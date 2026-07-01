@@ -50,51 +50,82 @@ let ChatService = class ChatService {
         });
     }
     async streamChat(conversationId, userId, dto, res) {
+        const conversation = await this.prisma.conversation.findUnique({
+            where: { id: conversationId },
+            select: { userId: true, model: true, systemPrompt: true, title: true, contextSummary: true },
+        });
+        if (!conversation)
+            throw new common_1.NotFoundException(fa_1.fa.conversations.notFound);
+        if (conversation.userId !== userId)
+            throw new common_1.ForbiddenException(fa_1.fa.conversations.forbidden);
+        const plan = await this.tokenService.getCachedPlan(userId);
+        const manualLimitRaw = await this.redis.get(`manual_limit:${userId}`);
+        if (manualLimitRaw) {
+            const ml = JSON.parse(manualLimitRaw);
+            const remaining = Math.ceil((ml.expiresAt - Date.now()) / 60_000);
+            const msg = ml.reason
+                ? `${ml.reason} (${remaining} دقیقه دیگر)`
+                : `دسترسی شما توسط ادمین موقتاً محدود شده است (${remaining} دقیقه دیگر)`;
+            throw new common_1.HttpException({ message: msg }, 429);
+        }
+        const todayCount = await this.tokenService.getTodayRequestCount(userId);
+        const N = plan.dailyMessageLimit;
+        const M = plan.throttledMessageCount ?? 0;
+        let messageStage = 'normal';
+        if (N !== null) {
+            if (todayCount >= N + M) {
+                throw new common_1.HttpException({
+                    message: fa_1.fa.chat.dailyBlocked,
+                    planTier: plan.planTier,
+                    stage: 'blocked',
+                }, 429);
+            }
+            if (todayCount >= N) {
+                messageStage = 'throttled';
+            }
+        }
+        let effectiveInputLimit = this.tokenService.resolveInputLimit(plan);
+        if (messageStage === 'throttled' && plan.throttledInputTokens) {
+            effectiveInputLimit = plan.throttledInputTokens;
+        }
+        const estimatedInput = estimateTokens(dto.content);
+        if (estimatedInput > effectiveInputLimit) {
+            throw new common_1.BadRequestException(fa_1.fa.chat.inputTooLong(effectiveInputLimit));
+        }
+        const { cascadeModel } = await this.pricingService.assertBudget(userId, plan.priceMonthly, plan.planTier);
+        let modelId = resolveModelId(dto.model ?? conversation.model);
+        if (!plan.allowedModels.includes(modelId)) {
+            throw new common_1.ForbiddenException(fa_1.fa.chat.modelNotAllowed);
+        }
+        const quota = await this.tokenService.checkQuota(userId);
+        const throttledMax = this.tokenService.resolveOutputThrottle(plan.outputThrottleSteps, todayCount);
+        let maxOut = Math.min(quota.remaining, throttledMax);
+        if (messageStage === 'throttled' && plan.throttledOutputTokens) {
+            maxOut = Math.min(maxOut, plan.throttledOutputTokens);
+        }
         res.setHeader('Content-Type', 'text/event-stream');
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Connection', 'keep-alive');
         res.setHeader('X-Accel-Buffering', 'no');
         res.flushHeaders();
+        if (N !== null) {
+            const remainingNormal = Math.max(0, N - todayCount);
+            const remainingThrottled = Math.max(0, N + M - todayCount);
+            res.write(`data: ${JSON.stringify({
+                info: 'stage',
+                stage: messageStage,
+                remainingNormal,
+                remainingThrottled,
+            })}\n\n`);
+        }
+        if (cascadeModel) {
+            modelId = cascadeModel;
+            res.write(`data: ${JSON.stringify({ info: 'model_cascaded', model: cascadeModel })}\n\n`);
+        }
+        if (throttledMax < 4096) {
+            res.write(`data: ${JSON.stringify({ info: 'output_throttled', maxOutputTokens: throttledMax })}\n\n`);
+        }
         try {
-            const conversation = await this.prisma.conversation.findUnique({
-                where: { id: conversationId },
-                select: { userId: true, model: true, systemPrompt: true, title: true, contextSummary: true },
-            });
-            if (!conversation)
-                throw new common_1.NotFoundException(fa_1.fa.conversations.notFound);
-            if (conversation.userId !== userId)
-                throw new common_1.ForbiddenException(fa_1.fa.conversations.forbidden);
-            const plan = await this.tokenService.getCachedPlan(userId);
-            const manualLimitRaw = await this.redis.get(`manual_limit:${userId}`);
-            if (manualLimitRaw) {
-                const ml = JSON.parse(manualLimitRaw);
-                const remaining = Math.ceil((ml.expiresAt - Date.now()) / 60_000);
-                const msg = ml.reason
-                    ? `${ml.reason} (${remaining} دقیقه دیگر)`
-                    : `دسترسی شما توسط ادمین موقتاً محدود شده است (${remaining} دقیقه دیگر)`;
-                throw new common_1.HttpException(msg, 429);
-            }
-            const inputLimit = this.tokenService.resolveInputLimit(plan);
-            const estimatedInput = estimateTokens(dto.content);
-            if (estimatedInput > inputLimit) {
-                throw new common_1.BadRequestException(fa_1.fa.chat.inputTooLong(inputLimit));
-            }
-            const { cascadeModel } = await this.pricingService.assertBudget(userId, plan.priceMonthly, plan.planTier);
-            let modelId = resolveModelId(dto.model ?? conversation.model);
-            if (!plan.allowedModels.includes(modelId)) {
-                throw new common_1.ForbiddenException(fa_1.fa.chat.modelNotAllowed);
-            }
-            if (cascadeModel) {
-                modelId = cascadeModel;
-                res.write(`data: ${JSON.stringify({ info: 'model_cascaded', model: cascadeModel })}\n\n`);
-            }
-            const quota = await this.tokenService.checkQuota(userId);
-            const todayMsgCount = await this.tokenService.getTodayRequestCount(userId);
-            const throttledMax = this.tokenService.resolveOutputThrottle(plan.outputThrottleSteps, todayMsgCount);
-            const maxOut = Math.min(quota.remaining, throttledMax);
-            if (throttledMax < 4096) {
-                res.write(`data: ${JSON.stringify({ info: 'output_throttled', maxOutputTokens: throttledMax })}\n\n`);
-            }
             await this.prisma.message.create({
                 data: { conversationId, role: 'USER', content: dto.content },
             });
@@ -131,6 +162,7 @@ let ChatService = class ChatService {
                 maxOutputTokens: maxOut,
             });
             let fullContent = '';
+            const isFirstMessage = recentMessages.length === 1;
             for await (const chunk of result.textStream) {
                 fullContent += chunk;
                 res.write(`data: ${JSON.stringify({ chunk })}\n\n`);
@@ -148,7 +180,6 @@ let ChatService = class ChatService {
                     model: modelId,
                 },
             });
-            const isFirstMessage = recentMessages.length === 1;
             await Promise.all([
                 this.tokenService.increment(userId, tokensUsed, quota.source),
                 this.pricingService.trackCost(userId, costRial),

@@ -12,12 +12,13 @@ const admin_controller_1 = require("./admin.controller");
 const admin_service_1 = require("./admin.service");
 const prisma_module_1 = require("../../prisma/prisma.module");
 const redis_module_1 = require("../../redis/redis.module");
+const tickets_module_1 = require("../tickets/tickets.module");
 let AdminModule = class AdminModule {
 };
 exports.AdminModule = AdminModule;
 exports.AdminModule = AdminModule = __decorate([
     (0, common_1.Module)({
-        imports: [prisma_module_1.PrismaModule, redis_module_1.RedisModule],
+        imports: [prisma_module_1.PrismaModule, redis_module_1.RedisModule, tickets_module_1.TicketsModule],
         controllers: [admin_controller_1.AdminController],
         providers: [admin_service_1.AdminService],
     })

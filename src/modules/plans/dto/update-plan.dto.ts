@@ -39,4 +39,33 @@ export class UpdatePlanDto {
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(0, { message: fa.validation.numberPositive })
   sortOrder?: number
+
+  @IsOptional()
+  @IsInt({ message: fa.validation.mustBeNumber })
+  @Min(1, { message: fa.validation.numberPositive })
+  dailyMessageLimit?: number | null
+
+  @IsOptional()
+  @IsInt({ message: fa.validation.mustBeNumber })
+  @Min(1, { message: fa.validation.numberPositive })
+  maxInputTokens?: number
+
+  @IsOptional()
+  @IsArray({ message: fa.validation.mustBeArray })
+  outputThrottleSteps?: { afterMessages: number; maxOutputTokens: number }[]
+
+  @IsOptional()
+  @IsInt({ message: fa.validation.mustBeNumber })
+  @Min(0, { message: fa.validation.numberPositive })
+  throttledMessageCount?: number | null
+
+  @IsOptional()
+  @IsInt({ message: fa.validation.mustBeNumber })
+  @Min(1, { message: fa.validation.numberPositive })
+  throttledInputTokens?: number | null
+
+  @IsOptional()
+  @IsInt({ message: fa.validation.mustBeNumber })
+  @Min(1, { message: fa.validation.numberPositive })
+  throttledOutputTokens?: number | null
 }

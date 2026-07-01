@@ -19,4 +19,15 @@ export declare class UsageController {
         costRial: number;
     }[]>;
     getBudget(user: JwtPayload): Promise<import("./pricing.service").BudgetStatus>;
+    getMessageQuota(user: JwtPayload): Promise<{
+        todayCount: number;
+        N: number | null;
+        M: number;
+        stage: "normal" | "throttled" | "blocked";
+        remainingNormal: number | null;
+        remainingThrottled: number | null;
+        throttledInputTokens: number | null;
+        throttledOutputTokens: number | null;
+        resetAt: string;
+    }>;
 }

@@ -45,63 +45,106 @@ export class ChatService {
   }
 
   async streamChat(conversationId: string, userId: string, dto: StreamMessageDto, res: Response) {
+    // ── PREFLIGHT: all limit checks BEFORE committing to SSE stream ────────
+    // These throw HttpExceptions → NestJS returns proper 4xx status codes
+    // (no flushHeaders yet, so HTTP status is still settable)
+
+    const conversation = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+      select: { userId: true, model: true, systemPrompt: true, title: true, contextSummary: true },
+    })
+    if (!conversation) throw new NotFoundException(fa.conversations.notFound)
+    if (conversation.userId !== userId) throw new ForbiddenException(fa.conversations.forbidden)
+
+    const plan = await this.tokenService.getCachedPlan(userId)
+
+    // ── manual limit set by admin ──────────────────────────────────────────
+    const manualLimitRaw = await this.redis.get(`manual_limit:${userId}`)
+    if (manualLimitRaw) {
+      const ml = JSON.parse(manualLimitRaw) as { type: string; reason: string; expiresAt: number }
+      const remaining = Math.ceil((ml.expiresAt - Date.now()) / 60_000)
+      const msg = ml.reason
+        ? `${ml.reason} (${remaining} دقیقه دیگر)`
+        : `دسترسی شما توسط ادمین موقتاً محدود شده است (${remaining} دقیقه دیگر)`
+      throw new HttpException({ message: msg }, 429)
+    }
+
+    // ── three-zone daily message limit ────────────────────────────────────
+    const todayCount = await this.tokenService.getTodayRequestCount(userId)
+    const N = plan.dailyMessageLimit      // normal zone ceiling (null = unlimited)
+    const M = plan.throttledMessageCount ?? 0  // throttled zone size
+
+    let messageStage: 'normal' | 'throttled' = 'normal'
+
+    if (N !== null) {
+      if (todayCount >= N + M) {
+        // ── BLOCKED ────────────────────────────────────────────────────────
+        throw new HttpException({
+          message: fa.chat.dailyBlocked,
+          planTier: plan.planTier,
+          stage: 'blocked',
+        }, 429)
+      }
+      if (todayCount >= N) {
+        // ── THROTTLED ──────────────────────────────────────────────────────
+        messageStage = 'throttled'
+      }
+    }
+
+    // ── input token limit (adjusted for throttled zone) ───────────────────
+    let effectiveInputLimit = this.tokenService.resolveInputLimit(plan)
+    if (messageStage === 'throttled' && plan.throttledInputTokens) {
+      effectiveInputLimit = plan.throttledInputTokens
+    }
+    const estimatedInput = estimateTokens(dto.content)
+    if (estimatedInput > effectiveInputLimit) {
+      throw new BadRequestException(fa.chat.inputTooLong(effectiveInputLimit))
+    }
+
+    // ── budget check + cascade model ───────────────────────────────────────
+    const { cascadeModel } = await this.pricingService.assertBudget(userId, plan.priceMonthly, plan.planTier)
+
+    let modelId = resolveModelId(dto.model ?? conversation.model)
+    if (!(plan.allowedModels as string[]).includes(modelId)) {
+      throw new ForbiddenException(fa.chat.modelNotAllowed)
+    }
+
+    const quota = await this.tokenService.checkQuota(userId)
+    const throttledMax = this.tokenService.resolveOutputThrottle(plan.outputThrottleSteps, todayCount)
+    let maxOut = Math.min(quota.remaining, throttledMax)
+    // further restrict output if in throttled zone
+    if (messageStage === 'throttled' && plan.throttledOutputTokens) {
+      maxOut = Math.min(maxOut, plan.throttledOutputTokens)
+    }
+
+    // ── ALL CHECKS PASSED — start SSE stream ──────────────────────────────
     res.setHeader('Content-Type', 'text/event-stream')
     res.setHeader('Cache-Control', 'no-cache')
     res.setHeader('Connection', 'keep-alive')
     res.setHeader('X-Accel-Buffering', 'no')
     res.flushHeaders()
 
+    // ── send stage info so frontend can update the banner ────────────────
+    if (N !== null) {
+      const remainingNormal    = Math.max(0, N - todayCount)
+      const remainingThrottled = Math.max(0, N + M - todayCount)
+      res.write(`data: ${JSON.stringify({
+        info: 'stage',
+        stage: messageStage,
+        remainingNormal,
+        remainingThrottled,
+      })}\n\n`)
+    }
+
+    if (cascadeModel) {
+      modelId = cascadeModel
+      res.write(`data: ${JSON.stringify({ info: 'model_cascaded', model: cascadeModel })}\n\n`)
+    }
+    if (throttledMax < 4096) {
+      res.write(`data: ${JSON.stringify({ info: 'output_throttled', maxOutputTokens: throttledMax })}\n\n`)
+    }
+
     try {
-      const conversation = await this.prisma.conversation.findUnique({
-        where: { id: conversationId },
-        select: { userId: true, model: true, systemPrompt: true, title: true, contextSummary: true },
-      })
-
-      if (!conversation) throw new NotFoundException(fa.conversations.notFound)
-      if (conversation.userId !== userId) throw new ForbiddenException(fa.conversations.forbidden)
-
-      const plan = await this.tokenService.getCachedPlan(userId)
-
-      // ── manual limit set by admin ──────────────────────────────────────────
-      const manualLimitRaw = await this.redis.get(`manual_limit:${userId}`)
-      if (manualLimitRaw) {
-        const ml = JSON.parse(manualLimitRaw) as { type: string; reason: string; expiresAt: number }
-        const remaining = Math.ceil((ml.expiresAt - Date.now()) / 60_000)
-        const msg = ml.reason
-          ? `${ml.reason} (${remaining} دقیقه دیگر)`
-          : `دسترسی شما توسط ادمین موقتاً محدود شده است (${remaining} دقیقه دیگر)`
-        throw new HttpException(msg, 429)
-      }
-
-      // ── input token limit ──────────────────────────────────────────────────
-      const inputLimit = this.tokenService.resolveInputLimit(plan)
-      const estimatedInput = estimateTokens(dto.content)
-      if (estimatedInput > inputLimit) {
-        throw new BadRequestException(fa.chat.inputTooLong(inputLimit))
-      }
-
-      // ── budget check + cascade model ───────────────────────────────────────
-      const { cascadeModel } = await this.pricingService.assertBudget(userId, plan.priceMonthly, plan.planTier)
-
-      let modelId = resolveModelId(dto.model ?? conversation.model)
-      if (!(plan.allowedModels as string[]).includes(modelId)) {
-        throw new ForbiddenException(fa.chat.modelNotAllowed)
-      }
-      if (cascadeModel) {
-        modelId = cascadeModel
-        res.write(`data: ${JSON.stringify({ info: 'model_cascaded', model: cascadeModel })}\n\n`)
-      }
-
-      const quota = await this.tokenService.checkQuota(userId)
-
-      // ── output throttle ────────────────────────────────────────────────────
-      const todayMsgCount = await this.tokenService.getTodayRequestCount(userId)
-      const throttledMax = this.tokenService.resolveOutputThrottle(plan.outputThrottleSteps, todayMsgCount)
-      const maxOut = Math.min(quota.remaining, throttledMax)
-      if (throttledMax < 4096) {
-        res.write(`data: ${JSON.stringify({ info: 'output_throttled', maxOutputTokens: throttledMax })}\n\n`)
-      }
-
       await this.prisma.message.create({
         data: { conversationId, role: 'USER', content: dto.content },
       })
@@ -142,6 +185,8 @@ export class ChatService {
       })
 
       let fullContent = ''
+      const isFirstMessage = recentMessages.length === 1
+
       for await (const chunk of result.textStream) {
         fullContent += chunk
         res.write(`data: ${JSON.stringify({ chunk })}\n\n`)
@@ -165,8 +210,6 @@ export class ChatService {
           model: modelId,
         },
       })
-
-      const isFirstMessage = recentMessages.length === 1
 
       await Promise.all([
         this.tokenService.increment(userId, tokensUsed, quota.source),

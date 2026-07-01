@@ -17,10 +17,14 @@ const common_1 = require("@nestjs/common");
 const jwt_guard_1 = require("../../common/guards/jwt.guard");
 const admin_guard_1 = require("../../common/guards/admin.guard");
 const admin_service_1 = require("./admin.service");
+const tickets_service_1 = require("../tickets/tickets.service");
+const update_ticket_status_dto_1 = require("../tickets/dto/update-ticket-status.dto");
 let AdminController = class AdminController {
     adminService;
-    constructor(adminService) {
+    ticketsService;
+    constructor(adminService, ticketsService) {
         this.adminService = adminService;
+        this.ticketsService = ticketsService;
     }
     getDashboard() {
         return this.adminService.getDashboard();
@@ -54,6 +58,18 @@ let AdminController = class AdminController {
     }
     changePlan(id, body) {
         return this.adminService.changeUserPlan(id, body.planId);
+    }
+    getTickets(status) {
+        return this.ticketsService.findAll(status);
+    }
+    getTicket(id) {
+        return this.ticketsService.findOne(id);
+    }
+    addTicketReply(id, body) {
+        return this.ticketsService.addAdminReply(id, body.body, body.adminNote);
+    }
+    updateTicketStatus(id, dto) {
+        return this.ticketsService.updateStatus(id, dto.status, dto.priority, dto.adminNote);
     }
 };
 exports.AdminController = AdminController;
@@ -135,9 +151,40 @@ __decorate([
     __metadata("design:paramtypes", [String, Object]),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "changePlan", null);
+__decorate([
+    (0, common_1.Get)('tickets'),
+    __param(0, (0, common_1.Query)('status')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "getTickets", null);
+__decorate([
+    (0, common_1.Get)('tickets/:id'),
+    __param(0, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "getTicket", null);
+__decorate([
+    (0, common_1.Post)('tickets/:id/reply'),
+    __param(0, (0, common_1.Param)('id')),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "addTicketReply", null);
+__decorate([
+    (0, common_1.Patch)('tickets/:id/status'),
+    __param(0, (0, common_1.Param)('id')),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, update_ticket_status_dto_1.UpdateTicketStatusDto]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "updateTicketStatus", null);
 exports.AdminController = AdminController = __decorate([
     (0, common_1.Controller)('admin'),
     (0, common_1.UseGuards)(jwt_guard_1.JwtGuard, admin_guard_1.AdminGuard),
-    __metadata("design:paramtypes", [admin_service_1.AdminService])
+    __metadata("design:paramtypes", [admin_service_1.AdminService,
+        tickets_service_1.TicketsService])
 ], AdminController);
 //# sourceMappingURL=admin.controller.js.map

@@ -21,6 +21,12 @@ class UpdatePlanDto {
     features;
     isActive;
     sortOrder;
+    dailyMessageLimit;
+    maxInputTokens;
+    outputThrottleSteps;
+    throttledMessageCount;
+    throttledInputTokens;
+    throttledOutputTokens;
 }
 exports.UpdatePlanDto = UpdatePlanDto;
 __decorate([
@@ -69,4 +75,39 @@ __decorate([
     (0, class_validator_1.Min)(0, { message: fa_1.fa.validation.numberPositive }),
     __metadata("design:type", Number)
 ], UpdatePlanDto.prototype, "sortOrder", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsInt)({ message: fa_1.fa.validation.mustBeNumber }),
+    (0, class_validator_1.Min)(1, { message: fa_1.fa.validation.numberPositive }),
+    __metadata("design:type", Object)
+], UpdatePlanDto.prototype, "dailyMessageLimit", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsInt)({ message: fa_1.fa.validation.mustBeNumber }),
+    (0, class_validator_1.Min)(1, { message: fa_1.fa.validation.numberPositive }),
+    __metadata("design:type", Number)
+], UpdatePlanDto.prototype, "maxInputTokens", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsArray)({ message: fa_1.fa.validation.mustBeArray }),
+    __metadata("design:type", Array)
+], UpdatePlanDto.prototype, "outputThrottleSteps", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsInt)({ message: fa_1.fa.validation.mustBeNumber }),
+    (0, class_validator_1.Min)(0, { message: fa_1.fa.validation.numberPositive }),
+    __metadata("design:type", Object)
+], UpdatePlanDto.prototype, "throttledMessageCount", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsInt)({ message: fa_1.fa.validation.mustBeNumber }),
+    (0, class_validator_1.Min)(1, { message: fa_1.fa.validation.numberPositive }),
+    __metadata("design:type", Object)
+], UpdatePlanDto.prototype, "throttledInputTokens", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsInt)({ message: fa_1.fa.validation.mustBeNumber }),
+    (0, class_validator_1.Min)(1, { message: fa_1.fa.validation.numberPositive }),
+    __metadata("design:type", Object)
+], UpdatePlanDto.prototype, "throttledOutputTokens", void 0);
 //# sourceMappingURL=update-plan.dto.js.map

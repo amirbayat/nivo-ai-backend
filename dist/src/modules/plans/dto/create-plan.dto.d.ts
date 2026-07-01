@@ -7,4 +7,13 @@ export declare class CreatePlanDto {
     features?: Record<string, unknown>;
     isActive: boolean;
     sortOrder: number;
+    dailyMessageLimit?: number | null;
+    maxInputTokens?: number;
+    outputThrottleSteps?: {
+        afterMessages: number;
+        maxOutputTokens: number;
+    }[];
+    throttledMessageCount?: number | null;
+    throttledInputTokens?: number | null;
+    throttledOutputTokens?: number | null;
 }

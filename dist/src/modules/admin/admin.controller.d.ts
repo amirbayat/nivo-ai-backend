@@ -1,7 +1,10 @@
 import { AdminService } from './admin.service';
+import { TicketsService } from '../tickets/tickets.service';
+import { UpdateTicketStatusDto } from '../tickets/dto/update-ticket-status.dto';
 export declare class AdminController {
     private readonly adminService;
-    constructor(adminService: AdminService);
+    private readonly ticketsService;
+    constructor(adminService: AdminService, ticketsService: TicketsService);
     getDashboard(): Promise<{
         totalUsers: number;
         activeUsers: number;
@@ -106,6 +109,84 @@ export declare class AdminController {
             periodStart: Date;
             periodEnd: Date;
             cancelAtPeriodEnd: boolean;
+        };
+    }>;
+    getTickets(status?: string): Promise<{
+        tickets: ({
+            user: {
+                id: string;
+                phone: string;
+                name: string | null;
+            };
+            replies: {
+                id: string;
+                createdAt: Date;
+                body: string;
+                fromAdmin: boolean;
+                ticketId: string;
+            }[];
+        } & {
+            id: string;
+            createdAt: Date;
+            updatedAt: Date;
+            userId: string;
+            status: import("@prisma/client").$Enums.TicketStatus;
+            subject: string;
+            body: string;
+            priority: import("@prisma/client").$Enums.TicketPriority;
+            adminNote: string | null;
+        })[];
+    }>;
+    getTicket(id: string): Promise<{
+        ticket: {
+            user: {
+                id: string;
+                phone: string;
+                name: string | null;
+            };
+            replies: {
+                id: string;
+                createdAt: Date;
+                body: string;
+                fromAdmin: boolean;
+                ticketId: string;
+            }[];
+        } & {
+            id: string;
+            createdAt: Date;
+            updatedAt: Date;
+            userId: string;
+            status: import("@prisma/client").$Enums.TicketStatus;
+            subject: string;
+            body: string;
+            priority: import("@prisma/client").$Enums.TicketPriority;
+            adminNote: string | null;
+        };
+    }>;
+    addTicketReply(id: string, body: {
+        body: string;
+        adminNote?: string;
+    }): Promise<{
+        reply: {
+            id: string;
+            createdAt: Date;
+            body: string;
+            fromAdmin: boolean;
+            ticketId: string;
+        };
+    }>;
+    updateTicketStatus(id: string, dto: UpdateTicketStatusDto): Promise<{
+        message: "تیکت به‌روز شد";
+        ticket: {
+            id: string;
+            createdAt: Date;
+            updatedAt: Date;
+            userId: string;
+            status: import("@prisma/client").$Enums.TicketStatus;
+            subject: string;
+            body: string;
+            priority: import("@prisma/client").$Enums.TicketPriority;
+            adminNote: string | null;
         };
     }>;
 }

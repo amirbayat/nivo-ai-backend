@@ -16,6 +16,10 @@ export declare class SubscriptionsController {
             sortOrder: number;
             maxInputTokens: number;
             outputThrottleSteps: import("@prisma/client/runtime/client").JsonValue;
+            dailyMessageLimit: number | null;
+            throttledMessageCount: number | null;
+            throttledInputTokens: number | null;
+            throttledOutputTokens: number | null;
         };
     } & {
         id: string;

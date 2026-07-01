@@ -36,6 +36,9 @@ export declare const fa: {
         readonly inputTooLong: (limit: number) => string;
         readonly budgetExceeded: "بودجه روزانه شما به پایان رسیده است";
         readonly walletInsufficient: "موجودی کیف پول برای ادامه کافی نیست";
+        readonly dailyMessageLimitExceeded: "به سقف پیام روزانه رسیدید";
+        readonly dailyBlocked: "امروز به محدودیت کامل رسیدید. فردا دوباره می‌توانید ارسال کنید";
+        readonly throttledNotice: "پیام‌های باقی‌مانده امروز با محدودیت توکن ارسال می‌شوند";
     };
     readonly payment: {
         readonly pending: "در انتظار پرداخت";

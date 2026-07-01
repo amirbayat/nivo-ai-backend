@@ -24,26 +24,37 @@ export interface PlanLimits {
   priceMonthly: number
   planTier: string
   planName: string
+  dailyMessageLimit: number | null
+  throttledMessageCount: number | null
+  throttledInputTokens: number | null
+  throttledOutputTokens: number | null
+}
+
+// Iran Standard Time = UTC+3:30 (no DST)
+const IRAN_OFFSET_MS = 3.5 * 60 * 60 * 1000
+
+function iranDate(): string {
+  return new Date(Date.now() + IRAN_OFFSET_MS).toISOString().slice(0, 10)
+}
+
+function iranMonth(): string {
+  return new Date(Date.now() + IRAN_OFFSET_MS).toISOString().slice(0, 7)
 }
 
 function todayKey(userId: string) {
-  const d = new Date().toISOString().slice(0, 10)
-  return `token:free:${userId}:${d}`
+  return `token:free:${userId}:${iranDate()}`
 }
 
 function monthKey(userId: string) {
-  const m = new Date().toISOString().slice(0, 7)
-  return `token:paid:${userId}:${m}`
+  return `token:paid:${userId}:${iranMonth()}`
 }
 
 function dailyPaidKey(userId: string) {
-  const d = new Date().toISOString().slice(0, 10)
-  return `token:dailypaid:${userId}:${d}`
+  return `token:dailypaid:${userId}:${iranDate()}`
 }
 
 function reqKey(userId: string) {
-  const d = new Date().toISOString().slice(0, 10)
-  return `token:req:${userId}:${d}`
+  return `token:req:${userId}:${iranDate()}`
 }
 
 function planCacheKey(userId: string) {
@@ -83,7 +94,7 @@ export class TokenService {
       return { allowed: true, source: 'paid', remaining: paidRemaining }
     }
 
-    throw new HttpException(fa.chat.quotaExceeded, 429)
+    throw new HttpException({ message: fa.chat.quotaExceeded, planTier: plan.planTier }, 429)
   }
 
   async increment(userId: string, tokens: number, source: 'free' | 'paid') {
@@ -198,17 +209,30 @@ export class TokenService {
         priceMonthly: sub.plan.priceMonthly,
         planTier: tier,
         planName: sub.plan.name,
+        dailyMessageLimit: sub.plan.dailyMessageLimit ?? null,
+        throttledMessageCount: sub.plan.throttledMessageCount ?? null,
+        throttledInputTokens: sub.plan.throttledInputTokens ?? null,
+        throttledOutputTokens: sub.plan.throttledOutputTokens ?? null,
       }
     } else {
+      // no subscription → look up the active free plan from DB instead of hardcoded defaults
+      const freePlan = await this.prisma.plan.findFirst({
+        where: { priceMonthly: 0, isActive: true },
+        orderBy: { sortOrder: 'asc' },
+      })
       limits = {
-        dailyFreeTokens: 5000,
-        monthlyTotalTokens: 0,
-        allowedModels: ['openai/gpt-4o-mini'],
-        maxInputTokens: Number(this.config.get('MAX_INPUT_TOKENS_FREE', '300')),
-        outputThrottleSteps: [],
+        dailyFreeTokens: freePlan?.dailyFreeTokens ?? 5000,
+        monthlyTotalTokens: freePlan?.monthlyTotalTokens ?? 0,
+        allowedModels: freePlan ? (freePlan.allowedModels as string[]) : ['openai/gpt-4o-mini'],
+        maxInputTokens: freePlan?.maxInputTokens ?? Number(this.config.get('MAX_INPUT_TOKENS_FREE', '300')),
+        outputThrottleSteps: freePlan ? ((freePlan.outputThrottleSteps as unknown as ThrottleStep[]) ?? []) : [],
         priceMonthly: 0,
         planTier: 'free',
-        planName: 'Free',
+        planName: freePlan?.name ?? 'Free',
+        dailyMessageLimit: freePlan?.dailyMessageLimit ?? null,
+        throttledMessageCount: freePlan?.throttledMessageCount ?? null,
+        throttledInputTokens: freePlan?.throttledInputTokens ?? null,
+        throttledOutputTokens: freePlan?.throttledOutputTokens ?? null,
       }
     }
 

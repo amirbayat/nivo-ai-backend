@@ -22,7 +22,7 @@ const plans = [
   {
     name: 'نقره‌ای',
     priceMonthly: 1_500_000, // 150,000 Tomans in Rials
-    dailyFreeTokens: 10_000,
+    dailyFreeTokens: 0,
     monthlyTotalTokens: 500_000,
     allowedModels: ['openai/gpt-4o-mini', 'openai/gpt-4o'],
     features: {
@@ -37,7 +37,7 @@ const plans = [
   {
     name: 'طلایی',
     priceMonthly: 3_500_000, // 350,000 Tomans in Rials
-    dailyFreeTokens: 20_000,
+    dailyFreeTokens: 0,
     monthlyTotalTokens: 2_000_000,
     allowedModels: ['openai/gpt-4o-mini', 'openai/gpt-4o', 'openai/gpt-4.1'],
     features: {
@@ -58,7 +58,7 @@ async function main() {
   for (const plan of plans) {
     await prisma.plan.upsert({
       where: { name: plan.name },
-      update: plan,
+      update: {},   // never overwrite admin edits — only create if missing
       create: plan,
     })
     console.log(`  ✓ ${plan.name}`)

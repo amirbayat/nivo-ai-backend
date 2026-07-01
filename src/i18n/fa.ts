@@ -36,6 +36,9 @@ export const fa = {
     inputTooLong: (limit: number) => `پیام شما بیش از ${limit} توکن است. لطفاً آن را کوتاه‌تر کنید`,
     budgetExceeded: 'بودجه روزانه شما به پایان رسیده است',
     walletInsufficient: 'موجودی کیف پول برای ادامه کافی نیست',
+    dailyMessageLimitExceeded: 'به سقف پیام روزانه رسیدید',
+    dailyBlocked: 'امروز به محدودیت کامل رسیدید. فردا دوباره می‌توانید ارسال کنید',
+    throttledNotice: 'پیام‌های باقی‌مانده امروز با محدودیت توکن ارسال می‌شوند',
   },
   payment: {
     pending: 'در انتظار پرداخت',

@@ -2,11 +2,16 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } f
 import { JwtGuard } from '../../common/guards/jwt.guard'
 import { AdminGuard } from '../../common/guards/admin.guard'
 import { AdminService } from './admin.service'
+import { TicketsService } from '../tickets/tickets.service'
+import { UpdateTicketStatusDto } from '../tickets/dto/update-ticket-status.dto'
 
 @Controller('admin')
 @UseGuards(JwtGuard, AdminGuard)
 export class AdminController {
-  constructor(private readonly adminService: AdminService) {}
+  constructor(
+    private readonly adminService: AdminService,
+    private readonly ticketsService: TicketsService,
+  ) {}
 
   @Get('dashboard')
   getDashboard() {
@@ -71,5 +76,30 @@ export class AdminController {
   @Patch('users/:id/plan')
   changePlan(@Param('id') id: string, @Body() body: { planId: string }) {
     return this.adminService.changeUserPlan(id, body.planId)
+  }
+
+  // ── Tickets ──────────────────────────────────────────────────────────────────
+
+  @Get('tickets')
+  getTickets(@Query('status') status?: string) {
+    return this.ticketsService.findAll(status)
+  }
+
+  @Get('tickets/:id')
+  getTicket(@Param('id') id: string) {
+    return this.ticketsService.findOne(id)
+  }
+
+  @Post('tickets/:id/reply')
+  addTicketReply(
+    @Param('id') id: string,
+    @Body() body: { body: string; adminNote?: string },
+  ) {
+    return this.ticketsService.addAdminReply(id, body.body, body.adminNote)
+  }
+
+  @Patch('tickets/:id/status')
+  updateTicketStatus(@Param('id') id: string, @Body() dto: UpdateTicketStatusDto) {
+    return this.ticketsService.updateStatus(id, dto.status, dto.priority, dto.adminNote)
   }
 }

@@ -15,21 +15,24 @@ const config_1 = require("@nestjs/config");
 const redis_service_1 = require("../../redis/redis.service");
 const prisma_service_1 = require("../../prisma/prisma.service");
 const fa_1 = require("../../i18n/fa");
+const IRAN_OFFSET_MS = 3.5 * 60 * 60 * 1000;
+function iranDate() {
+    return new Date(Date.now() + IRAN_OFFSET_MS).toISOString().slice(0, 10);
+}
+function iranMonth() {
+    return new Date(Date.now() + IRAN_OFFSET_MS).toISOString().slice(0, 7);
+}
 function todayKey(userId) {
-    const d = new Date().toISOString().slice(0, 10);
-    return `token:free:${userId}:${d}`;
+    return `token:free:${userId}:${iranDate()}`;
 }
 function monthKey(userId) {
-    const m = new Date().toISOString().slice(0, 7);
-    return `token:paid:${userId}:${m}`;
+    return `token:paid:${userId}:${iranMonth()}`;
 }
 function dailyPaidKey(userId) {
-    const d = new Date().toISOString().slice(0, 10);
-    return `token:dailypaid:${userId}:${d}`;
+    return `token:dailypaid:${userId}:${iranDate()}`;
 }
 function reqKey(userId) {
-    const d = new Date().toISOString().slice(0, 10);
-    return `token:req:${userId}:${d}`;
+    return `token:req:${userId}:${iranDate()}`;
 }
 function planCacheKey(userId) {
     return `plan:${userId}`;
@@ -62,7 +65,7 @@ let TokenService = class TokenService {
         if (paidRemaining >= estimated) {
             return { allowed: true, source: 'paid', remaining: paidRemaining };
         }
-        throw new common_1.HttpException(fa_1.fa.chat.quotaExceeded, 429);
+        throw new common_1.HttpException({ message: fa_1.fa.chat.quotaExceeded, planTier: plan.planTier }, 429);
     }
     async increment(userId, tokens, source) {
         const rKey = reqKey(userId);
@@ -166,18 +169,30 @@ let TokenService = class TokenService {
                 priceMonthly: sub.plan.priceMonthly,
                 planTier: tier,
                 planName: sub.plan.name,
+                dailyMessageLimit: sub.plan.dailyMessageLimit ?? null,
+                throttledMessageCount: sub.plan.throttledMessageCount ?? null,
+                throttledInputTokens: sub.plan.throttledInputTokens ?? null,
+                throttledOutputTokens: sub.plan.throttledOutputTokens ?? null,
             };
         }
         else {
+            const freePlan = await this.prisma.plan.findFirst({
+                where: { priceMonthly: 0, isActive: true },
+                orderBy: { sortOrder: 'asc' },
+            });
             limits = {
-                dailyFreeTokens: 5000,
-                monthlyTotalTokens: 0,
-                allowedModels: ['openai/gpt-4o-mini'],
-                maxInputTokens: Number(this.config.get('MAX_INPUT_TOKENS_FREE', '300')),
-                outputThrottleSteps: [],
+                dailyFreeTokens: freePlan?.dailyFreeTokens ?? 5000,
+                monthlyTotalTokens: freePlan?.monthlyTotalTokens ?? 0,
+                allowedModels: freePlan ? freePlan.allowedModels : ['openai/gpt-4o-mini'],
+                maxInputTokens: freePlan?.maxInputTokens ?? Number(this.config.get('MAX_INPUT_TOKENS_FREE', '300')),
+                outputThrottleSteps: freePlan ? (freePlan.outputThrottleSteps ?? []) : [],
                 priceMonthly: 0,
                 planTier: 'free',
-                planName: 'Free',
+                planName: freePlan?.name ?? 'Free',
+                dailyMessageLimit: freePlan?.dailyMessageLimit ?? null,
+                throttledMessageCount: freePlan?.throttledMessageCount ?? null,
+                throttledInputTokens: freePlan?.throttledInputTokens ?? null,
+                throttledOutputTokens: freePlan?.throttledOutputTokens ?? null,
             };
         }
         await this.redis.set(planCacheKey(userId), JSON.stringify(limits), 'EX', 3600);

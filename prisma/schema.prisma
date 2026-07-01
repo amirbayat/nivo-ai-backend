@@ -43,8 +43,12 @@ model Plan {
   features            Json    @default("{}")
   isActive            Boolean @default(true)
   sortOrder           Int     @default(0)
-  maxInputTokens      Int     @default(300)
-  outputThrottleSteps Json    @default("[]")
+  maxInputTokens        Int     @default(300)
+  outputThrottleSteps   Json    @default("[]")
+  dailyMessageLimit     Int?
+  throttledMessageCount Int?
+  throttledInputTokens  Int?
+  throttledOutputTokens Int?
 
   subscriptions Subscription[]
   payments      Payment[]

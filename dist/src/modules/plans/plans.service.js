@@ -12,11 +12,14 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.PlansService = void 0;
 const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../../prisma/prisma.service");
+const redis_service_1 = require("../../redis/redis.service");
 const fa_1 = require("../../i18n/fa");
 let PlansService = class PlansService {
     prisma;
-    constructor(prisma) {
+    redis;
+    constructor(prisma, redis) {
         this.prisma = prisma;
+        this.redis = redis;
     }
     findAll() {
         return this.prisma.plan.findMany({
@@ -46,19 +49,42 @@ let PlansService = class PlansService {
                 features: (dto.features ?? {}),
                 isActive: dto.isActive,
                 sortOrder: dto.sortOrder,
+                dailyMessageLimit: dto.dailyMessageLimit ?? null,
+                ...(dto.maxInputTokens !== undefined && { maxInputTokens: dto.maxInputTokens }),
+                ...(dto.outputThrottleSteps !== undefined && {
+                    outputThrottleSteps: dto.outputThrottleSteps,
+                }),
+                ...(dto.throttledMessageCount !== undefined && { throttledMessageCount: dto.throttledMessageCount ?? null }),
+                ...(dto.throttledInputTokens !== undefined && { throttledInputTokens: dto.throttledInputTokens ?? null }),
+                ...(dto.throttledOutputTokens !== undefined && { throttledOutputTokens: dto.throttledOutputTokens ?? null }),
             },
         });
     }
     async update(id, dto) {
         await this.findOne(id);
-        const { features, ...rest } = dto;
-        return this.prisma.plan.update({
+        const { features, outputThrottleSteps, ...rest } = dto;
+        const updated = await this.prisma.plan.update({
             where: { id },
             data: {
                 ...rest,
                 ...(features !== undefined && { features: features }),
+                ...(outputThrottleSteps !== undefined && {
+                    outputThrottleSteps: outputThrottleSteps,
+                }),
             },
         });
+        const subs = await this.prisma.subscription.findMany({
+            where: { planId: id },
+            select: { userId: true },
+        });
+        const delTasks = subs.map(s => this.redis.del(`plan:${s.userId}`));
+        if (updated.priceMonthly === 0) {
+            const keys = await this.redis.keys('plan:*');
+            keys.forEach(k => delTasks.push(this.redis.del(k)));
+        }
+        if (delTasks.length)
+            await Promise.all(delTasks);
+        return updated;
     }
     async remove(id) {
         await this.findOne(id);
@@ -68,6 +94,7 @@ let PlansService = class PlansService {
 exports.PlansService = PlansService;
 exports.PlansService = PlansService = __decorate([
     (0, common_1.Injectable)(),
-    __metadata("design:paramtypes", [prisma_service_1.PrismaService])
+    __metadata("design:paramtypes", [prisma_service_1.PrismaService,
+        redis_service_1.RedisService])
 ], PlansService);
 //# sourceMappingURL=plans.service.js.map

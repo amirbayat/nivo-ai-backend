@@ -19,6 +19,10 @@ export interface PlanLimits {
     priceMonthly: number;
     planTier: string;
     planName: string;
+    dailyMessageLimit: number | null;
+    throttledMessageCount: number | null;
+    throttledInputTokens: number | null;
+    throttledOutputTokens: number | null;
 }
 export declare class TokenService {
     private readonly redis;
