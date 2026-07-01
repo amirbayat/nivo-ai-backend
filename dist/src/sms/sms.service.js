@@ -25,7 +25,7 @@ let SmsService = SmsService_1 = class SmsService {
         this.config = config;
         const apiKey = this.config.get('KAVENEGAR_API_KEY', '');
         this.template = this.config.get('KAVENEGAR_TEMPLATE', 'registerverify');
-        this.devMode = !apiKey;
+        this.devMode = this.config.get('SEND_SMS', 'false') !== 'true';
         if (!this.devMode) {
             this.api = Kavenegar.KavenegarApi({ apikey: apiKey });
         }

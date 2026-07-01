@@ -15,12 +15,15 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  conversations Conversation[]
-  subscription  Subscription?
-  payments      Payment[]
-  refreshTokens RefreshToken[]
-  dailyUsages   DailyUsage[]
-  feedbacks     Feedback[]
+  conversations  Conversation[]
+  subscription   Subscription?
+  payments       Payment[]
+  refreshTokens  RefreshToken[]
+  dailyUsages    DailyUsage[]
+  feedbacks      Feedback[]
+  quotaOverride  UserQuotaOverride?
+  wallet         Wallet?
+  tickets        SupportTicket[]
 
   @@map("users")
 }
@@ -31,15 +34,17 @@ enum Role {
 }
 
 model Plan {
-  id                 String  @id @default(uuid())
-  name               String  @unique
-  priceMonthly       Int
-  dailyFreeTokens    Int
-  monthlyTotalTokens Int
-  allowedModels      Json
-  features           Json    @default("{}")
-  isActive           Boolean @default(true)
-  sortOrder          Int     @default(0)
+  id                  String  @id @default(uuid())
+  name                String  @unique
+  priceMonthly        Int
+  dailyFreeTokens     Int
+  monthlyTotalTokens  Int
+  allowedModels       Json
+  features            Json    @default("{}")
+  isActive            Boolean @default(true)
+  sortOrder           Int     @default(0)
+  maxInputTokens      Int     @default(300)
+  outputThrottleSteps Json    @default("[]")
 
   subscriptions Subscription[]
   payments      Payment[]
@@ -72,15 +77,17 @@ enum SubscriptionStatus {
 }
 
 model Conversation {
-  id            String   @id @default(uuid())
-  userId        String
-  title         String?
-  model         String
-  systemPrompt  String?
-  totalTokens   Int      @default(0)
-  isArchived    Boolean  @default(false)
-  lastMessageAt DateTime @default(now())
-  createdAt     DateTime @default(now())
+  id             String    @id @default(uuid())
+  userId         String
+  title          String?
+  model          String
+  systemPrompt   String?
+  totalTokens    Int       @default(0)
+  isArchived     Boolean   @default(false)
+  lastMessageAt  DateTime  @default(now())
+  createdAt      DateTime  @default(now())
+  contextSummary String?
+  summarizedAt   DateTime?
 
   user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   messages Message[]
@@ -159,6 +166,7 @@ model DailyUsage {
   freeTokensUsed Int      @default(0)
   paidTokensUsed Int      @default(0)
   requestsCount  Int      @default(0)
+  costRial       Int      @default(0)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -198,4 +206,102 @@ model FeedbackSummary {
   createdAt   DateTime @default(now())
 
   @@map("feedback_summaries")
+}
+
+// ─── Quota Overrides ───────────────────────────────────────────────────────────
+
+model UserQuotaOverride {
+  id                  String   @id @default(uuid())
+  userId              String   @unique
+  maxInputTokens      Int?
+  outputThrottleSteps Json?
+  dailyBudgetRial     Int?
+  note                String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_quota_overrides")
+}
+
+// ─── Wallet ────────────────────────────────────────────────────────────────────
+
+model Wallet {
+  id          String   @id @default(uuid())
+  userId      String   @unique
+  balanceRial Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions WalletTransaction[]
+
+  @@map("wallets")
+}
+
+model WalletTransaction {
+  id          String       @id @default(uuid())
+  walletId    String
+  type        WalletTxType
+  amountRial  Int
+  description String?
+  metadata    Json?
+  createdAt   DateTime     @default(now())
+
+  wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  @@index([walletId, createdAt])
+  @@map("wallet_transactions")
+}
+
+enum WalletTxType {
+  CREDIT
+  DEBIT
+}
+
+// ─── Support Tickets ───────────────────────────────────────────────────────────
+
+model SupportTicket {
+  id        String         @id @default(uuid())
+  userId    String
+  subject   String
+  body      String
+  status    TicketStatus   @default(OPEN)
+  priority  TicketPriority @default(NORMAL)
+  adminNote String?
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  user    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  replies TicketReply[]
+
+  @@index([status, createdAt])
+  @@map("support_tickets")
+}
+
+model TicketReply {
+  id        String   @id @default(uuid())
+  ticketId  String
+  fromAdmin Boolean  @default(false)
+  body      String
+  createdAt DateTime @default(now())
+
+  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@map("ticket_replies")
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum TicketPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
 }

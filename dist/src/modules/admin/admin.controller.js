@@ -37,6 +37,24 @@ let AdminController = class AdminController {
     getRevenue() {
         return this.adminService.getRevenueStats();
     }
+    getPricingAlert() {
+        return this.adminService.getPricingAlert();
+    }
+    getCostChart(days) {
+        return this.adminService.getCostChart(days ? Number(days) : 30);
+    }
+    setLimit(id, body) {
+        return this.adminService.setManualLimit(id, body.type, body.reason);
+    }
+    removeLimit(id) {
+        return this.adminService.removeManualLimit(id);
+    }
+    getLimit(id) {
+        return this.adminService.getManualLimit(id);
+    }
+    changePlan(id, body) {
+        return this.adminService.changeUserPlan(id, body.planId);
+    }
 };
 exports.AdminController = AdminController;
 __decorate([
@@ -74,6 +92,49 @@ __decorate([
     __metadata("design:paramtypes", []),
     __metadata("design:returntype", void 0)
 ], AdminController.prototype, "getRevenue", null);
+__decorate([
+    (0, common_1.Get)('pricing-alert'),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "getPricingAlert", null);
+__decorate([
+    (0, common_1.Get)('cost-chart'),
+    __param(0, (0, common_1.Query)('days')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "getCostChart", null);
+__decorate([
+    (0, common_1.Post)('users/:id/limit'),
+    __param(0, (0, common_1.Param)('id')),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "setLimit", null);
+__decorate([
+    (0, common_1.Delete)('users/:id/limit'),
+    __param(0, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "removeLimit", null);
+__decorate([
+    (0, common_1.Get)('users/:id/limit'),
+    __param(0, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "getLimit", null);
+__decorate([
+    (0, common_1.Patch)('users/:id/plan'),
+    __param(0, (0, common_1.Param)('id')),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, Object]),
+    __metadata("design:returntype", void 0)
+], AdminController.prototype, "changePlan", null);
 exports.AdminController = AdminController = __decorate([
     (0, common_1.Controller)('admin'),
     (0, common_1.UseGuards)(jwt_guard_1.JwtGuard, admin_guard_1.AdminGuard),

@@ -26,30 +26,30 @@ let TokenFlushProcessor = TokenFlushProcessor_1 = class TokenFlushProcessor {
     async handleFlush() {
         const today = new Date().toISOString().slice(0, 10);
         const date = new Date(today);
-        const [freeKeys, dpKeys, reqKeys] = await Promise.all([
+        const [freeKeys, dpKeys, reqKeys, costKeys] = await Promise.all([
             this.scanKeys(`token:free:*:${today}`),
             this.scanKeys(`token:dailypaid:*:${today}`),
             this.scanKeys(`token:req:*:${today}`),
+            this.scanKeys(`cost:daily:*:${today}`),
         ]);
-        if (!freeKeys.length && !dpKeys.length && !reqKeys.length)
+        if (!freeKeys.length && !dpKeys.length && !reqKeys.length && !costKeys.length)
             return;
-        const allKeys = [...freeKeys, ...dpKeys, ...reqKeys];
+        const allKeys = [...freeKeys, ...dpKeys, ...reqKeys, ...costKeys];
         const values = await Promise.all(allKeys.map(k => this.redis.get(k)));
         const userMap = new Map();
         const row = (id) => {
             if (!userMap.has(id))
-                userMap.set(id, { freeTokensUsed: 0, paidTokensUsed: 0, requestsCount: 0 });
+                userMap.set(id, { freeTokensUsed: 0, paidTokensUsed: 0, requestsCount: 0, costRial: 0 });
             return userMap.get(id);
         };
-        freeKeys.forEach((k, i) => {
-            row(k.split(':')[2]).freeTokensUsed = Number(values[i]) || 0;
-        });
-        dpKeys.forEach((k, i) => {
-            row(k.split(':')[2]).paidTokensUsed = Number(values[freeKeys.length + i]) || 0;
-        });
-        reqKeys.forEach((k, i) => {
-            row(k.split(':')[2]).requestsCount = Number(values[freeKeys.length + dpKeys.length + i]) || 0;
-        });
+        const o1 = 0;
+        const o2 = freeKeys.length;
+        const o3 = o2 + dpKeys.length;
+        const o4 = o3 + reqKeys.length;
+        freeKeys.forEach((k, i) => { row(k.split(':')[2]).freeTokensUsed = Number(values[o1 + i]) || 0; });
+        dpKeys.forEach((k, i) => { row(k.split(':')[2]).paidTokensUsed = Number(values[o2 + i]) || 0; });
+        reqKeys.forEach((k, i) => { row(k.split(':')[2]).requestsCount = Number(values[o3 + i]) || 0; });
+        costKeys.forEach((k, i) => { row(k.split(':')[2]).costRial = Number(values[o4 + i]) || 0; });
         await Promise.all(Array.from(userMap.entries()).map(([userId, data]) => this.prisma.dailyUsage.upsert({
             where: { userId_date: { userId, date } },
             create: { userId, date, ...data },

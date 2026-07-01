@@ -12,11 +12,21 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.AdminService = void 0;
 const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../../prisma/prisma.service");
+const redis_service_1 = require("../../redis/redis.service");
 const fa_1 = require("../../i18n/fa");
+const LIMIT_TTL = {
+    '1h': 3_600,
+    '3h': 10_800,
+    '6h': 21_600,
+    daily: 86_400,
+};
+function manualLimitKey(userId) { return `manual_limit:${userId}`; }
 let AdminService = class AdminService {
     prisma;
-    constructor(prisma) {
+    redis;
+    constructor(prisma, redis) {
         this.prisma = prisma;
+        this.redis = redis;
     }
     async getDashboard() {
         const now = new Date();
@@ -50,10 +60,12 @@ let AdminService = class AdminService {
     }
     async getUsers(page, limit, search) {
         const skip = (page - 1) * limit;
-        const where = search
-            ? { phone: { contains: search } }
-            : {};
-        const [users, total] = await Promise.all([
+        const where = search ? { phone: { contains: search } } : {};
+        const now = new Date();
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+        const daysPassed = now.getDate();
+        const [users, total, monthlyRevenue, monthlyCost] = await Promise.all([
             this.prisma.user.findMany({
                 where,
                 skip,
@@ -70,14 +82,44 @@ let AdminService = class AdminService {
                         select: {
                             status: true,
                             periodEnd: true,
-                            plan: { select: { name: true } },
+                            periodStart: true,
+                            plan: { select: { name: true, priceMonthly: true } },
                         },
                     },
                 },
             }),
             this.prisma.user.count({ where }),
+            this.prisma.payment.groupBy({
+                by: ['userId'],
+                where: { status: 'COMPLETED', createdAt: { gte: startOfMonth } },
+                _sum: { amount: true },
+            }),
+            this.prisma.dailyUsage.groupBy({
+                by: ['userId'],
+                where: { date: { gte: startOfMonth } },
+                _sum: { costRial: true },
+            }),
         ]);
-        return { users, total, page, limit };
+        const revenueMap = new Map(monthlyRevenue.map(r => [r.userId, r._sum.amount ?? 0]));
+        const costMap = new Map(monthlyCost.map(r => [r.userId, r._sum.costRial ?? 0]));
+        const enriched = users.map(u => {
+            const charged = revenueMap.get(u.id) ?? 0;
+            const aiCost = costMap.get(u.id) ?? 0;
+            const monthlyBudget = Math.floor((u.subscription?.plan.priceMonthly ?? 0) * 0.7);
+            const expectedByNow = Math.floor((monthlyBudget * daysPassed) / daysInMonth);
+            const ratio = expectedByNow > 0 ? aiCost / expectedByNow : 0;
+            let category = 'inactive';
+            if (aiCost > 0) {
+                if (ratio >= 1.5)
+                    category = 'heavy';
+                else if (ratio >= 0.5)
+                    category = 'moderate';
+                else
+                    category = 'light';
+            }
+            return { ...u, chargedThisMonth: charged, aiCostThisMonth: aiCost, expectedByNow, category };
+        });
+        return { users: enriched, total, page, limit };
     }
     async updateUser(userId, data) {
         const user = await this.prisma.user.findUnique({ where: { id: userId } });
@@ -116,6 +158,109 @@ let AdminService = class AdminService {
             },
         };
     }
+    async getCostChart(days = 30) {
+        const since = new Date();
+        since.setDate(since.getDate() - days);
+        since.setHours(0, 0, 0, 0);
+        const [costRows, revenueRows] = await Promise.all([
+            this.prisma.dailyUsage.groupBy({
+                by: ['date'],
+                where: { date: { gte: since } },
+                _sum: { costRial: true },
+                orderBy: { date: 'asc' },
+            }),
+            this.prisma.$queryRaw `
+        SELECT DATE_TRUNC('day', "createdAt") AS day, SUM(amount)::bigint AS revenue
+        FROM payments
+        WHERE status = 'COMPLETED' AND "createdAt" >= ${since}
+        GROUP BY DATE_TRUNC('day', "createdAt")
+        ORDER BY day ASC
+      `,
+        ]);
+        const revenueMap = new Map(revenueRows.map(r => [r.day.toISOString().slice(0, 10), Number(r.revenue)]));
+        return costRows.map(r => ({
+            date: r.date.toISOString().slice(0, 10),
+            aiCostRial: r._sum.costRial ?? 0,
+            revenueToman: revenueMap.get(r.date.toISOString().slice(0, 10)) ?? 0,
+        }));
+    }
+    async getPricingAlert() {
+        const now = new Date();
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        const [revenueRow, costRow] = await Promise.all([
+            this.prisma.payment.aggregate({
+                where: { status: 'COMPLETED', createdAt: { gte: startOfMonth } },
+                _sum: { amount: true },
+            }),
+            this.prisma.dailyUsage.aggregate({
+                where: { date: { gte: startOfMonth } },
+                _sum: { costRial: true },
+            }),
+        ]);
+        const monthlyRevenue = revenueRow._sum.amount ?? 0;
+        const monthlyAiCost = costRow._sum.costRial ?? 0;
+        const ratio = monthlyRevenue > 0 ? monthlyAiCost / monthlyRevenue : 0;
+        let alertLevel = 'safe';
+        let suggestion = null;
+        if (ratio >= 0.75) {
+            alertLevel = 'critical';
+            const targetRatio = 0.55;
+            const suggestedMultiplier = ratio / targetRatio;
+            suggestion = [
+                `هزینه AI این ماه ${(ratio * 100).toFixed(1)}٪ درآمد است (آستانه: ۷۵٪).`,
+                `برای رسیدن به نسبت سالم ۵۵٪، پیشنهاد می‌شود قیمت پلن‌ها را حدود ${((suggestedMultiplier - 1) * 100).toFixed(0)}٪ افزایش دهید.`,
+            ].join(' ');
+        }
+        else if (ratio >= 0.60) {
+            alertLevel = 'warning';
+            suggestion = `هزینه AI این ماه ${(ratio * 100).toFixed(1)}٪ درآمد است — نزدیک به آستانه هشدار. مراقب باشید.`;
+        }
+        return {
+            monthlyRevenueToman: monthlyRevenue,
+            monthlyAiCostRial: monthlyAiCost,
+            aiCostRatio: Math.round(ratio * 1000) / 10,
+            alertLevel,
+            suggestion,
+        };
+    }
+    async setManualLimit(userId, type, reason) {
+        const user = await this.prisma.user.findUnique({ where: { id: userId } });
+        if (!user)
+            throw new common_1.NotFoundException(fa_1.fa.admin.userNotFound);
+        const ttl = LIMIT_TTL[type];
+        const expiresAt = Date.now() + ttl * 1000;
+        await this.redis.set(manualLimitKey(userId), JSON.stringify({ type, reason: reason ?? '', expiresAt }), 'EX', ttl);
+        return { success: true, expiresAt: new Date(expiresAt).toISOString() };
+    }
+    async removeManualLimit(userId) {
+        await this.redis.del(manualLimitKey(userId));
+        return { success: true };
+    }
+    async getManualLimit(userId) {
+        const raw = await this.redis.get(manualLimitKey(userId));
+        if (!raw)
+            return null;
+        return JSON.parse(raw);
+    }
+    async changeUserPlan(userId, planId) {
+        const [user, plan] = await Promise.all([
+            this.prisma.user.findUnique({ where: { id: userId } }),
+            this.prisma.plan.findUnique({ where: { id: planId } }),
+        ]);
+        if (!user)
+            throw new common_1.NotFoundException(fa_1.fa.admin.userNotFound);
+        if (!plan)
+            throw new common_1.NotFoundException(fa_1.fa.plans.notFound);
+        const now = new Date();
+        const periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, now.getDate());
+        const sub = await this.prisma.subscription.upsert({
+            where: { userId },
+            create: { userId, planId, periodStart: now, periodEnd, status: 'ACTIVE' },
+            update: { planId, periodStart: now, periodEnd, status: 'ACTIVE', cancelAtPeriodEnd: false },
+        });
+        await this.redis.del(`plan:${userId}`);
+        return { success: true, subscription: sub };
+    }
     async getRevenueStats() {
         const rows = await this.prisma.$queryRaw `
       SELECT
@@ -138,6 +283,7 @@ let AdminService = class AdminService {
 exports.AdminService = AdminService;
 exports.AdminService = AdminService = __decorate([
     (0, common_1.Injectable)(),
-    __metadata("design:paramtypes", [prisma_service_1.PrismaService])
+    __metadata("design:paramtypes", [prisma_service_1.PrismaService,
+        redis_service_1.RedisService])
 ], AdminService);
 //# sourceMappingURL=admin.service.js.map

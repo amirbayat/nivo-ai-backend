@@ -33,6 +33,9 @@ export declare const fa: {
         readonly modelNotAllowed: "این مدل در پلن فعلی شما در دسترس نیست";
         readonly streamError: "خطا در دریافت پاسخ. دوباره تلاش کنید";
         readonly conversationNotFound: "مکالمه یافت نشد";
+        readonly inputTooLong: (limit: number) => string;
+        readonly budgetExceeded: "بودجه روزانه شما به پایان رسیده است";
+        readonly walletInsufficient: "موجودی کیف پول برای ادامه کافی نیست";
     };
     readonly payment: {
         readonly pending: "در انتظار پرداخت";
@@ -84,5 +87,26 @@ export declare const fa: {
         readonly forbidden: "دسترسی فقط برای مدیران مجاز است";
         readonly userNotFound: "کاربر یافت نشد";
         readonly userUpdated: "کاربر به‌روز شد";
+    };
+    readonly budget: {
+        readonly dailyExceeded: "بودجه روزانه شما به پایان رسیده است";
+        readonly walletInsufficient: "موجودی کیف پول برای ادامه کافی نیست";
+        readonly sessionLimit: "مصرف امروز به حد بحرانی رسیده — تنها مدل پایه در دسترس است";
+    };
+    readonly upsell: {
+        readonly free: "برای ادامه استفاده، پلن حرفه‌ای تهیه کنید";
+        readonly pro: "برای مصرف بیشتر، پلن ویژه را امتحان کنید";
+        readonly premium: "کیف پول خود را شارژ کنید تا بدون وقفه ادامه دهید";
+    };
+    readonly wallet: {
+        readonly notFound: "کیف پول یافت نشد";
+        readonly credited: (amount: number) => string;
+        readonly insufficient: "موجودی کیف پول کافی نیست";
+    };
+    readonly ticket: {
+        readonly created: "تیکت پشتیبانی شما با موفقیت ثبت شد";
+        readonly notFound: "تیکت یافت نشد";
+        readonly closed: "این تیکت بسته شده است";
+        readonly updated: "تیکت به‌روز شد";
     };
 };

@@ -14,6 +14,8 @@ export declare class SubscriptionsController {
             allowedModels: import("@prisma/client/runtime/client").JsonValue;
             features: import("@prisma/client/runtime/client").JsonValue;
             sortOrder: number;
+            maxInputTokens: number;
+            outputThrottleSteps: import("@prisma/client/runtime/client").JsonValue;
         };
     } & {
         id: string;

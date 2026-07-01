@@ -9,15 +9,18 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.UsageModule = void 0;
 const common_1 = require("@nestjs/common");
 const token_service_1 = require("./token.service");
+const pricing_service_1 = require("./pricing.service");
 const usage_controller_1 = require("./usage.controller");
+const exchange_rate_module_1 = require("../../exchange-rate/exchange-rate.module");
 let UsageModule = class UsageModule {
 };
 exports.UsageModule = UsageModule;
 exports.UsageModule = UsageModule = __decorate([
     (0, common_1.Module)({
+        imports: [exchange_rate_module_1.ExchangeRateModule],
         controllers: [usage_controller_1.UsageController],
-        providers: [token_service_1.TokenService],
-        exports: [token_service_1.TokenService],
+        providers: [token_service_1.TokenService, pricing_service_1.PricingService],
+        exports: [token_service_1.TokenService, pricing_service_1.PricingService],
     })
 ], UsageModule);
 //# sourceMappingURL=usage.module.js.map

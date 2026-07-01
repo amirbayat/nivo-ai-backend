@@ -36,6 +36,9 @@ exports.fa = {
         modelNotAllowed: 'این مدل در پلن فعلی شما در دسترس نیست',
         streamError: 'خطا در دریافت پاسخ. دوباره تلاش کنید',
         conversationNotFound: 'مکالمه یافت نشد',
+        inputTooLong: (limit) => `پیام شما بیش از ${limit} توکن است. لطفاً آن را کوتاه‌تر کنید`,
+        budgetExceeded: 'بودجه روزانه شما به پایان رسیده است',
+        walletInsufficient: 'موجودی کیف پول برای ادامه کافی نیست',
     },
     payment: {
         pending: 'در انتظار پرداخت',
@@ -87,6 +90,27 @@ exports.fa = {
         forbidden: 'دسترسی فقط برای مدیران مجاز است',
         userNotFound: 'کاربر یافت نشد',
         userUpdated: 'کاربر به‌روز شد',
+    },
+    budget: {
+        dailyExceeded: 'بودجه روزانه شما به پایان رسیده است',
+        walletInsufficient: 'موجودی کیف پول برای ادامه کافی نیست',
+        sessionLimit: 'مصرف امروز به حد بحرانی رسیده — تنها مدل پایه در دسترس است',
+    },
+    upsell: {
+        free: 'برای ادامه استفاده، پلن حرفه‌ای تهیه کنید',
+        pro: 'برای مصرف بیشتر، پلن ویژه را امتحان کنید',
+        premium: 'کیف پول خود را شارژ کنید تا بدون وقفه ادامه دهید',
+    },
+    wallet: {
+        notFound: 'کیف پول یافت نشد',
+        credited: (amount) => `${amount.toLocaleString('fa-IR')} ریال به کیف پول شما افزوده شد`,
+        insufficient: 'موجودی کیف پول کافی نیست',
+    },
+    ticket: {
+        created: 'تیکت پشتیبانی شما با موفقیت ثبت شد',
+        notFound: 'تیکت یافت نشد',
+        closed: 'این تیکت بسته شده است',
+        updated: 'تیکت به‌روز شد',
     },
 };
 //# sourceMappingURL=fa.js.map

@@ -15,6 +15,8 @@ export declare class ConversationsService {
         totalTokens: number;
         isArchived: boolean;
         lastMessageAt: Date;
+        contextSummary: string | null;
+        summarizedAt: Date | null;
     }, never, import("@prisma/client/runtime/client").DefaultArgs, import("@prisma/client").Prisma.PrismaClientOptions>;
     findAll(userId: string, query: ListConversationsDto): Promise<{
         items: {
@@ -48,6 +50,8 @@ export declare class ConversationsService {
         totalTokens: number;
         isArchived: boolean;
         lastMessageAt: Date;
+        contextSummary: string | null;
+        summarizedAt: Date | null;
     }>;
     update(id: string, userId: string, dto: UpdateConversationDto): Promise<{
         id: string;
@@ -59,6 +63,8 @@ export declare class ConversationsService {
         totalTokens: number;
         isArchived: boolean;
         lastMessageAt: Date;
+        contextSummary: string | null;
+        summarizedAt: Date | null;
     }>;
     archive(id: string, userId: string): Promise<void>;
     private assertOwnership;

@@ -14,6 +14,8 @@ export declare class PlansController {
         allowedModels: import("@prisma/client/runtime/client").JsonValue;
         features: import("@prisma/client/runtime/client").JsonValue;
         sortOrder: number;
+        maxInputTokens: number;
+        outputThrottleSteps: import("@prisma/client/runtime/client").JsonValue;
     }[]>;
     findAllAdmin(): import("@prisma/client").Prisma.PrismaPromise<{
         id: string;
@@ -25,6 +27,8 @@ export declare class PlansController {
         allowedModels: import("@prisma/client/runtime/client").JsonValue;
         features: import("@prisma/client/runtime/client").JsonValue;
         sortOrder: number;
+        maxInputTokens: number;
+        outputThrottleSteps: import("@prisma/client/runtime/client").JsonValue;
     }[]>;
     findOne(id: string): Promise<{
         id: string;
@@ -36,6 +40,8 @@ export declare class PlansController {
         allowedModels: import("@prisma/client/runtime/client").JsonValue;
         features: import("@prisma/client/runtime/client").JsonValue;
         sortOrder: number;
+        maxInputTokens: number;
+        outputThrottleSteps: import("@prisma/client/runtime/client").JsonValue;
     }>;
     create(dto: CreatePlanDto): Promise<{
         message: "پلن با موفقیت ایجاد شد";
@@ -49,6 +55,8 @@ export declare class PlansController {
             allowedModels: import("@prisma/client/runtime/client").JsonValue;
             features: import("@prisma/client/runtime/client").JsonValue;
             sortOrder: number;
+            maxInputTokens: number;
+            outputThrottleSteps: import("@prisma/client/runtime/client").JsonValue;
         };
     }>;
     update(id: string, dto: UpdatePlanDto): Promise<{
@@ -63,6 +71,8 @@ export declare class PlansController {
             allowedModels: import("@prisma/client/runtime/client").JsonValue;
             features: import("@prisma/client/runtime/client").JsonValue;
             sortOrder: number;
+            maxInputTokens: number;
+            outputThrottleSteps: import("@prisma/client/runtime/client").JsonValue;
         };
     }>;
     remove(id: string): Promise<{

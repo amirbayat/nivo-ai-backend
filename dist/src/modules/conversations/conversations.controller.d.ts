@@ -16,6 +16,8 @@ export declare class ConversationsController {
         totalTokens: number;
         isArchived: boolean;
         lastMessageAt: Date;
+        contextSummary: string | null;
+        summarizedAt: Date | null;
     }, never, import("@prisma/client/runtime/client").DefaultArgs, import("@prisma/client").Prisma.PrismaClientOptions>;
     findAll(user: JwtPayload, query: ListConversationsDto): Promise<{
         items: {
@@ -49,6 +51,8 @@ export declare class ConversationsController {
         totalTokens: number;
         isArchived: boolean;
         lastMessageAt: Date;
+        contextSummary: string | null;
+        summarizedAt: Date | null;
     }>;
     update(user: JwtPayload, id: string, dto: UpdateConversationDto): Promise<{
         message: "مکالمه به‌روز شد";
@@ -62,6 +66,8 @@ export declare class ConversationsController {
             totalTokens: number;
             isArchived: boolean;
             lastMessageAt: Date;
+            contextSummary: string | null;
+            summarizedAt: Date | null;
         };
     }>;
     archive(user: JwtPayload, id: string): Promise<void>;

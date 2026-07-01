@@ -15,6 +15,8 @@ export declare class PlansService {
         allowedModels: Prisma.JsonValue;
         features: Prisma.JsonValue;
         sortOrder: number;
+        maxInputTokens: number;
+        outputThrottleSteps: Prisma.JsonValue;
     }[]>;
     findAllAdmin(): Prisma.PrismaPromise<{
         id: string;
@@ -26,6 +28,8 @@ export declare class PlansService {
         allowedModels: Prisma.JsonValue;
         features: Prisma.JsonValue;
         sortOrder: number;
+        maxInputTokens: number;
+        outputThrottleSteps: Prisma.JsonValue;
     }[]>;
     findOne(id: string): Promise<{
         id: string;
@@ -37,6 +41,8 @@ export declare class PlansService {
         allowedModels: Prisma.JsonValue;
         features: Prisma.JsonValue;
         sortOrder: number;
+        maxInputTokens: number;
+        outputThrottleSteps: Prisma.JsonValue;
     }>;
     create(dto: CreatePlanDto): Prisma.Prisma__PlanClient<{
         id: string;
@@ -48,6 +54,8 @@ export declare class PlansService {
         allowedModels: Prisma.JsonValue;
         features: Prisma.JsonValue;
         sortOrder: number;
+        maxInputTokens: number;
+        outputThrottleSteps: Prisma.JsonValue;
     }, never, import("@prisma/client/runtime/client").DefaultArgs, Prisma.PrismaClientOptions>;
     update(id: string, dto: UpdatePlanDto): Promise<{
         id: string;
@@ -59,6 +67,8 @@ export declare class PlansService {
         allowedModels: Prisma.JsonValue;
         features: Prisma.JsonValue;
         sortOrder: number;
+        maxInputTokens: number;
+        outputThrottleSteps: Prisma.JsonValue;
     }>;
     remove(id: string): Promise<{
         id: string;
@@ -70,5 +80,7 @@ export declare class PlansService {
         allowedModels: Prisma.JsonValue;
         features: Prisma.JsonValue;
         sortOrder: number;
+        maxInputTokens: number;
+        outputThrottleSteps: Prisma.JsonValue;
     }>;
 }

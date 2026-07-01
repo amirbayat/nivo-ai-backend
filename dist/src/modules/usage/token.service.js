@@ -11,6 +11,7 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.TokenService = void 0;
 const common_1 = require("@nestjs/common");
+const config_1 = require("@nestjs/config");
 const redis_service_1 = require("../../redis/redis.service");
 const prisma_service_1 = require("../../prisma/prisma.service");
 const fa_1 = require("../../i18n/fa");
@@ -33,12 +34,19 @@ function reqKey(userId) {
 function planCacheKey(userId) {
     return `plan:${userId}`;
 }
+const TIER_INPUT_LIMITS = {
+    free: 'MAX_INPUT_TOKENS_FREE',
+    pro: 'MAX_INPUT_TOKENS_PRO',
+    premium: 'MAX_INPUT_TOKENS_PREMIUM',
+};
 let TokenService = class TokenService {
     redis;
     prisma;
-    constructor(redis, prisma) {
+    config;
+    constructor(redis, prisma, config) {
         this.redis = redis;
         this.prisma = prisma;
+        this.config = config;
     }
     async checkQuota(userId, estimated = 500) {
         const plan = await this.getCachedPlan(userId);
@@ -80,6 +88,30 @@ let TokenService = class TokenService {
             ]);
         }
     }
+    async getTodayRequestCount(userId) {
+        return this.redis.get(reqKey(userId)).then(v => Number(v) || 0);
+    }
+    resolveOutputThrottle(steps, todayCount) {
+        if (!steps.length)
+            return 4096;
+        let limit = 4096;
+        for (const step of steps) {
+            if (todayCount >= step.afterMessages)
+                limit = step.maxOutputTokens;
+            else
+                break;
+        }
+        return limit;
+    }
+    resolveInputLimit(plan) {
+        const envKey = TIER_INPUT_LIMITS[plan.planTier];
+        if (envKey) {
+            const envVal = this.config.get(envKey);
+            if (envVal)
+                return Number(envVal);
+        }
+        return plan.maxInputTokens;
+    }
     async getUsageToday(userId) {
         const plan = await this.getCachedPlan(userId);
         const [freeUsed, paidUsed] = await Promise.all([
@@ -101,13 +133,14 @@ let TokenService = class TokenService {
         const records = await this.prisma.dailyUsage.findMany({
             where: { userId, date: { gte: start, lt: end } },
             orderBy: { date: 'asc' },
-            select: { date: true, freeTokensUsed: true, paidTokensUsed: true, requestsCount: true },
+            select: { date: true, freeTokensUsed: true, paidTokensUsed: true, requestsCount: true, costRial: true },
         });
         return records.map(r => ({
             date: r.date.toISOString().slice(0, 10),
             freeTokensUsed: r.freeTokensUsed,
             paidTokensUsed: r.paidTokensUsed,
             requestsCount: r.requestsCount,
+            costRial: r.costRial,
         }));
     }
     async invalidatePlanCache(userId) {
@@ -121,21 +154,51 @@ let TokenService = class TokenService {
             where: { userId },
             include: { plan: true },
         });
-        const limits = sub?.plan
-            ? {
+        let limits;
+        if (sub?.plan) {
+            const tier = this.detectTier(sub.plan.name, sub.plan.priceMonthly);
+            limits = {
                 dailyFreeTokens: sub.plan.dailyFreeTokens,
                 monthlyTotalTokens: sub.plan.monthlyTotalTokens,
                 allowedModels: sub.plan.allowedModels,
-            }
-            : { dailyFreeTokens: 5000, monthlyTotalTokens: 0, allowedModels: ['openai/gpt-4o-mini'] };
+                maxInputTokens: sub.plan.maxInputTokens,
+                outputThrottleSteps: sub.plan.outputThrottleSteps ?? [],
+                priceMonthly: sub.plan.priceMonthly,
+                planTier: tier,
+                planName: sub.plan.name,
+            };
+        }
+        else {
+            limits = {
+                dailyFreeTokens: 5000,
+                monthlyTotalTokens: 0,
+                allowedModels: ['openai/gpt-4o-mini'],
+                maxInputTokens: Number(this.config.get('MAX_INPUT_TOKENS_FREE', '300')),
+                outputThrottleSteps: [],
+                priceMonthly: 0,
+                planTier: 'free',
+                planName: 'Free',
+            };
+        }
         await this.redis.set(planCacheKey(userId), JSON.stringify(limits), 'EX', 3600);
         return limits;
+    }
+    detectTier(planName, price) {
+        const lower = planName.toLowerCase();
+        if (lower.includes('premium') || lower.includes('ویژه'))
+            return 'premium';
+        if (lower.includes('pro') || lower.includes('حرفه'))
+            return 'pro';
+        if (price === 0)
+            return 'free';
+        return 'pro';
     }
 };
 exports.TokenService = TokenService;
 exports.TokenService = TokenService = __decorate([
     (0, common_1.Injectable)(),
     __metadata("design:paramtypes", [redis_service_1.RedisService,
-        prisma_service_1.PrismaService])
+        prisma_service_1.PrismaService,
+        config_1.ConfigService])
 ], TokenService);
 //# sourceMappingURL=token.service.js.map

@@ -1,4 +1,5 @@
 import { HttpException, Injectable } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
 import { RedisService } from '../../redis/redis.service'
 import { PrismaService } from '../../prisma/prisma.service'
 import { fa } from '../../i18n/fa'
@@ -9,10 +10,20 @@ export interface TokenCheckResult {
   remaining: number
 }
 
-interface PlanLimits {
+export interface ThrottleStep {
+  afterMessages: number
+  maxOutputTokens: number
+}
+
+export interface PlanLimits {
   dailyFreeTokens: number
   monthlyTotalTokens: number
   allowedModels: string[]
+  maxInputTokens: number
+  outputThrottleSteps: ThrottleStep[]
+  priceMonthly: number
+  planTier: string
+  planName: string
 }
 
 function todayKey(userId: string) {
@@ -25,13 +36,11 @@ function monthKey(userId: string) {
   return `token:paid:${userId}:${m}`
 }
 
-// daily paid — same granularity as free, flushed to dailyUsage.paidTokensUsed
 function dailyPaidKey(userId: string) {
   const d = new Date().toISOString().slice(0, 10)
   return `token:dailypaid:${userId}:${d}`
 }
 
-// request count per day — flushed to dailyUsage.requestsCount
 function reqKey(userId: string) {
   const d = new Date().toISOString().slice(0, 10)
   return `token:req:${userId}:${d}`
@@ -41,11 +50,19 @@ function planCacheKey(userId: string) {
   return `plan:${userId}`
 }
 
+// env-based input token limits per tier (override plan DB value when set)
+const TIER_INPUT_LIMITS: Record<string, string> = {
+  free: 'MAX_INPUT_TOKENS_FREE',
+  pro: 'MAX_INPUT_TOKENS_PRO',
+  premium: 'MAX_INPUT_TOKENS_PREMIUM',
+}
+
 @Injectable()
 export class TokenService {
   constructor(
     private readonly redis: RedisService,
     private readonly prisma: PrismaService,
+    private readonly config: ConfigService,
   ) {}
 
   async checkQuota(userId: string, estimated = 500): Promise<TokenCheckResult> {
@@ -76,7 +93,7 @@ export class TokenService {
       const fKey = todayKey(userId)
       await Promise.all([
         this.redis.incrby(fKey, tokens),
-        this.redis.expire(fKey, 90_000, 'NX'),   // 25h
+        this.redis.expire(fKey, 90_000, 'NX'),
         this.redis.incr(rKey),
         this.redis.expire(rKey, 90_000, 'NX'),
       ])
@@ -85,13 +102,39 @@ export class TokenService {
       const dpKey = dailyPaidKey(userId)
       await Promise.all([
         this.redis.incrby(mKey, tokens),
-        this.redis.expire(mKey, 2_764_800, 'NX'), // 32d
+        this.redis.expire(mKey, 2_764_800, 'NX'),
         this.redis.incrby(dpKey, tokens),
-        this.redis.expire(dpKey, 90_000, 'NX'),   // 25h
+        this.redis.expire(dpKey, 90_000, 'NX'),
         this.redis.incr(rKey),
         this.redis.expire(rKey, 90_000, 'NX'),
       ])
     }
+  }
+
+  async getTodayRequestCount(userId: string): Promise<number> {
+    return this.redis.get(reqKey(userId)).then(v => Number(v) || 0)
+  }
+
+  // resolve maxOutputTokens based on today's message count and plan throttle steps
+  // env overrides DB; steps must be sorted ascending by afterMessages
+  resolveOutputThrottle(steps: ThrottleStep[], todayCount: number): number {
+    if (!steps.length) return 4096
+    let limit = 4096
+    for (const step of steps) {
+      if (todayCount >= step.afterMessages) limit = step.maxOutputTokens
+      else break
+    }
+    return limit
+  }
+
+  // resolve maxInputTokens: env wins over DB plan value
+  resolveInputLimit(plan: PlanLimits): number {
+    const envKey = TIER_INPUT_LIMITS[plan.planTier]
+    if (envKey) {
+      const envVal = this.config.get<string>(envKey)
+      if (envVal) return Number(envVal)
+    }
+    return plan.maxInputTokens
   }
 
   async getUsageToday(userId: string) {
@@ -117,7 +160,7 @@ export class TokenService {
     const records = await this.prisma.dailyUsage.findMany({
       where: { userId, date: { gte: start, lt: end } },
       orderBy: { date: 'asc' },
-      select: { date: true, freeTokensUsed: true, paidTokensUsed: true, requestsCount: true },
+      select: { date: true, freeTokensUsed: true, paidTokensUsed: true, requestsCount: true, costRial: true },
     })
 
     return records.map(r => ({
@@ -125,6 +168,7 @@ export class TokenService {
       freeTokensUsed: r.freeTokensUsed,
       paidTokensUsed: r.paidTokensUsed,
       requestsCount: r.requestsCount,
+      costRial: r.costRial,
     }))
   }
 
@@ -141,16 +185,42 @@ export class TokenService {
       include: { plan: true },
     })
 
-    // Fall back to free plan limits if no subscription
-    const limits: PlanLimits = sub?.plan
-      ? {
-          dailyFreeTokens: sub.plan.dailyFreeTokens,
-          monthlyTotalTokens: sub.plan.monthlyTotalTokens,
-          allowedModels: sub.plan.allowedModels as string[],
-        }
-      : { dailyFreeTokens: 5000, monthlyTotalTokens: 0, allowedModels: ['openai/gpt-4o-mini'] }
+    let limits: PlanLimits
+
+    if (sub?.plan) {
+      const tier = this.detectTier(sub.plan.name, sub.plan.priceMonthly)
+      limits = {
+        dailyFreeTokens: sub.plan.dailyFreeTokens,
+        monthlyTotalTokens: sub.plan.monthlyTotalTokens,
+        allowedModels: sub.plan.allowedModels as string[],
+        maxInputTokens: sub.plan.maxInputTokens,
+        outputThrottleSteps: (sub.plan.outputThrottleSteps as unknown as ThrottleStep[]) ?? [],
+        priceMonthly: sub.plan.priceMonthly,
+        planTier: tier,
+        planName: sub.plan.name,
+      }
+    } else {
+      limits = {
+        dailyFreeTokens: 5000,
+        monthlyTotalTokens: 0,
+        allowedModels: ['openai/gpt-4o-mini'],
+        maxInputTokens: Number(this.config.get('MAX_INPUT_TOKENS_FREE', '300')),
+        outputThrottleSteps: [],
+        priceMonthly: 0,
+        planTier: 'free',
+        planName: 'Free',
+      }
+    }
 
     await this.redis.set(planCacheKey(userId), JSON.stringify(limits), 'EX', 3600)
     return limits
+  }
+
+  private detectTier(planName: string, price: number): string {
+    const lower = planName.toLowerCase()
+    if (lower.includes('premium') || lower.includes('ویژه')) return 'premium'
+    if (lower.includes('pro') || lower.includes('حرفه')) return 'pro'
+    if (price === 0) return 'free'
+    return 'pro'
   }
 }

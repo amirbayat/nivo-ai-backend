@@ -1,7 +1,10 @@
 import { PrismaService } from '../../prisma/prisma.service';
+import { RedisService } from '../../redis/redis.service';
+type LimitType = 'daily' | '1h' | '3h' | '6h';
 export declare class AdminService {
     private readonly prisma;
-    constructor(prisma: PrismaService);
+    private readonly redis;
+    constructor(prisma: PrismaService, redis: RedisService);
     getDashboard(): Promise<{
         totalUsers: number;
         activeUsers: number;
@@ -12,11 +15,17 @@ export declare class AdminService {
     }>;
     getUsers(page: number, limit: number, search?: string): Promise<{
         users: {
+            chargedThisMonth: number;
+            aiCostThisMonth: number;
+            expectedByNow: number;
+            category: "heavy" | "moderate" | "light" | "inactive";
             subscription: {
                 plan: {
                     name: string;
+                    priceMonthly: number;
                 };
                 status: import("@prisma/client").$Enums.SubscriptionStatus;
+                periodStart: Date;
                 periodEnd: Date;
             } | null;
             id: string;
@@ -54,9 +63,48 @@ export declare class AdminService {
             totalPaid: number;
         };
     }>;
+    getCostChart(days?: number): Promise<{
+        date: string;
+        aiCostRial: number;
+        revenueToman: number;
+    }[]>;
+    getPricingAlert(): Promise<{
+        monthlyRevenueToman: number;
+        monthlyAiCostRial: number;
+        aiCostRatio: number;
+        alertLevel: "warning" | "critical" | "safe";
+        suggestion: string | null;
+    }>;
+    setManualLimit(userId: string, type: LimitType, reason?: string): Promise<{
+        success: boolean;
+        expiresAt: string;
+    }>;
+    removeManualLimit(userId: string): Promise<{
+        success: boolean;
+    }>;
+    getManualLimit(userId: string): Promise<{
+        type: LimitType;
+        reason: string;
+        expiresAt: number;
+    } | null>;
+    changeUserPlan(userId: string, planId: string): Promise<{
+        success: boolean;
+        subscription: {
+            id: string;
+            createdAt: Date;
+            updatedAt: Date;
+            userId: string;
+            planId: string;
+            status: import("@prisma/client").$Enums.SubscriptionStatus;
+            periodStart: Date;
+            periodEnd: Date;
+            cancelAtPeriodEnd: boolean;
+        };
+    }>;
     getRevenueStats(): Promise<{
         month: string;
         revenue: number;
         count: number;
     }[]>;
 }
+export {};

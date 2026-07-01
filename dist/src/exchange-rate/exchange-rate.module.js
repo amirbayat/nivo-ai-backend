@@ -6,20 +6,16 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
     return c > 3 && r && Object.defineProperty(target, key, r), r;
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.ChatModule = void 0;
+exports.ExchangeRateModule = void 0;
 const common_1 = require("@nestjs/common");
-const chat_service_1 = require("./chat.service");
-const chat_controller_1 = require("./chat.controller");
-const usage_module_1 = require("../usage/usage.module");
-const redis_module_1 = require("../../redis/redis.module");
-let ChatModule = class ChatModule {
+const exchange_rate_service_1 = require("./exchange-rate.service");
+let ExchangeRateModule = class ExchangeRateModule {
 };
-exports.ChatModule = ChatModule;
-exports.ChatModule = ChatModule = __decorate([
+exports.ExchangeRateModule = ExchangeRateModule;
+exports.ExchangeRateModule = ExchangeRateModule = __decorate([
     (0, common_1.Module)({
-        imports: [usage_module_1.UsageModule, redis_module_1.RedisModule],
-        controllers: [chat_controller_1.ChatController],
-        providers: [chat_service_1.ChatService],
+        providers: [exchange_rate_service_1.ExchangeRateService],
+        exports: [exchange_rate_service_1.ExchangeRateService],
     })
-], ChatModule);
-//# sourceMappingURL=chat.module.js.map
+], ExchangeRateModule);
+//# sourceMappingURL=exchange-rate.module.js.map

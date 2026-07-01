@@ -1,15 +1,16 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common'
+import { BadRequestException, ForbiddenException, HttpException, Injectable, NotFoundException } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
-import { streamText } from 'ai'
+import { streamText, generateText } from 'ai'
 import type { ModelMessage } from 'ai'
 import { PrismaService } from '../../prisma/prisma.service'
+import { RedisService } from '../../redis/redis.service'
 import { TokenService } from '../usage/token.service'
+import { PricingService } from '../usage/pricing.service'
 import { fa } from '../../i18n/fa'
 import type { Response } from 'express'
 import { StreamMessageDto } from './dto/stream-message.dto'
 
-// models stored before the openai/ prefix convention was introduced
 const LEGACY_MODEL_MAP: Record<string, string> = {
   'gpt-4o-mini': 'openai/gpt-4o-mini',
   'gpt-4o': 'openai/gpt-4o',
@@ -20,13 +21,20 @@ function resolveModelId(id: string): string {
   return LEGACY_MODEL_MAP[id] ?? id
 }
 
+// rough token estimate: ~3 chars per token for mixed Persian/English
+function estimateTokens(text: string): number {
+  return Math.ceil(text.length / 3)
+}
+
 @Injectable()
 export class ChatService {
   private readonly provider
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly redis: RedisService,
     private readonly tokenService: TokenService,
+    private readonly pricingService: PricingService,
     private readonly config: ConfigService,
   ) {
     this.provider = createOpenAICompatible({
@@ -46,31 +54,80 @@ export class ChatService {
     try {
       const conversation = await this.prisma.conversation.findUnique({
         where: { id: conversationId },
-        select: { userId: true, model: true, systemPrompt: true },
+        select: { userId: true, model: true, systemPrompt: true, title: true, contextSummary: true },
       })
 
       if (!conversation) throw new NotFoundException(fa.conversations.notFound)
       if (conversation.userId !== userId) throw new ForbiddenException(fa.conversations.forbidden)
 
-      const modelId = resolveModelId(dto.model ?? conversation.model)
       const plan = await this.tokenService.getCachedPlan(userId)
 
+      // ── manual limit set by admin ──────────────────────────────────────────
+      const manualLimitRaw = await this.redis.get(`manual_limit:${userId}`)
+      if (manualLimitRaw) {
+        const ml = JSON.parse(manualLimitRaw) as { type: string; reason: string; expiresAt: number }
+        const remaining = Math.ceil((ml.expiresAt - Date.now()) / 60_000)
+        const msg = ml.reason
+          ? `${ml.reason} (${remaining} دقیقه دیگر)`
+          : `دسترسی شما توسط ادمین موقتاً محدود شده است (${remaining} دقیقه دیگر)`
+        throw new HttpException(msg, 429)
+      }
+
+      // ── input token limit ──────────────────────────────────────────────────
+      const inputLimit = this.tokenService.resolveInputLimit(plan)
+      const estimatedInput = estimateTokens(dto.content)
+      if (estimatedInput > inputLimit) {
+        throw new BadRequestException(fa.chat.inputTooLong(inputLimit))
+      }
+
+      // ── budget check + cascade model ───────────────────────────────────────
+      const { cascadeModel } = await this.pricingService.assertBudget(userId, plan.priceMonthly, plan.planTier)
+
+      let modelId = resolveModelId(dto.model ?? conversation.model)
       if (!(plan.allowedModels as string[]).includes(modelId)) {
         throw new ForbiddenException(fa.chat.modelNotAllowed)
       }
+      if (cascadeModel) {
+        modelId = cascadeModel
+        res.write(`data: ${JSON.stringify({ info: 'model_cascaded', model: cascadeModel })}\n\n`)
+      }
 
       const quota = await this.tokenService.checkQuota(userId)
+
+      // ── output throttle ────────────────────────────────────────────────────
+      const todayMsgCount = await this.tokenService.getTodayRequestCount(userId)
+      const throttledMax = this.tokenService.resolveOutputThrottle(plan.outputThrottleSteps, todayMsgCount)
+      const maxOut = Math.min(quota.remaining, throttledMax)
+      if (throttledMax < 4096) {
+        res.write(`data: ${JSON.stringify({ info: 'output_throttled', maxOutputTokens: throttledMax })}\n\n`)
+      }
 
       await this.prisma.message.create({
         data: { conversationId, role: 'USER', content: dto.content },
       })
 
-      const recentMessages = await this.prisma.message.findMany({
-        where: { conversationId },
-        orderBy: { createdAt: 'asc' },
-        take: 20,
-        select: { role: true, content: true },
-      })
+      // ── build context: use summary + last 5 msgs if summary exists ─────────
+      const systemParts: string[] = []
+      if (conversation.systemPrompt) systemParts.push(conversation.systemPrompt)
+
+      let recentMessages: { role: string; content: string }[]
+      if (conversation.contextSummary) {
+        systemParts.push(`خلاصه مکالمه تا کنون:\n${conversation.contextSummary}`)
+        recentMessages = await this.prisma.message.findMany({
+          where: { conversationId },
+          orderBy: { createdAt: 'desc' },
+          take: 5,
+          select: { role: true, content: true },
+        })
+        recentMessages = recentMessages.reverse()
+      } else {
+        recentMessages = await this.prisma.message.findMany({
+          where: { conversationId },
+          orderBy: { createdAt: 'asc' },
+          take: 20,
+          select: { role: true, content: true },
+        })
+      }
 
       const coreMessages: ModelMessage[] = recentMessages.map(m => ({
         role: m.role === 'USER' ? 'user' : m.role === 'ASSISTANT' ? 'assistant' : 'system',
@@ -79,9 +136,9 @@ export class ChatService {
 
       const result = streamText({
         model: this.provider(modelId),
-        system: conversation.systemPrompt ?? undefined,
+        system: systemParts.join('\n\n') || undefined,
         messages: coreMessages,
-        maxOutputTokens: Math.min(quota.remaining, 4096),
+        maxOutputTokens: maxOut,
       })
 
       let fullContent = ''
@@ -92,6 +149,11 @@ export class ChatService {
 
       const usage = await result.usage
       const tokensUsed = usage.totalTokens ?? 0
+      const costRial = await this.pricingService.calcCostRial(
+        usage.inputTokens ?? 0,
+        usage.outputTokens ?? 0,
+        modelId,
+      )
 
       await this.prisma.message.create({
         data: {
@@ -104,16 +166,20 @@ export class ChatService {
         },
       })
 
+      const isFirstMessage = recentMessages.length === 1
+
       await Promise.all([
         this.tokenService.increment(userId, tokensUsed, quota.source),
+        this.pricingService.trackCost(userId, costRial),
         this.prisma.conversation.update({
           where: { id: conversationId },
-          data: {
-            totalTokens: { increment: tokensUsed },
-            lastMessageAt: new Date(),
-          },
+          data: { totalTokens: { increment: tokensUsed }, lastMessageAt: new Date() },
         }),
       ])
+
+      if (!conversation.title && isFirstMessage) {
+        await this.generateTitle(conversationId, dto.content, modelId)
+      }
 
       res.write(`data: [DONE]\n\n`)
     } catch (err: unknown) {
@@ -121,6 +187,23 @@ export class ChatService {
       res.write(`data: ${JSON.stringify({ error: message })}\n\n`)
     } finally {
       res.end()
+    }
+  }
+
+  private async generateTitle(conversationId: string, firstMessage: string, modelId: string): Promise<void> {
+    try {
+      const { text } = await generateText({
+        model: this.provider(modelId),
+        system: 'یک عنوان کوتاه (حداکثر ۵ کلمه) برای این مکالمه بنویس. فقط عنوان، بدون توضیح یا نقل‌قول.',
+        messages: [{ role: 'user', content: firstMessage.slice(0, 300) }],
+        maxOutputTokens: 40,
+      })
+      const title = text.trim().replace(/^["'«»\n]+|["'«»\n]+$/g, '')
+      if (title) {
+        await this.prisma.conversation.update({ where: { id: conversationId }, data: { title } })
+      }
+    } catch {
+      // non-critical
     }
   }
 }

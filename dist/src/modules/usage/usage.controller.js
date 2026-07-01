@@ -17,16 +17,23 @@ const common_1 = require("@nestjs/common");
 const jwt_guard_1 = require("../../common/guards/jwt.guard");
 const current_user_decorator_1 = require("../../common/decorators/current-user.decorator");
 const token_service_1 = require("./token.service");
+const pricing_service_1 = require("./pricing.service");
 let UsageController = class UsageController {
     tokenService;
-    constructor(tokenService) {
+    pricingService;
+    constructor(tokenService, pricingService) {
         this.tokenService = tokenService;
+        this.pricingService = pricingService;
     }
     getToday(user) {
         return this.tokenService.getUsageToday(user.sub);
     }
     getHistory(user, month) {
         return this.tokenService.getUsageHistory(user.sub, month);
+    }
+    async getBudget(user) {
+        const plan = await this.tokenService.getCachedPlan(user.sub);
+        return this.pricingService.getBudgetStatus(user.sub, plan.priceMonthly, plan.planTier);
     }
 };
 exports.UsageController = UsageController;
@@ -45,9 +52,17 @@ __decorate([
     __metadata("design:paramtypes", [current_user_decorator_1.JwtPayload, String]),
     __metadata("design:returntype", void 0)
 ], UsageController.prototype, "getHistory", null);
+__decorate([
+    (0, common_1.Get)('budget'),
+    __param(0, (0, current_user_decorator_1.CurrentUser)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [current_user_decorator_1.JwtPayload]),
+    __metadata("design:returntype", Promise)
+], UsageController.prototype, "getBudget", null);
 exports.UsageController = UsageController = __decorate([
     (0, common_1.Controller)('usage'),
     (0, common_1.UseGuards)(jwt_guard_1.JwtGuard),
-    __metadata("design:paramtypes", [token_service_1.TokenService])
+    __metadata("design:paramtypes", [token_service_1.TokenService,
+        pricing_service_1.PricingService])
 ], UsageController);
 //# sourceMappingURL=usage.controller.js.map
