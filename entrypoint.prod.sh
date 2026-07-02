@@ -11,4 +11,4 @@ echo ">>> [3/4] Seeding plans (upsert — safe to re-run)..."
 npx ts-node --transpile-only prisma/seeds/plans.seed.ts
 
 echo ">>> [4/4] Starting NestJS in production mode..."
-exec node dist/main
+exec node dist/src/main
