@@ -10,12 +10,12 @@ export declare class PlansService {
     findAll(): Prisma.PrismaPromise<{
         id: string;
         name: string;
+        isActive: boolean;
         priceMonthly: number;
         dailyFreeTokens: number;
         monthlyTotalTokens: number;
         allowedModels: Prisma.JsonValue;
         features: Prisma.JsonValue;
-        isActive: boolean;
         sortOrder: number;
         maxInputTokens: number;
         outputThrottleSteps: Prisma.JsonValue;
@@ -27,12 +27,12 @@ export declare class PlansService {
     findAllAdmin(): Prisma.PrismaPromise<{
         id: string;
         name: string;
+        isActive: boolean;
         priceMonthly: number;
         dailyFreeTokens: number;
         monthlyTotalTokens: number;
         allowedModels: Prisma.JsonValue;
         features: Prisma.JsonValue;
-        isActive: boolean;
         sortOrder: number;
         maxInputTokens: number;
         outputThrottleSteps: Prisma.JsonValue;
@@ -44,12 +44,12 @@ export declare class PlansService {
     findOne(id: string): Promise<{
         id: string;
         name: string;
+        isActive: boolean;
         priceMonthly: number;
         dailyFreeTokens: number;
         monthlyTotalTokens: number;
         allowedModels: Prisma.JsonValue;
         features: Prisma.JsonValue;
-        isActive: boolean;
         sortOrder: number;
         maxInputTokens: number;
         outputThrottleSteps: Prisma.JsonValue;
@@ -61,12 +61,12 @@ export declare class PlansService {
     create(dto: CreatePlanDto): Prisma.Prisma__PlanClient<{
         id: string;
         name: string;
+        isActive: boolean;
         priceMonthly: number;
         dailyFreeTokens: number;
         monthlyTotalTokens: number;
         allowedModels: Prisma.JsonValue;
         features: Prisma.JsonValue;
-        isActive: boolean;
         sortOrder: number;
         maxInputTokens: number;
         outputThrottleSteps: Prisma.JsonValue;
@@ -78,12 +78,12 @@ export declare class PlansService {
     update(id: string, dto: UpdatePlanDto): Promise<{
         id: string;
         name: string;
+        isActive: boolean;
         priceMonthly: number;
         dailyFreeTokens: number;
         monthlyTotalTokens: number;
         allowedModels: Prisma.JsonValue;
         features: Prisma.JsonValue;
-        isActive: boolean;
         sortOrder: number;
         maxInputTokens: number;
         outputThrottleSteps: Prisma.JsonValue;
@@ -95,12 +95,12 @@ export declare class PlansService {
     remove(id: string): Promise<{
         id: string;
         name: string;
+        isActive: boolean;
         priceMonthly: number;
         dailyFreeTokens: number;
         monthlyTotalTokens: number;
         allowedModels: Prisma.JsonValue;
         features: Prisma.JsonValue;
-        isActive: boolean;
         sortOrder: number;
         maxInputTokens: number;
         outputThrottleSteps: Prisma.JsonValue;

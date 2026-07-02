@@ -7,12 +7,12 @@ export declare class PlansController {
     findAll(): import("@prisma/client").Prisma.PrismaPromise<{
         id: string;
         name: string;
+        isActive: boolean;
         priceMonthly: number;
         dailyFreeTokens: number;
         monthlyTotalTokens: number;
         allowedModels: import("@prisma/client/runtime/client").JsonValue;
         features: import("@prisma/client/runtime/client").JsonValue;
-        isActive: boolean;
         sortOrder: number;
         maxInputTokens: number;
         outputThrottleSteps: import("@prisma/client/runtime/client").JsonValue;
@@ -24,12 +24,12 @@ export declare class PlansController {
     findAllAdmin(): import("@prisma/client").Prisma.PrismaPromise<{
         id: string;
         name: string;
+        isActive: boolean;
         priceMonthly: number;
         dailyFreeTokens: number;
         monthlyTotalTokens: number;
         allowedModels: import("@prisma/client/runtime/client").JsonValue;
         features: import("@prisma/client/runtime/client").JsonValue;
-        isActive: boolean;
         sortOrder: number;
         maxInputTokens: number;
         outputThrottleSteps: import("@prisma/client/runtime/client").JsonValue;
@@ -41,12 +41,12 @@ export declare class PlansController {
     findOne(id: string): Promise<{
         id: string;
         name: string;
+        isActive: boolean;
         priceMonthly: number;
         dailyFreeTokens: number;
         monthlyTotalTokens: number;
         allowedModels: import("@prisma/client/runtime/client").JsonValue;
         features: import("@prisma/client/runtime/client").JsonValue;
-        isActive: boolean;
         sortOrder: number;
         maxInputTokens: number;
         outputThrottleSteps: import("@prisma/client/runtime/client").JsonValue;
@@ -60,12 +60,12 @@ export declare class PlansController {
         plan: {
             id: string;
             name: string;
+            isActive: boolean;
             priceMonthly: number;
             dailyFreeTokens: number;
             monthlyTotalTokens: number;
             allowedModels: import("@prisma/client/runtime/client").JsonValue;
             features: import("@prisma/client/runtime/client").JsonValue;
-            isActive: boolean;
             sortOrder: number;
             maxInputTokens: number;
             outputThrottleSteps: import("@prisma/client/runtime/client").JsonValue;
@@ -80,12 +80,12 @@ export declare class PlansController {
         plan: {
             id: string;
             name: string;
+            isActive: boolean;
             priceMonthly: number;
             dailyFreeTokens: number;
             monthlyTotalTokens: number;
             allowedModels: import("@prisma/client/runtime/client").JsonValue;
             features: import("@prisma/client/runtime/client").JsonValue;
-            isActive: boolean;
             sortOrder: number;
             maxInputTokens: number;
             outputThrottleSteps: import("@prisma/client/runtime/client").JsonValue;
