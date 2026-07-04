@@ -1,4 +1,8 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common'
+import {
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common'
 import { PrismaService } from '../../prisma/prisma.service'
 import { fa } from '../../i18n/fa'
 import { CreateConversationDto } from './dto/create-conversation.dto'
@@ -50,12 +54,27 @@ export class ConversationsService {
         messages: {
           orderBy: { createdAt: 'asc' },
           take: 50,
+          // نکته: فیلد `model` عمداً از select حذف شده — مدل واقعی پاسخ‌دهنده (که ممکن است توسط
+          // ModelRouterService بی‌صدا override شده باشد) نباید از طریق API به کاربر لو برود.
+          // بازخورد خودِ کاربر (لایک/دیس‌لایک) بدون مشکل نمایش داده می‌شود چون رأی خودش است.
+          select: {
+            id: true,
+            conversationId: true,
+            role: true,
+            content: true,
+            images: true,
+            tokensInput: true,
+            tokensOutput: true,
+            createdAt: true,
+            feedback: { select: { vote: true, comment: true } },
+          },
         },
       },
     })
 
     if (!conversation) throw new NotFoundException(fa.conversations.notFound)
-    if (conversation.userId !== userId) throw new ForbiddenException(fa.conversations.forbidden)
+    if (conversation.userId !== userId)
+      throw new ForbiddenException(fa.conversations.forbidden)
 
     return conversation
   }
@@ -67,7 +86,10 @@ export class ConversationsService {
 
   async archive(id: string, userId: string) {
     await this.assertOwnership(id, userId)
-    await this.prisma.conversation.update({ where: { id }, data: { isArchived: true } })
+    await this.prisma.conversation.update({
+      where: { id },
+      data: { isArchived: true },
+    })
   }
 
   private async assertOwnership(id: string, userId: string) {
@@ -76,6 +98,7 @@ export class ConversationsService {
       select: { userId: true },
     })
     if (!conv) throw new NotFoundException(fa.conversations.notFound)
-    if (conv.userId !== userId) throw new ForbiddenException(fa.conversations.forbidden)
+    if (conv.userId !== userId)
+      throw new ForbiddenException(fa.conversations.forbidden)
   }
 }

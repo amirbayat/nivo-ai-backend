@@ -24,6 +24,8 @@ const users_module_1 = require("./modules/users/users.module");
 const feedback_module_1 = require("./modules/feedback/feedback.module");
 const tickets_module_1 = require("./modules/tickets/tickets.module");
 const sales_module_1 = require("./modules/sales/sales.module");
+const model_router_module_1 = require("./modules/model-router/model-router.module");
+const message_feedback_module_1 = require("./modules/message-feedback/message-feedback.module");
 const queue_module_1 = require("./queue/queue.module");
 let AppModule = class AppModule {
 };
@@ -47,6 +49,8 @@ exports.AppModule = AppModule = __decorate([
             feedback_module_1.FeedbackModule,
             tickets_module_1.TicketsModule,
             sales_module_1.SalesModule,
+            model_router_module_1.ModelRouterModule,
+            message_feedback_module_1.MessageFeedbackModule,
         ],
     })
 ], AppModule);

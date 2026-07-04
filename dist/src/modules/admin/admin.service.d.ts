@@ -112,6 +112,7 @@ export declare class AdminService {
         isActive: boolean;
         createdAt: Date;
         sortOrder: number;
+        tier: import("@prisma/client").$Enums.ModelTier;
         displayName: string;
         provider: string;
         inputPricePerM: number;
@@ -127,12 +128,14 @@ export declare class AdminService {
         supportsVision: boolean;
         isActive: boolean;
         sortOrder: number;
+        tier?: 'SIMPLE' | 'MEDIUM' | 'COMPLEX';
     }): import("@prisma/client").Prisma.Prisma__AiModelClient<{
         id: string;
         name: string;
         isActive: boolean;
         createdAt: Date;
         sortOrder: number;
+        tier: import("@prisma/client").$Enums.ModelTier;
         displayName: string;
         provider: string;
         inputPricePerM: number;
@@ -148,12 +151,14 @@ export declare class AdminService {
         supportsVision: boolean;
         isActive: boolean;
         sortOrder: number;
+        tier: 'SIMPLE' | 'MEDIUM' | 'COMPLEX';
     }>): Promise<{
         id: string;
         name: string;
         isActive: boolean;
         createdAt: Date;
         sortOrder: number;
+        tier: import("@prisma/client").$Enums.ModelTier;
         displayName: string;
         provider: string;
         inputPricePerM: number;

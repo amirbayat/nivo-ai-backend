@@ -111,7 +111,8 @@ model Message {
   model          String?
   createdAt      DateTime    @default(now())
 
-  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversation Conversation    @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  feedback     MessageFeedback?
 
   @@index([conversationId, createdAt])
   @@map("messages")
@@ -311,19 +312,94 @@ enum TicketPriority {
   URGENT
 }
 
+enum ModelTier {
+  SIMPLE
+  MEDIUM
+  COMPLEX
+}
+
 model AiModel {
-  id              String   @id @default(uuid())
-  name            String   @unique
+  id              String    @id @default(uuid())
+  name            String    @unique
   displayName     String
   provider        String
-  inputPricePerM  Float    @default(0)
-  outputPricePerM Float    @default(0)
-  supportsVision  Boolean  @default(false)
-  isActive        Boolean  @default(true)
-  sortOrder       Int      @default(0)
-  createdAt       DateTime @default(now())
+  inputPricePerM  Float     @default(0)
+  outputPricePerM Float     @default(0)
+  supportsVision  Boolean   @default(false)
+  isActive        Boolean   @default(true)
+  sortOrder       Int       @default(0)
+  tier            ModelTier @default(MEDIUM)
+  createdAt       DateTime  @default(now())
 
   @@map("ai_models")
+}
+
+// ─── Model Router ──────────────────────────────────────────────────────────────
+
+// تنظیمات سراسری مسیریابی مدل — تک‌رکوردی (singleton، با id ثابت "default")
+model ModelRoutingConfig {
+  id                  String   @id @default(uuid())
+  enabled             Boolean  @default(true)
+  simpleKeywords      Json     @default("[]")
+  complexKeywords     Json     @default("[]")
+  complexLenThreshold Int      @default(600)
+  llmFallbackEnabled  Boolean  @default(true)
+  llmFallbackModel    String   @default("openai/gpt-4o-mini")
+  updatedAt           DateTime @updatedAt
+
+  @@map("model_routing_configs")
+}
+
+// لاگ هر تصمیم مسیریابی — برای آنالیتیکس و دیباگ آینده
+model ModelRoutingLog {
+  id             String    @id @default(uuid())
+  userId         String
+  conversationId String
+  chosenModel    String
+  tier           ModelTier
+  method         String // 'heuristic' | 'llm' | 'sticky' | 'manual' | 'disabled'
+  confidence     Float?
+  overrodeManual String? // اگر غیرنال باشد یعنی انتخاب دستی کاربر بی‌صدا override شد
+  createdAt      DateTime  @default(now())
+
+  @@index([userId, createdAt])
+  @@map("model_routing_logs")
+}
+
+// ─── Message Feedback (لایک/دیس‌لایک) ──────────────────────────────────────────
+
+enum FeedbackVote {
+  UP
+  DOWN
+}
+
+model MessageFeedback {
+  id        String       @id @default(uuid())
+  messageId String       @unique
+  userId    String
+  vote      FeedbackVote
+  comment   String?
+  modelUsed String
+  isChecked Boolean      @default(false)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([isChecked, createdAt])
+  @@index([modelUsed, vote])
+  @@map("message_feedbacks")
+}
+
+model ModelFeedbackSummary {
+  id             String   @id @default(uuid())
+  summary        String
+  topIssues      Json
+  totalProcessed Int      @default(0)
+  checkedUpTo    DateTime @default(now())
+  createdAt      DateTime @default(now())
+
+  @@map("model_feedback_summaries")
 }
 
 model LeadProfile {

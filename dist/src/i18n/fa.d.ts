@@ -112,4 +112,10 @@ export declare const fa: {
         readonly closed: "این تیکت بسته شده است";
         readonly updated: "تیکت به‌روز شد";
     };
+    readonly messageFeedback: {
+        readonly submitted: "بازخورد شما ثبت شد";
+        readonly notFound: "پیام یافت نشد";
+        readonly onlyAssistant: "فقط می‌توان به پاسخ دستیار بازخورد داد";
+        readonly summaryNotReady: "هنوز بازخورد جدیدی برای خلاصه‌سازی وجود ندارد";
+    };
 };

@@ -18,13 +18,16 @@ const common_1 = require("@nestjs/common");
 const bull_1 = require("@nestjs/bull");
 const FLUSH_CRON = '*/5 * * * *';
 const SUMMARY_CRON = '0 2 * * *';
+const MODEL_FEEDBACK_SUMMARY_CRON = '0 3 * * *';
 let QueueService = QueueService_1 = class QueueService {
     tokenFlushQueue;
     feedbackSummaryQueue;
+    modelFeedbackSummaryQueue;
     logger = new common_1.Logger(QueueService_1.name);
-    constructor(tokenFlushQueue, feedbackSummaryQueue) {
+    constructor(tokenFlushQueue, feedbackSummaryQueue, modelFeedbackSummaryQueue) {
         this.tokenFlushQueue = tokenFlushQueue;
         this.feedbackSummaryQueue = feedbackSummaryQueue;
+        this.modelFeedbackSummaryQueue = modelFeedbackSummaryQueue;
     }
     async onApplicationBootstrap() {
         const tokenRepeatables = await this.tokenFlushQueue.getRepeatableJobs();
@@ -39,6 +42,12 @@ let QueueService = QueueService_1 = class QueueService {
         }
         await this.feedbackSummaryQueue.add('summarize', {}, { repeat: { cron: SUMMARY_CRON } });
         this.logger.log(`Feedback summary job scheduled: ${SUMMARY_CRON}`);
+        const modelFeedbackRepeatables = await this.modelFeedbackSummaryQueue.getRepeatableJobs();
+        for (const job of modelFeedbackRepeatables) {
+            await this.modelFeedbackSummaryQueue.removeRepeatableByKey(job.key);
+        }
+        await this.modelFeedbackSummaryQueue.add('summarize', {}, { repeat: { cron: MODEL_FEEDBACK_SUMMARY_CRON } });
+        this.logger.log(`Model feedback summary job scheduled: ${MODEL_FEEDBACK_SUMMARY_CRON}`);
     }
 };
 exports.QueueService = QueueService;
@@ -46,6 +55,7 @@ exports.QueueService = QueueService = QueueService_1 = __decorate([
     (0, common_1.Injectable)(),
     __param(0, (0, bull_1.InjectQueue)('token-flush')),
     __param(1, (0, bull_1.InjectQueue)('feedback-summary')),
-    __metadata("design:paramtypes", [Object, Object])
+    __param(2, (0, bull_1.InjectQueue)('model-feedback-summary')),
+    __metadata("design:paramtypes", [Object, Object, Object])
 ], QueueService);
 //# sourceMappingURL=queue.service.js.map

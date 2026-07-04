@@ -115,5 +115,11 @@ exports.fa = {
         closed: 'این تیکت بسته شده است',
         updated: 'تیکت به‌روز شد',
     },
+    messageFeedback: {
+        submitted: 'بازخورد شما ثبت شد',
+        notFound: 'پیام یافت نشد',
+        onlyAssistant: 'فقط می‌توان به پاسخ دستیار بازخورد داد',
+        summaryNotReady: 'هنوز بازخورد جدیدی برای خلاصه‌سازی وجود ندارد',
+    },
 };
 //# sourceMappingURL=fa.js.map

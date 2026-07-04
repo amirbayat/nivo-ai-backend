@@ -1,4 +1,10 @@
-import { BadRequestException, ForbiddenException, HttpException, Injectable, NotFoundException } from '@nestjs/common'
+import {
+  BadRequestException,
+  ForbiddenException,
+  HttpException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import { streamText, generateText } from 'ai'
@@ -7,9 +13,12 @@ import { PrismaService } from '../../prisma/prisma.service'
 import { RedisService } from '../../redis/redis.service'
 import { TokenService } from '../usage/token.service'
 import { PricingService } from '../usage/pricing.service'
+import { ModelRouterService } from '../model-router/model-router.service'
 import { fa } from '../../i18n/fa'
 import type { Response } from 'express'
 import { StreamMessageDto } from './dto/stream-message.dto'
+
+const OPTIMAL_MODE = 'optimal'
 
 const LEGACY_MODEL_MAP: Record<string, string> = {
   'gpt-4o-mini': 'openai/gpt-4o-mini',
@@ -35,6 +44,7 @@ export class ChatService {
     private readonly redis: RedisService,
     private readonly tokenService: TokenService,
     private readonly pricingService: PricingService,
+    private readonly modelRouter: ModelRouterService,
     private readonly config: ConfigService,
   ) {
     this.provider = createOpenAICompatible({
@@ -44,24 +54,40 @@ export class ChatService {
     })
   }
 
-  async streamChat(conversationId: string, userId: string, dto: StreamMessageDto, res: Response) {
+  async streamChat(
+    conversationId: string,
+    userId: string,
+    dto: StreamMessageDto,
+    res: Response,
+  ) {
     // ── PREFLIGHT: all limit checks BEFORE committing to SSE stream ────────
     // These throw HttpExceptions → NestJS returns proper 4xx status codes
     // (no flushHeaders yet, so HTTP status is still settable)
 
     const conversation = await this.prisma.conversation.findUnique({
       where: { id: conversationId },
-      select: { userId: true, model: true, systemPrompt: true, title: true, contextSummary: true },
+      select: {
+        userId: true,
+        model: true,
+        systemPrompt: true,
+        title: true,
+        contextSummary: true,
+      },
     })
     if (!conversation) throw new NotFoundException(fa.conversations.notFound)
-    if (conversation.userId !== userId) throw new ForbiddenException(fa.conversations.forbidden)
+    if (conversation.userId !== userId)
+      throw new ForbiddenException(fa.conversations.forbidden)
 
     const plan = await this.tokenService.getCachedPlan(userId)
 
     // ── manual limit set by admin ──────────────────────────────────────────
     const manualLimitRaw = await this.redis.get(`manual_limit:${userId}`)
     if (manualLimitRaw) {
-      const ml = JSON.parse(manualLimitRaw) as { type: string; reason: string; expiresAt: number }
+      const ml = JSON.parse(manualLimitRaw) as {
+        type: string
+        reason: string
+        expiresAt: number
+      }
       const remaining = Math.ceil((ml.expiresAt - Date.now()) / 60_000)
       const msg = ml.reason
         ? `${ml.reason} (${remaining} دقیقه دیگر)`
@@ -71,19 +97,22 @@ export class ChatService {
 
     // ── three-zone daily message limit ────────────────────────────────────
     const todayCount = await this.tokenService.getTodayRequestCount(userId)
-    const N = plan.dailyMessageLimit      // normal zone ceiling (null = unlimited)
-    const M = plan.throttledMessageCount ?? 0  // throttled zone size
+    const N = plan.dailyMessageLimit // normal zone ceiling (null = unlimited)
+    const M = plan.throttledMessageCount ?? 0 // throttled zone size
 
     let messageStage: 'normal' | 'throttled' = 'normal'
 
     if (N !== null) {
       if (todayCount >= N + M) {
         // ── BLOCKED ────────────────────────────────────────────────────────
-        throw new HttpException({
-          message: fa.chat.dailyBlocked,
-          planTier: plan.planTier,
-          stage: 'blocked',
-        }, 429)
+        throw new HttpException(
+          {
+            message: fa.chat.dailyBlocked,
+            planTier: plan.planTier,
+            stage: 'blocked',
+          },
+          429,
+        )
       }
       if (todayCount >= N) {
         // ── THROTTLED ──────────────────────────────────────────────────────
@@ -102,32 +131,64 @@ export class ChatService {
     }
 
     // ── budget check + cascade model ───────────────────────────────────────
-    const { cascadeModel } = await this.pricingService.assertBudget(userId, plan.priceMonthly, plan.planTier)
+    const { cascadeModel } = await this.pricingService.assertBudget(
+      userId,
+      plan.priceMonthly,
+      plan.planTier,
+    )
 
-    let modelId = resolveModelId(dto.model ?? conversation.model)
-    const allowed = plan.allowedModels as string[]
-    if (!allowed.includes(modelId)) {
-      if (allowed.length > 0) {
-        modelId = allowed[0]  // silently fall back to first allowed model
-      } else {
-        throw new ForbiddenException(fa.chat.modelNotAllowed)
-      }
-    }
+    const allowed = plan.allowedModels
+    if (allowed.length === 0)
+      throw new ForbiddenException(fa.chat.modelNotAllowed)
+
+    // ── model selection via Router — همیشه اجرا می‌شود، حتی روی انتخاب دستی ──
+    // اگر کاربر «حالت بهینه» را انتخاب کرده باشد manualModel تعریف نمی‌شود و Router هر سه سطح را خودش تعیین می‌کند.
+    // اگر کاربر مدل مشخصی انتخاب کرده باشد، برای پیام‌های SIMPLE باز هم بی‌صدا override می‌شود (بخش ۲/۸ PRD-model-router.md).
+    const rawModelChoice = dto.model ?? conversation.model
+    const manualModel =
+      rawModelChoice === OPTIMAL_MODE
+        ? undefined
+        : resolveModelId(rawModelChoice)
+    const validManualModel =
+      manualModel && allowed.includes(manualModel) ? manualModel : undefined
+
+    const lastAssistant = await this.prisma.message.findFirst({
+      where: { conversationId, role: 'ASSISTANT' },
+      orderBy: { createdAt: 'desc' },
+      select: { content: true },
+    })
+
+    const routed = await this.modelRouter.route({
+      userId,
+      content: dto.content,
+      hasImages: Boolean(dto.images?.length),
+      allowedModels: allowed,
+      manualModel: validManualModel,
+      lastAssistantMessageLength: lastAssistant?.content.length,
+    })
+    let modelId = routed.modelId
+    this.modelRouter.log({ userId, conversationId, ...routed }).catch(() => {})
 
     // ── vision check (preflight) ──────────────────────────────────────────
+    // نکته: وقتی rawModelChoice === 'optimal' باشد، aiModel با این نام پیدا نمی‌شود (modelRecord=null)
+    // و این چک بی‌اثر می‌ماند — Router خودش تضمین می‌کند مدل انتخابی از vision پشتیبانی کند (بخش hasImages بالا).
     if (dto.images?.length) {
-      const modelKey = dto.model ?? conversation.model
       const modelRecord = await this.prisma.aiModel.findFirst({
-        where: { name: modelKey, isActive: true },
+        where: { name: rawModelChoice, isActive: true },
         select: { supportsVision: true },
       })
       if (modelRecord && !modelRecord.supportsVision) {
-        throw new BadRequestException('این مدل از تصویر پشتیبانی نمی‌کند. لطفاً یک مدل Vision‌دار انتخاب کنید.')
+        throw new BadRequestException(
+          'این مدل از تصویر پشتیبانی نمی‌کند. لطفاً یک مدل Vision‌دار انتخاب کنید.',
+        )
       }
     }
 
     const quota = await this.tokenService.checkQuota(userId)
-    const throttledMax = this.tokenService.resolveOutputThrottle(plan.outputThrottleSteps, todayCount)
+    const throttledMax = this.tokenService.resolveOutputThrottle(
+      plan.outputThrottleSteps,
+      todayCount,
+    )
     let maxOut = Math.min(quota.remaining, throttledMax)
     // further restrict output if in throttled zone
     if (messageStage === 'throttled' && plan.throttledOutputTokens) {
@@ -143,22 +204,28 @@ export class ChatService {
 
     // ── send stage info so frontend can update the banner ────────────────
     if (N !== null) {
-      const remainingNormal    = Math.max(0, N - todayCount)
+      const remainingNormal = Math.max(0, N - todayCount)
       const remainingThrottled = Math.max(0, N + M - todayCount)
-      res.write(`data: ${JSON.stringify({
-        info: 'stage',
-        stage: messageStage,
-        remainingNormal,
-        remainingThrottled,
-      })}\n\n`)
+      res.write(
+        `data: ${JSON.stringify({
+          info: 'stage',
+          stage: messageStage,
+          remainingNormal,
+          remainingThrottled,
+        })}\n\n`,
+      )
     }
 
     if (cascadeModel) {
       modelId = cascadeModel
-      res.write(`data: ${JSON.stringify({ info: 'model_cascaded', model: cascadeModel })}\n\n`)
+      res.write(
+        `data: ${JSON.stringify({ info: 'model_cascaded', model: cascadeModel })}\n\n`,
+      )
     }
     if (throttledMax < 4096) {
-      res.write(`data: ${JSON.stringify({ info: 'output_throttled', maxOutputTokens: throttledMax })}\n\n`)
+      res.write(
+        `data: ${JSON.stringify({ info: 'output_throttled', maxOutputTokens: throttledMax })}\n\n`,
+      )
     }
 
     try {
@@ -177,7 +244,9 @@ export class ChatService {
 
       let recentMessages: { role: string; content: string }[]
       if (conversation.contextSummary) {
-        systemParts.push(`خلاصه مکالمه تا کنون:\n${conversation.contextSummary}`)
+        systemParts.push(
+          `خلاصه مکالمه تا کنون:\n${conversation.contextSummary}`,
+        )
         recentMessages = await this.prisma.message.findMany({
           where: { conversationId },
           orderBy: { createdAt: 'desc' },
@@ -201,14 +270,22 @@ export class ChatService {
           const visionMsg: UserModelMessage = {
             role: 'user',
             content: [
-              ...dto.images!.map(img => ({ type: 'image' as const, image: img })),
+              ...dto.images!.map((img) => ({
+                type: 'image' as const,
+                image: img,
+              })),
               { type: 'text' as const, text: m.content },
             ],
           }
           return visionMsg
         }
         return {
-          role: m.role === 'USER' ? 'user' : m.role === 'ASSISTANT' ? 'assistant' : 'system',
+          role:
+            m.role === 'USER'
+              ? 'user'
+              : m.role === 'ASSISTANT'
+                ? 'assistant'
+                : 'system',
           content: m.content,
         }
       })
@@ -252,7 +329,10 @@ export class ChatService {
         this.pricingService.trackCost(userId, costRial),
         this.prisma.conversation.update({
           where: { id: conversationId },
-          data: { totalTokens: { increment: tokensUsed }, lastMessageAt: new Date() },
+          data: {
+            totalTokens: { increment: tokensUsed },
+            lastMessageAt: new Date(),
+          },
         }),
       ])
 
@@ -269,17 +349,25 @@ export class ChatService {
     }
   }
 
-  private async generateTitle(conversationId: string, firstMessage: string, modelId: string): Promise<void> {
+  private async generateTitle(
+    conversationId: string,
+    firstMessage: string,
+    modelId: string,
+  ): Promise<void> {
     try {
       const { text } = await generateText({
         model: this.provider(modelId),
-        system: 'یک عنوان کوتاه (حداکثر ۵ کلمه) برای این مکالمه بنویس. فقط عنوان، بدون توضیح یا نقل‌قول.',
+        system:
+          'یک عنوان کوتاه (حداکثر ۵ کلمه) برای این مکالمه بنویس. فقط عنوان، بدون توضیح یا نقل‌قول.',
         messages: [{ role: 'user', content: firstMessage.slice(0, 300) }],
         maxOutputTokens: 40,
       })
       const title = text.trim().replace(/^["'«»\n]+|["'«»\n]+$/g, '')
       if (title) {
-        await this.prisma.conversation.update({ where: { id: conversationId }, data: { title } })
+        await this.prisma.conversation.update({
+          where: { id: conversationId },
+          data: { title },
+        })
       }
     } catch {
       // non-critical

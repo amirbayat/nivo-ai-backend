@@ -45,7 +45,7 @@ let FeedbackSummaryProcessor = FeedbackSummaryProcessor_1 = class FeedbackSummar
             return;
         }
         const feedbackLines = unchecked
-            .map(f => `[${f.category}] ${f.content}`)
+            .map((f) => `[${f.category}] ${f.content}`)
             .join('\n');
         const previousContext = previous
             ? `Previous summary: ${previous.summary}\nPrevious top items: ${JSON.stringify(previous.topItems)}\n\n`
@@ -63,7 +63,7 @@ let FeedbackSummaryProcessor = FeedbackSummaryProcessor_1 = class FeedbackSummar
         catch {
             parsed = { summary: text, topItems: [] };
         }
-        const ids = unchecked.map(f => f.id);
+        const ids = unchecked.map((f) => f.id);
         await this.prisma.$transaction(async (tx) => {
             await tx.feedbackSummary.create({
                 data: {

@@ -18,7 +18,9 @@ const prisma_service_1 = require("../../prisma/prisma.service");
 const redis_service_1 = require("../../redis/redis.service");
 const token_service_1 = require("../usage/token.service");
 const pricing_service_1 = require("../usage/pricing.service");
+const model_router_service_1 = require("../model-router/model-router.service");
 const fa_1 = require("../../i18n/fa");
+const OPTIMAL_MODE = 'optimal';
 const LEGACY_MODEL_MAP = {
     'gpt-4o-mini': 'openai/gpt-4o-mini',
     'gpt-4o': 'openai/gpt-4o',
@@ -35,13 +37,15 @@ let ChatService = class ChatService {
     redis;
     tokenService;
     pricingService;
+    modelRouter;
     config;
     provider;
-    constructor(prisma, redis, tokenService, pricingService, config) {
+    constructor(prisma, redis, tokenService, pricingService, modelRouter, config) {
         this.prisma = prisma;
         this.redis = redis;
         this.tokenService = tokenService;
         this.pricingService = pricingService;
+        this.modelRouter = modelRouter;
         this.config = config;
         this.provider = (0, openai_compatible_1.createOpenAICompatible)({
             name: 'liara',
@@ -52,7 +56,13 @@ let ChatService = class ChatService {
     async streamChat(conversationId, userId, dto, res) {
         const conversation = await this.prisma.conversation.findUnique({
             where: { id: conversationId },
-            select: { userId: true, model: true, systemPrompt: true, title: true, contextSummary: true },
+            select: {
+                userId: true,
+                model: true,
+                systemPrompt: true,
+                title: true,
+                contextSummary: true,
+            },
         });
         if (!conversation)
             throw new common_1.NotFoundException(fa_1.fa.conversations.notFound);
@@ -93,20 +103,32 @@ let ChatService = class ChatService {
             throw new common_1.BadRequestException(fa_1.fa.chat.inputTooLong(effectiveInputLimit));
         }
         const { cascadeModel } = await this.pricingService.assertBudget(userId, plan.priceMonthly, plan.planTier);
-        let modelId = resolveModelId(dto.model ?? conversation.model);
         const allowed = plan.allowedModels;
-        if (!allowed.includes(modelId)) {
-            if (allowed.length > 0) {
-                modelId = allowed[0];
-            }
-            else {
-                throw new common_1.ForbiddenException(fa_1.fa.chat.modelNotAllowed);
-            }
-        }
+        if (allowed.length === 0)
+            throw new common_1.ForbiddenException(fa_1.fa.chat.modelNotAllowed);
+        const rawModelChoice = dto.model ?? conversation.model;
+        const manualModel = rawModelChoice === OPTIMAL_MODE
+            ? undefined
+            : resolveModelId(rawModelChoice);
+        const validManualModel = manualModel && allowed.includes(manualModel) ? manualModel : undefined;
+        const lastAssistant = await this.prisma.message.findFirst({
+            where: { conversationId, role: 'ASSISTANT' },
+            orderBy: { createdAt: 'desc' },
+            select: { content: true },
+        });
+        const routed = await this.modelRouter.route({
+            userId,
+            content: dto.content,
+            hasImages: Boolean(dto.images?.length),
+            allowedModels: allowed,
+            manualModel: validManualModel,
+            lastAssistantMessageLength: lastAssistant?.content.length,
+        });
+        let modelId = routed.modelId;
+        this.modelRouter.log({ userId, conversationId, ...routed }).catch(() => { });
         if (dto.images?.length) {
-            const modelKey = dto.model ?? conversation.model;
             const modelRecord = await this.prisma.aiModel.findFirst({
-                where: { name: modelKey, isActive: true },
+                where: { name: rawModelChoice, isActive: true },
                 select: { supportsVision: true },
             });
             if (modelRecord && !modelRecord.supportsVision) {
@@ -179,14 +201,21 @@ let ChatService = class ChatService {
                     const visionMsg = {
                         role: 'user',
                         content: [
-                            ...dto.images.map(img => ({ type: 'image', image: img })),
+                            ...dto.images.map((img) => ({
+                                type: 'image',
+                                image: img,
+                            })),
                             { type: 'text', text: m.content },
                         ],
                     };
                     return visionMsg;
                 }
                 return {
-                    role: m.role === 'USER' ? 'user' : m.role === 'ASSISTANT' ? 'assistant' : 'system',
+                    role: m.role === 'USER'
+                        ? 'user'
+                        : m.role === 'ASSISTANT'
+                            ? 'assistant'
+                            : 'system',
                     content: m.content,
                 };
             });
@@ -220,7 +249,10 @@ let ChatService = class ChatService {
                 this.pricingService.trackCost(userId, costRial),
                 this.prisma.conversation.update({
                     where: { id: conversationId },
-                    data: { totalTokens: { increment: tokensUsed }, lastMessageAt: new Date() },
+                    data: {
+                        totalTokens: { increment: tokensUsed },
+                        lastMessageAt: new Date(),
+                    },
                 }),
             ]);
             if (!conversation.title && isFirstMessage) {
@@ -246,7 +278,10 @@ let ChatService = class ChatService {
             });
             const title = text.trim().replace(/^["'«»\n]+|["'«»\n]+$/g, '');
             if (title) {
-                await this.prisma.conversation.update({ where: { id: conversationId }, data: { title } });
+                await this.prisma.conversation.update({
+                    where: { id: conversationId },
+                    data: { title },
+                });
             }
         }
         catch {
@@ -260,6 +295,7 @@ exports.ChatService = ChatService = __decorate([
         redis_service_1.RedisService,
         token_service_1.TokenService,
         pricing_service_1.PricingService,
+        model_router_service_1.ModelRouterService,
         config_1.ConfigService])
 ], ChatService);
 //# sourceMappingURL=chat.service.js.map

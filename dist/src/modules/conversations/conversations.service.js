@@ -54,6 +54,17 @@ let ConversationsService = class ConversationsService {
                 messages: {
                     orderBy: { createdAt: 'asc' },
                     take: 50,
+                    select: {
+                        id: true,
+                        conversationId: true,
+                        role: true,
+                        content: true,
+                        images: true,
+                        tokensInput: true,
+                        tokensOutput: true,
+                        createdAt: true,
+                        feedback: { select: { vote: true, comment: true } },
+                    },
                 },
             },
         });
@@ -69,7 +80,10 @@ let ConversationsService = class ConversationsService {
     }
     async archive(id, userId) {
         await this.assertOwnership(id, userId);
-        await this.prisma.conversation.update({ where: { id }, data: { isArchived: true } });
+        await this.prisma.conversation.update({
+            where: { id },
+            data: { isArchived: true },
+        });
     }
     async assertOwnership(id, userId) {
         const conv = await this.prisma.conversation.findUnique({

@@ -31,15 +31,18 @@ export declare class ConversationsService {
     }>;
     findOne(id: string, userId: string): Promise<{
         messages: {
+            feedback: {
+                vote: import("@prisma/client").$Enums.FeedbackVote;
+                comment: string | null;
+            } | null;
             id: string;
             role: import("@prisma/client").$Enums.MessageRole;
             createdAt: Date;
-            model: string | null;
+            conversationId: string;
             content: string;
-            images: import("@prisma/client/runtime/client").JsonValue | null;
+            images: import("@prisma/client/runtime/client").JsonValue;
             tokensInput: number;
             tokensOutput: number;
-            conversationId: string;
         }[];
     } & {
         id: string;

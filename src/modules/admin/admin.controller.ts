@@ -120,6 +120,7 @@ export class AdminController {
     supportsVision: boolean
     isActive: boolean
     sortOrder: number
+    tier?: 'SIMPLE' | 'MEDIUM' | 'COMPLEX'
   }) {
     return this.adminService.createModel(body)
   }

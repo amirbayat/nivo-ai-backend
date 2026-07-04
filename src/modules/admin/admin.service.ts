@@ -331,6 +331,7 @@ export class AdminService {
     supportsVision: boolean
     isActive: boolean
     sortOrder: number
+    tier?: 'SIMPLE' | 'MEDIUM' | 'COMPLEX'
   }) {
     return this.prisma.aiModel.create({ data: dto })
   }
@@ -344,6 +345,7 @@ export class AdminService {
     supportsVision: boolean
     isActive: boolean
     sortOrder: number
+    tier: 'SIMPLE' | 'MEDIUM' | 'COMPLEX'
   }>) {
     const model = await this.prisma.aiModel.findUnique({ where: { id } })
     if (!model) throw new NotFoundException('مدل یافت نشد')

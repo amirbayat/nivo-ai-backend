@@ -13,6 +13,7 @@ const MODELS = [
     outputPricePerM: 0.60,
     supportsVision: true,
     sortOrder: 0,
+    tier: 'SIMPLE' as const,
   },
   {
     name: 'openai/gpt-4o',
@@ -22,6 +23,7 @@ const MODELS = [
     outputPricePerM: 10.00,
     supportsVision: true,
     sortOrder: 1,
+    tier: 'MEDIUM' as const,
   },
   {
     name: 'openai/gpt-4-turbo',
@@ -31,6 +33,7 @@ const MODELS = [
     outputPricePerM: 30.00,
     supportsVision: true,
     sortOrder: 2,
+    tier: 'COMPLEX' as const,
   },
 ]
 

@@ -4,6 +4,7 @@ import type { Queue } from 'bull'
 
 const FLUSH_CRON = '*/5 * * * *'
 const SUMMARY_CRON = '0 2 * * *'
+const MODEL_FEEDBACK_SUMMARY_CRON = '0 3 * * *' // یک ساعت بعد از فیدبک عمومی، تا فشار هم‌زمان روی AI provider نباشد
 
 @Injectable()
 export class QueueService implements OnApplicationBootstrap {
@@ -11,7 +12,10 @@ export class QueueService implements OnApplicationBootstrap {
 
   constructor(
     @InjectQueue('token-flush') private readonly tokenFlushQueue: Queue,
-    @InjectQueue('feedback-summary') private readonly feedbackSummaryQueue: Queue,
+    @InjectQueue('feedback-summary')
+    private readonly feedbackSummaryQueue: Queue,
+    @InjectQueue('model-feedback-summary')
+    private readonly modelFeedbackSummaryQueue: Queue,
   ) {}
 
   async onApplicationBootstrap() {
@@ -19,14 +23,37 @@ export class QueueService implements OnApplicationBootstrap {
     for (const job of tokenRepeatables) {
       await this.tokenFlushQueue.removeRepeatableByKey(job.key)
     }
-    await this.tokenFlushQueue.add('flush', {}, { repeat: { cron: FLUSH_CRON } })
+    await this.tokenFlushQueue.add(
+      'flush',
+      {},
+      { repeat: { cron: FLUSH_CRON } },
+    )
     this.logger.log(`Token flush job scheduled: ${FLUSH_CRON}`)
 
-    const summaryRepeatables = await this.feedbackSummaryQueue.getRepeatableJobs()
+    const summaryRepeatables =
+      await this.feedbackSummaryQueue.getRepeatableJobs()
     for (const job of summaryRepeatables) {
       await this.feedbackSummaryQueue.removeRepeatableByKey(job.key)
     }
-    await this.feedbackSummaryQueue.add('summarize', {}, { repeat: { cron: SUMMARY_CRON } })
+    await this.feedbackSummaryQueue.add(
+      'summarize',
+      {},
+      { repeat: { cron: SUMMARY_CRON } },
+    )
     this.logger.log(`Feedback summary job scheduled: ${SUMMARY_CRON}`)
+
+    const modelFeedbackRepeatables =
+      await this.modelFeedbackSummaryQueue.getRepeatableJobs()
+    for (const job of modelFeedbackRepeatables) {
+      await this.modelFeedbackSummaryQueue.removeRepeatableByKey(job.key)
+    }
+    await this.modelFeedbackSummaryQueue.add(
+      'summarize',
+      {},
+      { repeat: { cron: MODEL_FEEDBACK_SUMMARY_CRON } },
+    )
+    this.logger.log(
+      `Model feedback summary job scheduled: ${MODEL_FEEDBACK_SUMMARY_CRON}`,
+    )
   }
 }

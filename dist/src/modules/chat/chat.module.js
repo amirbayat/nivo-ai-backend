@@ -12,12 +12,13 @@ const chat_service_1 = require("./chat.service");
 const chat_controller_1 = require("./chat.controller");
 const usage_module_1 = require("../usage/usage.module");
 const redis_module_1 = require("../../redis/redis.module");
+const model_router_module_1 = require("../model-router/model-router.module");
 let ChatModule = class ChatModule {
 };
 exports.ChatModule = ChatModule;
 exports.ChatModule = ChatModule = __decorate([
     (0, common_1.Module)({
-        imports: [usage_module_1.UsageModule, redis_module_1.RedisModule],
+        imports: [usage_module_1.UsageModule, redis_module_1.RedisModule, model_router_module_1.ModelRouterModule],
         controllers: [chat_controller_1.ChatController],
         providers: [chat_service_1.ChatService],
     })
