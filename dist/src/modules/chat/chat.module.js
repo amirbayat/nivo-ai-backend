@@ -14,12 +14,13 @@ const usage_module_1 = require("../usage/usage.module");
 const redis_module_1 = require("../../redis/redis.module");
 const model_router_module_1 = require("../model-router/model-router.module");
 const usage_analytics_module_1 = require("../usage-analytics/usage-analytics.module");
+const campaign_module_1 = require("../campaign/campaign.module");
 let ChatModule = class ChatModule {
 };
 exports.ChatModule = ChatModule;
 exports.ChatModule = ChatModule = __decorate([
     (0, common_1.Module)({
-        imports: [usage_module_1.UsageModule, redis_module_1.RedisModule, model_router_module_1.ModelRouterModule, usage_analytics_module_1.UsageAnalyticsModule],
+        imports: [usage_module_1.UsageModule, redis_module_1.RedisModule, model_router_module_1.ModelRouterModule, usage_analytics_module_1.UsageAnalyticsModule, campaign_module_1.CampaignModule],
         controllers: [chat_controller_1.ChatController],
         providers: [chat_service_1.ChatService],
     })

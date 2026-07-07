@@ -9,10 +9,10 @@ export declare class TicketsController {
         message: "تیکت پشتیبانی شما با موفقیت ثبت شد";
         ticket: {
             id: string;
-            createdAt: Date;
-            updatedAt: Date;
-            userId: string;
             status: import("@prisma/client").$Enums.TicketStatus;
+            createdAt: Date;
+            userId: string;
+            updatedAt: Date;
             subject: string;
             body: string;
             priority: import("@prisma/client").$Enums.TicketPriority;
@@ -22,9 +22,9 @@ export declare class TicketsController {
     findAll(user: JwtPayload): Promise<{
         tickets: {
             id: string;
+            status: import("@prisma/client").$Enums.TicketStatus;
             createdAt: Date;
             updatedAt: Date;
-            status: import("@prisma/client").$Enums.TicketStatus;
             subject: string;
             priority: import("@prisma/client").$Enums.TicketPriority;
         }[];
@@ -40,10 +40,10 @@ export declare class TicketsController {
             }[];
         } & {
             id: string;
-            createdAt: Date;
-            updatedAt: Date;
-            userId: string;
             status: import("@prisma/client").$Enums.TicketStatus;
+            createdAt: Date;
+            userId: string;
+            updatedAt: Date;
             subject: string;
             body: string;
             priority: import("@prisma/client").$Enums.TicketPriority;

@@ -28,12 +28,12 @@ export declare class AdminService {
                 periodStart: Date;
                 periodEnd: Date;
             } | null;
-            id: string;
-            phone: string;
             name: string | null;
+            id: string;
+            createdAt: Date;
+            phone: string;
             role: import("@prisma/client").$Enums.Role;
             isActive: boolean;
-            createdAt: Date;
         }[];
         total: number;
         page: number;
@@ -45,9 +45,9 @@ export declare class AdminService {
     }): Promise<{
         message: "کاربر به‌روز شد";
         user: {
+            name: string | null;
             id: string;
             phone: string;
-            name: string | null;
             role: import("@prisma/client").$Enums.Role;
             isActive: boolean;
         };
@@ -91,11 +91,11 @@ export declare class AdminService {
         success: boolean;
         subscription: {
             id: string;
-            createdAt: Date;
-            updatedAt: Date;
-            userId: string;
-            planId: string;
             status: import("@prisma/client").$Enums.SubscriptionStatus;
+            createdAt: Date;
+            userId: string;
+            updatedAt: Date;
+            planId: string;
             periodStart: Date;
             periodEnd: Date;
             cancelAtPeriodEnd: boolean;
@@ -107,10 +107,10 @@ export declare class AdminService {
         count: number;
     }[]>;
     getModels(): import("@prisma/client").Prisma.PrismaPromise<{
-        id: string;
         name: string;
-        isActive: boolean;
+        id: string;
         createdAt: Date;
+        isActive: boolean;
         sortOrder: number;
         displayName: string;
         provider: string;
@@ -132,10 +132,10 @@ export declare class AdminService {
         sortOrder: number;
         tier?: 'SIMPLE' | 'MEDIUM' | 'COMPLEX';
     }): import("@prisma/client").Prisma.Prisma__AiModelClient<{
-        id: string;
         name: string;
-        isActive: boolean;
+        id: string;
         createdAt: Date;
+        isActive: boolean;
         sortOrder: number;
         displayName: string;
         provider: string;
@@ -157,10 +157,10 @@ export declare class AdminService {
         sortOrder: number;
         tier: 'SIMPLE' | 'MEDIUM' | 'COMPLEX';
     }>): Promise<{
-        id: string;
         name: string;
-        isActive: boolean;
+        id: string;
         createdAt: Date;
+        isActive: boolean;
         sortOrder: number;
         displayName: string;
         provider: string;

@@ -1,0 +1,168 @@
+import { PrismaService } from '../../prisma/prisma.service';
+import { RedisService } from '../../redis/redis.service';
+import { ConfigService } from '@nestjs/config';
+import { SmsService } from '../../sms/sms.service';
+import type { LaunchCampaign } from '@prisma/client';
+export interface DisplayedCounter {
+    active: boolean;
+    campaignName: string | null;
+    displayedRemaining: number | null;
+}
+type ReminderStep = {
+    dayOffset: number;
+    template: string;
+};
+export declare class CampaignService {
+    private readonly prisma;
+    private readonly redis;
+    private readonly config;
+    private readonly sms;
+    constructor(prisma: PrismaService, redis: RedisService, config: ConfigService, sms: SmsService);
+    getActiveCampaign(): Promise<LaunchCampaign | null>;
+    private reviveCampaignDates;
+    private invalidateActiveCampaignCache;
+    applyToNewUser(userId: string, phone: string): Promise<{
+        message: string;
+        queuePosition: number;
+    } | null>;
+    getWaitingDailyLimit(userId: string): Promise<number | null>;
+    private waitingLimitCacheKey;
+    private invalidateWaitingLimitCache;
+    getDisplayedCounter(): Promise<DisplayedCounter>;
+    getMyWaitlistStatus(userId: string): Promise<{
+        status: string;
+        queuePosition: number | null;
+    } | null>;
+    activateByToken(token: string): Promise<void>;
+    grantAccess(campaignId: string, mode: 'all' | number): Promise<{
+        granted: number;
+    }>;
+    grantAccessToPhone(phone: string): Promise<{
+        granted: boolean;
+    }>;
+    private grantEntries;
+    sendDueReminders(): Promise<void>;
+    listCampaigns(): Promise<{
+        name: string;
+        id: string;
+        startAt: Date;
+        endAt: Date | null;
+        capacity: number;
+        grantedCount: number;
+        maxWaitlistSize: number | null;
+        status: import("@prisma/client").$Enums.CampaignStatus;
+        waitlistMessage: string;
+        waitlistFullMessage: string | null;
+        waitlistDailyMessageLimit: number;
+        displayCounterEnabled: boolean;
+        displayInitialPct: number;
+        displayFloor: number;
+        displayTickSeconds: number;
+        displayDecrementMin: number;
+        displayDecrementMax: number;
+        grantedSmsTemplate: string | null;
+        reminderSteps: import("@prisma/client/runtime/client").JsonValue;
+        createdAt: Date;
+        createdByAdminId: string | null;
+    }[]>;
+    createCampaign(data: {
+        name: string;
+        startAt: Date;
+        endAt?: Date | null;
+        capacity: number;
+        maxWaitlistSize?: number | null;
+        waitlistMessage: string;
+        waitlistFullMessage?: string | null;
+        waitlistDailyMessageLimit?: number;
+        displayCounterEnabled?: boolean;
+        displayInitialPct?: number;
+        displayFloor?: number;
+        displayTickSeconds?: number;
+        displayDecrementMin?: number;
+        displayDecrementMax?: number;
+        grantedSmsTemplate?: string | null;
+        reminderSteps?: ReminderStep[];
+    }): Promise<{
+        name: string;
+        id: string;
+        startAt: Date;
+        endAt: Date | null;
+        capacity: number;
+        grantedCount: number;
+        maxWaitlistSize: number | null;
+        status: import("@prisma/client").$Enums.CampaignStatus;
+        waitlistMessage: string;
+        waitlistFullMessage: string | null;
+        waitlistDailyMessageLimit: number;
+        displayCounterEnabled: boolean;
+        displayInitialPct: number;
+        displayFloor: number;
+        displayTickSeconds: number;
+        displayDecrementMin: number;
+        displayDecrementMax: number;
+        grantedSmsTemplate: string | null;
+        reminderSteps: import("@prisma/client/runtime/client").JsonValue;
+        createdAt: Date;
+        createdByAdminId: string | null;
+    }>;
+    updateCampaign(id: string, data: Record<string, unknown>): Promise<{
+        name: string;
+        id: string;
+        startAt: Date;
+        endAt: Date | null;
+        capacity: number;
+        grantedCount: number;
+        maxWaitlistSize: number | null;
+        status: import("@prisma/client").$Enums.CampaignStatus;
+        waitlistMessage: string;
+        waitlistFullMessage: string | null;
+        waitlistDailyMessageLimit: number;
+        displayCounterEnabled: boolean;
+        displayInitialPct: number;
+        displayFloor: number;
+        displayTickSeconds: number;
+        displayDecrementMin: number;
+        displayDecrementMax: number;
+        grantedSmsTemplate: string | null;
+        reminderSteps: import("@prisma/client/runtime/client").JsonValue;
+        createdAt: Date;
+        createdByAdminId: string | null;
+    }>;
+    closeCampaign(id: string): Promise<{
+        name: string;
+        id: string;
+        startAt: Date;
+        endAt: Date | null;
+        capacity: number;
+        grantedCount: number;
+        maxWaitlistSize: number | null;
+        status: import("@prisma/client").$Enums.CampaignStatus;
+        waitlistMessage: string;
+        waitlistFullMessage: string | null;
+        waitlistDailyMessageLimit: number;
+        displayCounterEnabled: boolean;
+        displayInitialPct: number;
+        displayFloor: number;
+        displayTickSeconds: number;
+        displayDecrementMin: number;
+        displayDecrementMax: number;
+        grantedSmsTemplate: string | null;
+        reminderSteps: import("@prisma/client/runtime/client").JsonValue;
+        createdAt: Date;
+        createdByAdminId: string | null;
+    }>;
+    getWaitlist(campaignId: string, status?: string): Promise<{
+        id: string;
+        status: import("@prisma/client").$Enums.WaitlistStatus;
+        createdAt: Date;
+        campaignId: string;
+        phone: string;
+        activationToken: string;
+        grantedAt: Date | null;
+        activatedAt: Date | null;
+        lastReminderStepSent: number | null;
+        lastReminderSentAt: Date | null;
+        userId: string;
+    }[]>;
+}
+export {};

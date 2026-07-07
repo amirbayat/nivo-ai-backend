@@ -88,8 +88,8 @@ export declare class UsageAnalyticsController {
     exportUsers(res: Response, from?: string, to?: string, segment?: string): Promise<void>;
     listSegments(): Promise<{
         id: string;
-        isActive: boolean;
         createdAt: Date;
+        isActive: boolean;
         updatedAt: Date;
         sortOrder: number;
         color: string | null;
@@ -156,8 +156,8 @@ export declare class UsageAnalyticsController {
         isActive?: boolean;
     }): Promise<{
         id: string;
-        isActive: boolean;
         createdAt: Date;
+        isActive: boolean;
         updatedAt: Date;
         sortOrder: number;
         color: string | null;
@@ -169,8 +169,8 @@ export declare class UsageAnalyticsController {
     }>;
     updateSegment(id: string, body: Record<string, unknown>): Promise<{
         id: string;
-        isActive: boolean;
         createdAt: Date;
+        isActive: boolean;
         updatedAt: Date;
         sortOrder: number;
         color: string | null;
@@ -182,8 +182,8 @@ export declare class UsageAnalyticsController {
     }>;
     deleteSegment(id: string): Promise<{
         id: string;
-        isActive: boolean;
         createdAt: Date;
+        isActive: boolean;
         updatedAt: Date;
         sortOrder: number;
         color: string | null;
@@ -198,10 +198,10 @@ export declare class TopicController {
     private readonly topics;
     constructor(topics: TopicService);
     list(): Promise<{
-        id: string;
         name: string;
-        isActive: boolean;
+        id: string;
         createdAt: Date;
+        isActive: boolean;
         sortOrder: number;
         keywords: import("@prisma/client/runtime/client").JsonValue;
         color: string | null;
@@ -212,19 +212,19 @@ export declare class TopicController {
         color?: string;
         sortOrder?: number;
     }): Promise<{
-        id: string;
         name: string;
-        isActive: boolean;
+        id: string;
         createdAt: Date;
+        isActive: boolean;
         sortOrder: number;
         keywords: import("@prisma/client/runtime/client").JsonValue;
         color: string | null;
     }>;
     update(id: string, body: Record<string, unknown>): Promise<{
-        id: string;
         name: string;
-        isActive: boolean;
+        id: string;
         createdAt: Date;
+        isActive: boolean;
         sortOrder: number;
         keywords: import("@prisma/client/runtime/client").JsonValue;
         color: string | null;

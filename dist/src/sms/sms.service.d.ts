@@ -7,4 +7,9 @@ export declare class SmsService {
     private readonly devMode;
     constructor(config: ConfigService);
     sendOtp(receptor: string, code: string): Promise<void>;
+    sendByTemplate(receptor: string, template: string, tokens?: {
+        token?: string;
+        token2?: string;
+        token3?: string;
+    }): Promise<void>;
 }

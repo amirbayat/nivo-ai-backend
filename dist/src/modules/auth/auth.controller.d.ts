@@ -16,6 +16,10 @@ export declare class AuthController {
             role: import("@prisma/client").$Enums.Role;
             name: string | null;
         };
+        waitlisted: {
+            message: string;
+            queuePosition: number;
+        } | null;
         accessToken: string;
         refreshToken: string;
     }>;
@@ -35,10 +39,10 @@ export declare class AuthController {
             status: import("@prisma/client").$Enums.SubscriptionStatus;
             periodEnd: Date;
         } | null;
-        id: string;
-        phone: string;
         name: string | null;
-        role: import("@prisma/client").$Enums.Role;
+        id: string;
         createdAt: Date;
+        phone: string;
+        role: import("@prisma/client").$Enums.Role;
     } | null>;
 }

@@ -48,6 +48,24 @@ let SmsService = SmsService_1 = class SmsService {
             });
         });
     }
+    async sendByTemplate(receptor, template, tokens = {}) {
+        if (this.devMode) {
+            this.logger.warn(`📩 SMS (template=${template}) ══ ${receptor} → ${JSON.stringify(tokens)}`);
+            return;
+        }
+        await new Promise((resolve, reject) => {
+            this.api.VerifyLookup({ receptor, template, ...tokens }, (response, status) => {
+                if (status === 200) {
+                    this.logger.log(`SMS (${template}) sent to ${receptor}`);
+                    resolve();
+                }
+                else {
+                    this.logger.error(`Kavenegar error — status: ${status}`, response);
+                    reject(new common_1.InternalServerErrorException(fa_1.fa.sms.sendFailed));
+                }
+            });
+        });
+    }
 };
 exports.SmsService = SmsService;
 exports.SmsService = SmsService = SmsService_1 = __decorate([

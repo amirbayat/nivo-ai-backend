@@ -22,11 +22,11 @@ export declare class PaymentsService {
         };
     } & {
         id: string;
-        createdAt: Date;
-        updatedAt: Date;
-        userId: string;
-        planId: string;
         status: import("@prisma/client").$Enums.PaymentStatus;
+        createdAt: Date;
+        userId: string;
+        updatedAt: Date;
+        planId: string;
         metadata: import("@prisma/client/runtime/client").JsonValue | null;
         amount: number;
         authority: string | null;
@@ -38,11 +38,11 @@ export declare class PaymentsService {
         };
     } & {
         id: string;
-        createdAt: Date;
-        updatedAt: Date;
-        userId: string;
-        planId: string;
         status: import("@prisma/client").$Enums.PaymentStatus;
+        createdAt: Date;
+        userId: string;
+        updatedAt: Date;
+        planId: string;
         metadata: import("@prisma/client/runtime/client").JsonValue | null;
         amount: number;
         authority: string | null;

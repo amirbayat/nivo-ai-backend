@@ -8,8 +8,8 @@ export declare class PlansService {
     private readonly redis;
     constructor(prisma: PrismaService, redis: RedisService);
     findAll(): Prisma.PrismaPromise<{
-        id: string;
         name: string;
+        id: string;
         isActive: boolean;
         priceMonthly: number;
         dailyFreeTokens: number;
@@ -25,8 +25,8 @@ export declare class PlansService {
         throttledOutputTokens: number | null;
     }[]>;
     findAllAdmin(): Prisma.PrismaPromise<{
-        id: string;
         name: string;
+        id: string;
         isActive: boolean;
         priceMonthly: number;
         dailyFreeTokens: number;
@@ -42,8 +42,8 @@ export declare class PlansService {
         throttledOutputTokens: number | null;
     }[]>;
     findOne(id: string): Promise<{
-        id: string;
         name: string;
+        id: string;
         isActive: boolean;
         priceMonthly: number;
         dailyFreeTokens: number;
@@ -59,8 +59,8 @@ export declare class PlansService {
         throttledOutputTokens: number | null;
     }>;
     create(dto: CreatePlanDto): Prisma.Prisma__PlanClient<{
-        id: string;
         name: string;
+        id: string;
         isActive: boolean;
         priceMonthly: number;
         dailyFreeTokens: number;
@@ -76,8 +76,8 @@ export declare class PlansService {
         throttledOutputTokens: number | null;
     }, never, import("@prisma/client/runtime/client").DefaultArgs, Prisma.PrismaClientOptions>;
     update(id: string, dto: UpdatePlanDto): Promise<{
-        id: string;
         name: string;
+        id: string;
         isActive: boolean;
         priceMonthly: number;
         dailyFreeTokens: number;
@@ -93,8 +93,8 @@ export declare class PlansService {
         throttledOutputTokens: number | null;
     }>;
     remove(id: string): Promise<{
-        id: string;
         name: string;
+        id: string;
         isActive: boolean;
         priceMonthly: number;
         dailyFreeTokens: number;

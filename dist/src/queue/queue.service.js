@@ -19,15 +19,18 @@ const bull_1 = require("@nestjs/bull");
 const FLUSH_CRON = '*/5 * * * *';
 const SUMMARY_CRON = '0 2 * * *';
 const MODEL_FEEDBACK_SUMMARY_CRON = '0 3 * * *';
+const WAITLIST_REMINDER_CRON = '0 9 * * *';
 let QueueService = QueueService_1 = class QueueService {
     tokenFlushQueue;
     feedbackSummaryQueue;
     modelFeedbackSummaryQueue;
+    waitlistReminderQueue;
     logger = new common_1.Logger(QueueService_1.name);
-    constructor(tokenFlushQueue, feedbackSummaryQueue, modelFeedbackSummaryQueue) {
+    constructor(tokenFlushQueue, feedbackSummaryQueue, modelFeedbackSummaryQueue, waitlistReminderQueue) {
         this.tokenFlushQueue = tokenFlushQueue;
         this.feedbackSummaryQueue = feedbackSummaryQueue;
         this.modelFeedbackSummaryQueue = modelFeedbackSummaryQueue;
+        this.waitlistReminderQueue = waitlistReminderQueue;
     }
     async onApplicationBootstrap() {
         const tokenRepeatables = await this.tokenFlushQueue.getRepeatableJobs();
@@ -48,6 +51,12 @@ let QueueService = QueueService_1 = class QueueService {
         }
         await this.modelFeedbackSummaryQueue.add('summarize', {}, { repeat: { cron: MODEL_FEEDBACK_SUMMARY_CRON } });
         this.logger.log(`Model feedback summary job scheduled: ${MODEL_FEEDBACK_SUMMARY_CRON}`);
+        const waitlistRepeatables = await this.waitlistReminderQueue.getRepeatableJobs();
+        for (const job of waitlistRepeatables) {
+            await this.waitlistReminderQueue.removeRepeatableByKey(job.key);
+        }
+        await this.waitlistReminderQueue.add('send-reminders', {}, { repeat: { cron: WAITLIST_REMINDER_CRON } });
+        this.logger.log(`Waitlist reminder job scheduled: ${WAITLIST_REMINDER_CRON}`);
     }
 };
 exports.QueueService = QueueService;
@@ -56,6 +65,7 @@ exports.QueueService = QueueService = QueueService_1 = __decorate([
     __param(0, (0, bull_1.InjectQueue)('token-flush')),
     __param(1, (0, bull_1.InjectQueue)('feedback-summary')),
     __param(2, (0, bull_1.InjectQueue)('model-feedback-summary')),
-    __metadata("design:paramtypes", [Object, Object, Object])
+    __param(3, (0, bull_1.InjectQueue)('waitlist-reminder')),
+    __metadata("design:paramtypes", [Object, Object, Object, Object])
 ], QueueService);
 //# sourceMappingURL=queue.service.js.map

@@ -49,4 +49,39 @@ export class SmsService {
       )
     })
   }
+
+  /**
+   * ارسال با الگوی از پیش تأییدشده در پنل کاوه‌نگار (همان مکانیزم VerifyLookup
+   * که برای OTP استفاده می‌شود) — نه متن آزاد. متن پیام از قبل در خودِ کاوه‌نگار
+   * ثبت و تأیید شده؛ اینجا فقط نام الگو + مقادیر جایگزین (%token%, %token2%, ...)
+   * داده می‌شود. برای کمپین سافت‌لانچ (docs/PRD-global-budget-gateway.md بخش ۱۸.۷)
+   * چون متن آزاد در خطوط عادی/مشترک معمولاً فیلتر یا رد می‌شود.
+   */
+  async sendByTemplate(
+    receptor: string,
+    template: string,
+    tokens: { token?: string; token2?: string; token3?: string } = {},
+  ): Promise<void> {
+    if (this.devMode) {
+      this.logger.warn(
+        `📩 SMS (template=${template}) ══ ${receptor} → ${JSON.stringify(tokens)}`,
+      )
+      return
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      this.api.VerifyLookup(
+        { receptor, template, ...tokens },
+        (response: any, status: number) => {
+          if (status === 200) {
+            this.logger.log(`SMS (${template}) sent to ${receptor}`)
+            resolve()
+          } else {
+            this.logger.error(`Kavenegar error — status: ${status}`, response)
+            reject(new InternalServerErrorException(fa.sms.sendFailed))
+          }
+        },
+      )
+    })
+  }
 }

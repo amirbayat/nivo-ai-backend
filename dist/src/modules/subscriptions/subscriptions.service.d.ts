@@ -4,8 +4,8 @@ export declare class SubscriptionsService {
     constructor(prisma: PrismaService);
     getMySubscription(userId: string): Promise<{
         plan: {
-            id: string;
             name: string;
+            id: string;
             isActive: boolean;
             priceMonthly: number;
             dailyFreeTokens: number;
@@ -22,11 +22,11 @@ export declare class SubscriptionsService {
         };
     } & {
         id: string;
-        createdAt: Date;
-        updatedAt: Date;
-        userId: string;
-        planId: string;
         status: import("@prisma/client").$Enums.SubscriptionStatus;
+        createdAt: Date;
+        userId: string;
+        updatedAt: Date;
+        planId: string;
         periodStart: Date;
         periodEnd: Date;
         cancelAtPeriodEnd: boolean;

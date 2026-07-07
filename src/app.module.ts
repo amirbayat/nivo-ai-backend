@@ -18,6 +18,7 @@ import { SalesModule } from './modules/sales/sales.module'
 import { ModelRouterModule } from './modules/model-router/model-router.module'
 import { MessageFeedbackModule } from './modules/message-feedback/message-feedback.module'
 import { UsageAnalyticsModule } from './modules/usage-analytics/usage-analytics.module'
+import { CampaignModule } from './modules/campaign/campaign.module'
 import { QueueModule } from './queue/queue.module'
 
 @Module({
@@ -41,6 +42,7 @@ import { QueueModule } from './queue/queue.module'
     ModelRouterModule,
     MessageFeedbackModule,
     UsageAnalyticsModule,
+    CampaignModule,
   ],
 })
 export class AppModule {}

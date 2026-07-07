@@ -7,9 +7,9 @@ export declare class UsersController {
     updateMe(user: JwtPayload, dto: UpdateUserDto): Promise<{
         message: "پروفایل با موفقیت به‌روز شد";
         user: {
+            name: string | null;
             id: string;
             phone: string;
-            name: string | null;
             role: import("@prisma/client").$Enums.Role;
         };
     }>;

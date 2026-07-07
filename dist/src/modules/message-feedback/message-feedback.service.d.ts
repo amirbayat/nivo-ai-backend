@@ -19,8 +19,8 @@ export declare class MessageFeedbackService {
         } & {
             id: string;
             createdAt: Date;
-            updatedAt: Date;
             userId: string;
+            updatedAt: Date;
             messageId: string;
             vote: import("@prisma/client").$Enums.FeedbackVote;
             comment: string | null;

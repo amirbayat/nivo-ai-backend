@@ -3,13 +3,15 @@ import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RedisService } from '../../redis/redis.service';
 import { SmsService } from '../../sms/sms.service';
+import { CampaignService } from '../campaign/campaign.service';
 export declare class AuthService {
     private readonly prisma;
     private readonly redis;
     private readonly jwt;
     private readonly config;
     private readonly sms;
-    constructor(prisma: PrismaService, redis: RedisService, jwt: JwtService, config: ConfigService, sms: SmsService);
+    private readonly campaign;
+    constructor(prisma: PrismaService, redis: RedisService, jwt: JwtService, config: ConfigService, sms: SmsService, campaign: CampaignService);
     sendOtp(rawPhone: string): Promise<{
         message: string;
     }>;
@@ -20,6 +22,10 @@ export declare class AuthService {
             role: import("@prisma/client").$Enums.Role;
             name: string | null;
         };
+        waitlisted: {
+            message: string;
+            queuePosition: number;
+        } | null;
         accessToken: string;
         refreshToken: string;
     }>;
@@ -39,11 +45,11 @@ export declare class AuthService {
             status: import("@prisma/client").$Enums.SubscriptionStatus;
             periodEnd: Date;
         } | null;
-        id: string;
-        phone: string;
         name: string | null;
-        role: import("@prisma/client").$Enums.Role;
+        id: string;
         createdAt: Date;
+        phone: string;
+        role: import("@prisma/client").$Enums.Role;
     } | null>;
     private issueTokens;
 }

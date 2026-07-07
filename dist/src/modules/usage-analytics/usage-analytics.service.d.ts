@@ -157,8 +157,8 @@ export declare class UsageAnalyticsService {
     private matchSegment;
     listSegments(): Promise<{
         id: string;
-        isActive: boolean;
         createdAt: Date;
+        isActive: boolean;
         updatedAt: Date;
         sortOrder: number;
         color: string | null;
@@ -170,8 +170,8 @@ export declare class UsageAnalyticsService {
     }[]>;
     createSegment(data: Omit<UserSegment, 'id' | 'createdAt' | 'updatedAt'>): Promise<{
         id: string;
-        isActive: boolean;
         createdAt: Date;
+        isActive: boolean;
         updatedAt: Date;
         sortOrder: number;
         color: string | null;
@@ -183,8 +183,8 @@ export declare class UsageAnalyticsService {
     }>;
     updateSegment(id: string, data: Partial<Omit<UserSegment, 'id'>>): Promise<{
         id: string;
-        isActive: boolean;
         createdAt: Date;
+        isActive: boolean;
         updatedAt: Date;
         sortOrder: number;
         color: string | null;
@@ -196,8 +196,8 @@ export declare class UsageAnalyticsService {
     }>;
     deleteSegment(id: string): Promise<{
         id: string;
-        isActive: boolean;
         createdAt: Date;
+        isActive: boolean;
         updatedAt: Date;
         sortOrder: number;
         color: string | null;

@@ -27,6 +27,7 @@ const sales_module_1 = require("./modules/sales/sales.module");
 const model_router_module_1 = require("./modules/model-router/model-router.module");
 const message_feedback_module_1 = require("./modules/message-feedback/message-feedback.module");
 const usage_analytics_module_1 = require("./modules/usage-analytics/usage-analytics.module");
+const campaign_module_1 = require("./modules/campaign/campaign.module");
 const queue_module_1 = require("./queue/queue.module");
 let AppModule = class AppModule {
 };
@@ -53,6 +54,7 @@ exports.AppModule = AppModule = __decorate([
             model_router_module_1.ModelRouterModule,
             message_feedback_module_1.MessageFeedbackModule,
             usage_analytics_module_1.UsageAnalyticsModule,
+            campaign_module_1.CampaignModule,
         ],
     })
 ], AppModule);

@@ -36,8 +36,8 @@ export declare class ConversationsService {
                 comment: string | null;
             } | null;
             id: string;
-            role: import("@prisma/client").$Enums.MessageRole;
             createdAt: Date;
+            role: import("@prisma/client").$Enums.MessageRole;
             conversationId: string;
             content: string;
             images: import("@prisma/client/runtime/client").JsonValue;

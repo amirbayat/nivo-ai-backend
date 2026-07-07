@@ -6,9 +6,9 @@ export declare class UsersService {
     updateMe(userId: string, dto: UpdateUserDto): Promise<{
         message: "پروفایل با موفقیت به‌روز شد";
         user: {
+            name: string | null;
             id: string;
             phone: string;
-            name: string | null;
             role: import("@prisma/client").$Enums.Role;
         };
     }>;

@@ -13,28 +13,28 @@ export declare class TopicService {
     constructor(prisma: PrismaService, redis: RedisService);
     classify(text: string): Promise<string | null>;
     list(): Promise<{
-        id: string;
         name: string;
-        isActive: boolean;
+        id: string;
         createdAt: Date;
+        isActive: boolean;
         sortOrder: number;
         keywords: import("@prisma/client/runtime/client").JsonValue;
         color: string | null;
     }[]>;
     create(data: TopicInput): Promise<{
-        id: string;
         name: string;
-        isActive: boolean;
+        id: string;
         createdAt: Date;
+        isActive: boolean;
         sortOrder: number;
         keywords: import("@prisma/client/runtime/client").JsonValue;
         color: string | null;
     }>;
     update(id: string, data: Partial<TopicInput>): Promise<{
-        id: string;
         name: string;
-        isActive: boolean;
+        id: string;
         createdAt: Date;
+        isActive: boolean;
         sortOrder: number;
         keywords: import("@prisma/client/runtime/client").JsonValue;
         color: string | null;

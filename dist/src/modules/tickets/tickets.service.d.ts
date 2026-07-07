@@ -8,10 +8,10 @@ export declare class TicketsService {
         message: "تیکت پشتیبانی شما با موفقیت ثبت شد";
         ticket: {
             id: string;
-            createdAt: Date;
-            updatedAt: Date;
-            userId: string;
             status: import("@prisma/client").$Enums.TicketStatus;
+            createdAt: Date;
+            userId: string;
+            updatedAt: Date;
             subject: string;
             body: string;
             priority: import("@prisma/client").$Enums.TicketPriority;
@@ -21,9 +21,9 @@ export declare class TicketsService {
     findByUser(userId: string): Promise<{
         tickets: {
             id: string;
+            status: import("@prisma/client").$Enums.TicketStatus;
             createdAt: Date;
             updatedAt: Date;
-            status: import("@prisma/client").$Enums.TicketStatus;
             subject: string;
             priority: import("@prisma/client").$Enums.TicketPriority;
         }[];
@@ -39,10 +39,10 @@ export declare class TicketsService {
             }[];
         } & {
             id: string;
-            createdAt: Date;
-            updatedAt: Date;
-            userId: string;
             status: import("@prisma/client").$Enums.TicketStatus;
+            createdAt: Date;
+            userId: string;
+            updatedAt: Date;
             subject: string;
             body: string;
             priority: import("@prisma/client").$Enums.TicketPriority;
@@ -61,9 +61,9 @@ export declare class TicketsService {
     findAll(status?: string): Promise<{
         tickets: ({
             user: {
+                name: string | null;
                 id: string;
                 phone: string;
-                name: string | null;
             };
             replies: {
                 id: string;
@@ -74,10 +74,10 @@ export declare class TicketsService {
             }[];
         } & {
             id: string;
-            createdAt: Date;
-            updatedAt: Date;
-            userId: string;
             status: import("@prisma/client").$Enums.TicketStatus;
+            createdAt: Date;
+            userId: string;
+            updatedAt: Date;
             subject: string;
             body: string;
             priority: import("@prisma/client").$Enums.TicketPriority;
@@ -87,9 +87,9 @@ export declare class TicketsService {
     findOne(ticketId: string): Promise<{
         ticket: {
             user: {
+                name: string | null;
                 id: string;
                 phone: string;
-                name: string | null;
             };
             replies: {
                 id: string;
@@ -100,10 +100,10 @@ export declare class TicketsService {
             }[];
         } & {
             id: string;
-            createdAt: Date;
-            updatedAt: Date;
-            userId: string;
             status: import("@prisma/client").$Enums.TicketStatus;
+            createdAt: Date;
+            userId: string;
+            updatedAt: Date;
             subject: string;
             body: string;
             priority: import("@prisma/client").$Enums.TicketPriority;
@@ -123,10 +123,10 @@ export declare class TicketsService {
         message: "تیکت به‌روز شد";
         ticket: {
             id: string;
-            createdAt: Date;
-            updatedAt: Date;
-            userId: string;
             status: import("@prisma/client").$Enums.TicketStatus;
+            createdAt: Date;
+            userId: string;
+            updatedAt: Date;
             subject: string;
             body: string;
             priority: import("@prisma/client").$Enums.TicketPriority;

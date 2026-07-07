@@ -4,7 +4,8 @@ export declare class QueueService implements OnApplicationBootstrap {
     private readonly tokenFlushQueue;
     private readonly feedbackSummaryQueue;
     private readonly modelFeedbackSummaryQueue;
+    private readonly waitlistReminderQueue;
     private readonly logger;
-    constructor(tokenFlushQueue: Queue, feedbackSummaryQueue: Queue, modelFeedbackSummaryQueue: Queue);
+    constructor(tokenFlushQueue: Queue, feedbackSummaryQueue: Queue, modelFeedbackSummaryQueue: Queue, waitlistReminderQueue: Queue);
     onApplicationBootstrap(): Promise<void>;
 }

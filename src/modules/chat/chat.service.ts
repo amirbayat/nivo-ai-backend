@@ -17,6 +17,7 @@ import { TokenEstimatorService } from '../usage/token-estimator.service'
 import { ModelRouterService } from '../model-router/model-router.service'
 import { UsageAnalyticsService } from '../usage-analytics/usage-analytics.service'
 import { TopicService } from '../usage-analytics/topic.service'
+import { CampaignService } from '../campaign/campaign.service'
 import { fa } from '../../i18n/fa'
 import type { Response } from 'express'
 import { StreamMessageDto } from './dto/stream-message.dto'
@@ -54,6 +55,7 @@ export class ChatService {
     private readonly modelRouter: ModelRouterService,
     private readonly usageAnalytics: UsageAnalyticsService,
     private readonly topicService: TopicService,
+    private readonly campaignService: CampaignService,
     private readonly config: ConfigService,
   ) {
     this.provider = createOpenAICompatible({
@@ -106,6 +108,14 @@ export class ChatService {
 
     // ── three-zone daily message limit ────────────────────────────────────
     const todayCount = await this.tokenService.getTodayRequestCount(userId)
+
+    // ── سقف موقت لیست انتظار کمپین سافت‌لانچ — بخش ۱۸.۴ ────────────────────
+    const waitlistLimit = await this.campaignService.getWaitingDailyLimit(userId)
+    if (waitlistLimit !== null && todayCount >= waitlistLimit) {
+      this.usageAnalytics.logLimitHit(userId, 'DAILY_MESSAGE_BLOCKED').catch(() => {})
+      throw new HttpException({ message: fa.waitlist.limitReached, waitlisted: true }, 429)
+    }
+
     const N = plan.dailyMessageLimit // normal zone ceiling (null = unlimited)
     const M = plan.throttledMessageCount ?? 0 // throttled zone size
 

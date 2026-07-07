@@ -28,12 +28,12 @@ export declare class AdminController {
                 periodStart: Date;
                 periodEnd: Date;
             } | null;
-            id: string;
-            phone: string;
             name: string | null;
+            id: string;
+            createdAt: Date;
+            phone: string;
             role: import("@prisma/client").$Enums.Role;
             isActive: boolean;
-            createdAt: Date;
         }[];
         total: number;
         page: number;
@@ -45,9 +45,9 @@ export declare class AdminController {
     }): Promise<{
         message: "کاربر به‌روز شد";
         user: {
+            name: string | null;
             id: string;
             phone: string;
-            name: string | null;
             role: import("@prisma/client").$Enums.Role;
             isActive: boolean;
         };
@@ -101,11 +101,11 @@ export declare class AdminController {
         success: boolean;
         subscription: {
             id: string;
-            createdAt: Date;
-            updatedAt: Date;
-            userId: string;
-            planId: string;
             status: import("@prisma/client").$Enums.SubscriptionStatus;
+            createdAt: Date;
+            userId: string;
+            updatedAt: Date;
+            planId: string;
             periodStart: Date;
             periodEnd: Date;
             cancelAtPeriodEnd: boolean;
@@ -114,9 +114,9 @@ export declare class AdminController {
     getTickets(status?: string): Promise<{
         tickets: ({
             user: {
+                name: string | null;
                 id: string;
                 phone: string;
-                name: string | null;
             };
             replies: {
                 id: string;
@@ -127,10 +127,10 @@ export declare class AdminController {
             }[];
         } & {
             id: string;
-            createdAt: Date;
-            updatedAt: Date;
-            userId: string;
             status: import("@prisma/client").$Enums.TicketStatus;
+            createdAt: Date;
+            userId: string;
+            updatedAt: Date;
             subject: string;
             body: string;
             priority: import("@prisma/client").$Enums.TicketPriority;
@@ -140,9 +140,9 @@ export declare class AdminController {
     getTicket(id: string): Promise<{
         ticket: {
             user: {
+                name: string | null;
                 id: string;
                 phone: string;
-                name: string | null;
             };
             replies: {
                 id: string;
@@ -153,10 +153,10 @@ export declare class AdminController {
             }[];
         } & {
             id: string;
-            createdAt: Date;
-            updatedAt: Date;
-            userId: string;
             status: import("@prisma/client").$Enums.TicketStatus;
+            createdAt: Date;
+            userId: string;
+            updatedAt: Date;
             subject: string;
             body: string;
             priority: import("@prisma/client").$Enums.TicketPriority;
@@ -179,10 +179,10 @@ export declare class AdminController {
         message: "تیکت به‌روز شد";
         ticket: {
             id: string;
-            createdAt: Date;
-            updatedAt: Date;
-            userId: string;
             status: import("@prisma/client").$Enums.TicketStatus;
+            createdAt: Date;
+            userId: string;
+            updatedAt: Date;
             subject: string;
             body: string;
             priority: import("@prisma/client").$Enums.TicketPriority;
@@ -190,10 +190,10 @@ export declare class AdminController {
         };
     }>;
     getModels(): import("@prisma/client").Prisma.PrismaPromise<{
-        id: string;
         name: string;
-        isActive: boolean;
+        id: string;
         createdAt: Date;
+        isActive: boolean;
         sortOrder: number;
         displayName: string;
         provider: string;
@@ -215,10 +215,10 @@ export declare class AdminController {
         sortOrder: number;
         tier?: 'SIMPLE' | 'MEDIUM' | 'COMPLEX';
     }): import("@prisma/client").Prisma.Prisma__AiModelClient<{
-        id: string;
         name: string;
-        isActive: boolean;
+        id: string;
         createdAt: Date;
+        isActive: boolean;
         sortOrder: number;
         displayName: string;
         provider: string;
@@ -230,10 +230,10 @@ export declare class AdminController {
         avgCharsPerToken: number;
     }, never, import("@prisma/client/runtime/client").DefaultArgs, import("@prisma/client").Prisma.PrismaClientOptions>;
     updateModel(id: string, body: object): Promise<{
-        id: string;
         name: string;
-        isActive: boolean;
+        id: string;
         createdAt: Date;
+        isActive: boolean;
         sortOrder: number;
         displayName: string;
         provider: string;

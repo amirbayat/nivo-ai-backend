@@ -14,8 +14,10 @@ const queue_service_1 = require("./queue.service");
 const token_flush_processor_1 = require("./processors/token-flush.processor");
 const feedback_summary_processor_1 = require("./processors/feedback-summary.processor");
 const model_feedback_summary_processor_1 = require("./processors/model-feedback-summary.processor");
+const waitlist_reminder_processor_1 = require("./processors/waitlist-reminder.processor");
 const prisma_module_1 = require("../prisma/prisma.module");
 const message_feedback_module_1 = require("../modules/message-feedback/message-feedback.module");
+const campaign_module_1 = require("../modules/campaign/campaign.module");
 let QueueModule = class QueueModule {
 };
 exports.QueueModule = QueueModule;
@@ -32,14 +34,17 @@ exports.QueueModule = QueueModule = __decorate([
             bull_1.BullModule.registerQueue({ name: 'token-flush' }),
             bull_1.BullModule.registerQueue({ name: 'feedback-summary' }),
             bull_1.BullModule.registerQueue({ name: 'model-feedback-summary' }),
+            bull_1.BullModule.registerQueue({ name: 'waitlist-reminder' }),
             prisma_module_1.PrismaModule,
             message_feedback_module_1.MessageFeedbackModule,
+            campaign_module_1.CampaignModule,
         ],
         providers: [
             queue_service_1.QueueService,
             token_flush_processor_1.TokenFlushProcessor,
             feedback_summary_processor_1.FeedbackSummaryProcessor,
             model_feedback_summary_processor_1.ModelFeedbackSummaryProcessor,
+            waitlist_reminder_processor_1.WaitlistReminderProcessor,
         ],
     })
 ], QueueModule);

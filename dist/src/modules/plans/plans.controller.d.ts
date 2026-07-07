@@ -5,8 +5,8 @@ export declare class PlansController {
     private readonly plansService;
     constructor(plansService: PlansService);
     findAll(): import("@prisma/client").Prisma.PrismaPromise<{
-        id: string;
         name: string;
+        id: string;
         isActive: boolean;
         priceMonthly: number;
         dailyFreeTokens: number;
@@ -22,8 +22,8 @@ export declare class PlansController {
         throttledOutputTokens: number | null;
     }[]>;
     findAllAdmin(): import("@prisma/client").Prisma.PrismaPromise<{
-        id: string;
         name: string;
+        id: string;
         isActive: boolean;
         priceMonthly: number;
         dailyFreeTokens: number;
@@ -39,8 +39,8 @@ export declare class PlansController {
         throttledOutputTokens: number | null;
     }[]>;
     findOne(id: string): Promise<{
-        id: string;
         name: string;
+        id: string;
         isActive: boolean;
         priceMonthly: number;
         dailyFreeTokens: number;
@@ -58,8 +58,8 @@ export declare class PlansController {
     create(dto: CreatePlanDto): Promise<{
         message: "پلن با موفقیت ایجاد شد";
         plan: {
-            id: string;
             name: string;
+            id: string;
             isActive: boolean;
             priceMonthly: number;
             dailyFreeTokens: number;
@@ -78,8 +78,8 @@ export declare class PlansController {
     update(id: string, dto: UpdatePlanDto): Promise<{
         message: "پلن با موفقیت به‌روز شد";
         plan: {
-            id: string;
             name: string;
+            id: string;
             isActive: boolean;
             priceMonthly: number;
             dailyFreeTokens: number;

@@ -5,12 +5,14 @@ import { AuthController } from './auth.controller'
 import { AuthService } from './auth.service'
 import { JwtStrategy } from './jwt.strategy'
 import { SmsModule } from '../../sms/sms.module'
+import { CampaignModule } from '../campaign/campaign.module'
 
 @Module({
   imports: [
     PassportModule,
     JwtModule.register({}),
     SmsModule,
+    CampaignModule,
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy],

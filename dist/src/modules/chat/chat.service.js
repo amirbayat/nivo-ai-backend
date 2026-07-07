@@ -22,6 +22,7 @@ const token_estimator_service_1 = require("../usage/token-estimator.service");
 const model_router_service_1 = require("../model-router/model-router.service");
 const usage_analytics_service_1 = require("../usage-analytics/usage-analytics.service");
 const topic_service_1 = require("../usage-analytics/topic.service");
+const campaign_service_1 = require("../campaign/campaign.service");
 const fa_1 = require("../../i18n/fa");
 const OPTIMAL_MODE = 'optimal';
 const PRE_ROUTING_REFERENCE_MODEL = 'openai/gpt-4o-mini';
@@ -42,9 +43,10 @@ let ChatService = class ChatService {
     modelRouter;
     usageAnalytics;
     topicService;
+    campaignService;
     config;
     provider;
-    constructor(prisma, redis, tokenService, pricingService, tokenEstimator, modelRouter, usageAnalytics, topicService, config) {
+    constructor(prisma, redis, tokenService, pricingService, tokenEstimator, modelRouter, usageAnalytics, topicService, campaignService, config) {
         this.prisma = prisma;
         this.redis = redis;
         this.tokenService = tokenService;
@@ -53,6 +55,7 @@ let ChatService = class ChatService {
         this.modelRouter = modelRouter;
         this.usageAnalytics = usageAnalytics;
         this.topicService = topicService;
+        this.campaignService = campaignService;
         this.config = config;
         this.provider = (0, openai_compatible_1.createOpenAICompatible)({
             name: 'liara',
@@ -86,6 +89,11 @@ let ChatService = class ChatService {
             throw new common_1.HttpException({ message: msg }, 429);
         }
         const todayCount = await this.tokenService.getTodayRequestCount(userId);
+        const waitlistLimit = await this.campaignService.getWaitingDailyLimit(userId);
+        if (waitlistLimit !== null && todayCount >= waitlistLimit) {
+            this.usageAnalytics.logLimitHit(userId, 'DAILY_MESSAGE_BLOCKED').catch(() => { });
+            throw new common_1.HttpException({ message: fa_1.fa.waitlist.limitReached, waitlisted: true }, 429);
+        }
         const N = plan.dailyMessageLimit;
         const M = plan.throttledMessageCount ?? 0;
         let messageStage = 'normal';
@@ -323,6 +331,7 @@ exports.ChatService = ChatService = __decorate([
         model_router_service_1.ModelRouterService,
         usage_analytics_service_1.UsageAnalyticsService,
         topic_service_1.TopicService,
+        campaign_service_1.CampaignService,
         config_1.ConfigService])
 ], ChatService);
 //# sourceMappingURL=chat.service.js.map

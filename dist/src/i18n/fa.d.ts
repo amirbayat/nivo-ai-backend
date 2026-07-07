@@ -118,4 +118,10 @@ export declare const fa: {
         readonly onlyAssistant: "فقط می‌توان به پاسخ دستیار بازخورد داد";
         readonly summaryNotReady: "هنوز بازخورد جدیدی برای خلاصه‌سازی وجود ندارد";
     };
+    readonly waitlist: {
+        readonly limitReached: "سهمیه‌ی روزانه‌ی پیش‌ثبت‌نام شما تمام شد. برای پیام بیشتر و مدل‌های پیشرفته، منتظر بمانید تا ثبت‌نامتان تکمیل شود";
+        readonly invalidToken: "لینک نامعتبر یا منقضی شده است";
+        readonly campaignNotFound: "کمپینی یافت نشد";
+        readonly notWaiting: "این کاربر در لیست انتظار نیست";
+    };
 };

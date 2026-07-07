@@ -9,6 +9,7 @@ import * as crypto from 'crypto'
 import { PrismaService } from '../../prisma/prisma.service'
 import { RedisService } from '../../redis/redis.service'
 import { SmsService } from '../../sms/sms.service'
+import { CampaignService } from '../campaign/campaign.service'
 import { fa } from '../../i18n/fa'
 
 const OTP_TTL = 120        // seconds — 2 min
@@ -33,6 +34,7 @@ export class AuthService {
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
     private readonly sms: SmsService,
+    private readonly campaign: CampaignService,
   ) {}
 
   async sendOtp(rawPhone: string): Promise<{ message: string }> {
@@ -72,19 +74,24 @@ export class AuthService {
     // clear otp + counters after success
     await this.redis.del(otpKey(phone), otpRateKey(phone), attemptKey)
 
-    // upsert user
-    const user = await this.prisma.user.upsert({
-      where: { phone },
-      create: { phone },
-      update: {},
-    })
+    // upsert نمی‌تواند بگوید رکورد جدید ساخته شد یا از قبل بود — برای گیت کمپین
+    // سافت‌لانچ (فقط روی اولین ثبت‌نام) باید صریح جدا شود
+    const existing = await this.prisma.user.findUnique({ where: { phone } })
+    const user = existing ?? (await this.prisma.user.create({ data: { phone } }))
+    const isNewUser = !existing
 
     if (!user.isActive) throw new UnauthorizedException(fa.auth.userDisabled)
+
+    let waitlisted: { message: string; queuePosition: number } | null = null
+    if (isNewUser) {
+      waitlisted = await this.campaign.applyToNewUser(user.id, user.phone)
+    }
 
     const tokens = await this.issueTokens(user.id, user.phone, user.role)
     return {
       ...tokens,
       user: { id: user.id, phone: user.phone, role: user.role, name: user.name },
+      waitlisted,
     }
   }
 

@@ -26,6 +26,7 @@ model User {
   wallet         Wallet?
   tickets        SupportTicket[]
   limitHitEvents LimitHitEvent[]
+  waitlistEntry  WaitlistEntry?
 
   @@map("users")
 }
@@ -490,4 +491,73 @@ enum LimitHitType {
   SESSION_LIMIT
   INPUT_TOO_LONG
   ROLLING_WINDOW_BLOCKED
+}
+
+// ─── Soft-Launch Waitlist Campaign ──────────────────────────────────────────────
+// docs/PRD-global-budget-gateway.md بخش ۱۸
+
+model LaunchCampaign {
+  id                        String         @id @default(uuid())
+  name                      String
+  startAt                   DateTime
+  endAt                     DateTime? // null = تا وقتی دستی بسته شود
+  capacity                  Int
+  grantedCount              Int            @default(0) // افزایش اتمیک — بخش ۱۸.۳
+  maxWaitlistSize           Int? // null = بدون سقف — بخش ۱۸.۱۵ («ایمنی هزینه‌ی لیست انتظار»)
+  status                    CampaignStatus @default(ACTIVE)
+
+  waitlistMessage           String // پیام انگیزشیِ «پیش‌ثبت‌نام تکمیل شد ...» — همین داخل اپ نمایش داده می‌شود، محدودیت پیامکی ندارد
+  waitlistFullMessage       String? // وقتی حتی لیست انتظار هم پر شده — بخش ۱۸.۱۵
+  waitlistDailyMessageLimit Int            @default(4)
+
+  displayCounterEnabled     Boolean        @default(true)
+  displayInitialPct         Int            @default(20)
+  displayFloor              Int            @default(5)
+  displayTickSeconds        Int            @default(30)
+  displayDecrementMin       Int            @default(1)
+  displayDecrementMax       Int            @default(2)
+
+  // پیامک‌ها با الگوی از پیش تأییدشده در پنل کاوه‌نگار ارسال می‌شوند، نه متن آزاد
+  // (بخش ۱۸.۷ نسخه‌ی جدید) — دقیقاً همان روشی که برای OTP استفاده می‌شود
+  grantedSmsTemplate        String? // نام الگوی کاوه‌نگار برای پیامک «دسترسی باز شد»
+  reminderSteps             Json           @default("[]") // [{dayOffset:1, template:"نام الگو در کاوه‌نگار"}, ...]
+
+  createdAt                 DateTime       @default(now())
+  createdByAdminId          String?
+
+  waitlistEntries WaitlistEntry[]
+
+  @@index([status])
+  @@map("launch_campaigns")
+}
+
+enum CampaignStatus {
+  ACTIVE
+  CLOSED
+}
+
+model WaitlistEntry {
+  id                   String         @id @default(uuid())
+  campaignId           String
+  userId               String         @unique
+  phone                String
+  status               WaitlistStatus @default(WAITING)
+  activationToken      String         @unique
+  createdAt            DateTime       @default(now())
+  grantedAt            DateTime?
+  activatedAt          DateTime?
+  lastReminderStepSent Int?
+  lastReminderSentAt   DateTime?
+
+  campaign LaunchCampaign @relation(fields: [campaignId], references: [id])
+  user     User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId, status, createdAt])
+  @@map("waitlist_entries")
+}
+
+enum WaitlistStatus {
+  WAITING
+  GRANTED
+  ACTIVATED
 }

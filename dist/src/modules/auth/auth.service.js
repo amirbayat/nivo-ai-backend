@@ -50,6 +50,7 @@ const crypto = __importStar(require("crypto"));
 const prisma_service_1 = require("../../prisma/prisma.service");
 const redis_service_1 = require("../../redis/redis.service");
 const sms_service_1 = require("../../sms/sms.service");
+const campaign_service_1 = require("../campaign/campaign.service");
 const fa_1 = require("../../i18n/fa");
 const OTP_TTL = 120;
 const OTP_RATE_LIMIT = 3;
@@ -68,12 +69,14 @@ let AuthService = class AuthService {
     jwt;
     config;
     sms;
-    constructor(prisma, redis, jwt, config, sms) {
+    campaign;
+    constructor(prisma, redis, jwt, config, sms, campaign) {
         this.prisma = prisma;
         this.redis = redis;
         this.jwt = jwt;
         this.config = config;
         this.sms = sms;
+        this.campaign = campaign;
     }
     async sendOtp(rawPhone) {
         const phone = normalizePhone(rawPhone);
@@ -104,17 +107,20 @@ let AuthService = class AuthService {
         if (stored !== code)
             throw new common_1.UnauthorizedException(fa_1.fa.auth.otpInvalid);
         await this.redis.del(otpKey(phone), otpRateKey(phone), attemptKey);
-        const user = await this.prisma.user.upsert({
-            where: { phone },
-            create: { phone },
-            update: {},
-        });
+        const existing = await this.prisma.user.findUnique({ where: { phone } });
+        const user = existing ?? (await this.prisma.user.create({ data: { phone } }));
+        const isNewUser = !existing;
         if (!user.isActive)
             throw new common_1.UnauthorizedException(fa_1.fa.auth.userDisabled);
+        let waitlisted = null;
+        if (isNewUser) {
+            waitlisted = await this.campaign.applyToNewUser(user.id, user.phone);
+        }
         const tokens = await this.issueTokens(user.id, user.phone, user.role);
         return {
             ...tokens,
             user: { id: user.id, phone: user.phone, role: user.role, name: user.name },
+            waitlisted,
         };
     }
     async refresh(rawToken) {
@@ -183,6 +189,7 @@ exports.AuthService = AuthService = __decorate([
         redis_service_1.RedisService,
         jwt_1.JwtService,
         config_1.ConfigService,
-        sms_service_1.SmsService])
+        sms_service_1.SmsService,
+        campaign_service_1.CampaignService])
 ], AuthService);
 //# sourceMappingURL=auth.service.js.map
