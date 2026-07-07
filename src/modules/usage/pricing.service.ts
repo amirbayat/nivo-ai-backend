@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config'
 import { PrismaService } from '../../prisma/prisma.service'
 import { RedisService } from '../../redis/redis.service'
 import { ExchangeRateService } from '../../exchange-rate/exchange-rate.service'
+import { AiModelRegistryService } from './ai-model-registry.service'
 import { fa } from '../../i18n/fa'
 
 export type BudgetWarningLevel = 'none' | 'warning' | 'critical' | 'session_limit' | 'exceeded'
@@ -18,11 +19,6 @@ export interface BudgetStatus {
   cascadeModel: string | null
   upsellSuggestion: string | null
   usdtRial: number
-}
-
-interface ModelPrice {
-  input: number  // USD per 1M tokens
-  output: number
 }
 
 function dailyCostKey(userId: string) {
@@ -43,13 +39,13 @@ export class PricingService {
   private readonly sessionLimitPct: number
   private readonly freeBudgetRial: number
   private readonly walletMarkup: number
-  private readonly modelPricing: Record<string, ModelPrice>
 
   constructor(
     private readonly config: ConfigService,
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
     private readonly exchangeRate: ExchangeRateService,
+    private readonly modelRegistry: AiModelRegistryService,
   ) {
     this.aiShare = Number(this.config.get('AI_BUDGET_SHARE', '0.70'))
     this.warnPct = Number(this.config.get('BUDGET_WARN_PCT', '60')) / 100
@@ -57,20 +53,14 @@ export class PricingService {
     this.sessionLimitPct = Number(this.config.get('BUDGET_SESSION_LIMIT_PCT', '90')) / 100
     this.freeBudgetRial = Number(this.config.get('FREE_PLAN_MONTHLY_BUDGET_RIAL', '50000'))
     this.walletMarkup = Number(this.config.get('WALLET_MARKUP', '1.667'))
-
-    const p = (key: string, fallback: string) => Number(this.config.get(key, fallback))
-    this.modelPricing = {
-      'openai/gpt-4o-mini': { input: p('PRICE_GPT4O_MINI_INPUT', '0.15'), output: p('PRICE_GPT4O_MINI_OUTPUT', '0.60') },
-      'openai/gpt-4o':      { input: p('PRICE_GPT4O_INPUT', '2.50'),      output: p('PRICE_GPT4O_OUTPUT', '10.00') },
-      'openai/gpt-4-turbo': { input: p('PRICE_GPT4_TURBO_INPUT', '10.00'), output: p('PRICE_GPT4_TURBO_OUTPUT', '30.00') },
-      'gpt-4o-mini': { input: p('PRICE_GPT4O_MINI_INPUT', '0.15'), output: p('PRICE_GPT4O_MINI_OUTPUT', '0.60') },
-      'gpt-4o':      { input: p('PRICE_GPT4O_INPUT', '2.50'),      output: p('PRICE_GPT4O_OUTPUT', '10.00') },
-    }
   }
 
+  // قیمت هر مدل از AiModel (پنل ادمین) خوانده می‌شود، نه یک نگاشت هاردکد —
+  // مدلی که در جدول نباشد دیگر بی‌صدا با قیمت gpt-4o-mini حساب نمی‌شود
+  // (docs/PRD-global-budget-gateway.md بخش ۹.۳)
   async calcCostRial(inputTokens: number, outputTokens: number, modelId: string): Promise<number> {
-    const price = this.modelPricing[modelId] ?? { input: 0.15, output: 0.60 }
-    const usdCost = (inputTokens * price.input + outputTokens * price.output) / 1_000_000
+    const price = await this.modelRegistry.getModelInfo(modelId)
+    const usdCost = (inputTokens * price.inputPricePerM + outputTokens * price.outputPricePerM) / 1_000_000
     const rate = await this.exchangeRate.getUsdtRial()
     return Math.ceil(usdCost * rate)
   }

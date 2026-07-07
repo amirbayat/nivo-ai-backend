@@ -195,12 +195,14 @@ export declare class AdminController {
         isActive: boolean;
         createdAt: Date;
         sortOrder: number;
-        tier: import("@prisma/client").$Enums.ModelTier;
         displayName: string;
         provider: string;
         inputPricePerM: number;
         outputPricePerM: number;
         supportsVision: boolean;
+        tier: import("@prisma/client").$Enums.ModelTier;
+        tokenizerFamily: string;
+        avgCharsPerToken: number;
     }[]>;
     createModel(body: {
         name: string;
@@ -218,12 +220,14 @@ export declare class AdminController {
         isActive: boolean;
         createdAt: Date;
         sortOrder: number;
-        tier: import("@prisma/client").$Enums.ModelTier;
         displayName: string;
         provider: string;
         inputPricePerM: number;
         outputPricePerM: number;
         supportsVision: boolean;
+        tier: import("@prisma/client").$Enums.ModelTier;
+        tokenizerFamily: string;
+        avgCharsPerToken: number;
     }, never, import("@prisma/client/runtime/client").DefaultArgs, import("@prisma/client").Prisma.PrismaClientOptions>;
     updateModel(id: string, body: object): Promise<{
         id: string;
@@ -231,12 +235,14 @@ export declare class AdminController {
         isActive: boolean;
         createdAt: Date;
         sortOrder: number;
-        tier: import("@prisma/client").$Enums.ModelTier;
         displayName: string;
         provider: string;
         inputPricePerM: number;
         outputPricePerM: number;
         supportsVision: boolean;
+        tier: import("@prisma/client").$Enums.ModelTier;
+        tokenizerFamily: string;
+        avgCharsPerToken: number;
     }>;
     deleteModel(id: string): Promise<{
         message: string;

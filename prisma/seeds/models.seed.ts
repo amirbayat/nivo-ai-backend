@@ -14,6 +14,7 @@ const MODELS = [
     supportsVision: true,
     sortOrder: 0,
     tier: 'SIMPLE' as const,
+    tokenizerFamily: 'o200k_base',
   },
   {
     name: 'openai/gpt-4o',
@@ -24,6 +25,7 @@ const MODELS = [
     supportsVision: true,
     sortOrder: 1,
     tier: 'MEDIUM' as const,
+    tokenizerFamily: 'o200k_base',
   },
   {
     name: 'openai/gpt-4-turbo',
@@ -34,6 +36,21 @@ const MODELS = [
     supportsVision: true,
     sortOrder: 2,
     tier: 'COMPLEX' as const,
+    tokenizerFamily: 'cl100k_base',
+  },
+  {
+    // بود در allowedModels پلن طلایی (plans.seed.ts) ولی تا قبل از این تغییر
+    // اصلاً در AiModel نبود — یعنی هم قیمتش هاردکد گمشده حساب می‌شد، هم
+    // tier نداشت (docs/PRD-global-budget-gateway.md بخش ۹.۳)
+    name: 'openai/gpt-4.1',
+    displayName: 'GPT-4.1',
+    provider: 'openai',
+    inputPricePerM: 2.00,
+    outputPricePerM: 8.00,
+    supportsVision: true,
+    sortOrder: 3,
+    tier: 'MEDIUM' as const,
+    tokenizerFamily: 'o200k_base',
   },
 ]
 

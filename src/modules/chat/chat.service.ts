@@ -13,12 +13,21 @@ import { PrismaService } from '../../prisma/prisma.service'
 import { RedisService } from '../../redis/redis.service'
 import { TokenService } from '../usage/token.service'
 import { PricingService } from '../usage/pricing.service'
+import { TokenEstimatorService } from '../usage/token-estimator.service'
 import { ModelRouterService } from '../model-router/model-router.service'
 import { fa } from '../../i18n/fa'
 import type { Response } from 'express'
 import { StreamMessageDto } from './dto/stream-message.dto'
 
 const OPTIMAL_MODE = 'optimal'
+
+// the input-length gate below runs before model routing (the router itself
+// uses input length as a heuristic signal), so the exact model isn't known
+// yet — o200k_base is the shared encoding for the whole gpt-4o family
+// (including the free plan's only model) and a close-enough reference for
+// this pre-routing safety check; real billing always uses the SDK's actual
+// usage.inputTokens/outputTokens for the model that ends up running.
+const PRE_ROUTING_REFERENCE_MODEL = 'openai/gpt-4o-mini'
 
 const LEGACY_MODEL_MAP: Record<string, string> = {
   'gpt-4o-mini': 'openai/gpt-4o-mini',
@@ -30,11 +39,6 @@ function resolveModelId(id: string): string {
   return LEGACY_MODEL_MAP[id] ?? id
 }
 
-// rough token estimate: ~3 chars per token for mixed Persian/English
-function estimateTokens(text: string): number {
-  return Math.ceil(text.length / 3)
-}
-
 @Injectable()
 export class ChatService {
   private readonly provider
@@ -44,6 +48,7 @@ export class ChatService {
     private readonly redis: RedisService,
     private readonly tokenService: TokenService,
     private readonly pricingService: PricingService,
+    private readonly tokenEstimator: TokenEstimatorService,
     private readonly modelRouter: ModelRouterService,
     private readonly config: ConfigService,
   ) {
@@ -125,7 +130,10 @@ export class ChatService {
     if (messageStage === 'throttled' && plan.throttledInputTokens) {
       effectiveInputLimit = plan.throttledInputTokens
     }
-    const estimatedInput = estimateTokens(dto.content)
+    const estimatedInput = await this.tokenEstimator.estimateTokens(
+      dto.content,
+      PRE_ROUTING_REFERENCE_MODEL,
+    )
     if (estimatedInput > effectiveInputLimit) {
       throw new BadRequestException(fa.chat.inputTooLong(effectiveInputLimit))
     }
@@ -184,7 +192,13 @@ export class ChatService {
       }
     }
 
-    const quota = await this.tokenService.checkQuota(userId)
+    // تخمین واقعی پیام (نه پیش‌فرض ثابت ۵۰۰) برای همان مدلی که واقعاً انتخاب شده
+    // (docs/PRD-global-budget-gateway.md بخش ۹.۱)
+    const estimatedForQuota = await this.tokenEstimator.estimateTokens(
+      dto.content,
+      modelId,
+    )
+    const quota = await this.tokenService.checkQuota(userId, estimatedForQuota)
     const throttledMax = this.tokenService.resolveOutputThrottle(
       plan.outputThrottleSteps,
       todayCount,

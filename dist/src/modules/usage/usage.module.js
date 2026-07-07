@@ -10,6 +10,8 @@ exports.UsageModule = void 0;
 const common_1 = require("@nestjs/common");
 const token_service_1 = require("./token.service");
 const pricing_service_1 = require("./pricing.service");
+const ai_model_registry_service_1 = require("./ai-model-registry.service");
+const token_estimator_service_1 = require("./token-estimator.service");
 const usage_controller_1 = require("./usage.controller");
 const exchange_rate_module_1 = require("../../exchange-rate/exchange-rate.module");
 let UsageModule = class UsageModule {
@@ -19,8 +21,8 @@ exports.UsageModule = UsageModule = __decorate([
     (0, common_1.Module)({
         imports: [exchange_rate_module_1.ExchangeRateModule],
         controllers: [usage_controller_1.UsageController],
-        providers: [token_service_1.TokenService, pricing_service_1.PricingService],
-        exports: [token_service_1.TokenService, pricing_service_1.PricingService],
+        providers: [token_service_1.TokenService, pricing_service_1.PricingService, ai_model_registry_service_1.AiModelRegistryService, token_estimator_service_1.TokenEstimatorService],
+        exports: [token_service_1.TokenService, pricing_service_1.PricingService, ai_model_registry_service_1.AiModelRegistryService, token_estimator_service_1.TokenEstimatorService],
     })
 ], UsageModule);
 //# sourceMappingURL=usage.module.js.map

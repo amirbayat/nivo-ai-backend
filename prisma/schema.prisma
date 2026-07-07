@@ -331,6 +331,12 @@ model AiModel {
   tier            ModelTier @default(MEDIUM)
   createdAt       DateTime  @default(now())
 
+  // شمارش دقیق توکن — برای مدل‌های OpenAI-family یک tokenizer واقعی داریم؛
+  // برای بقیه‌ی پروایدرها (Claude، Grok، ...) که tokenizer آفلاین ندارند،
+  // یک نسبت کاراکتر/توکن قابل‌کالیبره در ادمین استفاده می‌شود.
+  tokenizerFamily  String @default("approximate") // "o200k_base" | "cl100k_base" | "approximate"
+  avgCharsPerToken Float  @default(4) // فقط وقتی tokenizerFamily="approximate" استفاده می‌شود
+
   @@map("ai_models")
 }
 

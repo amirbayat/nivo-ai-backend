@@ -18,9 +18,11 @@ const prisma_service_1 = require("../../prisma/prisma.service");
 const redis_service_1 = require("../../redis/redis.service");
 const token_service_1 = require("../usage/token.service");
 const pricing_service_1 = require("../usage/pricing.service");
+const token_estimator_service_1 = require("../usage/token-estimator.service");
 const model_router_service_1 = require("../model-router/model-router.service");
 const fa_1 = require("../../i18n/fa");
 const OPTIMAL_MODE = 'optimal';
+const PRE_ROUTING_REFERENCE_MODEL = 'openai/gpt-4o-mini';
 const LEGACY_MODEL_MAP = {
     'gpt-4o-mini': 'openai/gpt-4o-mini',
     'gpt-4o': 'openai/gpt-4o',
@@ -29,22 +31,21 @@ const LEGACY_MODEL_MAP = {
 function resolveModelId(id) {
     return LEGACY_MODEL_MAP[id] ?? id;
 }
-function estimateTokens(text) {
-    return Math.ceil(text.length / 3);
-}
 let ChatService = class ChatService {
     prisma;
     redis;
     tokenService;
     pricingService;
+    tokenEstimator;
     modelRouter;
     config;
     provider;
-    constructor(prisma, redis, tokenService, pricingService, modelRouter, config) {
+    constructor(prisma, redis, tokenService, pricingService, tokenEstimator, modelRouter, config) {
         this.prisma = prisma;
         this.redis = redis;
         this.tokenService = tokenService;
         this.pricingService = pricingService;
+        this.tokenEstimator = tokenEstimator;
         this.modelRouter = modelRouter;
         this.config = config;
         this.provider = (0, openai_compatible_1.createOpenAICompatible)({
@@ -98,7 +99,7 @@ let ChatService = class ChatService {
         if (messageStage === 'throttled' && plan.throttledInputTokens) {
             effectiveInputLimit = plan.throttledInputTokens;
         }
-        const estimatedInput = estimateTokens(dto.content);
+        const estimatedInput = await this.tokenEstimator.estimateTokens(dto.content, PRE_ROUTING_REFERENCE_MODEL);
         if (estimatedInput > effectiveInputLimit) {
             throw new common_1.BadRequestException(fa_1.fa.chat.inputTooLong(effectiveInputLimit));
         }
@@ -135,7 +136,8 @@ let ChatService = class ChatService {
                 throw new common_1.BadRequestException('این مدل از تصویر پشتیبانی نمی‌کند. لطفاً یک مدل Vision‌دار انتخاب کنید.');
             }
         }
-        const quota = await this.tokenService.checkQuota(userId);
+        const estimatedForQuota = await this.tokenEstimator.estimateTokens(dto.content, modelId);
+        const quota = await this.tokenService.checkQuota(userId, estimatedForQuota);
         const throttledMax = this.tokenService.resolveOutputThrottle(plan.outputThrottleSteps, todayCount);
         let maxOut = Math.min(quota.remaining, throttledMax);
         if (messageStage === 'throttled' && plan.throttledOutputTokens) {
@@ -295,6 +297,7 @@ exports.ChatService = ChatService = __decorate([
         redis_service_1.RedisService,
         token_service_1.TokenService,
         pricing_service_1.PricingService,
+        token_estimator_service_1.TokenEstimatorService,
         model_router_service_1.ModelRouterService,
         config_1.ConfigService])
 ], ChatService);

@@ -15,6 +15,7 @@ const config_1 = require("@nestjs/config");
 const prisma_service_1 = require("../../prisma/prisma.service");
 const redis_service_1 = require("../../redis/redis.service");
 const exchange_rate_service_1 = require("../../exchange-rate/exchange-rate.service");
+const ai_model_registry_service_1 = require("./ai-model-registry.service");
 const fa_1 = require("../../i18n/fa");
 function dailyCostKey(userId) {
     const d = new Date().toISOString().slice(0, 10);
@@ -29,36 +30,29 @@ let PricingService = class PricingService {
     prisma;
     redis;
     exchangeRate;
+    modelRegistry;
     aiShare;
     warnPct;
     downgradePct;
     sessionLimitPct;
     freeBudgetRial;
     walletMarkup;
-    modelPricing;
-    constructor(config, prisma, redis, exchangeRate) {
+    constructor(config, prisma, redis, exchangeRate, modelRegistry) {
         this.config = config;
         this.prisma = prisma;
         this.redis = redis;
         this.exchangeRate = exchangeRate;
+        this.modelRegistry = modelRegistry;
         this.aiShare = Number(this.config.get('AI_BUDGET_SHARE', '0.70'));
         this.warnPct = Number(this.config.get('BUDGET_WARN_PCT', '60')) / 100;
         this.downgradePct = Number(this.config.get('BUDGET_DOWNGRADE_PCT', '80')) / 100;
         this.sessionLimitPct = Number(this.config.get('BUDGET_SESSION_LIMIT_PCT', '90')) / 100;
         this.freeBudgetRial = Number(this.config.get('FREE_PLAN_MONTHLY_BUDGET_RIAL', '50000'));
         this.walletMarkup = Number(this.config.get('WALLET_MARKUP', '1.667'));
-        const p = (key, fallback) => Number(this.config.get(key, fallback));
-        this.modelPricing = {
-            'openai/gpt-4o-mini': { input: p('PRICE_GPT4O_MINI_INPUT', '0.15'), output: p('PRICE_GPT4O_MINI_OUTPUT', '0.60') },
-            'openai/gpt-4o': { input: p('PRICE_GPT4O_INPUT', '2.50'), output: p('PRICE_GPT4O_OUTPUT', '10.00') },
-            'openai/gpt-4-turbo': { input: p('PRICE_GPT4_TURBO_INPUT', '10.00'), output: p('PRICE_GPT4_TURBO_OUTPUT', '30.00') },
-            'gpt-4o-mini': { input: p('PRICE_GPT4O_MINI_INPUT', '0.15'), output: p('PRICE_GPT4O_MINI_OUTPUT', '0.60') },
-            'gpt-4o': { input: p('PRICE_GPT4O_INPUT', '2.50'), output: p('PRICE_GPT4O_OUTPUT', '10.00') },
-        };
     }
     async calcCostRial(inputTokens, outputTokens, modelId) {
-        const price = this.modelPricing[modelId] ?? { input: 0.15, output: 0.60 };
-        const usdCost = (inputTokens * price.input + outputTokens * price.output) / 1_000_000;
+        const price = await this.modelRegistry.getModelInfo(modelId);
+        const usdCost = (inputTokens * price.inputPricePerM + outputTokens * price.outputPricePerM) / 1_000_000;
         const rate = await this.exchangeRate.getUsdtRial();
         return Math.ceil(usdCost * rate);
     }
@@ -177,6 +171,7 @@ exports.PricingService = PricingService = __decorate([
     __metadata("design:paramtypes", [config_1.ConfigService,
         prisma_service_1.PrismaService,
         redis_service_1.RedisService,
-        exchange_rate_service_1.ExchangeRateService])
+        exchange_rate_service_1.ExchangeRateService,
+        ai_model_registry_service_1.AiModelRegistryService])
 ], PricingService);
 //# sourceMappingURL=pricing.service.js.map

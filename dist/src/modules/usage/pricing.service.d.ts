@@ -2,6 +2,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RedisService } from '../../redis/redis.service';
 import { ExchangeRateService } from '../../exchange-rate/exchange-rate.service';
+import { AiModelRegistryService } from './ai-model-registry.service';
 export type BudgetWarningLevel = 'none' | 'warning' | 'critical' | 'session_limit' | 'exceeded';
 export interface BudgetStatus {
     dailyBudgetRial: number;
@@ -20,14 +21,14 @@ export declare class PricingService {
     private readonly prisma;
     private readonly redis;
     private readonly exchangeRate;
+    private readonly modelRegistry;
     private readonly aiShare;
     private readonly warnPct;
     private readonly downgradePct;
     private readonly sessionLimitPct;
     private readonly freeBudgetRial;
     private readonly walletMarkup;
-    private readonly modelPricing;
-    constructor(config: ConfigService, prisma: PrismaService, redis: RedisService, exchangeRate: ExchangeRateService);
+    constructor(config: ConfigService, prisma: PrismaService, redis: RedisService, exchangeRate: ExchangeRateService, modelRegistry: AiModelRegistryService);
     calcCostRial(inputTokens: number, outputTokens: number, modelId: string): Promise<number>;
     dailyBudgetRial(priceMonthly: number): Promise<number>;
     monthlyBudgetRial(priceMonthly: number): Promise<number>;
