@@ -167,6 +167,7 @@ enum PaymentStatus {
 enum PaymentProvider {
   ZARINPAL
   VANDAR
+  ZIBAL
 }
 
 model RefreshToken {

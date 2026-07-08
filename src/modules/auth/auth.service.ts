@@ -12,11 +12,12 @@ import { SmsService } from '../../sms/sms.service'
 import { CampaignService } from '../campaign/campaign.service'
 import { fa } from '../../i18n/fa'
 
-const OTP_TTL = 120        // seconds — 2 min
-const OTP_RATE_LIMIT = 3   // max sends per window
-const OTP_RATE_WINDOW = 600 // 10 min
-const OTP_ATTEMPT_LIMIT = 5
-const OTP_ATTEMPT_WINDOW = 1800 // 30 min
+// مقادیر پیش‌فرض — همه از طریق env variable قابل بازنویسی‌اند (به ثانیه)
+const DEFAULT_OTP_TTL = 120        // OTP_TTL_SECONDS
+const DEFAULT_OTP_RATE_LIMIT = 3   // OTP_RATE_LIMIT — حداکثر تعداد ارسال در بازه
+const DEFAULT_OTP_RATE_WINDOW = 600 // OTP_RATE_WINDOW_SECONDS — ۱۰ دقیقه
+const DEFAULT_OTP_ATTEMPT_LIMIT = 5 // OTP_ATTEMPT_LIMIT
+const DEFAULT_OTP_ATTEMPT_WINDOW = 1800 // OTP_ATTEMPT_WINDOW_SECONDS — ۳۰ دقیقه
 
 // حساب تستی ثابت — بدون ارسال پیامک واقعی، بدون rate limit
 // فقط وقتی env variable به نام TEST_USER برابر 'true' باشد فعال است (پیش‌فرض: غیرفعال)
@@ -47,6 +48,26 @@ export class AuthService {
     return this.config.get<string>('TEST_USER', 'false') === 'true'
   }
 
+  private getOtpTtl(): number {
+    return Number(this.config.get('OTP_TTL_SECONDS', String(DEFAULT_OTP_TTL)))
+  }
+
+  private getOtpRateLimit(): number {
+    return Number(this.config.get('OTP_RATE_LIMIT', String(DEFAULT_OTP_RATE_LIMIT)))
+  }
+
+  private getOtpRateWindow(): number {
+    return Number(this.config.get('OTP_RATE_WINDOW_SECONDS', String(DEFAULT_OTP_RATE_WINDOW)))
+  }
+
+  private getOtpAttemptLimit(): number {
+    return Number(this.config.get('OTP_ATTEMPT_LIMIT', String(DEFAULT_OTP_ATTEMPT_LIMIT)))
+  }
+
+  private getOtpAttemptWindow(): number {
+    return Number(this.config.get('OTP_ATTEMPT_WINDOW_SECONDS', String(DEFAULT_OTP_ATTEMPT_WINDOW)))
+  }
+
   async sendOtp(rawPhone: string): Promise<{ message: string }> {
     const phone = normalizePhone(rawPhone)
 
@@ -54,16 +75,17 @@ export class AuthService {
       return { message: fa.auth.otpSent }
     }
 
-    // rate limit: max 3 sends / 10min
+    // rate limit: حداکثر تعداد ارسال در بازه (پیش‌فرض ۳ بار / ۱۰ دقیقه)
+    const rateWindow = this.getOtpRateWindow()
     const rateKey = otpRateKey(phone)
     const sends = await this.redis.incr(rateKey)
-    if (sends === 1) await this.redis.expire(rateKey, OTP_RATE_WINDOW)
-    if (sends > OTP_RATE_LIMIT) {
-      throw new HttpException(fa.auth.otpTooManyRequests, 429)
+    if (sends === 1) await this.redis.expire(rateKey, rateWindow)
+    if (sends > this.getOtpRateLimit()) {
+      throw new HttpException(fa.auth.otpTooManyRequests(Math.ceil(rateWindow / 60)), 429)
     }
 
     const code = Math.floor(100000 + Math.random() * 900000).toString()
-    await this.redis.set(otpKey(phone), code, 'EX', OTP_TTL)
+    await this.redis.set(otpKey(phone), code, 'EX', this.getOtpTtl())
 
     await this.sms.sendOtp(phone, code)
 
@@ -77,12 +99,13 @@ export class AuthService {
     if (isTestPhone) {
       if (code !== TEST_OTP_CODE) throw new UnauthorizedException(fa.auth.otpInvalid)
     } else {
-      // attempt limit: 5 / 30min
+      // attempt limit: حداکثر تعداد تلاش در بازه (پیش‌فرض ۵ بار / ۳۰ دقیقه)
+      const attemptWindow = this.getOtpAttemptWindow()
       const attemptKey = otpAttemptKey(phone)
       const attempts = await this.redis.incr(attemptKey)
-      if (attempts === 1) await this.redis.expire(attemptKey, OTP_ATTEMPT_WINDOW)
-      if (attempts > OTP_ATTEMPT_LIMIT) {
-        throw new HttpException(fa.auth.otpTooManyAttempts, 429)
+      if (attempts === 1) await this.redis.expire(attemptKey, attemptWindow)
+      if (attempts > this.getOtpAttemptLimit()) {
+        throw new HttpException(fa.auth.otpTooManyAttempts(Math.ceil(attemptWindow / 60)), 429)
       }
 
       const stored = await this.redis.get(otpKey(phone))

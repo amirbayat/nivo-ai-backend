@@ -5,6 +5,7 @@ import { fa } from '../../../i18n/fa'
 import { PAYMENT_GATEWAY_NAMES, PaymentGateway } from './payment-gateway.interface'
 import { ZarinpalGateway } from './zarinpal.gateway'
 import { VandarGateway } from './vandar.gateway'
+import { ZibalGateway } from './zibal.gateway'
 
 @Injectable()
 export class PaymentGatewayRegistry implements OnModuleInit {
@@ -15,8 +16,9 @@ export class PaymentGatewayRegistry implements OnModuleInit {
     private readonly config: ConfigService,
     zarinpal: ZarinpalGateway,
     vandar: VandarGateway,
+    zibal: ZibalGateway,
   ) {
-    this.gateways = { ZARINPAL: zarinpal, VANDAR: vandar }
+    this.gateways = { ZARINPAL: zarinpal, VANDAR: vandar, ZIBAL: zibal }
   }
 
   onModuleInit() {
@@ -36,6 +38,9 @@ export class PaymentGatewayRegistry implements OnModuleInit {
     }
     if (this.enabled.includes('VANDAR') && !this.config.get('VANDAR_API_KEY')) {
       throw new Error('VANDAR_API_KEY تنظیم نشده ولی vandar در PAYMENT_GATEWAYS فعال است')
+    }
+    if (this.enabled.includes('ZIBAL') && !this.config.get('ZIBAL_MERCHANT_ID')) {
+      throw new Error('ZIBAL_MERCHANT_ID تنظیم نشده ولی zibal در PAYMENT_GATEWAYS فعال است')
     }
   }
 

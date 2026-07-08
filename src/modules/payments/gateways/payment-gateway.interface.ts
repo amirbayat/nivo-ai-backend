@@ -8,7 +8,7 @@ export interface CreatePaymentParams {
 }
 
 export interface CreatePaymentResult {
-  providerRef: string // authority (زرین‌پال) یا token (وندار)
+  providerRef: string // authority (زرین‌پال)، token (وندار) یا trackId (زیبال)
   paymentUrl: string
 }
 
@@ -35,4 +35,4 @@ export interface PaymentGateway {
   parseCallback(query: Record<string, string>): CallbackQuery
 }
 
-export const PAYMENT_GATEWAY_NAMES = ['ZARINPAL', 'VANDAR'] as const
+export const PAYMENT_GATEWAY_NAMES = ['ZARINPAL', 'VANDAR', 'ZIBAL'] as const
