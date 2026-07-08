@@ -115,6 +115,16 @@ export class UsageAnalyticsService {
     const costRial = usage._sum.costRial ?? 0
     const revenueRial = revenue._sum.amount ?? 0
 
+    // میانگین توکن ورودی/خروجی و میانگین وزنیِ قیمت هر میلیون توکن، از روی
+    // model breakdown همین بازه محاسبه می‌شود — چون DailyUsage توکن ورودی/خروجی
+    // را جدا نگه نمی‌دارد (فقط freeTokensUsed/paidTokensUsed کل)؛ وزن‌دهی بر اساس
+    // حجم واقعی توکنی هر مدل است، نه میانگین ساده‌ی نرخ‌های استاتیک مدل‌ها
+    const messagesWithModel = modelBreakdown.reduce((s, m) => s + m.messages, 0)
+    const totalInputTokens = modelBreakdown.reduce((s, m) => s + m.tokensInput, 0)
+    const totalOutputTokens = modelBreakdown.reduce((s, m) => s + m.tokensOutput, 0)
+    const totalInputCostUsd = modelBreakdown.reduce((s, m) => s + m.costInputUsd, 0)
+    const totalOutputCostUsd = modelBreakdown.reduce((s, m) => s + m.costOutputUsd, 0)
+
     return {
       totalTokens,
       totalMessages,
@@ -124,6 +134,10 @@ export class UsageAnalyticsService {
       marginRial: revenueRial - costRial,
       marginPct: revenueRial > 0 ? (revenueRial - costRial) / revenueRial : null,
       avgTokensPerMessage: totalMessages > 0 ? Math.round(totalTokens / totalMessages) : 0,
+      avgInputTokensPerMessage: messagesWithModel > 0 ? Math.round(totalInputTokens / messagesWithModel) : 0,
+      avgOutputTokensPerMessage: messagesWithModel > 0 ? Math.round(totalOutputTokens / messagesWithModel) : 0,
+      avgInputPricePerMillionUsd: totalInputTokens > 0 ? (totalInputCostUsd / totalInputTokens) * 1_000_000 : 0,
+      avgOutputPricePerMillionUsd: totalOutputTokens > 0 ? (totalOutputCostUsd / totalOutputTokens) * 1_000_000 : 0,
       topModel: modelBreakdown[0]?.model ?? null,
     }
   }
@@ -176,18 +190,36 @@ export class UsageAnalyticsService {
     const rows = await this.prisma.message.groupBy({
       by: ['model'],
       where: { role: 'ASSISTANT', model: { not: null }, createdAt: { gte: range.from, lte: range.to } },
-      _sum: { tokensInput: true, tokensOutput: true, costRial: true, costUsdMicros: true },
+      _sum: {
+        tokensInput: true,
+        tokensOutput: true,
+        costRial: true,
+        costUsdMicros: true,
+        costInputUsdMicros: true,
+        costOutputUsdMicros: true,
+      },
       _count: { id: true },
     })
     return rows
-      .map((r) => ({
-        model: r.model as string,
-        messages: r._count.id,
-        tokensInput: r._sum.tokensInput ?? 0,
-        tokensOutput: r._sum.tokensOutput ?? 0,
-        costRial: r._sum.costRial ?? 0,
-        costUsd: (r._sum.costUsdMicros ?? 0) / 1_000_000,
-      }))
+      .map((r) => {
+        const tokensInput = r._sum.tokensInput ?? 0
+        const tokensOutput = r._sum.tokensOutput ?? 0
+        const costInputUsd = (r._sum.costInputUsdMicros ?? 0) / 1_000_000
+        const costOutputUsd = (r._sum.costOutputUsdMicros ?? 0) / 1_000_000
+        return {
+          model: r.model as string,
+          messages: r._count.id,
+          tokensInput,
+          tokensOutput,
+          costRial: r._sum.costRial ?? 0,
+          costUsd: (r._sum.costUsdMicros ?? 0) / 1_000_000,
+          costInputUsd,
+          costOutputUsd,
+          // میانگین وزنیِ قیمت هر میلیون توکن برای همین مدل در این بازه
+          avgInputPricePerMillionUsd: tokensInput > 0 ? (costInputUsd / tokensInput) * 1_000_000 : 0,
+          avgOutputPricePerMillionUsd: tokensOutput > 0 ? (costOutputUsd / tokensOutput) * 1_000_000 : 0,
+        }
+      })
       .sort((a, b) => b.costRial - a.costRial)
   }
 
@@ -386,6 +418,7 @@ export class UsageAnalyticsService {
       const msgValues = group.map((g) => g.avgMessagesPerDay).sort((a, b) => a - b)
       const tokenValues = group.map((g) => g.avgTokensPerDay).sort((a, b) => a - b)
       const costRial = group.reduce((s, g) => s + g.costRial, 0)
+      const costUsd = group.reduce((s, g) => s + g.costUsd, 0)
       const revenueRial = group.reduce((s, g) => s + g.revenueRial, 0)
       return {
         label,
@@ -397,6 +430,7 @@ export class UsageAnalyticsService {
         medianTokensPerDay: percentile(tokenValues, 50),
         p90TokensPerDay: percentile(tokenValues, 90),
         costRial,
+        costUsd,
         revenueRial,
         marginRial: revenueRial - costRial,
         marginPct: revenueRial > 0 ? (revenueRial - costRial) / revenueRial : null,

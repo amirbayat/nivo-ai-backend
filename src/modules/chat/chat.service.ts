@@ -364,11 +364,8 @@ export class ChatService {
 
       const usage = await result.usage
       const tokensUsed = usage.totalTokens ?? 0
-      const { costRial, costUsdMicros } = await this.pricingService.calcCost(
-        usage.inputTokens ?? 0,
-        usage.outputTokens ?? 0,
-        modelId,
-      )
+      const { costRial, costUsdMicros, costInputUsdMicros, costOutputUsdMicros } =
+        await this.pricingService.calcCost(usage.inputTokens ?? 0, usage.outputTokens ?? 0, modelId)
 
       await this.prisma.message.create({
         data: {
@@ -380,6 +377,8 @@ export class ChatService {
           tokensOutput: usage.outputTokens ?? 0,
           costRial,
           costUsdMicros,
+          costInputUsdMicros,
+          costOutputUsdMicros,
           model: modelId,
         },
       })

@@ -20,6 +20,7 @@ import { ModelRouterModule } from './modules/model-router/model-router.module'
 import { MessageFeedbackModule } from './modules/message-feedback/message-feedback.module'
 import { UsageAnalyticsModule } from './modules/usage-analytics/usage-analytics.module'
 import { CampaignModule } from './modules/campaign/campaign.module'
+import { AppConfigModule } from './modules/app-config/app-config.module'
 import { QueueModule } from './queue/queue.module'
 
 @Module({
@@ -45,6 +46,7 @@ import { QueueModule } from './queue/queue.module'
     MessageFeedbackModule,
     UsageAnalyticsModule,
     CampaignModule,
+    AppConfigModule,
   ],
 })
 export class AppModule {}

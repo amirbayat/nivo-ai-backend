@@ -250,6 +250,17 @@ export class ModelRouterService {
     config: RoutingConfigShape,
     lastAssistantMessageLength?: number,
   ): { tier: ModelTier | 'ambiguous'; method: string; confidence: number } {
+    const hasCodeBlock = content.includes('```')
+    const complexHits = countKeywordHits(content, config.complexKeywords)
+    const simpleHits = countKeywordHits(content, config.simpleKeywords)
+
+    // تطابق صریح با کلیدواژه‌ی ساده (مثلاً «سلام») حتی از قانون sticky هم مهم‌تره —
+    // وگرنه یک سلام‌وعلیک بعد از یک جواب پیچیده به‌غلط complex حساب می‌شه و مدل گرون
+    // انتخابی کاربر رو (که فقط برای MEDIUM/COMPLEX محترم شمرده می‌شه) صدا می‌زنه
+    if (simpleHits > 0 && complexHits === 0 && !hasCodeBlock && content.length < 150) {
+      return { tier: ModelTier.SIMPLE, method: 'heuristic', confidence: 0.85 }
+    }
+
     // ثبات درون مکالمه: پیام کوتاه بلافاصله بعد از یک پاسخ بلند/پیچیده رو نباید degrade کنه
     if (
       lastAssistantMessageLength &&
@@ -258,10 +269,6 @@ export class ModelRouterService {
     ) {
       return { tier: ModelTier.COMPLEX, method: 'sticky', confidence: 0.9 }
     }
-
-    const hasCodeBlock = content.includes('```')
-    const complexHits = countKeywordHits(content, config.complexKeywords)
-    const simpleHits = countKeywordHits(content, config.simpleKeywords)
 
     if (content.length < 40 && complexHits === 0 && !hasCodeBlock) {
       return { tier: ModelTier.SIMPLE, method: 'heuristic', confidence: 0.85 }
@@ -273,10 +280,6 @@ export class ModelRouterService {
       content.length > config.complexLenThreshold
     ) {
       return { tier: ModelTier.COMPLEX, method: 'heuristic', confidence: 0.8 }
-    }
-
-    if (simpleHits > 0 && complexHits === 0 && content.length < 150) {
-      return { tier: ModelTier.SIMPLE, method: 'heuristic', confidence: 0.7 }
     }
 
     return { tier: 'ambiguous', method: 'heuristic', confidence: 0 }

@@ -39,6 +39,8 @@ function dailyCostUsdKey(userId: string) {
 export interface CostCalc {
   costRial: number
   costUsdMicros: number // دلار × ۱٬۰۰۰٬۰۰۰ — نگه‌داشتن هزینه‌ی خام دلاری برای آنالیز مستقل از نوسان نرخ ارز
+  costInputUsdMicros: number // سهم توکن ورودی از costUsdMicros — برای میانگین وزنی قیمت ورودی/خروجی
+  costOutputUsdMicros: number
 }
 
 @Injectable()
@@ -71,11 +73,15 @@ export class PricingService {
   // می‌شود تا حسابداری آنالیز مصرف (بخش ۱۷.۵) مستقل از نوسان نرخ لحظه‌ای بماند.
   async calcCost(inputTokens: number, outputTokens: number, modelId: string): Promise<CostCalc> {
     const price = await this.modelRegistry.getModelInfo(modelId)
-    const usdCost = (inputTokens * price.inputPricePerM + outputTokens * price.outputPricePerM) / 1_000_000
+    const inputUsdCost = (inputTokens * price.inputPricePerM) / 1_000_000
+    const outputUsdCost = (outputTokens * price.outputPricePerM) / 1_000_000
+    const usdCost = inputUsdCost + outputUsdCost
     const rate = await this.exchangeRate.getUsdtRial()
     return {
       costRial: Math.ceil(usdCost * rate),
       costUsdMicros: Math.round(usdCost * 1_000_000),
+      costInputUsdMicros: Math.round(inputUsdCost * 1_000_000),
+      costOutputUsdMicros: Math.round(outputUsdCost * 1_000_000),
     }
   }
 

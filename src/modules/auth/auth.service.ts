@@ -182,7 +182,7 @@ export class AuthService {
           select: {
             status: true,
             periodEnd: true,
-            plan: { select: { name: true, dailyFreeTokens: true, monthlyTotalTokens: true, allowedModels: true } },
+            plan: { select: { name: true, priceMonthly: true, dailyFreeTokens: true, monthlyTotalTokens: true, allowedModels: true } },
           },
         },
       },

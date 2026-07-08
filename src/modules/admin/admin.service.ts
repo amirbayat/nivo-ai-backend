@@ -1,9 +1,11 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
 import { plainToInstance } from 'class-transformer'
 import { validate } from 'class-validator'
 import * as XLSX from 'xlsx'
 import { PrismaService } from '../../prisma/prisma.service'
 import { RedisService } from '../../redis/redis.service'
+import { ExchangeRateService } from '../../exchange-rate/exchange-rate.service'
 import { fa } from '../../i18n/fa'
 import { CreateModelDto, MODEL_TIERS, TOKENIZER_FAMILIES } from './dto/create-model.dto'
 import { UpdateModelDto } from './dto/update-model.dto'
@@ -71,10 +73,18 @@ function manualLimitKey(userId: string) { return `manual_limit:${userId}` }
 
 @Injectable()
 export class AdminService {
+  private readonly aiShare: number
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
-  ) {}
+    private readonly config: ConfigService,
+    private readonly exchangeRate: ExchangeRateService,
+  ) {
+    // همون درصدی که PricingService برای بودجه‌ی واقعی مصرف می‌کند — برای اینکه
+    // «انتظار مصرف» ادمین با محدودیت واقعی چت هماهنگ بماند، نه یک 0.7 هاردکد جدا
+    this.aiShare = Number(this.config.get('AI_BUDGET_SHARE', '0.70'))
+  }
 
   async getDashboard() {
     const now = new Date()
@@ -89,6 +99,7 @@ export class AdminService {
       revenueMrr,
       totalConversations,
       todayConversations,
+      exchangeRate,
     ] = await Promise.all([
       this.prisma.user.count(),
       this.prisma.user.count({
@@ -104,6 +115,7 @@ export class AdminService {
       }),
       this.prisma.conversation.count(),
       this.prisma.conversation.count({ where: { createdAt: { gte: startOfToday } } }),
+      this.exchangeRate.getRateInfo(),
     ])
 
     return {
@@ -113,6 +125,7 @@ export class AdminService {
       mrr: revenueMrr._sum.amount ?? 0,
       totalConversations,
       todayConversations,
+      exchangeRate,
     }
   }
 
@@ -169,7 +182,7 @@ export class AdminService {
       const charged = revenueMap.get(u.id) ?? 0
       const aiCost = costMap.get(u.id) ?? 0
       const aiCostUsd = (costUsdMap.get(u.id) ?? 0) / 1_000_000
-      const monthlyBudget = Math.floor((u.subscription?.plan.priceMonthly ?? 0) * 0.7)
+      const monthlyBudget = Math.floor((u.subscription?.plan.priceMonthly ?? 0) * this.aiShare)
       const expectedByNow = Math.floor((monthlyBudget * daysPassed) / daysInMonth)
       const ratio = expectedByNow > 0 ? aiCost / expectedByNow : 0
 
@@ -237,7 +250,7 @@ export class AdminService {
       this.prisma.dailyUsage.groupBy({
         by: ['date'],
         where: { date: { gte: since } },
-        _sum: { costRial: true },
+        _sum: { costRial: true, costUsdMicros: true },
         orderBy: { date: 'asc' },
       }),
       this.prisma.$queryRaw<Array<{ day: Date; revenue: bigint }>>`
@@ -256,6 +269,7 @@ export class AdminService {
     return costRows.map(r => ({
       date: r.date.toISOString().slice(0, 10),
       aiCostRial: r._sum.costRial ?? 0,
+      aiCostUsd: (r._sum.costUsdMicros ?? 0) / 1_000_000,
       revenueToman: revenueMap.get(r.date.toISOString().slice(0, 10)) ?? 0,
     }))
   }
@@ -271,12 +285,13 @@ export class AdminService {
       }),
       this.prisma.dailyUsage.aggregate({
         where: { date: { gte: startOfMonth } },
-        _sum: { costRial: true },
+        _sum: { costRial: true, costUsdMicros: true },
       }),
     ])
 
     const monthlyRevenue = revenueRow._sum.amount ?? 0
     const monthlyAiCost = costRow._sum.costRial ?? 0
+    const monthlyAiCostUsd = (costRow._sum.costUsdMicros ?? 0) / 1_000_000
     const ratio = monthlyRevenue > 0 ? monthlyAiCost / monthlyRevenue : 0
 
     let alertLevel: 'safe' | 'warning' | 'critical' = 'safe'
@@ -298,6 +313,7 @@ export class AdminService {
     return {
       monthlyRevenueToman: monthlyRevenue,
       monthlyAiCostRial: monthlyAiCost,
+      monthlyAiCostUsd,
       aiCostRatio: Math.round(ratio * 1000) / 10,
       alertLevel,
       suggestion,

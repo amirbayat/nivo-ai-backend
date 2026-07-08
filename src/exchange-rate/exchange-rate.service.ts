@@ -3,9 +3,16 @@ import { ConfigService } from '@nestjs/config'
 import { RedisService } from '../redis/redis.service'
 
 const REDIS_KEY = 'exchange:usdt_rial'
+const REDIS_UPDATED_AT_KEY = 'exchange:usdt_rial:updated_at'
 const REFRESH_INTERVAL_MS = 5 * 60 * 1000 // 5 minutes
 const API_URL = 'https://api.tetherland.com/currencies'
 const FALLBACK_RATE_KEY = 'USD_TO_RIAL'
+
+export interface RateInfo {
+  rial: number
+  updatedAt: string | null // null یعنی هیچ‌وقت رفرش زنده موفق نشده و مقدار fallback است
+  source: 'live' | 'fallback'
+}
 
 @Injectable()
 export class ExchangeRateService implements OnModuleInit, OnModuleDestroy {
@@ -36,6 +43,17 @@ export class ExchangeRateService implements OnModuleInit, OnModuleDestroy {
     return this.fallbackRate
   }
 
+  // برای نمایش «آخرین بروزرسانی نرخ دلار» در پنل ادمین — چون getUsdtRial() فقط
+  // عدد رو برمی‌گردونه و به‌صورت شفاف نمی‌گه از کش زنده استفاده شده یا از fallback ثابت
+  async getRateInfo(): Promise<RateInfo> {
+    const [cached, updatedAt] = await Promise.all([
+      this.redis.get(REDIS_KEY),
+      this.redis.get(REDIS_UPDATED_AT_KEY),
+    ])
+    if (cached) return { rial: Number(cached), updatedAt: updatedAt ?? null, source: 'live' }
+    return { rial: this.fallbackRate, updatedAt: null, source: 'fallback' }
+  }
+
   private async refresh(): Promise<void> {
     try {
       const res = await fetch(API_URL)
@@ -51,7 +69,10 @@ export class ExchangeRateService implements OnModuleInit, OnModuleDestroy {
 
       // تترلند قیمت را به تومان برمی‌گرداند — برای ذخیره‌ی واقعاً ریالی در ۱۰ ضرب می‌شود
       const priceRial = price * 10
-      await this.redis.set(REDIS_KEY, String(priceRial), 'EX', 600) // 10 min TTL
+      await Promise.all([
+        this.redis.set(REDIS_KEY, String(priceRial), 'EX', 600), // 10 min TTL
+        this.redis.set(REDIS_UPDATED_AT_KEY, new Date().toISOString(), 'EX', 600),
+      ])
       this.logger.log(`USDT/Rial updated: ${priceRial.toLocaleString()}`)
     } catch (err) {
       this.logger.warn(`Exchange rate refresh failed — using cached/fallback. ${err instanceof Error ? err.message : err}`)
