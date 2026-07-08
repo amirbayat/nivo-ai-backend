@@ -157,16 +157,18 @@ export class AdminService {
       this.prisma.dailyUsage.groupBy({
         by: ['userId'],
         where: { date: { gte: startOfMonth } },
-        _sum: { costRial: true },
+        _sum: { costRial: true, costUsdMicros: true },
       }),
     ])
 
     const revenueMap = new Map(monthlyRevenue.map(r => [r.userId, r._sum.amount ?? 0]))
     const costMap = new Map(monthlyCost.map(r => [r.userId, r._sum.costRial ?? 0]))
+    const costUsdMap = new Map(monthlyCost.map(r => [r.userId, r._sum.costUsdMicros ?? 0]))
 
     const enriched = users.map(u => {
       const charged = revenueMap.get(u.id) ?? 0
       const aiCost = costMap.get(u.id) ?? 0
+      const aiCostUsd = (costUsdMap.get(u.id) ?? 0) / 1_000_000
       const monthlyBudget = Math.floor((u.subscription?.plan.priceMonthly ?? 0) * 0.7)
       const expectedByNow = Math.floor((monthlyBudget * daysPassed) / daysInMonth)
       const ratio = expectedByNow > 0 ? aiCost / expectedByNow : 0
@@ -178,7 +180,7 @@ export class AdminService {
         else category = 'light'
       }
 
-      return { ...u, chargedThisMonth: charged, aiCostThisMonth: aiCost, expectedByNow, category }
+      return { ...u, chargedThisMonth: charged, aiCostThisMonth: aiCost, aiCostUsdThisMonth: aiCostUsd, expectedByNow, category }
     })
 
     return { users: enriched, total, page, limit }

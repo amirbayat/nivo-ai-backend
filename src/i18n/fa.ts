@@ -53,6 +53,9 @@ export const fa = {
     gatewayRequired: 'انتخاب درگاه پرداخت الزامی است',
     gatewayNotEnabled: 'این درگاه پرداخت فعال نیست',
   },
+  invoice: {
+    notFound: 'فاکتور یافت نشد',
+  },
   subscription: {
     activated: 'اشتراک شما فعال شد',
     alreadyActive: 'شما از قبل اشتراک فعال دارید',

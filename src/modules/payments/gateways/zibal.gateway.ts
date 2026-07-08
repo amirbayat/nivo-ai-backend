@@ -32,7 +32,10 @@ export class ZibalGateway implements PaymentGateway {
   private readonly gatewayUrl = 'https://gateway.zibal.ir/start'
 
   constructor(private readonly config: ConfigService) {
-    this.merchantId = this.config.get<string>('ZIBAL_MERCHANT_ID')!
+    // طبق راهنمای پشتیبانی زیبال: برای تست درگاه بدون merchant واقعی، مقدار merchant را «zibal» بگذارید
+    // (حتماً باید lowercase باشد — با تست مستقیم روی API واقعی تأیید شد؛ "ZIBAL" با result:104 رد می‌شود)
+    const isTestMode = this.config.get<string>('ZIBAL_TEST', 'false') === 'true'
+    this.merchantId = isTestMode ? 'zibal' : this.config.get<string>('ZIBAL_MERCHANT_ID')!
   }
 
   async createPayment({ amount, description, callbackUrl, mobile }: CreatePaymentParams): Promise<CreatePaymentResult> {

@@ -19,6 +19,7 @@ model User {
   messages       Message[]
   subscription   Subscription?
   payments       Payment[]
+  invoices       Invoice[]
   refreshTokens  RefreshToken[]
   dailyUsages    DailyUsage[]
   feedbacks      Feedback[]
@@ -150,8 +151,9 @@ model Payment {
   createdAt   DateTime        @default(now())
   updatedAt   DateTime        @updatedAt
 
-  user User @relation(fields: [userId], references: [id])
-  plan Plan @relation(fields: [planId], references: [id])
+  user    User     @relation(fields: [userId], references: [id])
+  plan    Plan     @relation(fields: [planId], references: [id])
+  invoice Invoice?
 
   @@index([userId])
   @@map("payments")
@@ -162,6 +164,29 @@ enum PaymentStatus {
   COMPLETED
   FAILED
   REFUNDED
+}
+
+// فقط برای پرداخت‌های COMPLETED صادر می‌شود — رسید داخلی، نه فاکتور رسمی سامانه‌ی مودیان
+// (آن بخش موضوع حقوقی/مالیاتی جداست و در این نسخه پیاده‌سازی نشده)
+model Invoice {
+  id         String   @id @default(uuid())
+  number     Int      @unique @default(autoincrement())
+  paymentId  String   @unique
+  userId     String
+  planName   String
+  amount     Int // ریال — مبلغ نهایی پرداخت‌شده
+  taxAmount  Int      @default(0) // ریال — رزرو برای مالیات بر ارزش افزوده در آینده، فعلاً محاسبه نمی‌شود
+  provider   PaymentProvider
+  refId      String?
+  buyerName  String?
+  buyerPhone String
+  issuedAt   DateTime @default(now())
+
+  payment Payment @relation(fields: [paymentId], references: [id])
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@map("invoices")
 }
 
 enum PaymentProvider {

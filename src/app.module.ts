@@ -9,6 +9,7 @@ import { PlansModule } from './modules/plans/plans.module'
 import { ConversationsModule } from './modules/conversations/conversations.module'
 import { ChatModule } from './modules/chat/chat.module'
 import { PaymentsModule } from './modules/payments/payments.module'
+import { InvoicesModule } from './modules/invoices/invoices.module'
 import { SubscriptionsModule } from './modules/subscriptions/subscriptions.module'
 import { AdminModule } from './modules/admin/admin.module'
 import { UsersModule } from './modules/users/users.module'
@@ -33,6 +34,7 @@ import { QueueModule } from './queue/queue.module'
     ConversationsModule,
     ChatModule,
     PaymentsModule,
+    InvoicesModule,
     SubscriptionsModule,
     AdminModule,
     UsersModule,

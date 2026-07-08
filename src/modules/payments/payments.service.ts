@@ -68,12 +68,13 @@ export class PaymentsService {
 
     const payment = await this.prisma.payment.findUnique({
       where: { providerRef },
-      include: { plan: true },
+      include: { plan: true, user: true },
     })
 
     if (!payment) throw new NotFoundException(fa.payment.notFound)
     if (payment.status === 'COMPLETED') {
-      return { redirect: `${appUrl}/payment?status=success&refId=${payment.refId}` }
+      const invoice = await this.prisma.invoice.findUnique({ where: { paymentId: payment.id } })
+      return { redirect: `${appUrl}/payment?status=success&refId=${payment.refId}&invoiceId=${invoice?.id ?? ''}` }
     }
     if (payment.status !== 'PENDING') throw new BadRequestException(fa.payment.invalidStatus)
 
@@ -87,7 +88,7 @@ export class PaymentsService {
     const now = new Date()
     const periodEnd = new Date(now.getTime() + SUBSCRIPTION_DAYS * 24 * 60 * 60 * 1000)
 
-    await this.prisma.$transaction(async (tx) => {
+    const invoice = await this.prisma.$transaction(async (tx) => {
       await tx.payment.update({
         where: { providerRef },
         data: { status: 'COMPLETED', refId: refId! },
@@ -111,11 +112,24 @@ export class PaymentsService {
           cancelAtPeriodEnd: false,
         },
       })
+
+      return tx.invoice.create({
+        data: {
+          paymentId: payment.id,
+          userId: payment.userId,
+          planName: payment.plan.name,
+          amount: payment.amount,
+          provider: payment.provider,
+          refId: refId!,
+          buyerName: payment.user.name,
+          buyerPhone: payment.user.phone,
+        },
+      })
     })
 
     await this.tokenService.invalidatePlanCache(payment.userId)
 
-    return { redirect: `${appUrl}/payment?status=success&refId=${refId}` }
+    return { redirect: `${appUrl}/payment?status=success&refId=${refId}&invoiceId=${invoice.id}` }
   }
 
   findAll(userId: string) {

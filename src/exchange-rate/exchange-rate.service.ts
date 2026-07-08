@@ -17,7 +17,8 @@ export class ExchangeRateService implements OnModuleInit, OnModuleDestroy {
     private readonly redis: RedisService,
     private readonly config: ConfigService,
   ) {
-    this.fallbackRate = Number(this.config.get(FALLBACK_RATE_KEY, '900000'))
+    // USD_TO_RIAL به‌صورت تومانی تنظیم می‌شود (مثلاً ۹۰۰٬۰۰۰ تومان) — در ۱۰ ضرب می‌شود تا واقعاً ریال باشد
+    this.fallbackRate = Number(this.config.get(FALLBACK_RATE_KEY, '900000')) * 10
   }
 
   async onModuleInit() {
@@ -48,8 +49,10 @@ export class ExchangeRateService implements OnModuleInit, OnModuleDestroy {
       const price = body?.data?.currencies?.USDT?.price
       if (!price || price <= 0) throw new Error('invalid price in response')
 
-      await this.redis.set(REDIS_KEY, String(price), 'EX', 600) // 10 min TTL
-      this.logger.log(`USDT/Rial updated: ${price.toLocaleString()}`)
+      // تترلند قیمت را به تومان برمی‌گرداند — برای ذخیره‌ی واقعاً ریالی در ۱۰ ضرب می‌شود
+      const priceRial = price * 10
+      await this.redis.set(REDIS_KEY, String(priceRial), 'EX', 600) // 10 min TTL
+      this.logger.log(`USDT/Rial updated: ${priceRial.toLocaleString()}`)
     } catch (err) {
       this.logger.warn(`Exchange rate refresh failed — using cached/fallback. ${err instanceof Error ? err.message : err}`)
     }
