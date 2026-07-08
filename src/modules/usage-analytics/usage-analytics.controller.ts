@@ -55,6 +55,15 @@ export class UsageAnalyticsController {
     return this.analytics.getUsers(parseDateRange(from, to), segment)
   }
 
+  @Get('users/:userId/models')
+  getUserModelBreakdown(
+    @Param('userId') userId: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    return this.analytics.getUserModelBreakdown(userId, parseDateRange(from, to))
+  }
+
   @Get('users/export')
   async exportUsers(
     @Res() res: Response,

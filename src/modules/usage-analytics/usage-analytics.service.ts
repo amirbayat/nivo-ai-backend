@@ -124,6 +124,8 @@ export class UsageAnalyticsService {
     const totalOutputTokens = modelBreakdown.reduce((s, m) => s + m.tokensOutput, 0)
     const totalInputCostUsd = modelBreakdown.reduce((s, m) => s + m.costInputUsd, 0)
     const totalOutputCostUsd = modelBreakdown.reduce((s, m) => s + m.costOutputUsd, 0)
+    const totalInputCostRial = modelBreakdown.reduce((s, m) => s + m.costInputRial, 0)
+    const totalOutputCostRial = modelBreakdown.reduce((s, m) => s + m.costOutputRial, 0)
 
     return {
       totalTokens,
@@ -138,6 +140,8 @@ export class UsageAnalyticsService {
       avgOutputTokensPerMessage: messagesWithModel > 0 ? Math.round(totalOutputTokens / messagesWithModel) : 0,
       avgInputPricePerMillionUsd: totalInputTokens > 0 ? (totalInputCostUsd / totalInputTokens) * 1_000_000 : 0,
       avgOutputPricePerMillionUsd: totalOutputTokens > 0 ? (totalOutputCostUsd / totalOutputTokens) * 1_000_000 : 0,
+      avgInputPricePerMillionRial: totalInputTokens > 0 ? Math.round((totalInputCostRial / totalInputTokens) * 1_000_000) : 0,
+      avgOutputPricePerMillionRial: totalOutputTokens > 0 ? Math.round((totalOutputCostRial / totalOutputTokens) * 1_000_000) : 0,
       topModel: modelBreakdown[0]?.model ?? null,
     }
   }
@@ -186,10 +190,15 @@ export class UsageAnalyticsService {
 
   // هزینه/توکن دقیقاً از Message.costRial/costUsdMicros خوانده می‌شود — همان
   // عددی که لحظه‌ی ایجاد پیام محاسبه شده، نه بازمحاسبه با قیمت/نرخ فعلی
-  async getModelBreakdown(range: DateRange) {
+  async getModelBreakdown(range: DateRange, userId?: string) {
     const rows = await this.prisma.message.groupBy({
       by: ['model'],
-      where: { role: 'ASSISTANT', model: { not: null }, createdAt: { gte: range.from, lte: range.to } },
+      where: {
+        role: 'ASSISTANT',
+        model: { not: null },
+        createdAt: { gte: range.from, lte: range.to },
+        ...(userId ? { userId } : {}),
+      },
       _sum: {
         tokensInput: true,
         tokensOutput: true,
@@ -204,23 +213,36 @@ export class UsageAnalyticsService {
       .map((r) => {
         const tokensInput = r._sum.tokensInput ?? 0
         const tokensOutput = r._sum.tokensOutput ?? 0
+        const costRial = r._sum.costRial ?? 0
+        const costUsd = (r._sum.costUsdMicros ?? 0) / 1_000_000
         const costInputUsd = (r._sum.costInputUsdMicros ?? 0) / 1_000_000
         const costOutputUsd = (r._sum.costOutputUsdMicros ?? 0) / 1_000_000
+        // سهم ریالی ورودی/خروجی مستقیم ذخیره نشده — از همون نسبت دلاری (که با نرخ
+        // لحظه‌ی ثبت پیام محاسبه شده) روی costRial واقعی (persisted) تسهیم می‌شود،
+        // نه با نرخ ارز فعلی بازمحاسبه
+        const costInputRial = costUsd > 0 ? Math.round(costRial * (costInputUsd / costUsd)) : 0
+        const costOutputRial = costUsd > 0 ? Math.round(costRial * (costOutputUsd / costUsd)) : 0
         return {
           model: r.model as string,
           messages: r._count.id,
           tokensInput,
           tokensOutput,
-          costRial: r._sum.costRial ?? 0,
-          costUsd: (r._sum.costUsdMicros ?? 0) / 1_000_000,
+          costRial,
+          costUsd,
           costInputUsd,
           costOutputUsd,
+          costInputRial,
+          costOutputRial,
           // میانگین وزنیِ قیمت هر میلیون توکن برای همین مدل در این بازه
           avgInputPricePerMillionUsd: tokensInput > 0 ? (costInputUsd / tokensInput) * 1_000_000 : 0,
           avgOutputPricePerMillionUsd: tokensOutput > 0 ? (costOutputUsd / tokensOutput) * 1_000_000 : 0,
         }
       })
       .sort((a, b) => b.costRial - a.costRial)
+  }
+
+  getUserModelBreakdown(userId: string, range: DateRange) {
+    return this.getModelBreakdown(range, userId)
   }
 
   async getTopicBreakdown(range: DateRange) {
