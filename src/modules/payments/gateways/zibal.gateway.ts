@@ -1,4 +1,4 @@
-import { Injectable, InternalServerErrorException } from '@nestjs/common'
+import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { PaymentProvider } from '@prisma/client'
 import { fa } from '../../../i18n/fa'
@@ -10,6 +10,7 @@ import {
   VerifyPaymentParams,
   VerifyPaymentResult,
 } from './payment-gateway.interface'
+import { maskSecret } from './redact'
 
 interface ZibalRequestResponse {
   result: number
@@ -27,6 +28,7 @@ interface ZibalVerifyResponse {
 export class ZibalGateway implements PaymentGateway {
   readonly name = PaymentProvider.ZIBAL
 
+  private readonly logger = new Logger(ZibalGateway.name)
   private readonly merchantId: string
   private readonly baseUrl = 'https://gateway.zibal.ir/v1'
   private readonly gatewayUrl = 'https://gateway.zibal.ir/start'
@@ -39,19 +41,23 @@ export class ZibalGateway implements PaymentGateway {
   }
 
   async createPayment({ amount, description, callbackUrl, mobile }: CreatePaymentParams): Promise<CreatePaymentResult> {
+    const body = {
+      merchant: this.merchantId,
+      amount,
+      callbackUrl,
+      description,
+      ...(mobile ? { mobile } : {}),
+    }
+    this.logger.log(`request → ${JSON.stringify({ ...body, merchant: maskSecret(body.merchant) })}`)
+
     const res = await fetch(`${this.baseUrl}/request`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({
-        merchant: this.merchantId,
-        amount,
-        callbackUrl,
-        description,
-        ...(mobile ? { mobile } : {}),
-      }),
+      body: JSON.stringify(body),
     })
 
     const json = (await res.json()) as ZibalRequestResponse
+    this.logger.log(`request ← status=${res.status} body=${JSON.stringify(json)}`)
 
     if (!res.ok || json.result !== 100 || !json.trackId) {
       throw new InternalServerErrorException(fa.payment.gatewayError)
@@ -65,16 +71,17 @@ export class ZibalGateway implements PaymentGateway {
 
   // نکته: زیبال هم مثل وندار مبلغ را در verify نمی‌گیرد (فقط merchant + trackId)
   async verifyPayment({ providerRef }: VerifyPaymentParams): Promise<VerifyPaymentResult> {
+    const body = { merchant: this.merchantId, trackId: Number(providerRef) }
+    this.logger.log(`verify → ${JSON.stringify({ ...body, merchant: maskSecret(body.merchant) })}`)
+
     const res = await fetch(`${this.baseUrl}/verify`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({
-        merchant: this.merchantId,
-        trackId: Number(providerRef),
-      }),
+      body: JSON.stringify(body),
     })
 
     const json = (await res.json()) as ZibalVerifyResponse
+    this.logger.log(`verify ← status=${res.status} body=${JSON.stringify(json)}`)
 
     // result 100 = موفق، 201 = قبلاً تایید شده (idempotent)
     if (!res.ok || (json.result !== 100 && json.result !== 201) || !json.refNumber) {
@@ -85,6 +92,7 @@ export class ZibalGateway implements PaymentGateway {
   }
 
   parseCallback(query: Record<string, string>): CallbackQuery {
+    this.logger.log(`callback query → ${JSON.stringify(query)}`)
     return { providerRef: query.trackId, success: query.success === '1' || query.success === '2' }
   }
 }
