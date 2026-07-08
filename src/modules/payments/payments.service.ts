@@ -25,7 +25,11 @@ export class PaymentsService {
     if (!plan.isActive) throw new BadRequestException(fa.plans.notActive)
 
     const gateway = this.registry.resolve(dto.gateway)
-    const callbackUrl = `${this.config.get('APP_URL')}/api/v1/payments/callback/${gateway.name.toLowerCase()}`
+    // نکته: این باید آدرس خودِ بک‌اند باشد (API_URL)، نه فرانت (APP_URL) —
+    // چون این آدرس رو مستقیم درگاه پرداخت صدا می‌زند. روی پروداکشن این دو دامنه‌ی متفاوتند
+    // (nivoai.ir برای فرانت، api.nivoai.ir برای بک‌اند)؛ اگر اشتباه بشوند، callback درگاه
+    // به SPA فرانت می‌خورد و به‌جای verify شدن، به‌خاطر catch-all روتر به صفحه‌ی اصلی می‌رود.
+    const callbackUrl = `${this.config.get('API_URL')}/api/v1/payments/callback/${gateway.name.toLowerCase()}`
 
     const { providerRef, paymentUrl } = await gateway.createPayment({
       amount: plan.priceMonthly,

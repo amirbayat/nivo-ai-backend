@@ -17,6 +17,7 @@ class EnvironmentVariables {
   @IsString() KAVENEGAR_API_KEY: string
 
   @IsUrl({ require_tld: false }) APP_URL: string
+  @IsUrl({ require_tld: false }) API_URL: string
 
   @IsInt() @Min(1) PORT: number = 3001
 }
