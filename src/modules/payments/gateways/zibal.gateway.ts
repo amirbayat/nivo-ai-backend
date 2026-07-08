@@ -20,7 +20,7 @@ interface ZibalRequestResponse {
 
 interface ZibalVerifyResponse {
   result: number
-  refNumber?: string
+  refNumber?: string | null
   message?: string
 }
 
@@ -84,11 +84,13 @@ export class ZibalGateway implements PaymentGateway {
     this.logger.log(`verify ← status=${res.status} body=${JSON.stringify(json)}`)
 
     // result 100 = موفق، 201 = قبلاً تایید شده (idempotent)
-    if (!res.ok || (json.result !== 100 && json.result !== 201) || !json.refNumber) {
+    if (!res.ok || (json.result !== 100 && json.result !== 201)) {
       return { success: false, refId: null }
     }
 
-    return { success: true, refId: String(json.refNumber) }
+    // نکته: توی حالت تست (merchant=zibal) بانک واقعی درگیر نیست، پس refNumber همیشه
+    // null برمی‌گرده حتی وقتی result=100 (یعنی واقعاً موفق بوده) — نباید این رو fail حساب کرد
+    return { success: true, refId: json.refNumber ? String(json.refNumber) : null }
   }
 
   parseCallback(query: Record<string, string>): CallbackQuery {
