@@ -39,8 +39,8 @@ const plans = [
     sortOrder: 0,
   },
   {
-    name: 'نقره‌ای',
-    priceMonthly: 1_500_000,
+    name: 'اکو',
+    priceMonthly: 1_990_000, // 199,000 Tomans in Rials
     dailyFreeTokens: 0,
     monthlyTotalTokens: 500_000,
     allowedModels: ['openai/gpt-4o-mini', 'openai/gpt-4o'],
@@ -57,8 +57,8 @@ const plans = [
     sortOrder: 1,
   },
   {
-    name: 'طلایی',
-    priceMonthly: 3_500_000,
+    name: 'پلاس',
+    priceMonthly: 4_990_000, // 499,000 Tomans in Rials
     dailyFreeTokens: 0,
     monthlyTotalTokens: 2_000_000,
     allowedModels: ['openai/gpt-4o-mini', 'openai/gpt-4o', 'openai/gpt-4.1'],
@@ -115,8 +115,8 @@ async function main() {
   // ─── ادمین اصلی ──────────────────────────────────────────────
   console.log('\n👤 Creating super-admin...')
 
-  const goldenPlan = await prisma.plan.findUnique({ where: { name: 'طلایی' } })
-  if (!goldenPlan) throw new Error('طلایی plan not found after seeding!')
+  const goldenPlan = await prisma.plan.findUnique({ where: { name: 'پلاس' } })
+  if (!goldenPlan) throw new Error('پلاس plan not found after seeding!')
 
   const admin = await prisma.user.upsert({
     where: { phone: ADMIN_PHONE },
@@ -130,7 +130,7 @@ async function main() {
   })
   console.log(`  ✓ Admin user: ${admin.phone} (id: ${admin.id})`)
 
-  // اشتراک طلایی بدون تاریخ انقضا (۱۰۰ سال)
+  // اشتراک پلاس بدون تاریخ انقضا (۱۰۰ سال)
   const periodStart = new Date()
   const periodEnd = new Date()
   periodEnd.setFullYear(periodEnd.getFullYear() + 100)
@@ -151,7 +151,7 @@ async function main() {
       periodEnd,
     },
   })
-  console.log(`  ✓ Admin subscription: طلایی (active for 100 years)`)
+  console.log(`  ✓ Admin subscription: پلاس (active for 100 years)`)
 
   // کیف پول ادمین
   await prisma.wallet.upsert({

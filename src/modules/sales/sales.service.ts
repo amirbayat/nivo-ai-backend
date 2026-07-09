@@ -30,8 +30,8 @@ const SALES_SYSTEM_PROMPT = `تو دستیار فروش هوشمند نیوو ه
 
 ## پلن‌ها:
 - رایگان: ۵ پیام در روز، مدل GPT-4o mini، بدون هزینه — برای تست اولیه
-- نقره‌ای: ۵۰ پیام در روز، GPT-4o mini، ۱۵۰,۰۰۰ تومان ماهانه — برای استفاده روزانه متوسط
-- طلایی: نامحدود، GPT-4o و GPT-4 Turbo (قوی‌ترین مدل‌ها)، ۳۵۰,۰۰۰ تومان ماهانه — برای استفاده حرفه‌ای و روزانه سنگین
+- اکو: ۵۰ پیام در روز، GPT-4o mini، ۱۹۹,۰۰۰ تومان ماهانه — برای استفاده روزانه متوسط
+- پلاس: نامحدود، GPT-4o و GPT-4 Turbo (قوی‌ترین مدل‌ها)، ۴۹۹,۰۰۰ تومان ماهانه — برای استفاده حرفه‌ای و روزانه سنگین
 
 ## لحن و سبک:
 - صمیمی، مثل یه دوست متخصص که دلسوزانه کمک می‌کند
@@ -110,8 +110,8 @@ export class SalesService {
   }
 
   private extractPlan(text: string): string | undefined {
-    if (text.includes('طلایی')) return 'gold'
-    if (text.includes('نقره‌ای') || text.includes('نقره ای')) return 'silver'
+    if (text.includes('پلاس')) return 'gold'
+    if (text.includes('اکو')) return 'silver'
     if (text.includes('رایگان')) return 'free'
     return undefined
   }

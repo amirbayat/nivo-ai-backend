@@ -9,12 +9,32 @@ import { fa } from '../i18n/fa'
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const Kavenegar = require('kavenegar')
 
+// خطاهای شبکه/DNS موقتی (نه خطای واقعی کاوه‌نگار) — با یک یا دو تلاش مجدد معمولاً برطرف می‌شوند
+const TRANSIENT_ERROR_CODES = new Set([
+  'ENOTFOUND',
+  'ECONNRESET',
+  'ETIMEDOUT',
+  'ECONNREFUSED',
+  'EAI_AGAIN',
+])
+
+function isTransientNetworkError(response: any): boolean {
+  const code = response?.error?.code ?? response?.error
+  return typeof code === 'string' && TRANSIENT_ERROR_CODES.has(code)
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
 @Injectable()
 export class SmsService {
   private readonly logger = new Logger(SmsService.name)
   private readonly api: any
   private readonly template: string
   private readonly devMode: boolean
+  private readonly maxRetries = 2
+  private readonly retryDelayMs = 800
 
   constructor(private readonly config: ConfigService) {
     const apiKey = this.config.get<string>('KAVENEGAR_API_KEY', '')
@@ -26,6 +46,32 @@ export class SmsService {
     }
   }
 
+  private callVerifyLookup(params: Record<string, unknown>): Promise<{ status: number; response: any }> {
+    return new Promise(resolve => {
+      this.api.VerifyLookup(params, (response: any, status: number) => resolve({ status, response }))
+    })
+  }
+
+  private async sendWithRetry(params: Record<string, unknown>, logLabel: string): Promise<void> {
+    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+      const { status, response } = await this.callVerifyLookup(params)
+
+      if (status === 200) {
+        this.logger.log(`${logLabel} sent to ${params['receptor']}`)
+        return
+      }
+
+      const canRetry = attempt < this.maxRetries && isTransientNetworkError(response)
+      this.logger.error(
+        `Kavenegar error — status: ${status}${canRetry ? ` (retrying, attempt ${attempt + 1}/${this.maxRetries})` : ''}`,
+        response,
+      )
+
+      if (!canRetry) throw new InternalServerErrorException(fa.sms.sendFailed)
+      await sleep(this.retryDelayMs * (attempt + 1))
+    }
+  }
+
   async sendOtp(receptor: string, code: string): Promise<void> {
     if (this.devMode) {
       this.logger.warn(
@@ -34,20 +80,7 @@ export class SmsService {
       return
     }
 
-    await new Promise<void>((resolve, reject) => {
-      this.api.VerifyLookup(
-        { receptor, token: code, template: this.template },
-        (response: any, status: number) => {
-          if (status === 200) {
-            this.logger.log(`OTP sent to ${receptor}`)
-            resolve()
-          } else {
-            this.logger.error(`Kavenegar error — status: ${status}`, response)
-            reject(new InternalServerErrorException(fa.sms.sendFailed))
-          }
-        },
-      )
-    })
+    await this.sendWithRetry({ receptor, token: code, template: this.template }, 'OTP')
   }
 
   /**
@@ -69,19 +102,6 @@ export class SmsService {
       return
     }
 
-    await new Promise<void>((resolve, reject) => {
-      this.api.VerifyLookup(
-        { receptor, template, ...tokens },
-        (response: any, status: number) => {
-          if (status === 200) {
-            this.logger.log(`SMS (${template}) sent to ${receptor}`)
-            resolve()
-          } else {
-            this.logger.error(`Kavenegar error — status: ${status}`, response)
-            reject(new InternalServerErrorException(fa.sms.sendFailed))
-          }
-        },
-      )
-    })
+    await this.sendWithRetry({ receptor, template, ...tokens }, `SMS (${template})`)
   }
 }

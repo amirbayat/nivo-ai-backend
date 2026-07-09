@@ -39,7 +39,7 @@ const MODELS = [
     tokenizerFamily: 'cl100k_base',
   },
   {
-    // بود در allowedModels پلن طلایی (plans.seed.ts) ولی تا قبل از این تغییر
+    // بود در allowedModels پلن پلاس (plans.seed.ts) ولی تا قبل از این تغییر
     // اصلاً در AiModel نبود — یعنی هم قیمتش هاردکد گمشده حساب می‌شد، هم
     // tier نداشت (docs/PRD-global-budget-gateway.md بخش ۹.۳)
     name: 'openai/gpt-4.1',

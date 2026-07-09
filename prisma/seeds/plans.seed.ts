@@ -22,8 +22,8 @@ const plans = [
     rollingWindowHours: 3,
   },
   {
-    name: 'نقره‌ای',
-    priceMonthly: 1_500_000, // 150,000 Tomans in Rials
+    name: 'اکو',
+    priceMonthly: 1_990_000, // 199,000 Tomans in Rials
     dailyFreeTokens: 0,
     monthlyTotalTokens: 500_000,
     allowedModels: ['openai/gpt-4o-mini', 'openai/gpt-4o'],
@@ -39,8 +39,8 @@ const plans = [
     rollingWindowHours: 3,
   },
   {
-    name: 'طلایی',
-    priceMonthly: 3_500_000, // 350,000 Tomans in Rials
+    name: 'پلاس',
+    priceMonthly: 4_990_000, // 499,000 Tomans in Rials
     dailyFreeTokens: 0,
     monthlyTotalTokens: 2_000_000,
     allowedModels: ['openai/gpt-4o-mini', 'openai/gpt-4o', 'openai/gpt-4.1'],
