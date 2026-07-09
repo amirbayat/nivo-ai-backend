@@ -47,6 +47,9 @@ model Plan {
   features            Json    @default("{}")
   isActive            Boolean @default(true)
   sortOrder           Int     @default(0)
+  isPopular           Boolean @default(false) // نشان «محبوب‌ترین» روی کارت پلن
+  featuredModels      Json    @default("[]")  // string[] — زیرمجموعه‌ی ترتیب‌دار allowedModels — مدل‌های ویژه‌ی این پلن (منبع دراپ‌داون چت + چیپ‌های کارت)
+  featuredModelsCount Int     @default(5)     // چند مورد از featuredModels روی کارت (قبل از «N مدل دیگر») نشان داده شود
   maxInputTokens        Int     @default(300)
   outputThrottleSteps   Json    @default("[]")
   dailyMessageLimit     Int?

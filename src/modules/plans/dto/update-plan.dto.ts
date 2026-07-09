@@ -41,6 +41,20 @@ export class UpdatePlanDto {
   sortOrder?: number
 
   @IsOptional()
+  @IsBoolean({ message: fa.validation.mustBeBoolean })
+  isPopular?: boolean
+
+  @IsOptional()
+  @IsArray({ message: fa.validation.mustBeArray })
+  @IsString({ each: true, message: fa.validation.required })
+  featuredModels?: string[]
+
+  @IsOptional()
+  @IsInt({ message: fa.validation.mustBeNumber })
+  @Min(1, { message: fa.validation.numberPositive })
+  featuredModelsCount?: number
+
+  @IsOptional()
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(1, { message: fa.validation.numberPositive })
   dailyMessageLimit?: number | null

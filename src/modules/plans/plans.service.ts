@@ -60,6 +60,9 @@ export class PlansService {
         isActive: dto.isActive,
         sortOrder: dto.sortOrder,
         dailyMessageLimit: dto.dailyMessageLimit ?? null,
+        ...(dto.isPopular !== undefined && { isPopular: dto.isPopular }),
+        ...(dto.featuredModels !== undefined && { featuredModels: dto.featuredModels as Prisma.InputJsonValue }),
+        ...(dto.featuredModelsCount !== undefined && { featuredModelsCount: dto.featuredModelsCount }),
         ...(dto.maxInputTokens !== undefined && { maxInputTokens: dto.maxInputTokens }),
         ...(dto.outputThrottleSteps !== undefined && {
           outputThrottleSteps: dto.outputThrottleSteps as Prisma.InputJsonValue,
@@ -75,7 +78,7 @@ export class PlansService {
 
   async update(id: string, dto: UpdatePlanDto) {
     await this.findOne(id)
-    const { features, outputThrottleSteps, ...rest } = dto
+    const { features, outputThrottleSteps, featuredModels, ...rest } = dto
     const updated = await this.prisma.plan.update({
       where: { id },
       data: {
@@ -84,6 +87,7 @@ export class PlansService {
         ...(outputThrottleSteps !== undefined && {
           outputThrottleSteps: outputThrottleSteps as Prisma.InputJsonValue,
         }),
+        ...(featuredModels !== undefined && { featuredModels: featuredModels as Prisma.InputJsonValue }),
       },
     })
     // invalidate Redis plan cache for every subscriber
