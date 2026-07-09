@@ -3,12 +3,13 @@ import {
   ForbiddenException,
   HttpException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import * as crypto from 'crypto'
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
-import { streamText, generateText } from 'ai'
+import { streamText, generateText, APICallError } from 'ai'
 import type { ModelMessage, UserModelMessage } from 'ai'
 import { PrismaService } from '../../prisma/prisma.service'
 import { RedisService } from '../../redis/redis.service'
@@ -45,6 +46,7 @@ function resolveModelId(id: string): string {
 
 @Injectable()
 export class ChatService {
+  private readonly logger = new Logger(ChatService.name)
   private readonly provider
 
   constructor(
@@ -406,8 +408,15 @@ export class ChatService {
 
       res.write(`data: [DONE]\n\n`)
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : fa.chat.streamError
-      res.write(`data: ${JSON.stringify({ error: message })}\n\n`)
+      const isModelError = APICallError.isInstance(err)
+      const message = isModelError ? fa.chat.modelUnavailable : fa.chat.streamError
+      this.logger.error(
+        `streamChat failed (model=${modelId}): ${err instanceof Error ? err.message : String(err)}`,
+        err instanceof Error ? err.stack : undefined,
+      )
+      res.write(
+        `data: ${JSON.stringify({ error: message, code: isModelError ? 'model_unavailable' : 'stream_error' })}\n\n`,
+      )
     } finally {
       res.end()
     }
