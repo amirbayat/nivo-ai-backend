@@ -79,18 +79,42 @@ export class SalesKbService {
   /** برای sales.service.ts — روی هر پیام کاربر صدا زده می‌شود. */
   async retrieveRelevant(userText: string): Promise<{ userMessage: string; assistantReply: string }[]> {
     const activeModel = await this.getActiveEmbeddingModel()
-    const entries = (await this.getActiveEntriesCached()).filter(e => e.embeddingModel === activeModel)
-    if (entries.length === 0) return []
+    const allCached = await this.getActiveEntriesCached()
+    const entries = allCached.filter(e => e.embeddingModel === activeModel)
+    const staleCount = allCached.length - entries.length
+
+    if (entries.length === 0) {
+      this.logger.log(
+        `[sales-kb.retrieve] query="${userText}" model=${activeModel} → هیچ نمونه‌ی فعالِ هم‌مدل نیست ` +
+          `(${allCached.length} نمونه‌ی فعال کل, ${staleCount} با مدل قدیمی/ناهماهنگ) → بدون بلوک KB`,
+      )
+      return []
+    }
 
     const embedded = await this.computeEmbedding(userText, activeModel)
-    if (!embedded) return [] // اگر تماس embedding شکست خورد، پاسخ اصلی بدون بلوک KB ادامه پیدا می‌کند
+    if (!embedded) {
+      this.logger.warn(`[sales-kb.retrieve] query="${userText}" → محاسبه‌ی embedding شکست خورد، بدون بلوک KB ادامه می‌دهیم`)
+      return [] // اگر تماس embedding شکست خورد، پاسخ اصلی بدون بلوک KB ادامه پیدا می‌کند
+    }
 
-    return entries
+    const scored = entries
       .map(entry => ({ entry, score: cosineSimilarity(embedded.embedding, entry.embedding) }))
-      .filter(s => s.score >= SIMILARITY_THRESHOLD)
       .sort((a, b) => b.score - a.score)
-      .slice(0, MAX_RETRIEVED)
-      .map(s => ({ userMessage: s.entry.userMessage, assistantReply: s.entry.assistantReply }))
+
+    const selected = scored.filter(s => s.score >= SIMILARITY_THRESHOLD).slice(0, MAX_RETRIEVED)
+
+    this.logger.log(
+      `[sales-kb.retrieve] query="${userText}" model=${activeModel} ` +
+        `candidates=${entries.length}(${staleCount} stale skipped) threshold=${SIMILARITY_THRESHOLD}\n` +
+        `--- امتیاز همه‌ی کاندیدها (بالا به پایین) ---\n` +
+        scored.map(s => `${s.score >= SIMILARITY_THRESHOLD ? '✅' : '  '} ${s.score.toFixed(4)} — ${s.entry.userMessage}`).join('\n') +
+        `\n--- ${selected.length} مورد انتخاب‌شده و ضمیمه‌شده به system prompt ---\n` +
+        (selected.length
+          ? selected.map(s => `کاربر: ${s.entry.userMessage}\nپاسخ: ${s.entry.assistantReply}`).join('\n---\n')
+          : '(هیچ‌کدام از آستانه بالاتر نرفت — هیچ بلوکی اضافه نمی‌شود)'),
+    )
+
+    return selected.map(s => ({ userMessage: s.entry.userMessage, assistantReply: s.entry.assistantReply }))
   }
 
   /** برای دکمه‌ی «تست بازیابی» در تب پایگاه دانش ادمین — امتیاز خام همه‌ی نمونه‌های فعال را نشان می‌دهد. */
@@ -233,10 +257,11 @@ export class SalesKbService {
         model: this.provider.embeddingModel(modelId),
         value: text,
       })
+      this.logger.log(`[sales-kb.embed] model=${modelId} tokens=${usage.tokens} text="${text}"`)
       this.recordEmbeddingUsage(usage.tokens, modelId).catch(() => {})
       return { embedding }
     } catch (err) {
-      this.logger.error(`embedding computation failed: ${err instanceof Error ? err.message : String(err)}`)
+      this.logger.error(`[sales-kb.embed] model=${modelId} text="${text}" شکست خورد: ${err instanceof Error ? err.message : String(err)}`)
       return null
     }
   }

@@ -1,4 +1,4 @@
-import { Injectable, HttpException } from '@nestjs/common'
+import { Injectable, HttpException, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import { generateText } from 'ai'
@@ -28,6 +28,7 @@ interface DailyUsageDelta {
 
 @Injectable()
 export class SalesService {
+  private readonly logger = new Logger(SalesService.name)
   private readonly provider
 
   constructor(
@@ -73,14 +74,25 @@ export class SalesService {
           .join('\n\n---\n\n')
       : ''
 
+    const finalSystemPrompt = botConfig.contextMd + kbBlock
+    const outgoingMessages = messages.map(m => ({ role: m.role, content: m.content }))
+
+    // لاگ کامل درخواست به لیارا — عمداً log (نه debug)، پیش‌فرض NestJS نشانش می‌دهد.
+    // برای رفع اشکال «آیا کانتکست درست فرستاده می‌شود؟» — بعداً می‌تواند حذف/به‌سطح debug برگردد.
+    this.logger.log(
+      `[sales.chat] sessionId=${dto.sessionId} model=${botConfig.model} kbExamples=${kbExamples.length}\n` +
+        `--- system prompt (${finalSystemPrompt.length} chars) ---\n${finalSystemPrompt}\n` +
+        `--- messages (${outgoingMessages.length}) ---\n${JSON.stringify(outgoingMessages, null, 2)}`,
+    )
+
     let text: string
     let inputTokens = 0
     let outputTokens = 0
     try {
       const result = await generateText({
         model: this.provider(botConfig.model),
-        system: botConfig.contextMd + kbBlock,
-        messages: messages.map(m => ({ role: m.role, content: m.content })),
+        system: finalSystemPrompt,
+        messages: outgoingMessages,
         maxOutputTokens: 400,
       })
       text = result.text
