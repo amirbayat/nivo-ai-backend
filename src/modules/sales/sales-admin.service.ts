@@ -1,7 +1,9 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common'
+import type { SalesKbKind } from '@prisma/client'
 import { PrismaService } from '../../prisma/prisma.service'
 import { SmsService } from '../../sms/sms.service'
 import { SalesConfigService, type UpdatableSalesBotConfig } from './sales-config.service'
+import { SalesKbService, type SalesKbEntryInput, type SalesKbEntryUpdateInput } from './sales-kb.service'
 
 export interface SalesBotAnalyticsOverview {
   totalMessages: number
@@ -28,8 +30,34 @@ export class SalesAdminService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly salesConfig: SalesConfigService,
+    private readonly salesKb: SalesKbService,
     private readonly sms: SmsService,
   ) {}
+
+  // ─── پایگاه دانش (RAG) — docs/PRD-sales-kb-rag-and-plan-context.md بخش الف.۱۰ ──
+  listKbEntries(kind?: string) {
+    return this.salesKb.list(kind as SalesKbKind | undefined)
+  }
+
+  createKbEntry(input: SalesKbEntryInput) {
+    return this.salesKb.create(input)
+  }
+
+  updateKbEntry(id: string, input: SalesKbEntryUpdateInput) {
+    return this.salesKb.update(id, input)
+  }
+
+  deleteKbEntry(id: string) {
+    return this.salesKb.remove(id)
+  }
+
+  bulkImportKbEntries(entries: SalesKbEntryInput[]) {
+    return this.salesKb.bulkImport(entries)
+  }
+
+  testKbRetrieval(sampleMessage: string) {
+    return this.salesKb.testRetrieval(sampleMessage)
+  }
 
   getConfig() {
     return this.salesConfig.getConfig()

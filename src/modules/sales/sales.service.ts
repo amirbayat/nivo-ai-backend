@@ -7,6 +7,7 @@ import { PrismaService } from '../../prisma/prisma.service'
 import { RedisService } from '../../redis/redis.service'
 import { PricingService } from '../usage/pricing.service'
 import { SalesConfigService } from './sales-config.service'
+import { SalesKbService } from './sales-kb.service'
 import type { SalesChatDto, SaveLeadDto } from './dto/sales-chat.dto'
 
 const IRAN_OFFSET_MS = 3.5 * 60 * 60 * 1000
@@ -34,6 +35,7 @@ export class SalesService {
     private readonly redis: RedisService,
     private readonly config: ConfigService,
     private readonly salesConfig: SalesConfigService,
+    private readonly salesKb: SalesKbService,
     private readonly pricingService: PricingService,
   ) {
     this.provider = createOpenAICompatible({
@@ -58,13 +60,26 @@ export class SalesService {
     const isDone = messages.length >= botConfig.maxMessages
     const isFirstMessage = dto.messages.length <= 1
 
+    // بازیابی معنایی (RAG) — docs/PRD-sales-kb-rag-and-plan-context.md بخش الف.۷.
+    // اگر هیچ نمونه‌ای از آستانه‌ی شباهت بالاتر نرفت، هیچ بلوکی اضافه نمی‌شود.
+    const lastUserMessage = [...messages].reverse().find(m => m.role === 'user')?.content
+    const kbExamples = lastUserMessage
+      ? await this.salesKb.retrieveRelevant(lastUserMessage).catch(() => [])
+      : []
+    const kbBlock = kbExamples.length
+      ? '\n\n## نمونه‌های مرتبط با این مکالمه\n\n' +
+        kbExamples
+          .map(e => `کاربر: ${e.userMessage}\nپاسخ: ${e.assistantReply}`)
+          .join('\n\n---\n\n')
+      : ''
+
     let text: string
     let inputTokens = 0
     let outputTokens = 0
     try {
       const result = await generateText({
         model: this.provider(botConfig.model),
-        system: botConfig.contextMd,
+        system: botConfig.contextMd + kbBlock,
         messages: messages.map(m => ({ role: m.role, content: m.content })),
         maxOutputTokens: 400,
       })

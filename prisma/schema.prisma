@@ -542,6 +542,32 @@ model SalesBotDailyUsage {
   @@map("sales_bot_daily_usage")
 }
 
+// پایگاه دانش فروش برای بازیابی معنایی (RAG) — docs/PRD-sales-kb-rag-and-plan-context.md بخش الف
+enum SalesKbKind {
+  EXAMPLE // نمونه‌ی کامل مکالمه (پیام کاربر + پاسخ دستیار)
+  OBJECTION // پاسخ به یک اعتراض مشخص
+  FAQ // سوال متداول با پاسخ ثابت
+  PERSONA_GUIDANCE // راهنمای لحن/تمرکز برای یک پرسونای شغلی
+}
+
+model SalesKbEntry {
+  id             String      @id @default(uuid())
+  kind           SalesKbKind
+  label          String // فقط نمایشی در ادمین، مثلاً "اعتراض قیمت — گرونه"
+  tags           Json        @default("[]") // string[]
+  userMessage    String      @db.Text // نمونه‌ی پیام کاربر — embedding از همین متن ساخته می‌شود
+  assistantReply String      @db.Text // پاسخ نمونه — دقیقاً همین شکل به پرامپت اضافه می‌شود
+  note           String?     @db.Text // توضیح داخلی برای ادمین — هرگز به مدل فرستاده نمی‌شود
+  embedding      Json? // number[] — بردار embedding کش‌شده‌ی userMessage
+  embeddingModel String? // شناسه‌ی مدلی که این بردار را ساخته
+  isActive       Boolean     @default(true)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  @@index([kind])
+  @@map("sales_kb_entries")
+}
+
 // ─── Usage Analytics ────────────────────────────────────────────────────────────
 
 model Topic {
