@@ -73,10 +73,15 @@ export class SalesConfigService {
   }
 
   async updateConfig(data: UpdatableSalesBotConfig): Promise<SalesBotConfig> {
+    // dto class fields با مقدار undefined هم به‌صورت key صریح روی instance ست می‌شوند
+    // (به خاطر useDefineForClassFields در تایپ‌اسکریپت)، پس باید قبل از spread حذف شوند
+    // وگرنه مقادیر پیش‌فرض create را با undefined بازنویسی می‌کنند.
+    const definedData = Object.fromEntries(Object.entries(data).filter(([, v]) => v !== undefined))
+
     const config = await this.prisma.salesBotConfig.upsert({
       where: { id: 'singleton' },
-      create: { id: 'singleton', contextMd: DEFAULT_CONTEXT_MD, discountPromptText: DEFAULT_DISCOUNT_PROMPT, ...data },
-      update: data,
+      create: { id: 'singleton', contextMd: DEFAULT_CONTEXT_MD, discountPromptText: DEFAULT_DISCOUNT_PROMPT, ...definedData },
+      update: definedData,
     })
 
     this.cached = config
