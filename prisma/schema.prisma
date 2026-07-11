@@ -552,6 +552,9 @@ model SalesBotDailyUsage {
   embeddingTokens        Int      @default(0)
   embeddingCostToman     Int      @default(0)
   embeddingCostUsdMicros Int      @default(0)
+  // کلیک روی CTAهای ویجت فروش (هم ردیف پایدار زیر ورودی، هم کارت بزرگ پایان مکالمه)
+  ctaFreeStartClicks     Int      @default(0)
+  ctaPricingClicks       Int      @default(0)
 
   @@unique([date])
   @@index([date])

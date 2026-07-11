@@ -20,6 +20,14 @@ export class SalesChatDto {
   sessionId: string
 }
 
+export const CTA_CLICK_TYPES = ['free_start', 'pricing'] as const
+
+export class TrackCtaClickDto {
+  @IsString()
+  @IsIn(CTA_CLICK_TYPES)
+  type: (typeof CTA_CLICK_TYPES)[number]
+}
+
 export class SaveLeadDto {
   @IsOptional()
   @IsString()

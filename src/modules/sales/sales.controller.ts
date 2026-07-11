@@ -1,7 +1,7 @@
 import { Body, Controller, Post, Req } from '@nestjs/common'
 import type { Request } from 'express'
 import { SalesService } from './sales.service'
-import { SalesChatDto, SaveLeadDto } from './dto/sales-chat.dto'
+import { SalesChatDto, SaveLeadDto, TrackCtaClickDto } from './dto/sales-chat.dto'
 
 @Controller('sales')
 export class SalesController {
@@ -18,5 +18,10 @@ export class SalesController {
   @Post('lead')
   saveLead(@Body() dto: SaveLeadDto) {
     return this.salesService.saveLead(dto)
+  }
+
+  @Post('cta-click')
+  trackCtaClick(@Body() dto: TrackCtaClickDto) {
+    return this.salesService.trackCtaClick(dto)
   }
 }

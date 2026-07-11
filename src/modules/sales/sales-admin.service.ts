@@ -20,6 +20,8 @@ export interface SalesBotAnalyticsOverview {
   embeddingTokens: number
   embeddingCostToman: number
   embeddingCostUsd: number
+  ctaFreeStartClicks: number
+  ctaPricingClicks: number
 }
 
 export interface SalesKbDraftEntry {
@@ -150,6 +152,8 @@ export class SalesAdminService {
         embeddingTokens: acc.embeddingTokens + r.embeddingTokens,
         embeddingCostToman: acc.embeddingCostToman + r.embeddingCostToman,
         embeddingCostUsdMicros: acc.embeddingCostUsdMicros + r.embeddingCostUsdMicros,
+        ctaFreeStartClicks: acc.ctaFreeStartClicks + r.ctaFreeStartClicks,
+        ctaPricingClicks: acc.ctaPricingClicks + r.ctaPricingClicks,
       }),
       {
         totalMessages: 0,
@@ -164,6 +168,8 @@ export class SalesAdminService {
         embeddingTokens: 0,
         embeddingCostToman: 0,
         embeddingCostUsdMicros: 0,
+        ctaFreeStartClicks: 0,
+        ctaPricingClicks: 0,
       },
     )
 
@@ -177,6 +183,8 @@ export class SalesAdminService {
       sessionsStarted: totals.sessionsStarted,
       discountOffersShown: totals.discountOffersShown,
       phonesCaptured: totals.phonesCaptured,
+      ctaFreeStartClicks: totals.ctaFreeStartClicks,
+      ctaPricingClicks: totals.ctaPricingClicks,
       discountConversionRate: totals.discountOffersShown > 0
         ? totals.phonesCaptured / totals.discountOffersShown
         : null,

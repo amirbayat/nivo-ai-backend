@@ -8,7 +8,7 @@ import { RedisService } from '../../redis/redis.service'
 import { PricingService } from '../usage/pricing.service'
 import { SalesConfigService } from './sales-config.service'
 import { SalesKbService } from './sales-kb.service'
-import type { SalesChatDto, SaveLeadDto } from './dto/sales-chat.dto'
+import type { SalesChatDto, SaveLeadDto, TrackCtaClickDto } from './dto/sales-chat.dto'
 
 const IRAN_OFFSET_MS = 3.5 * 60 * 60 * 1000
 function iranDate(): string {
@@ -24,6 +24,8 @@ interface DailyUsageDelta {
   sessionsStarted?: number
   discountOffersShown?: number
   phonesCaptured?: number
+  ctaFreeStartClicks?: number
+  ctaPricingClicks?: number
 }
 
 @Injectable()
@@ -126,6 +128,12 @@ export class SalesService {
     }
   }
 
+  async trackCtaClick(dto: TrackCtaClickDto): Promise<void> {
+    await this.recordDailyUsage(
+      dto.type === 'free_start' ? { ctaFreeStartClicks: 1 } : { ctaPricingClicks: 1 },
+    )
+  }
+
   async saveLead(dto: SaveLeadDto): Promise<{ id: string }> {
     const base = {
       ...(dto.sessionId   !== undefined && { sessionId: dto.sessionId }),
@@ -190,6 +198,8 @@ export class SalesService {
       sessionsStarted: delta.sessionsStarted ?? 0,
       discountOffersShown: delta.discountOffersShown ?? 0,
       phonesCaptured: delta.phonesCaptured ?? 0,
+      ctaFreeStartClicks: delta.ctaFreeStartClicks ?? 0,
+      ctaPricingClicks: delta.ctaPricingClicks ?? 0,
     }
 
     await this.prisma.salesBotDailyUsage.upsert({
@@ -204,6 +214,8 @@ export class SalesService {
         sessionsStarted: { increment: data.sessionsStarted },
         discountOffersShown: { increment: data.discountOffersShown },
         phonesCaptured: { increment: data.phonesCaptured },
+        ctaFreeStartClicks: { increment: data.ctaFreeStartClicks },
+        ctaPricingClicks: { increment: data.ctaPricingClicks },
       },
     })
   }
