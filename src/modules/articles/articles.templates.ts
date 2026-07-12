@@ -73,8 +73,10 @@ const BASE_STYLE = `
     margin-top: 60px; padding: 32px; text-align: center; border-radius: 20px;
     border: 1px solid rgba(16,185,129,0.25); background: rgba(16,185,129,0.06);
   }
+  footer.cta h3 { margin: 0 0 8px; font-size: 20px; color: #f1f5f9; }
+  footer.cta p { margin: 0; color: #94a3b8; font-size: 14px; line-height: 1.7; }
   footer.cta a {
-    display: inline-block; margin-top: 14px; padding: 12px 28px; border-radius: 12px;
+    display: inline-block; margin-top: 16px; padding: 12px 28px; border-radius: 12px;
     background: #10b981; color: #fff; font-weight: 700; font-size: 14px;
   }
 `
@@ -190,7 +192,8 @@ export function renderArticlePage(article: Article & { category: ArticleCategory
       ${article.coverImageUrl ? `<img class="cover" src="${escapeHtml(article.coverImageUrl)}" alt="${escapeHtml(article.title)}">` : ''}
       <div class="body">${bodyMd}</div>
       <footer class="cta">
-        <div>نیوو رو رایگان امتحان کن — چند سوال کوتاه، جواب دقیق.</div>
+        <h3>نیوو؛ دستیار هوش مصنوعی با دسترسی به جدیدترین مدل‌های دنیا</h3>
+        <p>ChatGPT، Claude، Gemini، Grok، DeepSeek و مدل‌های دیگه — با پرداخت ریالی و به‌صرفه، بدون فیلترشکن و بدون کارت بانکی خارجی.</p>
         <a href="/login">شروع رایگان ←</a>
       </footer>
     </article>`
