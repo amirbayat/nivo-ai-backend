@@ -6,7 +6,11 @@ import { AllExceptionsFilter } from './common/filters/http-exception.filter'
 async function bootstrap() {
   const app = await NestFactory.create(AppModule)
 
-  app.setGlobalPrefix('api/v1')
+  // مسیرهای مقالات عمداً بدون پیشوند api/v1 هستند — این‌ها آدرس‌های عمومی SEO
+  // هستند (docs/PRD-articles-seo-blog.md)، نه endpoint های API.
+  app.setGlobalPrefix('api/v1', {
+    exclude: ['blog', 'blog/(.*)'],
+  })
 
   app.useGlobalPipes(
     new ValidationPipe({

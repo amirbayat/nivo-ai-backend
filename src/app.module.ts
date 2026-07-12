@@ -21,6 +21,7 @@ import { MessageFeedbackModule } from './modules/message-feedback/message-feedba
 import { UsageAnalyticsModule } from './modules/usage-analytics/usage-analytics.module'
 import { CampaignModule } from './modules/campaign/campaign.module'
 import { AppConfigModule } from './modules/app-config/app-config.module'
+import { ArticlesModule } from './modules/articles/articles.module'
 import { QueueModule } from './queue/queue.module'
 
 @Module({
@@ -47,6 +48,7 @@ import { QueueModule } from './queue/queue.module'
     UsageAnalyticsModule,
     CampaignModule,
     AppConfigModule,
+    ArticlesModule,
   ],
 })
 export class AppModule {}

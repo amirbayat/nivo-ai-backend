@@ -726,3 +726,43 @@ enum WaitlistStatus {
   GRANTED
   ACTIVATED
 }
+
+// ─── مقالات (SEO) — docs/PRD-articles-seo-blog.md ──────────────────────────────
+
+model ArticleCategory {
+  id        String    @id @default(uuid())
+  name      String    @unique
+  slug      String    @unique
+  sortOrder Int       @default(0)
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+
+  articles  Article[]
+
+  @@map("article_categories")
+}
+
+enum ArticleStatus {
+  DRAFT
+  PUBLISHED
+}
+
+model Article {
+  id               String          @id @default(uuid())
+  slug             String          @unique
+  title            String
+  metaDescription  String?         @db.Text
+  coverImageUrl    String?
+  contentMd        String          @db.Text
+  categoryId       String?
+  status           ArticleStatus   @default(DRAFT)
+  isPinnedInBanner Boolean         @default(false)
+  publishedAt      DateTime?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  category         ArticleCategory? @relation(fields: [categoryId], references: [id])
+
+  @@index([status, publishedAt])
+  @@map("articles")
+}

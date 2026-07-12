@@ -38,6 +38,7 @@
     "gpt-tokenizer": "^3.4.0",
     "ioredis": "^5.11.1",
     "kavenegar": "^1.1.4",
+    "marked": "^18.0.6",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
     "pg": "^8.16.0",
