@@ -98,21 +98,19 @@ export class ChatService {
     const plan = await this.tokenService.getCachedPlan(userId)
 
     // ── دوره‌ی آزمایشی کاربر تازه (docs/PRD-growth-traction-features.md بخش ۳) ─────
-    // مادامی که lifetimeMessageCount از trialMessageThreshold کمتر است، به‌جای محدودیت‌های
-    // همیشگی پلن از نسخه‌ی «آزمایشی» همون فیلدها استفاده می‌شود (اگر ست نشده باشند، از همیشگی)
+    // مادامی که lifetimeMessageCount از trialMessageThreshold کمتر است، سقف‌های تعداد پیام
+    // (روزانه/پنجره‌ی لغزان) و بودجه‌ی روزانه اصلاً در نظر گرفته نمی‌شوند — نامحدود است. اگر
+    // ادمین صریحاً یک عدد trial* ست کرده باشد همان به‌جای «نامحدود» رعایت می‌شود (سقف آزمایشی
+    // دلخواه)؛ در غیر این صورت (پیش‌فرض null) یعنی کاملاً بدون محدودیت، نه بازگشت به سقف همیشگی.
     const dbUser = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { lifetimeMessageCount: true },
     })
     const inTrial =
       plan.trialMessageThreshold !== null && (dbUser?.lifetimeMessageCount ?? 0) < plan.trialMessageThreshold
-    const effectiveN = inTrial ? plan.trialDailyMessageLimit ?? plan.dailyMessageLimit : plan.dailyMessageLimit
-    const effectiveM = inTrial
-      ? plan.trialThrottledMessageCount ?? plan.throttledMessageCount
-      : plan.throttledMessageCount
-    const effectiveRollingLimit = inTrial
-      ? plan.trialRollingWindowLimit ?? plan.rollingWindowLimit
-      : plan.rollingWindowLimit
+    const effectiveN = inTrial ? plan.trialDailyMessageLimit ?? null : plan.dailyMessageLimit
+    const effectiveM = inTrial ? plan.trialThrottledMessageCount ?? null : plan.throttledMessageCount
+    const effectiveRollingLimit = inTrial ? plan.trialRollingWindowLimit ?? null : plan.rollingWindowLimit
     const effectiveRollingHours = inTrial
       ? plan.trialRollingWindowHours ?? plan.rollingWindowHours
       : plan.rollingWindowHours
@@ -201,16 +199,21 @@ export class ChatService {
     }
 
     // ── budget check + usage percentage (برای مسیریابی استپی Router) ────────
+    // در دوره‌ی آزمایشی، بودجه‌ی روزانه هم مثل سقف‌های تعداد پیام نادیده گرفته می‌شود
     let usagePct: number
-    try {
-      ;({ usagePct } = await this.pricingService.assertBudget(
-        userId,
-        plan.priceMonthly,
-        plan.planTier,
-      ))
-    } catch (err) {
-      this.usageAnalytics.logLimitHit(userId, 'BUDGET_EXCEEDED').catch(() => {})
-      throw err
+    if (inTrial) {
+      usagePct = 0
+    } else {
+      try {
+        ;({ usagePct } = await this.pricingService.assertBudget(
+          userId,
+          plan.priceMonthly,
+          plan.planTier,
+        ))
+      } catch (err) {
+        this.usageAnalytics.logLimitHit(userId, 'BUDGET_EXCEEDED').catch(() => {})
+        throw err
+      }
     }
 
     const allowed = plan.allowedModels
