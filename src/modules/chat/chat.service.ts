@@ -70,31 +70,6 @@ export class ChatService {
     })
   }
 
-  // لاگ کامل بادی ارسالی به Liara — برای دیباگ خلاصه‌سازی context (چی واقعاً به مدل می‌رسد).
-  // تصویرها (base64) به‌جای متن کامل با طولشون جایگزین می‌شوند تا لاگ غیرقابل‌خوندن/عظیم نشه.
-  private logLiaraRequest(
-    label: string,
-    modelId: string,
-    system: string | undefined,
-    messages: ModelMessage[],
-    maxOutputTokens?: number,
-  ) {
-    const safeMessages = messages.map(m => {
-      if (!Array.isArray(m.content)) return m
-      return {
-        ...m,
-        content: m.content.map(part =>
-          part.type === 'image'
-            ? { type: 'image', image: `<omitted, ${String(part.image).length} chars>` }
-            : part,
-        ),
-      }
-    })
-    this.logger.log(
-      `liara request [${label}] model=${modelId}: ${JSON.stringify({ system, messages: safeMessages, maxOutputTokens })}`,
-    )
-  }
-
   async streamChat(
     conversationId: string,
     userId: string,
@@ -381,11 +356,9 @@ export class ChatService {
         }
       })
 
-      const systemPrompt = systemParts.join('\n\n') || undefined
-      this.logLiaraRequest('stream', modelId, systemPrompt, coreMessages, maxOut)
       const result = streamText({
         model: this.provider(modelId),
-        system: systemPrompt,
+        system: systemParts.join('\n\n') || undefined,
         messages: coreMessages,
         maxOutputTokens: maxOut,
       })
@@ -456,14 +429,6 @@ export class ChatService {
 
       const tokensSinceSummaryText = recentMessages.map(m => m.content).join('\n') + fullContent
       const tokensSinceSummary = await this.tokenEstimator.estimateTokens(tokensSinceSummaryText, modelId)
-      // لاگ دیباگ خلاصه‌سازی — تخمین (که ممکن است برای مدل‌های non-OpenAI با نسبت
-      // chars/token تقریبی حساب شود) را کنار عدد واقعی usage.inputTokens همین درخواست می‌گذاریم
-      // تا مشخص شود آیا تخمین برای متن فارسی روی این مدل کم‌شمارش می‌کند یا نه
-      this.logger.log(
-        `summary check conversation=${conversationId} model=${modelId} ` +
-          `estimatedTokensSinceSummary=${tokensSinceSummary} triggerThreshold=${chatConfig.summaryTriggerTokens} ` +
-          `realInputTokensThisRequest=${usage.inputTokens ?? 0} willSummarize=${tokensSinceSummary > chatConfig.summaryTriggerTokens}`,
-      )
       if (tokensSinceSummary > chatConfig.summaryTriggerTokens) {
         const messagesToSummarize = [...recentMessages, assistantMessage]
         this.summarizeConversation(
@@ -500,16 +465,13 @@ export class ChatService {
     modelId: string,
   ): Promise<void> {
     try {
-      const system =
-        'متن زیر یا پاسخ ابتدایی هوش مصنوعی در یک مکالمه است یا خلاصه‌ی یک مکالمه. ' +
-        'بر اساس همین متن، یک عنوان کوتاه (حداکثر ۵ کلمه) برای این مکالمه بنویس. ' +
-        'فقط عنوان، بدون توضیح یا نقل‌قول.'
-      const messages: ModelMessage[] = [{ role: 'user', content: sourceText.slice(0, 500) }]
-      this.logLiaraRequest('title', modelId, system, messages, 40)
       const { text } = await generateText({
         model: this.provider(modelId),
-        system,
-        messages,
+        system:
+          'متن زیر یا پاسخ ابتدایی هوش مصنوعی در یک مکالمه است یا خلاصه‌ی یک مکالمه. ' +
+          'بر اساس همین متن، یک عنوان کوتاه (حداکثر ۵ کلمه) برای این مکالمه بنویس. ' +
+          'فقط عنوان، بدون توضیح یا نقل‌قول.',
+        messages: [{ role: 'user', content: sourceText.slice(0, 500) }],
         maxOutputTokens: 40,
       })
       const title = text.trim().replace(/^["'«»\n]+|["'«»\n]+$/g, '')
@@ -546,16 +508,13 @@ export class ChatService {
       ? `خلاصه‌ی قبلی:\n${previousSummary}\n\nادامه‌ی مکالمه:\n${transcript}`
       : transcript
 
-    const summarySystem =
-      'متن زیر بخشی از یک مکالمه است (شاید همراه با خلاصه‌ی قبلی). یک خلاصه‌ی بسیار کوتاه و ' +
-      'فشرده از نکات کلیدی، زمینه و درخواست‌های کاربر بنویس تا بعداً برای ادامه‌ی گفت‌وگو استفاده شود. ' +
-      'فقط خلاصه، بدون مقدمه یا توضیح اضافه.'
-    const summaryMessages: ModelMessage[] = [{ role: 'user', content: input }]
-    this.logLiaraRequest('summarize', modelId, summarySystem, summaryMessages, maxSummaryTokens)
     const { text: summary } = await generateText({
       model: this.provider(modelId),
-      system: summarySystem,
-      messages: summaryMessages,
+      system:
+        'متن زیر بخشی از یک مکالمه است (شاید همراه با خلاصه‌ی قبلی). یک خلاصه‌ی بسیار کوتاه و ' +
+        'فشرده از نکات کلیدی، زمینه و درخواست‌های کاربر بنویس تا بعداً برای ادامه‌ی گفت‌وگو استفاده شود. ' +
+        'فقط خلاصه، بدون مقدمه یا توضیح اضافه.',
+      messages: [{ role: 'user', content: input }],
       maxOutputTokens: maxSummaryTokens,
     })
 

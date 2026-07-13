@@ -62,19 +62,23 @@ export class GrowthPublicController {
     return { eligible: false, phase: null, graceDeadline: null }
   }
 
-  // برای بنر هدیه در صفحه‌ی چت — یک درخواست، هم واجدشرایط‌بودن هم محتوای هدیه را می‌دهد
+  // برای بنر هدیه در صفحه‌ی چت — یک درخواست، هم واجدشرایط‌بودن هم محتوای هدیه را می‌دهد.
+  // welcomeDiscountValidHours هم برگردانده می‌شود تا کارت هدیه، حتی قبل از claim، مهلت
+  // کد تخفیف را نشان بدهد (نه فقط بعد از گرفتن کد)
   @Get('onboarding-gift/status')
   @UseGuards(JwtGuard)
   async getGiftStatus(@CurrentUser() user: JwtPayload) {
-    const [gift, eligibility] = await Promise.all([
+    const [gift, eligibility, config] = await Promise.all([
       this.onboardingGift.getGift(),
       this.getWelcomeGiftEligibility(user.sub),
+      this.growthConfig.getConfig(),
     ])
     const show = eligibility.eligible && gift.isActive
     return {
       eligible: show,
       phase: show ? eligibility.phase : null,
       graceDeadline: show ? eligibility.graceDeadline : null,
+      welcomeDiscountValidHours: config.welcomeDiscountValidHours,
       gift: show ? gift : null,
     }
   }
