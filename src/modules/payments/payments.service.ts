@@ -75,6 +75,13 @@ export class PaymentsService {
     return this.registry.getEnabled().map((g) => g.toLowerCase())
   }
 
+  // برای دکمه‌ی «اعمال» کد تخفیف در صفحه‌ی قیمت‌گذاری — فقط اعتبارسنجی می‌کند، هیچ‌چیزی
+  // مصرف/ثبت نمی‌شود (مصرف واقعی همچنان فقط داخل initiate/verify اتفاق می‌افتد)
+  async validateDiscountCode(userId: string, code: string) {
+    const found = await this.discountCodeService.findValidCode(code, userId)
+    return { discountPercent: found.discountPercent }
+  }
+
   async verifyCallback(providerName: string, query: Record<string, string>) {
     this.logger.log(`callback hit: provider=${providerName} query=${JSON.stringify(query)}`)
 

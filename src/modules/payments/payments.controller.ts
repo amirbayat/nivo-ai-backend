@@ -19,6 +19,12 @@ export class PaymentsController {
     return { gateways: this.paymentsService.getEnabledGateways() }
   }
 
+  @Get('validate-discount')
+  @UseGuards(JwtGuard)
+  validateDiscount(@CurrentUser() user: JwtPayload, @Query('code') code: string) {
+    return this.paymentsService.validateDiscountCode(user.sub, code)
+  }
+
   @Get('callback/:provider')
   @Redirect()
   async callback(@Param('provider') provider: string, @Query() query: Record<string, string>) {
