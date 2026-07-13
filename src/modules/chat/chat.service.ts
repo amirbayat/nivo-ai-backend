@@ -86,6 +86,11 @@ export class ChatService {
       system: params.system,
       messages: [{ role: 'user', content: params.userContent }],
       maxOutputTokens: params.maxOutputTokens,
+      // مدل‌های reasoning پیش‌فرض روی reasoning_effort="medium" هستند و می‌توانند کل سقف
+      // خروجی را صرف توکن‌های استدلال نامرئی کنند و متن واقعی چیزی نداشته باشد (دقیقاً همین
+      // اتفاق در لاگ پروداکشن با maxOutputTokens=300 هم افتاد) — برای این تسک‌های بی‌اهمیت
+      // (عنوان/خلاصه‌ی کوتاه) استدلال عمیق لازم نیست، پس effort را به حداقل می‌بریم
+      reasoning: 'minimal',
     })
     let text = ''
     for await (const chunk of result.textStream) {
