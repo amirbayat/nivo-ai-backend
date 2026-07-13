@@ -93,6 +93,50 @@ export class AuthService {
     return { message: fa.auth.otpSent }
   }
 
+  isOtpViewerEnabled(): boolean {
+    // برای پشتیبانی («کد رو نگرفتم») و دیباگ — بعداً از طریق env قابل خاموش‌کردن (پیش‌فرض: فعال)
+    return this.config.get<string>('OTP_ADMIN_VIEWER_ENABLED', 'true') === 'true'
+  }
+
+  // لیست کدهای OTP فعال (منقضی‌نشده) در Redis، برای پنل ادمین
+  async listActiveOtps(): Promise<
+    { phone: string; code: string; name: string | null; expiresInSeconds: number }[]
+  > {
+    const keys: string[] = []
+    let cursor = '0'
+    do {
+      const [next, batch] = await this.redis.scan(cursor, 'MATCH', 'otp:*', 'COUNT', 200)
+      cursor = next
+      // فقط otp:PHONE (دو تکه) — نه otp:rate:PHONE / otp:attempt:PHONE که شمارنده‌اند نه خود کد
+      keys.push(...batch.filter(k => k.split(':').length === 2))
+    } while (cursor !== '0')
+
+    if (keys.length === 0) return []
+
+    const pipeline = this.redis.pipeline()
+    for (const key of keys) {
+      pipeline.get(key)
+      pipeline.ttl(key)
+    }
+    const results = await pipeline.exec()
+
+    const phones = keys.map(key => key.slice('otp:'.length))
+    const users = await this.prisma.user.findMany({
+      where: { phone: { in: phones } },
+      select: { phone: true, name: true },
+    })
+    const nameByPhone = new Map(users.map(u => [u.phone, u.name]))
+
+    return phones
+      .map((phone, i) => ({
+        phone,
+        code: (results?.[i * 2]?.[1] as string | null) ?? '',
+        name: nameByPhone.get(phone) ?? null,
+        expiresInSeconds: Math.max(0, (results?.[i * 2 + 1]?.[1] as number) ?? 0),
+      }))
+      .sort((a, b) => b.expiresInSeconds - a.expiresInSeconds)
+  }
+
   private async generateUniqueReferralCode(): Promise<string> {
     for (let attempt = 0; ; attempt++) {
       const code = generateShortCode()
