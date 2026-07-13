@@ -19,6 +19,15 @@ export interface BudgetStatus {
   usagePct: number
   upsellSuggestion: string | null
   usdtToman: number
+  resetAt: string
+}
+
+// dailyCostKey از تاریخ UTC استفاده می‌کند (نه ساعت ایران مثل token.service) —
+// یعنی بودجه‌ی روزانه واقعاً در نیمه‌شب UTC (۰۳:۳۰ به‌وقت ایران) ریست می‌شود، نه نیمه‌شب ایران.
+function nextUtcMidnightISO(): string {
+  const now = new Date()
+  const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1))
+  return next.toISOString()
 }
 
 function dailyCostKey(userId: string) {
@@ -164,6 +173,7 @@ export class PricingService {
       usagePct: Math.round(ratio * 100),
       upsellSuggestion,
       usdtToman,
+      resetAt: nextUtcMidnightISO(),
     }
   }
 
@@ -173,11 +183,17 @@ export class PricingService {
     const status = await this.getBudgetStatus(userId, priceMonthly, planTier)
 
     if (status.warningLevel === 'exceeded') {
-      throw new HttpException(fa.chat.budgetExceeded, 429)
+      throw new HttpException(
+        { message: fa.chat.budgetExceeded, stage: 'budget_exceeded', planTier, resetAt: status.resetAt },
+        429,
+      )
     }
 
     if (status.warningLevel === 'session_limit' && status.walletBalanceToman === 0) {
-      throw new HttpException(fa.budget.sessionLimit, 429)
+      throw new HttpException(
+        { message: fa.budget.sessionLimit, stage: 'budget_session_limit', planTier, resetAt: status.resetAt },
+        429,
+      )
     }
 
     return { usagePct: status.usagePct }

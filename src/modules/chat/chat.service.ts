@@ -13,7 +13,7 @@ import { streamText, generateText, APICallError } from 'ai'
 import type { ModelMessage, UserModelMessage } from 'ai'
 import { PrismaService } from '../../prisma/prisma.service'
 import { RedisService } from '../../redis/redis.service'
-import { TokenService } from '../usage/token.service'
+import { TokenService, rollingWindowKey } from '../usage/token.service'
 import { PricingService } from '../usage/pricing.service'
 import { TokenEstimatorService } from '../usage/token-estimator.service'
 import { ModelRouterService } from '../model-router/model-router.service'
@@ -146,18 +146,18 @@ export class ChatService {
     // ── پنجره‌ی لغزان (rolling window) — بخش ۸ PRD-global-budget-gateway.md ──
     // مکمل سقف روزانه‌ی بالا، نه جایگزین آن — هر دو باید هم‌زمان رعایت شوند.
     // null یعنی این پلن اصلاً محدودیت پنجره‌ای ندارد.
-    const rollingWindowKey = `ratelimit:msg:${userId}`
-    if (plan.rollingWindowLimit !== null) {
-      const windowMs = plan.rollingWindowHours * 3_600_000
-      await this.redis.zremrangebyscore(rollingWindowKey, 0, Date.now() - windowMs)
-      const countInWindow = await this.redis.zcard(rollingWindowKey)
-      if (countInWindow >= plan.rollingWindowLimit) {
-        this.usageAnalytics.logLimitHit(userId, 'ROLLING_WINDOW_BLOCKED').catch(() => {})
-        throw new HttpException(
-          { message: fa.chat.rollingWindowBlocked(plan.rollingWindowHours), stage: 'rolling_window_blocked' },
-          429,
-        )
-      }
+    const rollingWindow = await this.tokenService.getRollingWindowStatus(userId, plan)
+    if (rollingWindow.blocked) {
+      this.usageAnalytics.logLimitHit(userId, 'ROLLING_WINDOW_BLOCKED').catch(() => {})
+      throw new HttpException(
+        {
+          message: fa.chat.rollingWindowBlocked(plan.rollingWindowHours),
+          stage: 'rolling_window_blocked',
+          planTier: plan.planTier,
+          resetAt: rollingWindow.resetAt,
+        },
+        429,
+      )
     }
 
     // ── input token limit (adjusted for throttled zone) ───────────────────
@@ -395,12 +395,12 @@ export class ChatService {
         // فقط بعد از موفقیت شمرده می‌شود، نه در preflight — یک درخواست ردشده
         // نباید سهمی از سقف پنجره‌ی لغزان مصرف کند
         ...(plan.rollingWindowLimit !== null
-          ? [this.redis.zadd(rollingWindowKey, Date.now(), `${Date.now()}:${crypto.randomUUID()}`)]
+          ? [this.redis.zadd(rollingWindowKey(userId), Date.now(), `${Date.now()}:${crypto.randomUUID()}`)]
           : []),
       ])
 
       if (!conversation.title && isFirstMessage) {
-        await this.generateTitle(conversationId, dto.content, modelId)
+        await this.generateTitle(conversationId, fullContent, modelId)
       }
 
       res.write(`data: [DONE]\n\n`)
@@ -421,15 +421,16 @@ export class ChatService {
 
   private async generateTitle(
     conversationId: string,
-    firstMessage: string,
+    firstResponse: string,
     modelId: string,
   ): Promise<void> {
     try {
       const { text } = await generateText({
         model: this.provider(modelId),
         system:
+          'متن زیر پاسخ هوش مصنوعی به کاربر در ابتدای یک مکالمه است. بر اساس همین پاسخ، ' +
           'یک عنوان کوتاه (حداکثر ۵ کلمه) برای این مکالمه بنویس. فقط عنوان، بدون توضیح یا نقل‌قول.',
-        messages: [{ role: 'user', content: firstMessage.slice(0, 300) }],
+        messages: [{ role: 'user', content: firstResponse.slice(0, 500) }],
         maxOutputTokens: 40,
       })
       const title = text.trim().replace(/^["'«»\n]+|["'«»\n]+$/g, '')

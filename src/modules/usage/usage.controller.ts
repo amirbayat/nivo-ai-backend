@@ -1,7 +1,7 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common'
 import { JwtGuard } from '../../common/guards/jwt.guard'
 import { CurrentUser, JwtPayload } from '../../common/decorators/current-user.decorator'
-import { TokenService } from './token.service'
+import { TokenService, nextIranMidnightISO } from './token.service'
 import { PricingService } from './pricing.service'
 
 @Controller('usage')
@@ -30,9 +30,11 @@ export class UsageController {
 
   @Get('message-quota')
   async getMessageQuota(@CurrentUser() user: JwtPayload) {
-    const [plan, todayCount] = await Promise.all([
-      this.tokenService.getCachedPlan(user.sub),
+    const plan = await this.tokenService.getCachedPlan(user.sub)
+    const [todayCount, rollingWindow, budgetStatus] = await Promise.all([
       this.tokenService.getTodayRequestCount(user.sub),
+      this.tokenService.getRollingWindowStatus(user.sub, plan),
+      this.pricingService.getBudgetStatus(user.sub, plan.priceMonthly, plan.planTier),
     ])
 
     const N = plan.dailyMessageLimit
@@ -44,13 +46,9 @@ export class UsageController {
       else if (todayCount >= N) stage = 'throttled'
     }
 
-    // next midnight Iran time (UTC+3:30) converted back to UTC for the client
-    const IRAN_OFFSET_MS = 3.5 * 60 * 60 * 1000
-    const iranNow = new Date(Date.now() + IRAN_OFFSET_MS)
-    const iranMidnight = new Date(iranNow)
-    iranMidnight.setUTCDate(iranMidnight.getUTCDate() + 1)
-    iranMidnight.setUTCHours(0, 0, 0, 0)
-    const resetAt = new Date(iranMidnight.getTime() - IRAN_OFFSET_MS)
+    const budgetBlocked =
+      budgetStatus.warningLevel === 'exceeded' ||
+      (budgetStatus.warningLevel === 'session_limit' && budgetStatus.walletBalanceToman === 0)
 
     return {
       todayCount,
@@ -61,7 +59,16 @@ export class UsageController {
       remainingThrottled: N !== null ? Math.max(0, N + M - todayCount) : null,
       throttledInputTokens: plan.throttledInputTokens,
       throttledOutputTokens: plan.throttledOutputTokens,
-      resetAt: resetAt.toISOString(),
+      resetAt: nextIranMidnightISO(),
+      planTier: plan.planTier,
+      rollingWindow: plan.rollingWindowLimit !== null
+        ? { blocked: rollingWindow.blocked, resetAt: rollingWindow.resetAt }
+        : null,
+      budget: {
+        blocked: budgetBlocked,
+        reason: budgetBlocked ? (budgetStatus.warningLevel === 'exceeded' ? 'exceeded' : 'session_limit') : null,
+        resetAt: budgetStatus.resetAt,
+      },
     }
   }
 }

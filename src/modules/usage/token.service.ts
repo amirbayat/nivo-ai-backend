@@ -65,6 +65,19 @@ function planCacheKey(userId: string) {
   return `plan:${userId}`
 }
 
+export function rollingWindowKey(userId: string) {
+  return `ratelimit:msg:${userId}`
+}
+
+// نیمه‌شب بعدیِ به‌وقت ایران، به ISO/UTC برای پاسخ به کلاینت
+export function nextIranMidnightISO(): string {
+  const iranNow = new Date(Date.now() + IRAN_OFFSET_MS)
+  const iranMidnight = new Date(iranNow)
+  iranMidnight.setUTCDate(iranMidnight.getUTCDate() + 1)
+  iranMidnight.setUTCHours(0, 0, 0, 0)
+  return new Date(iranMidnight.getTime() - IRAN_OFFSET_MS).toISOString()
+}
+
 // env-based input token limits per tier (override plan DB value when set)
 const TIER_INPUT_LIMITS: Record<string, string> = {
   free: 'MAX_INPUT_TOKENS_FREE',
@@ -128,6 +141,25 @@ export class TokenService {
 
   async getTodayRequestCount(userId: string): Promise<number> {
     return this.redis.get(reqKey(userId)).then(v => Number(v) || 0)
+  }
+
+  // پنجره‌ی لغزان (rolling window) — یک‌جا هم برای چک مسدودسازی (chat.service) و هم
+  // نمایش پیش‌گیرانه‌ی وضعیت (usage.controller) استفاده می‌شود تا منطق دوجا تکرار نشود.
+  async getRollingWindowStatus(
+    userId: string,
+    plan: Pick<PlanLimits, 'rollingWindowLimit' | 'rollingWindowHours'>,
+  ): Promise<{ blocked: boolean; resetAt: string | null }> {
+    if (plan.rollingWindowLimit === null) return { blocked: false, resetAt: null }
+
+    const key = rollingWindowKey(userId)
+    const windowMs = plan.rollingWindowHours * 3_600_000
+    await this.redis.zremrangebyscore(key, 0, Date.now() - windowMs)
+    const countInWindow = await this.redis.zcard(key)
+    if (countInWindow < plan.rollingWindowLimit) return { blocked: false, resetAt: null }
+
+    const oldest = await this.redis.zrange(key, 0, 0, 'WITHSCORES')
+    const resetAt = oldest.length >= 2 ? new Date(Number(oldest[1]) + windowMs).toISOString() : null
+    return { blocked: true, resetAt }
   }
 
   // resolve maxOutputTokens based on today's message count and plan throttle steps
