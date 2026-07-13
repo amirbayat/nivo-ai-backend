@@ -9,7 +9,7 @@ import {
 import { ConfigService } from '@nestjs/config'
 import * as crypto from 'crypto'
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
-import { streamText, generateText, APICallError } from 'ai'
+import { streamText, generateText, APICallError, RetryError } from 'ai'
 import type { ModelMessage, UserModelMessage } from 'ai'
 import { PrismaService } from '../../prisma/prisma.service'
 import { RedisService } from '../../redis/redis.service'
@@ -496,13 +496,17 @@ export class ChatService {
       this.logger.warn(`generateTitle: model returned empty title (conversation=${conversationId})`)
       return null
     } catch (err) {
-      if (APICallError.isInstance(err)) {
+      // generateText با retry داخلی، خطای واقعی (APICallError) رو مستقیم پرتاب نمی‌کنه — توی
+      // RetryError.lastError پیچیده شده (تایید شده از stack trace واقعی این خطا در پروداکشن)
+      const actualError = RetryError.isInstance(err) ? err.lastError : err
+
+      if (APICallError.isInstance(actualError)) {
         // خطای واقعی سمت Liara/provider — statusCode و responseBody دقیقاً همون چیزیه که
         // سرور برگردونده، نه فقط پیام خطای کلی «Internal Server Error» AI SDK
         this.logger.error(
           `generateTitle failed (conversation=${conversationId}, model=${modelId}) — API call error: ` +
-            `statusCode=${err.statusCode} url=${err.url} isRetryable=${err.isRetryable} ` +
-            `responseBody=${err.responseBody ?? '(none)'} requestBodyValues=${JSON.stringify(err.requestBodyValues)}`,
+            `statusCode=${actualError.statusCode} url=${actualError.url} isRetryable=${actualError.isRetryable} ` +
+            `responseBody=${actualError.responseBody ?? '(none)'} requestBodyValues=${JSON.stringify(actualError.requestBodyValues)}`,
         )
       } else {
         this.logger.error(
