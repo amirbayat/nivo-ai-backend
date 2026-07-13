@@ -260,7 +260,7 @@ export class ChatService {
       dto.content,
       modelId,
     )
-    const quota = await this.tokenService.checkQuota(userId, estimatedForQuota)
+    const quota = await this.tokenService.checkQuota(userId, estimatedForQuota, inTrial)
     const throttledMax = this.tokenService.resolveOutputThrottle(
       plan.outputThrottleSteps,
       todayCount,

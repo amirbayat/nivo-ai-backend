@@ -36,13 +36,14 @@ export class UsageController {
     const { inTrial, effectiveN, effectiveM, effectiveRollingLimit, effectiveRollingHours } =
       await this.tokenService.getEffectiveLimits(user.sub, plan)
 
-    const [todayCount, rollingWindow, budgetStatus] = await Promise.all([
+    const [todayCount, rollingWindow, budgetStatus, tokenQuota] = await Promise.all([
       this.tokenService.getTodayRequestCount(user.sub),
       this.tokenService.getRollingWindowStatus(user.sub, {
         rollingWindowLimit: effectiveRollingLimit,
         rollingWindowHours: effectiveRollingHours,
       }),
       this.pricingService.getBudgetStatus(user.sub, plan.priceMonthly, plan.planTier),
+      this.tokenService.getTokenQuotaStatus(user.sub, plan, inTrial),
     ])
 
     const N = effectiveN
@@ -78,6 +79,7 @@ export class UsageController {
         reason: budgetBlocked ? (budgetStatus.warningLevel === 'exceeded' ? 'exceeded' : 'session_limit') : null,
         resetAt: budgetStatus.resetAt,
       },
+      tokenQuota,
     }
   }
 }

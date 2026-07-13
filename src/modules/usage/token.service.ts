@@ -100,8 +100,12 @@ export class TokenService {
     private readonly config: ConfigService,
   ) {}
 
-  async checkQuota(userId: string, estimated = 500): Promise<TokenCheckResult> {
+  // bypass=true در دوره‌ی آزمایشی کاربر تازه (chat.service.ts, inTrial) — سومین و آخرین مسیر
+  // محدودیت توکن که باید در trial نادیده گرفته شود (بعد از سقف تعداد پیام و بودجه‌ی تومانی)
+  async checkQuota(userId: string, estimated = 500, bypass = false): Promise<TokenCheckResult> {
     const plan = await this.getCachedPlan(userId)
+
+    if (bypass) return { allowed: true, source: 'free', remaining: Number.MAX_SAFE_INTEGER }
 
     const [freeUsed, paidUsed] = await Promise.all([
       this.redis.get(todayKey(userId)).then(v => Number(v) || 0),
@@ -118,7 +122,34 @@ export class TokenService {
       return { allowed: true, source: 'paid', remaining: paidRemaining }
     }
 
-    throw new HttpException({ message: fa.chat.quotaExceeded, planTier: plan.planTier }, 429)
+    // stage: 'quota_exceeded' — تا useChat.ts فرانت این خطا را «نوع محدودیت» تشخیص بدهد و به‌جای
+    // نمایش داخل چت، به همان باکس تایمردار (MessageLimitBanner) واگذارش کند
+    throw new HttpException(
+      {
+        message: fa.chat.quotaExceeded,
+        stage: 'quota_exceeded',
+        planTier: plan.planTier,
+        resetAt: nextIranMidnightISO(),
+      },
+      429,
+    )
+  }
+
+  // نسخه‌ی «فقط نمایش» چک بالا — بدون throw، برای بنر محدودیت (usage.controller) که باید همین
+  // وضعیت را پیش از تلاش کاربر برای ارسال نشان دهد، نه فقط بعد از یک تلاش ناموفق
+  async getTokenQuotaStatus(
+    userId: string,
+    plan: PlanLimits,
+    inTrial: boolean,
+  ): Promise<{ blocked: boolean; resetAt: string | null }> {
+    if (inTrial) return { blocked: false, resetAt: null }
+
+    const [freeUsed, paidUsed] = await Promise.all([
+      this.redis.get(todayKey(userId)).then(v => Number(v) || 0),
+      this.redis.get(monthKey(userId)).then(v => Number(v) || 0),
+    ])
+    const blocked = plan.dailyFreeTokens - freeUsed <= 0 && plan.monthlyTotalTokens - paidUsed <= 0
+    return { blocked, resetAt: blocked ? nextIranMidnightISO() : null }
   }
 
   async increment(userId: string, tokens: number, source: 'free' | 'paid') {
