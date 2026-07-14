@@ -10,7 +10,7 @@ export class CampaignPublicController {
 
   @Get('status')
   getStatus() {
-    return this.campaign.getDisplayedCounter()
+    return this.campaign.getCampaignStatus()
   }
 }
 

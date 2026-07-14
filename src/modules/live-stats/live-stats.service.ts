@@ -8,8 +8,12 @@ export interface LiaraStatsBucket {
   total: number
   success: number
   fail: number
+  // میانگین تأخیر ترکیبی هر ۴ نوع تماس با هم — چون «چت» (چند ثانیه، شامل کل تولید پاسخ) و
+  // «مسیریابی» (زیر یک ثانیه) مقیاس کاملاً متفاوتی دارند، این عدد به‌تنهایی گمراه‌کننده است؛
+  // avgLatencyMsByType را برای مقایسه‌ی معنادار استفاده کنید
   avgLatencyMs: number
   byType: Record<LiaraCallType, number>
+  avgLatencyMsByType: Record<LiaraCallType, number>
 }
 
 const ACTIVE_STREAMS_KEY = 'live:active_streams'
@@ -24,22 +28,30 @@ function dayBucket(d: Date): string {
   return d.toISOString().slice(0, 10).replace(/-/g, '') // YYYYMMDD
 }
 
+const CALL_TYPES: LiaraCallType[] = ['chat', 'title', 'summary', 'routing']
+
 function parseStatsHash(raw: Record<string, string> | null): LiaraStatsBucket {
   const total = Number(raw?.total ?? 0)
   const success = Number(raw?.success ?? 0)
   const fail = Number(raw?.fail ?? 0)
   const latencySumMs = Number(raw?.latencySumMs ?? 0)
+
+  const byType = {} as Record<LiaraCallType, number>
+  const avgLatencyMsByType = {} as Record<LiaraCallType, number>
+  for (const type of CALL_TYPES) {
+    const count = Number(raw?.[`type:${type}`] ?? 0)
+    const typeLatencySum = Number(raw?.[`latencySumMs:${type}`] ?? 0)
+    byType[type] = count
+    avgLatencyMsByType[type] = count > 0 ? Math.round(typeLatencySum / count) : 0
+  }
+
   return {
     total,
     success,
     fail,
     avgLatencyMs: total > 0 ? Math.round(latencySumMs / total) : 0,
-    byType: {
-      chat: Number(raw?.['type:chat'] ?? 0),
-      title: Number(raw?.['type:title'] ?? 0),
-      summary: Number(raw?.['type:summary'] ?? 0),
-      routing: Number(raw?.['type:routing'] ?? 0),
-    },
+    byType,
+    avgLatencyMsByType,
   }
 }
 
@@ -90,12 +102,14 @@ export class LiveStatsService {
     const minuteKey = `liara:stats:${minuteBucket(now)}`
     const dayKey = `liara:daily:${dayBucket(now)}`
 
+    const roundedLatency = Math.max(0, Math.round(latencyMs))
     const pipeline = this.redis.pipeline()
     for (const key of [minuteKey, dayKey]) {
       pipeline.hincrby(key, 'total', 1)
       pipeline.hincrby(key, success ? 'success' : 'fail', 1)
       pipeline.hincrby(key, `type:${type}`, 1)
-      pipeline.hincrby(key, 'latencySumMs', Math.max(0, Math.round(latencyMs)))
+      pipeline.hincrby(key, 'latencySumMs', roundedLatency)
+      pipeline.hincrby(key, `latencySumMs:${type}`, roundedLatency)
     }
     pipeline.expire(minuteKey, 3 * 86400) // ۳ روز — کافی برای نمودار «۲۴ ساعت اخیر»
     pipeline.expire(dayKey, 8 * 86400) // ۸ روز — کافی برای مقایسه‌ی هفتگی ساده

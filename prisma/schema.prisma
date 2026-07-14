@@ -800,11 +800,13 @@ model LaunchCampaign {
   waitlistDailyMessageLimit Int            @default(4)
 
   displayCounterEnabled     Boolean        @default(true)
-  displayInitialPct         Int            @default(20)
-  displayFloor              Int            @default(5)
-  displayTickSeconds        Int            @default(30)
+  displayInitialPctMin      Int            @default(15)
+  displayInitialPctMax      Int            @default(25)
+  displayFloorMin           Int            @default(3)
+  displayFloorMax           Int            @default(8)
+  displayAnimationTickMs    Int            @default(500)
   displayDecrementMin       Int            @default(1)
-  displayDecrementMax       Int            @default(2)
+  displayDecrementMax       Int            @default(3)
 
   // پیامک‌ها با الگوی از پیش تأییدشده در پنل کاوه‌نگار ارسال می‌شوند، نه متن آزاد
   // (بخش ۱۸.۷ نسخه‌ی جدید) — دقیقاً همان روشی که برای OTP استفاده می‌شود

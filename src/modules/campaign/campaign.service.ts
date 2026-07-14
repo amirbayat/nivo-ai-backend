@@ -15,19 +15,20 @@ function iranToday(): Date {
   return new Date(new Date().toISOString().slice(0, 10))
 }
 
-function hashToInt(input: string): number {
-  let h = 0
-  for (let i = 0; i < input.length; i++) {
-    h = (h << 5) - h + input.charCodeAt(i)
-    h |= 0
-  }
-  return Math.abs(h)
+// crypto.randomInt(min, max) کران بالا را exclusive می‌گیرد — این کمکی هر دو سر را inclusive می‌کند
+function randomIntInclusive(min: number, max: number): number {
+  return crypto.randomInt(min, max + 1)
 }
 
-export interface DisplayedCounter {
+export interface CampaignStatus {
   active: boolean
+  campaignId: string | null
   campaignName: string | null
-  displayedRemaining: number | null
+  initial: number | null
+  floor: number | null
+  decrementMin: number | null
+  decrementMax: number | null
+  animationTickMs: number | null
 }
 
 type ReminderStep = { dayOffset: number; template: string }
@@ -60,7 +61,7 @@ export class CampaignService {
   }
 
   // Redis فقط رشته ذخیره می‌کند — بعد از JSON.parse فیلدهای Date به string
-  // تبدیل می‌شوند و .getTime() در getDisplayedCounter می‌شکند؛ باید احیا شوند
+  // تبدیل می‌شوند و .getTime() در applyToNewUser می‌شکند؛ باید احیا شوند
   private reviveCampaignDates(raw: LaunchCampaign): LaunchCampaign {
     return {
       ...raw,
@@ -143,27 +144,40 @@ export class CampaignService {
     await this.redis.del(this.waitingLimitCacheKey(userId))
   }
 
-  /** شمارنده‌ی نمایشی صفحه‌ی لاگین — مستقل از ظرفیت واقعی (بخش ۱۸.۱) */
-  async getDisplayedCounter(): Promise<DisplayedCounter> {
+  /**
+   * شمارنده‌ی نمایشی صفحه‌ی لاگین — مستقل از ظرفیت واقعی (بخش ۱۸.۱، بازطراحی بخش ۱۸.۲۰).
+   * فقط پارامترهای انیمیشن را برمی‌گرداند؛ خودِ شمارش/کش‌کردن یک‌بار-مصرف کاملاً سمت فرانت
+   * (localStorage به‌ازای campaignId) انجام می‌شود تا هر بار refetch عدد را از نو رندوم نکند.
+   */
+  async getCampaignStatus(): Promise<CampaignStatus> {
     const campaign = await this.getActiveCampaign()
     if (!campaign || !campaign.displayCounterEnabled) {
-      return { active: Boolean(campaign), campaignName: campaign?.name ?? null, displayedRemaining: null }
+      return {
+        active: Boolean(campaign),
+        campaignId: campaign?.id ?? null,
+        campaignName: campaign?.name ?? null,
+        initial: null,
+        floor: null,
+        decrementMin: null,
+        decrementMax: null,
+        animationTickMs: null,
+      }
     }
 
-    const initial = Math.ceil((campaign.capacity * campaign.displayInitialPct) / 100)
-    const tickMs = campaign.displayTickSeconds * 1000
-    const tickIndex = Math.floor((Date.now() - campaign.startAt.getTime()) / tickMs)
+    const initialPct = randomIntInclusive(campaign.displayInitialPctMin, campaign.displayInitialPctMax)
+    const floor = randomIntInclusive(campaign.displayFloorMin, campaign.displayFloorMax)
+    const initial = Math.max(Math.ceil((campaign.capacity * initialPct) / 100), floor + 1)
 
-    let remaining = initial
-    for (let i = 0; i < tickIndex && remaining > campaign.displayFloor; i++) {
-      const seed = hashToInt(`${campaign.id}:${i}`)
-      const range = campaign.displayDecrementMax - campaign.displayDecrementMin + 1
-      const dec = campaign.displayDecrementMin + (seed % range)
-      remaining -= dec
+    return {
+      active: true,
+      campaignId: campaign.id,
+      campaignName: campaign.name,
+      initial,
+      floor,
+      decrementMin: campaign.displayDecrementMin,
+      decrementMax: campaign.displayDecrementMax,
+      animationTickMs: campaign.displayAnimationTickMs,
     }
-    remaining = Math.max(campaign.displayFloor, remaining)
-
-    return { active: true, campaignName: campaign.name, displayedRemaining: remaining }
   }
 
   /** موقعیت فعلی کاربر در صف — برای نمایش «شما نفر N هستید» در اپ، نه فقط لحظه‌ی ثبت‌نام */
@@ -267,9 +281,11 @@ export class CampaignService {
     waitlistFullMessage?: string | null
     waitlistDailyMessageLimit?: number
     displayCounterEnabled?: boolean
-    displayInitialPct?: number
-    displayFloor?: number
-    displayTickSeconds?: number
+    displayInitialPctMin?: number
+    displayInitialPctMax?: number
+    displayFloorMin?: number
+    displayFloorMax?: number
+    displayAnimationTickMs?: number
     displayDecrementMin?: number
     displayDecrementMax?: number
     grantedSmsTemplate?: string | null

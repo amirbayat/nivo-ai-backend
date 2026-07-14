@@ -345,7 +345,10 @@ export class ChatService {
 
     // برای بنر «چند نفر الان دارن چت می‌کنن» توی ادمین — فقط شمارنده، بدون هیچ محتوایی
     const streamToken = await this.liveStats.trackStreamStart()
-    const chatCallStart = Date.now()
+    // این مقدار اولیه فقط برای خطاهای زودهنگام (قبل از رسیدن به streamText) استفاده می‌شود؛
+    // درست قبل از streamText دوباره ست می‌شود تا «تأخیر چت» واقعاً فقط زمان مدل را اندازه بگیرد
+    // (نه topic classify/DB/عنوان‌سازی که قبلاً به‌اشتباه داخل همین بازه حساب می‌شدند)
+    let chatCallStart = Date.now()
 
     try {
       const topicId = await this.topicService.classify(dto.content)
@@ -405,6 +408,7 @@ export class ChatService {
         }
       })
 
+      chatCallStart = Date.now()
       const result = streamText({
         model: this.provider(modelId),
         system: systemParts.join('\n\n') || undefined,
@@ -451,6 +455,9 @@ export class ChatService {
       }
 
       const usage = await result.usage
+      // اینجا دقیقاً «زمان مدل» است — از شروع streamText تا مصرف کامل استریم (reasoning + متن)،
+      // بدون DB/عنوان‌سازی/خلاصه‌سازی که بعدش می‌آیند (docs/PERFORMANCE-AND-CONCURRENCY.md)
+      this.liveStats.recordLiaraCall('chat', true, Date.now() - chatCallStart).catch(() => {})
       const tokensUsed = usage.totalTokens ?? 0
       const { costToman, costUsdMicros, costInputUsdMicros, costOutputUsdMicros } =
         await this.pricingService.calcCost(usage.inputTokens ?? 0, usage.outputTokens ?? 0, modelId)
@@ -529,7 +536,6 @@ export class ChatService {
       }
 
       res.write(`data: [DONE]\n\n`)
-      this.liveStats.recordLiaraCall('chat', true, Date.now() - chatCallStart).catch(() => {})
     } catch (err: unknown) {
       const isModelError = APICallError.isInstance(err)
       const message = isModelError ? fa.chat.modelUnavailable : fa.chat.streamError
