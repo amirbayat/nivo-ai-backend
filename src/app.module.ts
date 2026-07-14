@@ -24,6 +24,7 @@ import { UsageAnalyticsModule } from './modules/usage-analytics/usage-analytics.
 import { CampaignModule } from './modules/campaign/campaign.module'
 import { AppConfigModule } from './modules/app-config/app-config.module'
 import { ArticlesModule } from './modules/articles/articles.module'
+import { LiveStatsModule } from './modules/live-stats/live-stats.module'
 import { QueueModule } from './queue/queue.module'
 
 @Module({
@@ -53,6 +54,7 @@ import { QueueModule } from './queue/queue.module'
     CampaignModule,
     AppConfigModule,
     ArticlesModule,
+    LiveStatsModule,
   ],
 })
 export class AppModule {}

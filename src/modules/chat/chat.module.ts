@@ -7,9 +7,13 @@ import { ModelRouterModule } from '../model-router/model-router.module'
 import { UsageAnalyticsModule } from '../usage-analytics/usage-analytics.module'
 import { CampaignModule } from '../campaign/campaign.module'
 import { ChatConfigModule } from '../chat-config/chat-config.module'
+import { LiveStatsModule } from '../live-stats/live-stats.module'
 
 @Module({
-  imports: [UsageModule, RedisModule, ModelRouterModule, UsageAnalyticsModule, CampaignModule, ChatConfigModule],
+  imports: [
+    UsageModule, RedisModule, ModelRouterModule, UsageAnalyticsModule,
+    CampaignModule, ChatConfigModule, LiveStatsModule,
+  ],
   controllers: [ChatController],
   providers: [ChatService],
 })

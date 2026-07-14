@@ -101,10 +101,10 @@ export class TokenService {
   ) {}
 
   // bypass=true در دوره‌ی آزمایشی کاربر تازه (chat.service.ts, inTrial) — سومین و آخرین مسیر
-  // محدودیت توکن که باید در trial نادیده گرفته شود (بعد از سقف تعداد پیام و بودجه‌ی تومانی)
-  async checkQuota(userId: string, estimated = 500, bypass = false): Promise<TokenCheckResult> {
-    const plan = await this.getCachedPlan(userId)
-
+  // محدودیت توکن که باید در trial نادیده گرفته شود (بعد از سقف تعداد پیام و بودجه‌ی تومانی).
+  // plan از caller گرفته می‌شود (نه دوباره getCachedPlan) — قبلاً همین درخواست یک‌بار plan را
+  // خوانده بود، خواندن دوباره فقط یک رفت‌وبرگشت Redis تکراری بود (docs/PERFORMANCE-AND-CONCURRENCY.md بخش ۱)
+  async checkQuota(userId: string, plan: PlanLimits, estimated = 500, bypass = false): Promise<TokenCheckResult> {
     if (bypass) return { allowed: true, source: 'free', remaining: Number.MAX_SAFE_INTEGER }
 
     const [freeUsed, paidUsed] = await Promise.all([

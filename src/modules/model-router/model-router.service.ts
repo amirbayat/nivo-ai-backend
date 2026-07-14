@@ -7,6 +7,7 @@ import { ModelTier, type AiModel } from '@prisma/client'
 import { PrismaService } from '../../prisma/prisma.service'
 import { RedisService } from '../../redis/redis.service'
 import { PricingService } from '../usage/pricing.service'
+import { LiveStatsService } from '../live-stats/live-stats.service'
 
 const CONFIG_CACHE_KEY = 'model_routing_config:cache'
 const CONFIG_CACHE_TTL = 60 // ثانیه
@@ -87,6 +88,7 @@ export class ModelRouterService {
     private readonly redis: RedisService,
     private readonly config: ConfigService,
     private readonly pricingService: PricingService,
+    private readonly liveStats: LiveStatsService,
   ) {
     this.provider = createOpenAICompatible({
       name: 'liara',
@@ -364,6 +366,7 @@ export class ModelRouterService {
     modelId: string,
     userId: string,
   ): Promise<{ tier: ModelTier; confidence: number } | null> {
+    const callStart = Date.now()
     try {
       const { object, usage } = await generateObject({
         model: this.provider(modelId),
@@ -377,6 +380,10 @@ MEDIUM: نوشتن متن چندبندی، توضیح مفهوم، کد کوتا
 COMPLEX: استدلال چندمرحله‌ای، کد/معماری پیچیده، تحلیل سند بلند، درخواست صریح تفکر عمیق.
 فقط یک JSON با این ساختار برگردان: {"tier": "SIMPLE" | "MEDIUM" | "COMPLEX", "reason": "..."}`,
         messages: [{ role: 'user', content: content.slice(0, 2000) }],
+        // این تماس قبل از شروع پاسخ اصلی، سر راه است — نباید معطلی طولانی به
+        // زمان-تا-اولین-توکن اضافه کند (docs/PERFORMANCE-AND-CONCURRENCY.md بخش ۸).
+        // generateObject گزینه‌ی timeout ندارد (فقط streamText/generateText) — abortSignal معادلش است
+        abortSignal: AbortSignal.timeout(8_000),
       })
 
       if (usage) {
@@ -388,8 +395,10 @@ COMPLEX: استدلال چندمرحله‌ای، کد/معماری پیچیده
         this.pricingService.trackCost(userId, costToman, costUsdMicros).catch(() => {})
       }
 
+      this.liveStats.recordLiaraCall('routing', true, Date.now() - callStart).catch(() => {})
       return { tier: ModelTier[object.tier], confidence: 0.75 }
     } catch (err) {
+      this.liveStats.recordLiaraCall('routing', false, Date.now() - callStart).catch(() => {})
       this.logger.warn(
         `classifier LLM call failed, falling back to MEDIUM: ${(err as Error).message}`,
       )

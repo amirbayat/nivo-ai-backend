@@ -112,14 +112,26 @@ export class PlansService {
     const delTasks: Promise<unknown>[] = subs.map(s => this.redis.del(`plan:${s.userId}`))
 
     // free plans (priceMonthly=0) apply to users without subscriptions too —
-    // clear every cached plan so they pick up the new limits on next request
+    // clear every cached plan so they pick up the new limits on next request.
+    // scanStream (نه KEYS) — docs/PERFORMANCE-AND-CONCURRENCY.md بخش ۴: KEYS کل فضای کلید
+    // Redis را پیمایش می‌کند و در این مدت Redis (تک‌رشته‌ای) به هیچ درخواست دیگری جواب نمی‌دهد
     if (updated.priceMonthly === 0) {
-      const keys = await this.redis.keys('plan:*')
+      const keys = await this.scanKeys('plan:*')
       keys.forEach(k => delTasks.push(this.redis.del(k)))
     }
 
     if (delTasks.length) await Promise.all(delTasks)
     return updated
+  }
+
+  private scanKeys(pattern: string): Promise<string[]> {
+    return new Promise((resolve, reject) => {
+      const keys: string[] = []
+      const stream = this.redis.scanStream({ match: pattern, count: 100 })
+      stream.on('data', (batch: string[]) => keys.push(...batch))
+      stream.on('end', () => resolve(keys))
+      stream.on('error', reject)
+    })
   }
 
   async remove(id: string) {

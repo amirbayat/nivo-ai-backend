@@ -21,6 +21,7 @@ import { UsageAnalyticsService } from '../usage-analytics/usage-analytics.servic
 import { TopicService } from '../usage-analytics/topic.service'
 import { CampaignService } from '../campaign/campaign.service'
 import { ChatConfigService } from '../chat-config/chat-config.service'
+import { LiveStatsService } from '../live-stats/live-stats.service'
 import { fa } from '../../i18n/fa'
 import type { Response } from 'express'
 import { StreamMessageDto } from './dto/stream-message.dto'
@@ -61,6 +62,7 @@ export class ChatService {
     private readonly topicService: TopicService,
     private readonly campaignService: CampaignService,
     private readonly chatConfigService: ChatConfigService,
+    private readonly liveStats: LiveStatsService,
     private readonly config: ConfigService,
   ) {
     this.provider = createOpenAICompatible({
@@ -91,6 +93,9 @@ export class ChatService {
       // اتفاق در لاگ پروداکشن با maxOutputTokens=300 هم افتاد) — برای این تسک‌های بی‌اهمیت
       // (عنوان/خلاصه‌ی کوتاه) استدلال عمیق لازم نیست، پس effort را به حداقل می‌بریم
       reasoning: 'minimal',
+      // بدون timeout صریح، یک تماس معلق‌مانده به Liara منابع را نامحدود نگه می‌داشت
+      // (docs/PERFORMANCE-AND-CONCURRENCY.md بخش ۸) — این‌ها کارهای کوچک و کوتاهند
+      timeout: 20_000,
     })
     let text = ''
     for await (const chunk of result.textStream) {
@@ -132,8 +137,20 @@ export class ChatService {
     const { inTrial, lifetimeMessageCount, effectiveN, effectiveM, effectiveRollingLimit, effectiveRollingHours } =
       await this.tokenService.getEffectiveLimits(userId, plan)
 
+    // ── چهار چک مستقل زیر قبلاً یکی‌یکی (متوالی) اجرا می‌شدند؛ هیچ‌کدام به نتیجه‌ی
+    // بقیه نیاز ندارد، پس با Promise.all موازی می‌شوند (docs/PERFORMANCE-AND-CONCURRENCY.md
+    // بخش ۱) — ترتیب throw کردن خطاها بعد از این، دقیقاً مثل قبل حفظ شده (فقط fetch موازی شد)
+    const [manualLimitRaw, todayCount, waitlistLimit, rollingWindow] = await Promise.all([
+      this.redis.get(`manual_limit:${userId}`),
+      this.tokenService.getTodayRequestCount(userId),
+      this.campaignService.getWaitingDailyLimit(userId),
+      this.tokenService.getRollingWindowStatus(userId, {
+        rollingWindowLimit: effectiveRollingLimit,
+        rollingWindowHours: effectiveRollingHours ?? plan.rollingWindowHours,
+      }),
+    ])
+
     // ── manual limit set by admin ──────────────────────────────────────────
-    const manualLimitRaw = await this.redis.get(`manual_limit:${userId}`)
     if (manualLimitRaw) {
       const ml = JSON.parse(manualLimitRaw) as {
         type: string
@@ -147,16 +164,13 @@ export class ChatService {
       throw new HttpException({ message: msg }, 429)
     }
 
-    // ── three-zone daily message limit ────────────────────────────────────
-    const todayCount = await this.tokenService.getTodayRequestCount(userId)
-
     // ── سقف موقت لیست انتظار کمپین سافت‌لانچ — بخش ۱۸.۴ ────────────────────
-    const waitlistLimit = await this.campaignService.getWaitingDailyLimit(userId)
     if (waitlistLimit !== null && todayCount >= waitlistLimit) {
       this.usageAnalytics.logLimitHit(userId, 'DAILY_MESSAGE_BLOCKED').catch(() => {})
       throw new HttpException({ message: fa.waitlist.limitReached, waitlisted: true }, 429)
     }
 
+    // ── three-zone daily message limit ────────────────────────────────────
     const N = effectiveN // normal zone ceiling (null = unlimited)
     const M = effectiveM ?? 0 // throttled zone size
 
@@ -184,10 +198,6 @@ export class ChatService {
     // ── پنجره‌ی لغزان (rolling window) — بخش ۸ PRD-global-budget-gateway.md ──
     // مکمل سقف روزانه‌ی بالا، نه جایگزین آن — هر دو باید هم‌زمان رعایت شوند.
     // null یعنی این پلن اصلاً محدودیت پنجره‌ای ندارد.
-    const rollingWindow = await this.tokenService.getRollingWindowStatus(userId, {
-      rollingWindowLimit: effectiveRollingLimit,
-      rollingWindowHours: effectiveRollingHours ?? plan.rollingWindowHours,
-    })
     if (rollingWindow.blocked) {
       this.usageAnalytics.logLimitHit(userId, 'ROLLING_WINDOW_BLOCKED').catch(() => {})
       throw new HttpException(
@@ -289,7 +299,7 @@ export class ChatService {
       dto.content,
       modelId,
     )
-    const quota = await this.tokenService.checkQuota(userId, estimatedForQuota, inTrial)
+    const quota = await this.tokenService.checkQuota(userId, plan, estimatedForQuota, inTrial)
     const throttledMax = this.tokenService.resolveOutputThrottle(
       plan.outputThrottleSteps,
       todayCount,
@@ -326,6 +336,10 @@ export class ChatService {
         `data: ${JSON.stringify({ info: 'output_throttled', maxOutputTokens: throttledMax })}\n\n`,
       )
     }
+
+    // برای بنر «چند نفر الان دارن چت می‌کنن» توی ادمین — فقط شمارنده، بدون هیچ محتوایی
+    const streamToken = await this.liveStats.trackStreamStart()
+    const chatCallStart = Date.now()
 
     try {
       const topicId = await this.topicService.classify(dto.content)
@@ -390,6 +404,9 @@ export class ChatService {
         system: systemParts.join('\n\n') || undefined,
         messages: coreMessages,
         maxOutputTokens: maxOut,
+        // chunkMs نه totalMs — پاسخ‌های بلند مجازند طول بکشند، فقط اگر بین دو chunk بیش از
+        // این مدت سکوت شد (گیرکردن واقعی اتصال) قطع شود (docs/PERFORMANCE-AND-CONCURRENCY.md بخش ۸)
+        timeout: { chunkMs: 30_000 },
       })
 
       let fullContent = ''
@@ -398,11 +415,17 @@ export class ChatService {
 
       // fullStream (نه فقط textStream) چون مدل‌های reasoning (خانواده‌ی gpt-5) قبل از متن نهایی
       // یک فاز استدلال نامرئی دارند — با تفکیک reasoning-*/text-delta می‌شود به فرانت گفت «داره
-      // فکر می‌کند» تا کاربر روی صفحه‌ی خالی/نقطه‌چین معمولی گیج نماند
+      // فکر می‌کند» تا کاربر روی صفحه‌ی خالی/نقطه‌چین معمولی گیج نماند. reasoning-delta علاوه
+      // بر سیگنال شروع/پایان، متن واقعی استدلال را هم دارد (اگر Liara/مدل آن را برگرداند) —
+      // این را هم جدا استریم می‌کنیم تا فرانت بتواند کم‌رنگ/محو نشانش بدهد.
       for await (const part of result.stream) {
         if (part.type === 'reasoning-start') {
           reasoningActive = true
           res.write(`data: ${JSON.stringify({ info: 'reasoning', reasoning: true })}\n\n`)
+        } else if (part.type === 'reasoning-delta') {
+          // فیلد جدا از «chunk» عمداً — چون فرانت هر پیامی با فیلد chunk را مستقیم به متن
+          // اصلی پاسخ اضافه می‌کند؛ استفاده از همان اسم این متن استدلال را قاطی جواب می‌کرد
+          res.write(`data: ${JSON.stringify({ info: 'reasoning-chunk', reasoningChunk: part.text })}\n\n`)
         } else if (part.type === 'reasoning-end') {
           if (reasoningActive) {
             reasoningActive = false
@@ -497,6 +520,7 @@ export class ChatService {
       }
 
       res.write(`data: [DONE]\n\n`)
+      this.liveStats.recordLiaraCall('chat', true, Date.now() - chatCallStart).catch(() => {})
     } catch (err: unknown) {
       const isModelError = APICallError.isInstance(err)
       const message = isModelError ? fa.chat.modelUnavailable : fa.chat.streamError
@@ -507,8 +531,10 @@ export class ChatService {
       res.write(
         `data: ${JSON.stringify({ error: message, code: isModelError ? 'model_unavailable' : 'stream_error' })}\n\n`,
       )
+      this.liveStats.recordLiaraCall('chat', false, Date.now() - chatCallStart).catch(() => {})
     } finally {
       res.end()
+      this.liveStats.trackStreamEnd(streamToken).catch(() => {})
     }
   }
 
@@ -522,6 +548,7 @@ export class ChatService {
     sourceText: string,
     modelId: string,
   ): Promise<string | null> {
+    const callStart = Date.now()
     try {
       const text = await this.generateTextViaStream({
         modelId,
@@ -535,6 +562,7 @@ export class ChatService {
         // نماند و خروجی خالی برگردد (دقیقاً همین اتفاق در لاگ پروداکشن دیده شد)
         maxOutputTokens: 300,
       })
+      this.liveStats.recordLiaraCall('title', true, Date.now() - callStart).catch(() => {})
       const title = text.trim().replace(/^["'«»\n]+|["'«»\n]+$/g, '')
       if (title) {
         await this.prisma.conversation.update({
@@ -546,6 +574,7 @@ export class ChatService {
       this.logger.warn(`generateTitle: model returned empty title (conversation=${conversationId})`)
       return null
     } catch (err) {
+      this.liveStats.recordLiaraCall('title', false, Date.now() - callStart).catch(() => {})
       // generateText با retry داخلی، خطای واقعی (APICallError) رو مستقیم پرتاب نمی‌کنه — توی
       // RetryError.lastError پیچیده شده (تایید شده از stack trace واقعی این خطا در پروداکشن)
       const actualError = RetryError.isInstance(err) ? err.lastError : err
@@ -584,15 +613,23 @@ export class ChatService {
       ? `خلاصه‌ی قبلی:\n${previousSummary}\n\nادامه‌ی مکالمه:\n${transcript}`
       : transcript
 
-    const summary = await this.generateTextViaStream({
-      modelId,
-      system:
-        'متن زیر بخشی از یک مکالمه است (شاید همراه با خلاصه‌ی قبلی). یک خلاصه‌ی بسیار کوتاه و ' +
-        'فشرده از نکات کلیدی، زمینه و درخواست‌های کاربر بنویس تا بعداً برای ادامه‌ی گفت‌وگو استفاده شود. ' +
-        'فقط خلاصه، بدون مقدمه یا توضیح اضافه.',
-      userContent: input,
-      maxOutputTokens: maxSummaryTokens,
-    })
+    const callStart = Date.now()
+    let summary: string
+    try {
+      summary = await this.generateTextViaStream({
+        modelId,
+        system:
+          'متن زیر بخشی از یک مکالمه است (شاید همراه با خلاصه‌ی قبلی). یک خلاصه‌ی بسیار کوتاه و ' +
+          'فشرده از نکات کلیدی، زمینه و درخواست‌های کاربر بنویس تا بعداً برای ادامه‌ی گفت‌وگو استفاده شود. ' +
+          'فقط خلاصه، بدون مقدمه یا توضیح اضافه.',
+        userContent: input,
+        maxOutputTokens: maxSummaryTokens,
+      })
+      this.liveStats.recordLiaraCall('summary', true, Date.now() - callStart).catch(() => {})
+    } catch (err) {
+      this.liveStats.recordLiaraCall('summary', false, Date.now() - callStart).catch(() => {})
+      throw err
+    }
 
     const trimmedSummary = summary.trim()
     if (!trimmedSummary) return
