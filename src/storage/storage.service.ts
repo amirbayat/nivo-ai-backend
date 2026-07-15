@@ -56,6 +56,17 @@ export class StorageService implements OnModuleInit {
     await this.client.removeObject(this.bucket, key)
   }
 
+  // برای ویرایش/ترکیب چند‌مرحله‌ای عکس (images/edits) — برخلاف presignedGetUrl که فقط یک
+  // لینک می‌دهد، اینجا واقعاً بایت‌های تصویر لازم است تا مستقیم به provider فرستاده شود
+  async downloadImage(key: string): Promise<Buffer> {
+    const stream = await this.client.getObject(this.bucket, key)
+    const chunks: Buffer[] = []
+    for await (const chunk of stream) {
+      chunks.push(chunk as Buffer)
+    }
+    return Buffer.concat(chunks)
+  }
+
   // رشته‌های قدیمی هنوز base64 خام هستند (data:image/...)؛ کلیدهای MinIO این‌طور نیستند —
   // docs/PRD-chat-images.md بخش ۴، برای تشخیص کدام رکورد presign لازم دارد
   isStorageKey(value: string): boolean {

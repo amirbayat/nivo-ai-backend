@@ -11,7 +11,7 @@ import * as crypto from 'crypto'
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import { streamText, generateObject, APICallError, RetryError } from 'ai'
 import type { ModelMessage, UserModelMessage } from 'ai'
-import { ModelTier, type AiModel } from '@prisma/client'
+import { ModelTier, Prisma, type AiModel } from '@prisma/client'
 import { z } from 'zod'
 import { PrismaService } from '../../prisma/prisma.service'
 import { RedisService } from '../../redis/redis.service'
@@ -266,18 +266,24 @@ export class ChatService {
 
     // docs/PRD-chat-images.md بخش ۵.۵ — تولید عکس مسیر کاملاً جدایی است: نه Router (طبقه‌بندی
     // SIMPLE/MEDIUM/COMPLEX بی‌معنی است)، نه vision-preflight، نه سهمیه‌ی توکنی خروجی. مدل یا
-    // صراحتاً انتخاب شده (toggle فرانت) یا از روی نیت پیام تشخیص داده می‌شود (heuristic، قابل
-    // خاموش‌کردن از ادمین) — هر سه حالت به همان مسیر می‌روند.
-    // دو heuristic جدا: وقتی کاربر عکس نفرستاده («تولید از صفر» — اسم+فعل مثل «عکس گربه بکش»)
-    // در برابر وقتی عکس فرستاده («ویرایش/ترکیب همون عکس» — فقط فعل کافیه، مثل «سفیدش کن»،
-    // چون خودِ عکس ضمیمه‌شده موضوع رو مشخص می‌کنه). قبلاً وقتی عکس بود اصلاً implicit چک نمی‌شد
-    // که یعنی «سفیدش کن» روی یک عکس آپلودی به‌جای ویرایش، به مسیر توضیح/تحلیل معمولی می‌رفت.
-    const implicitImageGenTriggered =
-      !dto.images?.length && chatConfig.implicitImageGenEnabled && detectImageGenIntent(dto.content)
-    const implicitImageEditTriggered =
-      Boolean(dto.images?.length) && chatConfig.implicitImageGenEnabled && detectImageEditIntent(dto.content)
-    if (dto.generateImage || implicitImageGenTriggered || implicitImageEditTriggered) {
-      return this.handleImageGeneration(res, conversationId, userId, dto, plan)
+    // صراحتاً انتخاب شده (toggle فرانت) یا از روی نیت پیام (LLM classifier) تشخیص داده می‌شود.
+    const explicitImageToggle = dto.generateImage === true
+    let imageIntent: { wantsImage: boolean; isEdit: boolean } | null = null
+    if (!explicitImageToggle && chatConfig.implicitImageGenEnabled) {
+      const hasAttachedImage = Boolean(dto.images?.length)
+      const hasRecentConversationImage =
+        !hasAttachedImage &&
+        Boolean(
+          await this.prisma.message.findFirst({
+            where: { conversationId, images: { not: Prisma.DbNull } },
+            select: { id: true },
+          }),
+        )
+      imageIntent = await this.classifyImageIntent(dto.content, hasAttachedImage, hasRecentConversationImage, userId)
+    }
+    if (explicitImageToggle || imageIntent?.wantsImage) {
+      const isEditIntent = explicitImageToggle ? Boolean(dto.images?.length) : Boolean(imageIntent?.isEdit)
+      return this.handleImageGeneration(res, conversationId, userId, dto, plan, isEditIntent)
     }
 
     // ── model selection via Router — همیشه اجرا می‌شود، حتی روی انتخاب دستی ──
@@ -649,6 +655,85 @@ export class ChatService {
     }
   }
 
+  // جایگزین heuristic کلیدواژه‌ای قبلی — یک مدل ارزون خودش تشخیص می‌دهد آیا کاربر واقعاً
+  // تولید/ویرایش عکس می‌خواهد (نه صرفاً درباره‌ی عکس صحبت می‌کند)، و اگر بله، آیا منظورش
+  // ویرایش یک عکس موجود است یا ساختن یک عکس کاملاً جدید. regex قبلی به‌عنوان fallback
+  // (فقط اگر این تماس fail کند) نگه داشته شده — docs بحث کاربر: «باید بدی به یک مدل و
+  // intent رو بفهمه»، دقیقاً همون best practice صنعتی (LLM-based intent classification)
+  private async classifyImageIntent(
+    content: string,
+    hasAttachedImage: boolean,
+    hasRecentConversationImage: boolean,
+    userId: string,
+  ): Promise<{ wantsImage: boolean; isEdit: boolean }> {
+    const fallback = () => ({
+      wantsImage: hasAttachedImage
+        ? detectImageEditIntent(content)
+        : detectImageGenIntent(content),
+      isEdit: hasAttachedImage || (hasRecentConversationImage && detectImageEditIntent(content)),
+    })
+    try {
+      const { object, usage } = await generateObject({
+        model: this.provider(PRE_ROUTING_REFERENCE_MODEL),
+        schema: z.object({
+          wantsImage: z.boolean(),
+          isEdit: z.boolean(),
+        }),
+        system: `تشخیص بده آیا کاربر واقعاً می‌خواهد یک عکس تولید یا ویرایش شود — نه اینکه صرفاً
+درباره‌ی عکس صحبت می‌کند یا یک سؤال متنی معمولی می‌پرسد.
+زمینه: ${
+          hasAttachedImage
+            ? 'کاربر همین الان یک عکس پیوست کرده.'
+            : hasRecentConversationImage
+              ? 'یک عکس قبلاً در همین مکالمه ساخته/فرستاده شده (ولی الان چیزی پیوست نکرده).'
+              : 'هیچ عکسی در این مکالمه نیست.'
+        }
+wantsImage: آیا این پیام واقعاً درخواست تولید یا ویرایش عکس است؟
+isEdit: اگر wantsImage=true، آیا منظورش ویرایش/ادامه‌ی یک عکس موجود است (نه ساختن یک عکس کاملاً تازه از صفر)؟
+فقط JSON برگردان.`,
+        messages: [{ role: 'user', content: content.slice(0, 500) }],
+        abortSignal: AbortSignal.timeout(6_000),
+      })
+      if (usage) {
+        const { costToman, costUsdMicros } = await this.pricingService.calcCost(
+          usage.inputTokens ?? 0,
+          usage.outputTokens ?? 0,
+          PRE_ROUTING_REFERENCE_MODEL,
+        )
+        this.pricingService.trackCost(userId, costToman, costUsdMicros).catch(() => {})
+      }
+      return object
+    } catch (err) {
+      this.logger.warn(`Image intent classification failed, falling back to heuristic: ${(err as Error).message}`)
+      return fallback()
+    }
+  }
+
+  // چون گیت‌وی ما previous_response_id (حافظه‌ی مکالمه‌ی خودِ OpenAI برای عکس) را ندارد، خودمان
+  // آخرین عکس مرتبط این مکالمه (آپلودی یا تولیدشده، فرقی نمی‌کند) را برای ادامه‌ی ویرایش می‌گیریم
+  private async resolveLastConversationImages(conversationId: string): Promise<Buffer[]> {
+    const lastImageMessage = await this.prisma.message.findFirst({
+      where: { conversationId, images: { not: Prisma.DbNull } },
+      orderBy: { createdAt: 'desc' },
+      select: { images: true },
+    })
+    const keys = (lastImageMessage?.images as string[] | null) ?? []
+    const buffers = await Promise.all(
+      keys.map(async (keyOrDataUrl): Promise<Buffer | null> => {
+        if (this.storageService.isStorageKey(keyOrDataUrl)) {
+          try {
+            return await this.storageService.downloadImage(keyOrDataUrl)
+          } catch (err) {
+            this.logger.warn(`Failed to download last conversation image for edit continuation: ${(err as Error).message}`)
+            return null
+          }
+        }
+        return parseChatImageDataUrl(keyOrDataUrl)?.buffer ?? null
+      }),
+    )
+    return buffers.filter((b): b is Buffer => b !== null)
+  }
+
   // یک مدل تولید عکس ممکن است چند ردیف با کیفیت/قیمت مختلف داشته باشد (مثلاً low/medium/high
   // خانواده‌ی gpt-image) — به‌جای اینکه کاربر خودش کیفیت را انتخاب کند، از روی متن پیام تشخیص
   // می‌دهیم که این تصویر چقدر باید دقیق/پیچیده باشد، و اندازه‌ی مناسب (مربع/عمودی/افقی) را هم
@@ -831,6 +916,7 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
     userId: string,
     dto: StreamMessageDto,
     plan: PlanLimits,
+    isEditIntent: boolean,
   ): Promise<void> {
     // انتخاب دستی (toggle صریح با یک مدل مشخص) اگر معتبر و supportsImageGen باشد همچنان در
     // اولویت است — راه فرار برای انتخاب دقیق. وگرنه (حالت پیش‌فرض/تشخیص ضمنی)، خودمان از روی
@@ -838,7 +924,9 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
     // (که ممکن است چند سطح کیفیت/قیمت مختلف از یک یا چند مدل باشند) بهترین را انتخاب می‌کنیم.
     // اگر کاربر عکس هم فرستاده باشد، این یک درخواست «ویرایش/ترکیب» است (images/edits) نه تولید
     // از صفر — دقیقاً مثل مثال gpt-image-1-mini (چند عکس ورودی + prompt → یک عکس جدید)
-    const hasInputImages = Boolean(dto.images?.length)
+    const hasExplicitInputImages = Boolean(dto.images?.length)
+    // isEditIntent (از classifyImageIntent) یعنی این ادامه‌ی ویرایش یک عکس قبلی همین مکالمه‌ست،
+    // حتی اگه کاربر خودش دوباره عکس رو پیوست نکرده باشه («نه، صورتیش کن» بدون آپلود دوباره)
 
     // این مسیر (برخلاف چت معمولی) زودتر return می‌کند و هیچ‌وقت به کد ذخیره‌سازی پیام کاربر
     // در streamChat() نمی‌رسد — پس اگر اینجا خودمان پیام کاربر را ذخیره نکنیم، بعد از هر
@@ -899,7 +987,7 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
         // برایش کافی است انتخاب می‌شود — بهترین کیفیتی که کاربر واقعاً می‌تواند بپردازد،
         // نه لزوماً ارزان‌ترین. اگر even ارزان‌ترین گزینه هم کافی نبود، یعنی هیچ‌کدام از
         // کل لیست (با هر ترتیبی) قابل‌پرداخت نیست
-        const affordable = await this.firstAffordable(ranked, balance, markup, hasInputImages)
+        const affordable = await this.firstAffordable(ranked, balance, markup, hasExplicitInputImages || isEditIntent)
         if (!affordable) {
           throw new HttpException(
             { message: fa.payAsYouGo.insufficientBalance, stage: 'wallet_insufficient' },
@@ -915,7 +1003,7 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
       // فقط چک می‌کنیم کیف‌پول کافی هست یا نه
       const markup = plan.payAsYouGoMarkup ?? 1.3
       const balance = await this.pricingService.getWalletBalance(userId)
-      const affordable = await this.firstAffordable([modelRecord], balance, markup, hasInputImages)
+      const affordable = await this.firstAffordable([modelRecord], balance, markup, hasExplicitInputImages || isEditIntent)
       if (!affordable) {
         throw new HttpException(
           { message: fa.payAsYouGo.insufficientBalance, stage: 'wallet_insufficient' },
@@ -940,14 +1028,24 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
     const callStart = Date.now()
 
     try {
-      const result = hasInputImages
+      // اگر کاربر خودش عکس نفرستاده ولی این ادامه‌ی یک ویرایش قبلی تشخیص داده شده («نه، صورتیش
+      // کن»)، آخرین عکس مرتبط همین مکالمه را خودمان از MinIO می‌گیریم — گیت‌وی ما (برخلاف
+      // Responses API خودِ OpenAI با previous_response_id) هیچ حافظه‌ای بین تماس‌ها ندارد،
+      // پس این حافظه را خودمان دستی نگه می‌داریم
+      const inputImageBuffers = hasExplicitInputImages
+        ? (dto.images ?? [])
+            .map((dataUrl) => parseChatImageDataUrl(dataUrl))
+            .filter((p): p is NonNullable<typeof p> => p !== null)
+            .map((p) => p.buffer)
+        : isEditIntent
+          ? await this.resolveLastConversationImages(conversationId)
+          : []
+
+      const result = inputImageBuffers.length
         ? await this.editImageRaw({
             modelId,
             prompt: dto.content,
-            images: (dto.images ?? [])
-              .map((dataUrl) => parseChatImageDataUrl(dataUrl))
-              .filter((p): p is NonNullable<typeof p> => p !== null)
-              .map((p) => p.buffer),
+            images: inputImageBuffers,
             size: modelRecord.imageGenSize ?? undefined,
             quality: modelRecord.imageGenQuality ?? undefined,
           })
