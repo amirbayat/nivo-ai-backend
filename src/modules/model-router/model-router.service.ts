@@ -138,7 +138,7 @@ export class ModelRouterService {
       where: {
         name: { in: input.allowedModels },
         isActive: true,
-        modelType: 'CHAT', // مدل‌های embedding هرگز نباید برای تولید پاسخ چت انتخاب شوند
+        modelType: 'CHAT', // مدل‌های embedding و IMAGE_GEN (که اصلاً قابلیت تولید متن ندارند) هرگز نباید برای پاسخ چت معمولی انتخاب شوند
         ...(input.hasImages ? { supportsVision: true } : {}),
       },
       orderBy: { sortOrder: 'asc' },

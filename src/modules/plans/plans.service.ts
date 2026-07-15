@@ -27,11 +27,13 @@ export class PlansService {
   }
 
   // فقط فیلدهای عمومی/غیرحساس — بدون قیمت — برای ساخت آیکون/توضیح مدل در فرانت (دراپ‌داون چت، کارت پلن‌ها)
-  // modelType: 'CHAT' چون این کاتالوگ عمومی است — مدل‌های embedding نباید به کاربر نهایی به‌عنوان
-  // گزینه‌ی چت نمایش داده شوند (docs/PRD-sales-kb-rag-and-plan-context.md بخش الف).
+  // CHAT + IMAGE_GEN چون این کاتالوگ عمومی است — مدل‌های embedding نباید به کاربر نهایی به‌عنوان
+  // گزینه نمایش داده شوند (docs/PRD-sales-kb-rag-and-plan-context.md بخش الف)، اما مدل‌های IMAGE_GEN
+  // باید اینجا باشند تا حالت «تولید عکس» فرانت (بر اساس supportsImageGen) آن‌ها را ببیند —
+  // مسیریاب مدل (model-router.service.ts) جدا و همچنان فقط modelType:'CHAT' فیلتر می‌کند.
   findModelCatalog() {
     return this.prisma.aiModel.findMany({
-      where: { isActive: true, modelType: 'CHAT' },
+      where: { isActive: true, modelType: { in: ['CHAT', 'IMAGE_GEN'] } },
       orderBy: { sortOrder: 'asc' },
       select: {
         name: true,

@@ -445,11 +445,15 @@ enum ModelTier {
 }
 
 // چت‌محور (تولید متن) در برابر embedding — docs/PRD-sales-kb-rag-and-plan-context.md.
-// جدا نگه‌داشتن این دو نوع در همان جدول AiModel لازم است تا مدل‌های embedding در
+// جدا نگه‌داشتن این انواع در همان جدول AiModel لازم است تا مدل‌های embedding در
 // دراپ‌داون‌های چت (پلن‌ها، مسیریاب مدل، کاتالوگ عمومی) سهواً انتخاب‌پذیر نشوند.
+// IMAGE_GEN — مدل‌هایی که فقط تولید عکس می‌کنند و اصلاً قابلیت تولید متن/چت ندارند؛
+// عمداً از فیلتر `modelType: 'CHAT'` مسیریاب مدل (model-router.service.ts) بیرون می‌مانند
+// تا هرگز برای پاسخ‌دهی متنی معمولی انتخاب نشوند — حتی اگر توی allowedModels یک پلن باشند.
 enum AiModelType {
   CHAT
   EMBEDDING
+  IMAGE_GEN
 }
 
 model AiModel {
