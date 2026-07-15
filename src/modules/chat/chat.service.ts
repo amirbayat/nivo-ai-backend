@@ -9,8 +9,10 @@ import {
 import { ConfigService } from '@nestjs/config'
 import * as crypto from 'crypto'
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
-import { streamText, generateImage, APICallError, RetryError } from 'ai'
+import { streamText, generateImage, generateObject, APICallError, RetryError } from 'ai'
 import type { ModelMessage, UserModelMessage } from 'ai'
+import { ModelTier, type AiModel } from '@prisma/client'
+import { z } from 'zod'
 import { PrismaService } from '../../prisma/prisma.service'
 import { RedisService } from '../../redis/redis.service'
 import { TokenService, rollingWindowKey, type PlanLimits } from '../usage/token.service'
@@ -642,6 +644,67 @@ export class ChatService {
     }
   }
 
+  // یک مدل تولید عکس ممکن است چند ردیف با کیفیت/قیمت مختلف داشته باشد (مثلاً low/medium/high
+  // خانواده‌ی gpt-image) — به‌جای اینکه کاربر خودش کیفیت را انتخاب کند، از روی متن پیام تشخیص
+  // می‌دهیم که این تصویر چقدر باید دقیق/پیچیده باشد، و اندازه‌ی مناسب (مربع/عمودی/افقی) را هم
+  // از توصیف کاربر درمی‌آوریم. تماس سبک و ارزان است (همان الگوی classifyWithLLM در model-router).
+  private async classifyImagePrompt(
+    prompt: string,
+  ): Promise<{ tier: ModelTier; size: '1024x1024' | '1024x1536' | '1536x1024' }> {
+    const fallback = { tier: ModelTier.MEDIUM, size: '1024x1024' as const }
+    try {
+      const { object } = await generateObject({
+        model: this.provider(PRE_ROUTING_REFERENCE_MODEL),
+        schema: z.object({
+          tier: z.enum(['SIMPLE', 'MEDIUM', 'COMPLEX']),
+          size: z.enum(['1024x1024', '1024x1536', '1536x1024']),
+        }),
+        system: `درخواست تولید عکس کاربر را از نظر پیچیدگی/کیفیت لازم طبقه‌بندی کن.
+SIMPLE: آیکون ساده، شکل مینیمال، طرح خیلی ابتدایی — کیفیت پایین کافی است.
+MEDIUM: یک صحنه‌ی معمولی، تصویر توضیحی، بدون جزئیات فوق‌العاده دقیق.
+COMPLEX: تصویر فوتورئالیستیک، جزئیات زیاد، متن/عدد دقیق داخل تصویر، ترکیب‌بندی پیچیده.
+size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی عمودی/پرتره/شخص از نزدیک بود → "1024x1536"،
+اگر منظره/صحنه‌ی افقی/بنر بود → "1536x1024"، در غیر این صورت (یا نامشخص) → "1024x1024".
+فقط JSON برگردان.`,
+        messages: [{ role: 'user', content: prompt.slice(0, 1000) }],
+        abortSignal: AbortSignal.timeout(8_000),
+      })
+      return object
+    } catch (err) {
+      this.logger.warn(`Image prompt classification failed, falling back to MEDIUM/1024x1024: ${(err as Error).message}`)
+      return fallback
+    }
+  }
+
+  // بین چند ردیف supportsImageGen موجود (که ممکن است کیفیت/اندازه‌ی متفاوتی داشته باشند)،
+  // نزدیک‌ترین به (idealTier, idealSize) را انتخاب می‌کند — تطابق کیفیت وزن بیشتری از تطابق
+  // اندازه دارد، چون تفاوت قیمتی کیفیت معمولاً بسیار بیشتر از تفاوت قیمتی اندازه است
+  private rankImageModelCandidates(
+    candidates: AiModel[],
+    idealTier: ModelTier,
+    idealSize: string,
+  ): AiModel[] {
+    const tierScore = (t: string | null) => (t === idealTier ? 2 : 0)
+    const sizeScore = (s: string | null) => (s === idealSize ? 1 : 0)
+    return [...candidates].sort((a, b) => {
+      const scoreDiff = (tierScore(b.tier) + sizeScore(b.imageGenSize)) - (tierScore(a.tier) + sizeScore(a.imageGenSize))
+      if (scoreDiff !== 0) return scoreDiff
+      return a.sortOrder - b.sortOrder
+    })
+  }
+
+  private async firstAffordable(
+    rankedCandidates: AiModel[],
+    balanceToman: number,
+    markup: number,
+  ): Promise<AiModel | null> {
+    for (const candidate of rankedCandidates) {
+      const { costToman } = await this.pricingService.calcFlatCostToman(candidate.imageGenPriceUsd ?? 0)
+      if (balanceToman >= Math.ceil(costToman * markup)) return candidate
+    }
+    return null
+  }
+
   // docs/PRD-chat-images.md بخش ۵.۵ — مسیر تولید عکس: مستقل از streamText/Router. نتیجه یک‌جا
   // (نه تدریجی) از طریق یک رویداد SSE برگردانده می‌شود، نه چانک‌به‌چانک مثل متن.
   private async handleImageGeneration(
@@ -651,42 +714,64 @@ export class ChatService {
     dto: StreamMessageDto,
     plan: PlanLimits,
   ): Promise<void> {
-    // انتخاب دستی (toggle صریح) اگر معتبر و supportsImageGen باشد در اولویت است؛ وگرنه (مخصوصاً
-    // حالت تشخیص ضمنی که کاربر اصلاً مدلی برای تولید عکس انتخاب نکرده) اولین مدل فعال
-    // supportsImageGen داخل allowedModels پلن به‌صورت پیش‌فرض انتخاب می‌شود
+    // انتخاب دستی (toggle صریح با یک مدل مشخص) اگر معتبر و supportsImageGen باشد همچنان در
+    // اولویت است — راه فرار برای انتخاب دقیق. وگرنه (حالت پیش‌فرض/تشخیص ضمنی)، خودمان از روی
+    // متن پیام تشخیص می‌دهیم این عکس چقدر باید پیچیده/باکیفیت باشد و بین ردیف‌های موجود
+    // (که ممکن است چند سطح کیفیت/قیمت مختلف از یک یا چند مدل باشند) بهترین را انتخاب می‌کنیم.
     const requestedModel = dto.model && dto.model !== OPTIMAL_MODE ? resolveModelId(dto.model) : undefined
-    let modelRecord =
+    const explicitModelRecord =
       requestedModel && plan.allowedModels.includes(requestedModel)
         ? await this.prisma.aiModel.findFirst({
             where: { name: requestedModel, isActive: true, supportsImageGen: true },
           })
         : null
 
+    let modelRecord = explicitModelRecord
     if (!modelRecord) {
-      modelRecord = await this.prisma.aiModel.findFirst({
+      const candidates = await this.prisma.aiModel.findMany({
         where: { name: { in: plan.allowedModels }, supportsImageGen: true, isActive: true },
         orderBy: { sortOrder: 'asc' },
       })
-    }
-    if (!modelRecord) {
-      throw new BadRequestException(fa.chat.imageGenNotSupported)
-    }
-    const modelId = modelRecord.name
+      if (!candidates.length) {
+        throw new BadRequestException(fa.chat.imageGenNotSupported)
+      }
 
-    const priceUsd = modelRecord.imageGenPriceUsd ?? 0
+      const { tier: idealTier, size: idealSize } = await this.classifyImagePrompt(dto.content)
+      const ranked = this.rankImageModelCandidates(candidates, idealTier, idealSize)
 
-    // پیش‌چک PAYG — همون الگوی چت معمولی (بخش ۵.۲)؛ برای پلن‌های دیگر بودجه‌ی بالاتر preflight شده
-    if (plan.isPayAsYouGo) {
+      if (plan.isPayAsYouGo) {
+        const markup = plan.payAsYouGoMarkup ?? 1.3
+        const balance = await this.pricingService.getWalletBalance(userId)
+        // بین همه‌ی گزینه‌ها (به ترتیب بهترین تطابق کیفیت اول)، اولین گزینه‌ای که کیف‌پول
+        // برایش کافی است انتخاب می‌شود — بهترین کیفیتی که کاربر واقعاً می‌تواند بپردازد،
+        // نه لزوماً ارزان‌ترین. اگر even ارزان‌ترین گزینه هم کافی نبود، یعنی هیچ‌کدام از
+        // کل لیست (با هر ترتیبی) قابل‌پرداخت نیست
+        const affordable = await this.firstAffordable(ranked, balance, markup)
+        if (!affordable) {
+          throw new HttpException(
+            { message: fa.payAsYouGo.insufficientBalance, stage: 'wallet_insufficient' },
+            402,
+          )
+        }
+        modelRecord = affordable
+      } else {
+        modelRecord = ranked[0]
+      }
+    } else if (plan.isPayAsYouGo) {
+      // انتخاب دستی صریح — کیفیت را خودمان پایین نمی‌آوریم (کاربر دقیقاً همین را خواسته)،
+      // فقط چک می‌کنیم کیف‌پول کافی هست یا نه
       const markup = plan.payAsYouGoMarkup ?? 1.3
-      const { costToman: worstCaseToman } = await this.pricingService.calcFlatCostToman(priceUsd)
       const balance = await this.pricingService.getWalletBalance(userId)
-      if (balance < Math.ceil(worstCaseToman * markup)) {
+      const affordable = await this.firstAffordable([modelRecord], balance, markup)
+      if (!affordable) {
         throw new HttpException(
           { message: fa.payAsYouGo.insufficientBalance, stage: 'wallet_insufficient' },
           402,
         )
       }
     }
+    const modelId = modelRecord.name
+    const priceUsd = modelRecord.imageGenPriceUsd ?? 0
 
     res.setHeader('Content-Type', 'text/event-stream')
     res.setHeader('Cache-Control', 'no-cache')
