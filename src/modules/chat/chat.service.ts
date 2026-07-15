@@ -29,7 +29,7 @@ import { fa } from '../../i18n/fa'
 import type { Response } from 'express'
 import { StreamMessageDto } from './dto/stream-message.dto'
 import { validateChatImages, parseChatImageDataUrl } from '../../common/validators/chat-image.validator'
-import { detectImageGenIntent } from './image-gen-intent'
+import { detectImageGenIntent, detectImageEditIntent } from './image-gen-intent'
 
 const OPTIMAL_MODE = 'optimal'
 
@@ -267,11 +267,16 @@ export class ChatService {
     // docs/PRD-chat-images.md بخش ۵.۵ — تولید عکس مسیر کاملاً جدایی است: نه Router (طبقه‌بندی
     // SIMPLE/MEDIUM/COMPLEX بی‌معنی است)، نه vision-preflight، نه سهمیه‌ی توکنی خروجی. مدل یا
     // صراحتاً انتخاب شده (toggle فرانت) یا از روی نیت پیام تشخیص داده می‌شود (heuristic، قابل
-    // خاموش‌کردن از ادمین) — هر دو حالت به همان مسیر می‌روند. تشخیص ضمنی عمداً وقتی کاربر
-    // خودش عکس آپلود کرده اجرا نمی‌شود — آن یک درخواست vision است (توضیح/تحلیل عکس)، نه تولید.
+    // خاموش‌کردن از ادمین) — هر سه حالت به همان مسیر می‌روند.
+    // دو heuristic جدا: وقتی کاربر عکس نفرستاده («تولید از صفر» — اسم+فعل مثل «عکس گربه بکش»)
+    // در برابر وقتی عکس فرستاده («ویرایش/ترکیب همون عکس» — فقط فعل کافیه، مثل «سفیدش کن»،
+    // چون خودِ عکس ضمیمه‌شده موضوع رو مشخص می‌کنه). قبلاً وقتی عکس بود اصلاً implicit چک نمی‌شد
+    // که یعنی «سفیدش کن» روی یک عکس آپلودی به‌جای ویرایش، به مسیر توضیح/تحلیل معمولی می‌رفت.
     const implicitImageGenTriggered =
       !dto.images?.length && chatConfig.implicitImageGenEnabled && detectImageGenIntent(dto.content)
-    if (dto.generateImage || implicitImageGenTriggered) {
+    const implicitImageEditTriggered =
+      Boolean(dto.images?.length) && chatConfig.implicitImageGenEnabled && detectImageEditIntent(dto.content)
+    if (dto.generateImage || implicitImageGenTriggered || implicitImageEditTriggered) {
       return this.handleImageGeneration(res, conversationId, userId, dto, plan)
     }
 
@@ -650,10 +655,11 @@ export class ChatService {
   // از توصیف کاربر درمی‌آوریم. تماس سبک و ارزان است (همان الگوی classifyWithLLM در model-router).
   private async classifyImagePrompt(
     prompt: string,
+    userId: string,
   ): Promise<{ tier: ModelTier; size: '1024x1024' | '1024x1536' | '1536x1024' }> {
     const fallback = { tier: ModelTier.MEDIUM, size: '1024x1024' as const }
     try {
-      const { object } = await generateObject({
+      const { object, usage } = await generateObject({
         model: this.provider(PRE_ROUTING_REFERENCE_MODEL),
         schema: z.object({
           tier: z.enum(['SIMPLE', 'MEDIUM', 'COMPLEX']),
@@ -669,6 +675,16 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
         messages: [{ role: 'user', content: prompt.slice(0, 1000) }],
         abortSignal: AbortSignal.timeout(8_000),
       })
+      // این هم یک تماس واقعی به Liara است و هزینه‌ی واقعی دارد — قبلاً اینجا ردیابی نمی‌شد،
+      // یعنی روی Liara شارژ می‌شد ولی توی حساب‌وکتاب داخلی ما اصلاً دیده نمی‌شد
+      if (usage) {
+        const { costToman, costUsdMicros } = await this.pricingService.calcCost(
+          usage.inputTokens ?? 0,
+          usage.outputTokens ?? 0,
+          PRE_ROUTING_REFERENCE_MODEL,
+        )
+        this.pricingService.trackCost(userId, costToman, costUsdMicros).catch(() => {})
+      }
       return object
     } catch (err) {
       this.logger.warn(`Image prompt classification failed, falling back to MEDIUM/1024x1024: ${(err as Error).message}`)
@@ -824,6 +840,37 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
     // از صفر — دقیقاً مثل مثال gpt-image-1-mini (چند عکس ورودی + prompt → یک عکس جدید)
     const hasInputImages = Boolean(dto.images?.length)
 
+    // این مسیر (برخلاف چت معمولی) زودتر return می‌کند و هیچ‌وقت به کد ذخیره‌سازی پیام کاربر
+    // در streamChat() نمی‌رسد — پس اگر اینجا خودمان پیام کاربر را ذخیره نکنیم، بعد از هر
+    // invalidate/refetch (مثلاً پایان استریم) کل پیام کاربر (متن + عکس‌های ورودی) ناپدید می‌شود،
+    // چون اصلاً هیچ‌وقت توی دیتابیس نبوده — فقط توی کش optimistic فرانت بوده
+    const persistedInputImageKeys = dto.images?.length
+      ? (
+          await Promise.all(
+            dto.images.map(async (dataUrl) => {
+              const parsed = parseChatImageDataUrl(dataUrl)
+              if (!parsed) return null
+              try {
+                return await this.storageService.uploadImage(parsed.buffer, parsed.ext, conversationId)
+              } catch (err) {
+                this.logger.warn(`MinIO upload failed for input image, keeping raw base64: ${(err as Error).message}`)
+                return dataUrl
+              }
+            }),
+          )
+        ).filter((key): key is string => key !== null)
+      : []
+
+    await this.prisma.message.create({
+      data: {
+        conversationId,
+        userId,
+        role: 'USER',
+        content: dto.content,
+        ...(persistedInputImageKeys.length ? { images: persistedInputImageKeys } : {}),
+      },
+    })
+
     const requestedModel = dto.model && dto.model !== OPTIMAL_MODE ? resolveModelId(dto.model) : undefined
     const explicitModelRecord =
       requestedModel && plan.allowedModels.includes(requestedModel)
@@ -842,7 +889,7 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
         throw new BadRequestException(fa.chat.imageGenNotSupported)
       }
 
-      const { tier: idealTier, size: idealSize } = await this.classifyImagePrompt(dto.content)
+      const { tier: idealTier, size: idealSize } = await this.classifyImagePrompt(dto.content, userId)
       const ranked = this.rankImageModelCandidates(candidates, idealTier, idealSize)
 
       if (plan.isPayAsYouGo) {
@@ -884,6 +931,11 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
     res.setHeader('X-Accel-Buffering', 'no')
     res.flushHeaders()
 
+    // وقتی toggle صریح فرانت فعال بوده، فرانت از قبل isGeneratingImage را خودش true کرده —
+    // ولی وقتی تشخیص ضمنی/heuristic باعث اومدن به این مسیر شده، فرانت هیچ‌وقت از قبل خبر نداشت
+    // این پیام قراره تولید عکس بشه؛ بدون این رویداد، لودینگ آماده‌سازی عکس اصلاً نشون داده نمی‌شد
+    res.write(`data: ${JSON.stringify({ info: 'image-generation-started' })}\n\n`)
+
     const streamToken = await this.liveStats.trackStreamStart()
     const callStart = Date.now()
 
@@ -918,13 +970,18 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
         this.logger.warn(`MinIO upload failed for generated image: ${(err as Error).message}`)
       }
 
+      // اگر آپلود به MinIO fail بشه، عکس رو کامل از دست نمی‌دیم — همون base64 خام رو ذخیره
+      // می‌کنیم (فرمت قدیمی که کد خواندنش رو از قبل پشتیبانی می‌کند، isStorageKey تشخیصش می‌ده)؛
+      // وگرنه پیام دستیار با content خالی و بدون عکس، کاملاً نامرئی می‌شد (نه متن نه عکس)
+      const persistedImage = imageKey ?? `data:image/png;base64,${result.base64}`
+
       const assistantMessage = await this.prisma.message.create({
         data: {
           conversationId,
           userId,
           role: 'ASSISTANT',
           content: '',
-          ...(imageKey ? { images: [imageKey] } : {}),
+          images: [persistedImage],
           costToman,
           costUsdMicros,
           costInputUsdMicros,

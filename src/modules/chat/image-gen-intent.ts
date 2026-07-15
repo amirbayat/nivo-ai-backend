@@ -18,3 +18,18 @@ const IMAGE_GEN_INTENT_RE = new RegExp(
 export function detectImageGenIntent(content: string): boolean {
   return IMAGE_GEN_INTENT_RE.test(content)
 }
+
+// وقتی کاربر از قبل عکس فرستاده، دیگر نیازی به اسم «عکس/تصویر» نیست (چون خودِ عکس ضمیمه‌شده
+// موضوع را مشخص می‌کند — «سفیدش کن» یعنی «این عکس رو سفید کن») — پس فقط دنبال فعل‌های ویرایش
+// می‌گردیم، نه ترکیب اسم+فعل مثل تولید از صفر
+const EDIT_VERBS = [
+  'ویرایش', 'تغییرش', 'تغییر بده', 'عوضش', 'عوض کن', 'سفیدش', 'سفید کن',
+  'رنگش', 'رنگی‌اش', 'روشن‌تر', 'تیره‌تر', 'پاکش', 'پاک کن', 'حذفش', 'حذف کن',
+  'اضافه کن', 'درستش کن', 'بهترش کن', 'ریتاچ', 'کراپ', 'برش بده', 'ترکیبشون',
+  'ترکیب کن', 'بکش روش', 'بذار روش',
+]
+const IMAGE_EDIT_INTENT_RE = new RegExp(EDIT_VERBS.join('|'))
+
+export function detectImageEditIntent(content: string): boolean {
+  return IMAGE_EDIT_INTENT_RE.test(content)
+}
