@@ -4,6 +4,17 @@ import { AdminGuard } from '../../common/guards/admin.guard'
 import { CurrentUser, JwtPayload } from '../../common/decorators/current-user.decorator'
 import { NetworkOutageService } from './network-outage.service'
 
+@Controller('network-outage')
+export class NetworkOutagePublicController {
+  constructor(private readonly outage: NetworkOutageService) {}
+
+  @Get('status')
+  async getStatus() {
+    const current = await this.outage.getCurrent()
+    return { active: Boolean(current) }
+  }
+}
+
 @Controller('admin/network-outage')
 @UseGuards(JwtGuard, AdminGuard)
 export class NetworkOutageController {

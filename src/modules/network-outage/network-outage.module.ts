@@ -1,9 +1,9 @@
 import { Module } from '@nestjs/common'
 import { NetworkOutageService } from './network-outage.service'
-import { NetworkOutageController } from './network-outage.controller'
+import { NetworkOutageController, NetworkOutagePublicController } from './network-outage.controller'
 
 @Module({
-  controllers: [NetworkOutageController],
+  controllers: [NetworkOutagePublicController, NetworkOutageController],
   providers: [NetworkOutageService],
 })
 export class NetworkOutageModule {}
