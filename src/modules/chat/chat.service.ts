@@ -1098,7 +1098,7 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
       orderBy: { sortOrder: 'asc' },
     })
     if (!candidates.length) {
-      throw new BadRequestException(fa.chat.imageGenNotSupported)
+      throw new BadRequestException({ message: fa.chat.imageGenNotSupported, code: 'IMAGE_GEN_NOT_SUPPORTED' })
     }
 
     // زنجیره‌ی fallback: اگر مدل دقیقاً درخواست‌شده/پیش‌فرضِ پلن هست اول امتحان می‌شود، بعد

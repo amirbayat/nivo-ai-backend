@@ -10,7 +10,7 @@ import { PaymentGateway } from './gateways/payment-gateway.interface'
 import { fa } from '../../i18n/fa'
 import { InitiatePaymentDto } from './dto/initiate-payment.dto'
 import { InitiateWalletTopupDto } from './dto/initiate-wallet-topup.dto'
-import type { Payment, User } from '@prisma/client'
+import type { Payment, Plan, User } from '@prisma/client'
 
 const SUBSCRIPTION_DAYS = 30
 
@@ -37,13 +37,20 @@ export class PaymentsService {
     if (!plan) throw new NotFoundException(fa.plans.notFound)
     if (!plan.isActive) throw new BadRequestException(fa.plans.notActive)
 
+    // ── قانون «فقط خرید رو به بالا» — docs/PRD-plan-image-capability-and-upgrade.md بخش ۶ ──
+    // وقتی کاربر یک سابسکریپشن معمولی (نه PAYG) فعال دارد، فقط پلن گران‌تر از پلن فعلی قابل‌خرید
+    // است (نه همان پلن دوباره، نه پایین‌تر) — PAYG مستقل از این قانون است (مسیر مصرف جداست).
+    const upgradeCreditToman = plan.isPayAsYouGo
+      ? 0
+      : await this.computeUpgradeCredit(userId, plan)
+
     // docs/PRD-growth-traction-features.md بخش ۵.۲ — کد تخفیف اختیاری
-    let finalAmount = plan.priceMonthly
+    let finalAmount = Math.max(0, plan.priceMonthly - upgradeCreditToman)
     let discountCodeId: string | null = null
     if (dto.discountCode) {
       const code = await this.discountCodeService.findValidCode(dto.discountCode, userId)
       discountCodeId = code.id
-      finalAmount = Math.round(plan.priceMonthly * (1 - code.discountPercent / 100))
+      finalAmount = Math.round(finalAmount * (1 - code.discountPercent / 100))
     }
 
     const gateway = this.registry.resolve(dto.gateway)
@@ -70,12 +77,40 @@ export class PaymentsService {
         provider: gateway.name,
         providerRef,
         ...(discountCodeId ? { discountCodeId } : {}),
+        ...(upgradeCreditToman > 0 ? { metadata: { isUpgrade: true, upgradeCreditToman } } : {}),
       },
     })
 
     this.logger.log(`initiate: created payment providerRef=${providerRef} paymentUrl=${paymentUrl}`)
 
     return { paymentUrl, providerRef }
+  }
+
+  // docs/PRD-plan-image-capability-and-upgrade.md بخش ۶.۲ — اگر کاربر یک سابسکریپشن معمولی
+  // فعال دارد، فقط پلن گران‌تر قابل‌خرید است؛ اعتبار روزهای باقی‌مانده‌ی پلن فعلی از قیمت پلن
+  // جدید کم می‌شود. چون این تابع فقط وقتی صدا زده می‌شود که newPlan.priceMonthly > oldPlan.priceMonthly
+  // (پایین‌تر throw می‌شود)، اعتبار محاسبه‌شده همیشه کوچک‌تر از قیمت پلن جدید است — هیچ‌وقت پرداخت منفی نمی‌شود.
+  private async computeUpgradeCredit(userId: string, newPlan: Plan): Promise<number> {
+    const now = new Date()
+    const currentSub = await this.prisma.subscription.findUnique({
+      where: { userId },
+      include: { plan: true },
+    })
+    if (!currentSub || currentSub.status !== 'ACTIVE' || currentSub.periodEnd <= now || currentSub.plan.isPayAsYouGo) {
+      return 0
+    }
+
+    const currentPlan = currentSub.plan
+    if (newPlan.priceMonthly <= currentPlan.priceMonthly) {
+      throw new BadRequestException({
+        message: fa.plans.downgradeOrRepurchaseNotAllowed(currentPlan.name),
+        code: 'PLAN_DOWNGRADE_OR_REPURCHASE_NOT_ALLOWED',
+      })
+    }
+
+    const totalMs = SUBSCRIPTION_DAYS * 24 * 60 * 60 * 1000
+    const remainingMs = Math.min(totalMs, Math.max(0, currentSub.periodEnd.getTime() - now.getTime()))
+    return Math.round(currentPlan.priceMonthly * (remainingMs / totalMs))
   }
 
   getEnabledGateways() {
