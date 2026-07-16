@@ -48,6 +48,51 @@ function csvEscape(v: unknown): string {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
 }
 
+export interface ModelBreakdownRow {
+  model: string
+  modelType: 'TEXT' | 'IMAGE'
+  messages: number
+  tokensInput: number
+  tokensOutput: number
+  costToman: number
+  costUsd: number
+  costInputUsd: number
+  costOutputUsd: number
+  costInputToman: number
+  costOutputToman: number
+  avgInputPricePerMillionUsd: number
+  avgOutputPricePerMillionUsd: number
+}
+
+// میانگین‌ها/پرمصرف‌ترین مدل را روی زیرمجموعه‌ای از modelBreakdown (مثلاً فقط
+// مدل‌های متنی یا فقط تولید عکس) محاسبه می‌کند — همون فرمول وزنی computeOverview
+// را برای هر بازه‌ی مدل‌ها هم به کار می‌بریم تا رفتار یکسان بماند
+function summarizeModelTypeBreakdown(rows: ModelBreakdownRow[]) {
+  const messages = rows.reduce((s, m) => s + m.messages, 0)
+  const tokensInput = rows.reduce((s, m) => s + m.tokensInput, 0)
+  const tokensOutput = rows.reduce((s, m) => s + m.tokensOutput, 0)
+  const costInputUsd = rows.reduce((s, m) => s + m.costInputUsd, 0)
+  const costOutputUsd = rows.reduce((s, m) => s + m.costOutputUsd, 0)
+  const costInputToman = rows.reduce((s, m) => s + m.costInputToman, 0)
+  const costOutputToman = rows.reduce((s, m) => s + m.costOutputToman, 0)
+  const totalTokens = tokensInput + tokensOutput
+
+  return {
+    messages,
+    totalTokens,
+    avgTokensPerMessage: messages > 0 ? Math.round(totalTokens / messages) : 0,
+    avgInputTokensPerMessage: messages > 0 ? Math.round(tokensInput / messages) : 0,
+    avgOutputTokensPerMessage: messages > 0 ? Math.round(tokensOutput / messages) : 0,
+    avgInputPricePerMillionUsd: tokensInput > 0 ? (costInputUsd / tokensInput) * 1_000_000 : 0,
+    avgOutputPricePerMillionUsd: tokensOutput > 0 ? (costOutputUsd / tokensOutput) * 1_000_000 : 0,
+    avgInputPricePerMillionToman: tokensInput > 0 ? Math.round((costInputToman / tokensInput) * 1_000_000) : 0,
+    avgOutputPricePerMillionToman: tokensOutput > 0 ? Math.round((costOutputToman / tokensOutput) * 1_000_000) : 0,
+    // rows از قبل بر اساس costToman نزولی مرتب است (getModelBreakdown)، پس اولین
+    // عضو زیرمجموعه همچنان پرهزینه‌ترین مدل همان نوع است
+    topModel: rows[0]?.model ?? null,
+  }
+}
+
 export interface UserUsageRow {
   userId: string
   phone: string | null
@@ -127,6 +172,11 @@ export class UsageAnalyticsService {
     const totalInputCostToman = modelBreakdown.reduce((s, m) => s + m.costInputToman, 0)
     const totalOutputCostToman = modelBreakdown.reduce((s, m) => s + m.costOutputToman, 0)
 
+    // تفکیک مدل‌های تولید متن از تولید عکس — چون هردو در همون جدول Message
+    // ذخیره می‌شن، فقط با تطبیق نام مدل روی AiModel.modelType قابل تشخیصن
+    const textBreakdown = modelBreakdown.filter((m) => m.modelType === 'TEXT')
+    const imageBreakdown = modelBreakdown.filter((m) => m.modelType === 'IMAGE')
+
     return {
       totalTokens,
       totalMessages,
@@ -143,6 +193,8 @@ export class UsageAnalyticsService {
       avgInputPricePerMillionToman: totalInputTokens > 0 ? Math.round((totalInputCostToman / totalInputTokens) * 1_000_000) : 0,
       avgOutputPricePerMillionToman: totalOutputTokens > 0 ? Math.round((totalOutputCostToman / totalOutputTokens) * 1_000_000) : 0,
       topModel: modelBreakdown[0]?.model ?? null,
+      text: summarizeModelTypeBreakdown(textBreakdown),
+      image: summarizeModelTypeBreakdown(imageBreakdown),
     }
   }
 
@@ -188,27 +240,40 @@ export class UsageAnalyticsService {
       .sort((a, b) => a.period.localeCompare(b.period))
   }
 
+  // مدل‌های تولید عکس روی جدول AiModel با modelType=IMAGE_GEN مشخص می‌شن؛
+  // Message.model فقط یه رشته‌ست (نه relation)، پس تطبیق با اسم مدل انجام می‌شه
+  private async getImageModelNames(): Promise<Set<string>> {
+    const rows = await this.prisma.aiModel.findMany({
+      where: { modelType: 'IMAGE_GEN' },
+      select: { name: true },
+    })
+    return new Set(rows.map((r) => r.name))
+  }
+
   // هزینه/توکن دقیقاً از Message.costToman/costUsdMicros خوانده می‌شود — همان
   // عددی که لحظه‌ی ایجاد پیام محاسبه شده، نه بازمحاسبه با قیمت/نرخ فعلی
-  async getModelBreakdown(range: DateRange, userId?: string) {
-    const rows = await this.prisma.message.groupBy({
-      by: ['model'],
-      where: {
-        role: 'ASSISTANT',
-        model: { not: null },
-        createdAt: { gte: range.from, lte: range.to },
-        ...(userId ? { userId } : {}),
-      },
-      _sum: {
-        tokensInput: true,
-        tokensOutput: true,
-        costToman: true,
-        costUsdMicros: true,
-        costInputUsdMicros: true,
-        costOutputUsdMicros: true,
-      },
-      _count: { id: true },
-    })
+  async getModelBreakdown(range: DateRange, userId?: string): Promise<ModelBreakdownRow[]> {
+    const [rows, imageModelNames] = await Promise.all([
+      this.prisma.message.groupBy({
+        by: ['model'],
+        where: {
+          role: 'ASSISTANT',
+          model: { not: null },
+          createdAt: { gte: range.from, lte: range.to },
+          ...(userId ? { userId } : {}),
+        },
+        _sum: {
+          tokensInput: true,
+          tokensOutput: true,
+          costToman: true,
+          costUsdMicros: true,
+          costInputUsdMicros: true,
+          costOutputUsdMicros: true,
+        },
+        _count: { id: true },
+      }),
+      this.getImageModelNames(),
+    ])
     return rows
       .map((r) => {
         const tokensInput = r._sum.tokensInput ?? 0
@@ -224,6 +289,7 @@ export class UsageAnalyticsService {
         const costOutputToman = costUsd > 0 ? Math.round(costToman * (costOutputUsd / costUsd)) : 0
         return {
           model: r.model as string,
+          modelType: (imageModelNames.has(r.model as string) ? 'IMAGE' : 'TEXT') as 'TEXT' | 'IMAGE',
           messages: r._count.id,
           tokensInput,
           tokensOutput,
