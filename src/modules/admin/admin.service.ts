@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common'
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { plainToInstance } from 'class-transformer'
 import { validate } from 'class-validator'
@@ -74,6 +74,7 @@ function manualLimitKey(userId: string) { return `manual_limit:${userId}` }
 
 @Injectable()
 export class AdminService {
+  private readonly logger = new Logger(AdminService.name)
   private readonly aiShare: number
 
   constructor(
@@ -136,11 +137,15 @@ export class AdminService {
     const where = search ? { phone: { contains: search } } : {}
 
     const now = new Date()
+    // «شارژ ماه» (chargedThisMonth) عمداً تقویمی می‌ماند — یک گزارش مالی «این ماه چقدر واریزی
+    // داشتیم» است، نه معیار pacing per-user. برای expectedByNow/aiCostThisMonth اما، چون
+    // با هم مقایسه می‌شوند، هر دو باید یک پنجره‌ی مشترک داشته باشند: دوره‌ی جاری اشتراک همون
+    // کاربر (periodStart) اگر مشترک باشد، وگرنه (کاربر رایگان، بدون periodStart) همون قرارداد
+    // قبلی یعنی اول ماه میلادی.
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
-    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
-    const daysPassed = now.getDate()
+    const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate())
 
-    const [users, total, monthlyRevenue, monthlyCost] = await Promise.all([
+    const [users, total, monthlyRevenue] = await Promise.all([
       this.prisma.user.findMany({
         where,
         skip,
@@ -169,23 +174,52 @@ export class AdminService {
         where: { status: 'COMPLETED', createdAt: { gte: startOfMonth } },
         _sum: { amount: true },
       }),
-      this.prisma.dailyUsage.groupBy({
-        by: ['userId'],
-        where: { date: { gte: startOfMonth } },
-        _sum: { costToman: true, costUsdMicros: true },
-      }),
     ])
 
     const revenueMap = new Map(monthlyRevenue.map(r => [r.userId, r._sum.amount ?? 0]))
-    const costMap = new Map(monthlyCost.map(r => [r.userId, r._sum.costToman ?? 0]))
-    const costUsdMap = new Map(monthlyCost.map(r => [r.userId, r._sum.costUsdMicros ?? 0]))
+
+    // پنجره‌ی مصرف هر کاربر می‌تواند متفاوت باشد (هرکس periodStart خودش را دارد)، پس دیگر
+    // نمی‌شود یک groupBy مشترک زد — قدیمی‌ترین شروع‌پنجره‌ی بین کاربرهای همین صفحه را پیدا
+    // می‌کنیم، ردیف‌های خام را از آنجا می‌گیریم، و بعد به‌ازای هر کاربر خودمان جمع می‌زنیم.
+    const windowStartFor = (u: (typeof users)[number]) =>
+      u.subscription ? startOfDay(u.subscription.periodStart) : startOfMonth
+    const earliestWindowStart = users.reduce(
+      (min, u) => { const s = windowStartFor(u); return s < min ? s : min },
+      startOfMonth,
+    )
+
+    const usageRows = users.length
+      ? await this.prisma.dailyUsage.findMany({
+        where: { userId: { in: users.map(u => u.id) }, date: { gte: earliestWindowStart } },
+        select: { userId: true, date: true, costToman: true, costUsdMicros: true },
+      })
+      : []
 
     const enriched = users.map(u => {
+      const windowStart = windowStartFor(u)
+      const rowsForUser = usageRows.filter(r => r.userId === u.id && r.date >= windowStart)
+      const aiCost = rowsForUser.reduce((sum, r) => sum + r.costToman, 0)
+      const aiCostUsd = rowsForUser.reduce((sum, r) => sum + r.costUsdMicros, 0) / 1_000_000
       const charged = revenueMap.get(u.id) ?? 0
-      const aiCost = costMap.get(u.id) ?? 0
-      const aiCostUsd = (costUsdMap.get(u.id) ?? 0) / 1_000_000
-      const monthlyBudget = Math.floor((u.subscription?.plan.priceMonthly ?? 0) * this.aiShare)
-      const expectedByNow = Math.floor((monthlyBudget * daysPassed) / daysInMonth)
+
+      const priceMonthly = u.subscription?.plan.priceMonthly ?? 0
+      const monthlyBudget = Math.floor(priceMonthly * this.aiShare)
+
+      let daysInPeriod: number
+      let daysPassed: number
+      if (u.subscription) {
+        const { periodStart, periodEnd } = u.subscription
+        daysInPeriod = Math.max(1, Math.round((periodEnd.getTime() - periodStart.getTime()) / 86_400_000))
+        const rawDaysPassed = Math.floor((now.getTime() - periodStart.getTime()) / 86_400_000) + 1
+        daysPassed = Math.min(Math.max(rawDaysPassed, 1), daysInPeriod)
+      } else {
+        // کاربر رایگان — بدون دوره‌ی اشتراک؛ چون priceMonthly=۰ است budget عملاً صفر می‌شود،
+        // اما برای پایداری فرمول همون قرارداد قبلی (ماه میلادی) را نگه می‌داریم
+        daysInPeriod = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
+        daysPassed = now.getDate()
+      }
+
+      const expectedByNow = Math.floor((monthlyBudget * daysPassed) / daysInPeriod)
       const ratio = expectedByNow > 0 ? aiCost / expectedByNow : 0
 
       let category: 'heavy' | 'moderate' | 'light' | 'inactive' = 'inactive'
@@ -194,6 +228,15 @@ export class AdminService {
         else if (ratio >= 0.5) category = 'moderate'
         else category = 'light'
       }
+
+      this.logger.log(
+        `[expectedByNow] user=${u.phone} plan=${u.subscription?.plan.name ?? 'بدون اشتراک'} `
+        + `periodStart=${u.subscription?.periodStart.toISOString() ?? '- (رایگان، اول ماه میلادی)'} `
+        + `periodEnd=${u.subscription?.periodEnd.toISOString() ?? '-'} daysInPeriod=${daysInPeriod} daysPassed=${daysPassed} `
+        + `priceMonthly=${priceMonthly} monthlyBudget=floor(${priceMonthly} × ${this.aiShare})=${monthlyBudget} `
+        + `expectedByNow=floor(${monthlyBudget} × ${daysPassed} / ${daysInPeriod})=${expectedByNow} `
+        + `aiCostThisPeriod=${aiCost} (پنجره از ${windowStart.toISOString()} تا الان) ratio=${ratio.toFixed(3)} category=${category}`,
+      )
 
       return { ...u, chargedThisMonth: charged, aiCostThisMonth: aiCost, aiCostUsdThisMonth: aiCostUsd, expectedByNow, category }
     })
