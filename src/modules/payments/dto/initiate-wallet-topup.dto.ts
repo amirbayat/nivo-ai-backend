@@ -15,4 +15,9 @@ export class InitiateWalletTopupDto {
   @Transform(({ value }) => (typeof value === 'string' ? value.toUpperCase() : value))
   @IsIn(PAYMENT_GATEWAY_NAMES, { message: fa.payment.gatewayNotEnabled })
   gateway?: PaymentProvider
+
+  // docs/PRD-user-push-notifications-and-mobile-app-flows.md بخش ۴/۵.۵ — همان معنی initiate-payment.dto.ts
+  @IsOptional()
+  @IsIn(['app'], { message: fa.validation.required })
+  source?: 'app'
 }

@@ -19,4 +19,10 @@ export class VerifyOtpDto {
   @IsOptional()
   @IsString({ message: fa.validation.required })
   referralCode?: string
+
+  // docs/PRD-user-push-notifications-and-mobile-app-flows.md بخش ۵.۳ — اپ اندروید این را از
+  // طریق NivoAndroidBridge.getDeviceUuid() به فرانت می‌دهد؛ برای وصل‌کردن توکن پوش ناشناس به این کاربر
+  @IsOptional()
+  @IsString({ message: fa.validation.required })
+  deviceUuid?: string
 }

@@ -7,6 +7,7 @@ import { AuthService } from './auth.service'
 import { JwtStrategy } from './jwt.strategy'
 import { SmsModule } from '../../sms/sms.module'
 import { CampaignModule } from '../campaign/campaign.module'
+import { DeviceTokensModule } from '../device-tokens/device-tokens.module'
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { CampaignModule } from '../campaign/campaign.module'
     JwtModule.register({}),
     SmsModule,
     CampaignModule,
+    DeviceTokensModule,
   ],
   controllers: [AuthController, AdminOtpController],
   providers: [AuthService, JwtStrategy],

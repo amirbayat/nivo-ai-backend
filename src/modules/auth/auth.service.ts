@@ -1,6 +1,7 @@
 import {
   HttpException,
   Injectable,
+  Logger,
   UnauthorizedException,
 } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
@@ -10,7 +11,9 @@ import { PrismaService } from '../../prisma/prisma.service'
 import { RedisService } from '../../redis/redis.service'
 import { SmsService } from '../../sms/sms.service'
 import { CampaignService } from '../campaign/campaign.service'
+import { DeviceTokensService } from '../device-tokens/device-tokens.service'
 import { generateShortCode } from '../../common/utils/generate-code'
+import { normalizePhone } from '../../common/utils/normalize-phone'
 import { fa } from '../../i18n/fa'
 
 // مقادیر پیش‌فرض — همه از طریق env variable قابل بازنویسی‌اند (به ثانیه)
@@ -36,16 +39,14 @@ const PLAN_SUMMARY_SELECT = {
   featuredModelsCount: true,
 } as const
 
-function normalizePhone(phone: string): string {
-  return phone.replace(/^\+98/, '0').replace(/^98/, '0')
-}
-
 function otpKey(phone: string) { return `otp:${phone}` }
 function otpRateKey(phone: string) { return `otp:rate:${phone}` }
 function otpAttemptKey(phone: string) { return `otp:attempt:${phone}` }
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name)
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
@@ -53,6 +54,7 @@ export class AuthService {
     private readonly config: ConfigService,
     private readonly sms: SmsService,
     private readonly campaign: CampaignService,
+    private readonly deviceTokens: DeviceTokensService,
   ) {}
 
   private isTestUserEnabled(): boolean {
@@ -156,7 +158,7 @@ export class AuthService {
     }
   }
 
-  async verifyOtp(rawPhone: string, code: string, referralCode?: string) {
+  async verifyOtp(rawPhone: string, code: string, referralCode?: string, deviceUuid?: string) {
     const phone = normalizePhone(rawPhone)
     const isTestPhone = phone === TEST_PHONE && this.isTestUserEnabled()
 
@@ -200,6 +202,14 @@ export class AuthService {
     const isNewUser = !existing
 
     if (!user.isActive) throw new UnauthorizedException(fa.auth.userDisabled)
+
+    // docs/PRD-user-push-notifications-and-mobile-app-flows.md بخش ۴ — توکن پوش ناشناسی که
+    // این دستگاه قبل از لاگین ثبت کرده بود را به این کاربر وصل می‌کند؛ شکست این کار نباید لاگین را fail کند
+    if (deviceUuid) {
+      await this.deviceTokens
+        .attachToUser(deviceUuid, user.id)
+        .catch((err) => this.logger.error(`attachToUser failed for deviceUuid=${deviceUuid} user=${user.id}`, err))
+    }
 
     // حساب تستی هیچ‌وقت پشت گیت waitlist سافت‌لانچ گیر نمی‌افتد
     let waitlisted: { message: string; queuePosition: number } | null = null

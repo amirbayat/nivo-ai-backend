@@ -19,4 +19,10 @@ export class InitiatePaymentDto {
   @IsOptional()
   @IsString({ message: fa.validation.required })
   discountCode?: string
+
+  // docs/PRD-user-push-notifications-and-mobile-app-flows.md بخش ۴/۵.۵ — فرانت وقتی داخل
+  // WebView اپ اندروید تشخیص داده شود این را می‌فرستد، تا صفحه‌ی برگشتی دکمه‌ی «بازگشت به اپ» نشان دهد
+  @IsOptional()
+  @IsIn(['app'], { message: fa.validation.required })
+  source?: 'app'
 }

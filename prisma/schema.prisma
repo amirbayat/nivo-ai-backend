@@ -16,10 +16,10 @@ model User {
   updatedAt DateTime @updatedAt
 
   // docs/PRD-growth-traction-features.md بخش ۳.۲ — denormalized، هر پیام (نه فقط امروز) اینکریمنت می‌شود
-  lifetimeMessageCount Int @default(0)
+  lifetimeMessageCount Int       @default(0)
   // لحظه‌ی دقیقی که کاربر از trial خارج شد (lifetimeMessageCount اولین‌بار به trialMessageThreshold
   // رسید) — برای پنجره‌ی مهلت ۲۴ساعته‌ی claim کد تخفیف هدیه بعد از پایان trial (بخش ۳.۵)
-  trialEndedAt DateTime?
+  trialEndedAt         DateTime?
 
   // docs/PRD-growth-traction-features.md بخش ۶.۲ — معرفی دوستان
   referralCode     String  @unique
@@ -27,22 +27,24 @@ model User {
   referredByUser   User?   @relation("Referrals", fields: [referredByUserId], references: [id])
   referredUsers    User[]  @relation("Referrals")
 
-  conversations      Conversation[]
-  messages           Message[]
-  subscription       Subscription?
-  payments           Payment[]
-  invoices           Invoice[]
-  refreshTokens      RefreshToken[]
-  dailyUsages        DailyUsage[]
-  feedbacks          Feedback[]
-  quotaOverride      UserQuotaOverride?
-  wallet             Wallet?
-  tickets            SupportTicket[]
-  limitHitEvents     LimitHitEvent[]
-  adminDeviceTokens  AdminDeviceToken[] @relation("AdminDeviceTokens")
-  waitlistEntry      WaitlistEntry?
-  issuedDiscountCodes    DiscountCode[]           @relation("IssuedDiscountCodes")
-  discountRedemptions    DiscountCodeRedemption[]
+  conversations       Conversation[]
+  messages            Message[]
+  subscription        Subscription?
+  payments            Payment[]
+  invoices            Invoice[]
+  refreshTokens       RefreshToken[]
+  dailyUsages         DailyUsage[]
+  feedbacks           Feedback[]
+  quotaOverride       UserQuotaOverride?
+  wallet              Wallet?
+  tickets             SupportTicket[]
+  limitHitEvents      LimitHitEvent[]
+  adminDeviceTokens   AdminDeviceToken[]       @relation("AdminDeviceTokens")
+  deviceTokens        DeviceToken[]            @relation("UserDeviceTokens")
+  pushCampaigns       PushCampaign[]           @relation("PushCampaignCreatedBy")
+  waitlistEntry       WaitlistEntry?
+  issuedDiscountCodes DiscountCode[]           @relation("IssuedDiscountCodes")
+  discountRedemptions DiscountCodeRedemption[]
 
   @@map("users")
 }
@@ -53,18 +55,18 @@ enum Role {
 }
 
 model Plan {
-  id                  String  @id @default(uuid())
-  name                String  @unique
-  priceMonthly        Int // تومان
-  dailyFreeTokens     Int
-  monthlyTotalTokens  Int
-  allowedModels       Json
-  features            Json    @default("{}")
-  isActive            Boolean @default(true)
-  sortOrder           Int     @default(0)
-  isPopular           Boolean @default(false) // نشان «محبوب‌ترین» روی کارت پلن
-  featuredModels      Json    @default("[]")  // string[] — زیرمجموعه‌ی ترتیب‌دار allowedModels — مدل‌های ویژه‌ی این پلن (منبع دراپ‌داون چت + چیپ‌های کارت)
-  featuredModelsCount Int     @default(5)     // چند مورد از featuredModels روی کارت (قبل از «N مدل دیگر») نشان داده شود
+  id                    String  @id @default(uuid())
+  name                  String  @unique
+  priceMonthly          Int // تومان
+  dailyFreeTokens       Int
+  monthlyTotalTokens    Int
+  allowedModels         Json
+  features              Json    @default("{}")
+  isActive              Boolean @default(true)
+  sortOrder             Int     @default(0)
+  isPopular             Boolean @default(false) // نشان «محبوب‌ترین» روی کارت پلن
+  featuredModels        Json    @default("[]") // string[] — زیرمجموعه‌ی ترتیب‌دار allowedModels — مدل‌های ویژه‌ی این پلن (منبع دراپ‌داون چت + چیپ‌های کارت)
+  featuredModelsCount   Int     @default(5) // چند مورد از featuredModels روی کارت (قبل از «N مدل دیگر») نشان داده شود
   maxInputTokens        Int     @default(300)
   outputThrottleSteps   Json    @default("[]")
   dailyMessageLimit     Int?
@@ -72,9 +74,9 @@ model Plan {
   throttledInputTokens  Int?
   throttledOutputTokens Int?
   rollingWindowLimit    Int? // سقف پیام در پنجره‌ی لغزان — null = غیرفعال برای این پلن (docs/PRD-global-budget-gateway.md بخش ۸)
-  rollingWindowHours    Int  @default(3)
+  rollingWindowHours    Int     @default(3)
 
-  simpleModel  String? @default("openai/gpt-5-nano") // مدل ثابت برای پیام‌های SIMPLE این پلن — کف‌ترین/دیفالت‌ترین مدل
+  simpleModel String? @default("openai/gpt-5-nano") // مدل ثابت برای پیام‌های SIMPLE این پلن — کف‌ترین/دیفالت‌ترین مدل
 
   // میزان reasoning effort برای پاسخ اصلی چت این پلن (مدل‌های reasoning مثل خانواده‌ی gpt-5) —
   // 'minimal' | 'low' | 'medium' | 'high'؛ null = پیش‌فرض provider (معمولاً medium). می‌تواند
@@ -110,7 +112,7 @@ model Plan {
   defaultImageGenModel String?
   maxImageGenPerDay    Int? // null = بدون سقف روزانه
   maxImageGenPerWindow Int? // null = بدون سقف پنجره‌ی لغزان
-  imageGenWindowHours  Int? @default(24)
+  imageGenWindowHours  Int?    @default(24)
 
   subscriptions Subscription[]
   payments      Payment[]
@@ -122,15 +124,15 @@ model Plan {
 // استپ‌های مسیریابی مدل بر اساس درصد مصرف بودجه‌ی روزانه — هر پلن چند استپ دارد،
 // هر استپ یک استخر مدل ترتیب‌دار (drag&drop در ادمین) برای یک بازه‌ی مصرف مشخص می‌کند
 model PlanRoutingStep {
-  id           String   @id @default(uuid())
-  planId       String
-  order        Int                // ترتیب استپ (۱، ۲، ۳، ...)
-  thresholdPct Int                // سقف تجمعی درصد مصرف روزانه (مثلاً ۶۰، ۹۰، ۱۰۰)
-  models       Json               // string[] ترتیب‌دار — استخر مدل‌های این استپ (زیرمجموعه‌ی allowedModels پلن)
+  id              String   @id @default(uuid())
+  planId          String
+  order           Int // ترتیب استپ (۱، ۲، ۳، ...)
+  thresholdPct    Int // سقف تجمعی درصد مصرف روزانه (مثلاً ۶۰، ۹۰، ۱۰۰)
+  models          Json // string[] ترتیب‌دار — استخر مدل‌های این استپ (زیرمجموعه‌ی allowedModels پلن)
   // override میزان reasoning effort فقط برای همین استپ — null یعنی از Plan.reasoningEffort ارث می‌برد
   reasoningEffort String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   plan Plan @relation(fields: [planId], references: [id], onDelete: Cascade)
 
@@ -164,17 +166,17 @@ enum SubscriptionStatus {
 }
 
 model Conversation {
-  id             String    @id @default(uuid())
-  userId         String
-  title          String?
-  model          String
-  systemPrompt   String?
-  totalTokens    Int       @default(0)
-  isArchived     Boolean   @default(false)
-  lastMessageAt  DateTime  @default(now())
-  createdAt      DateTime  @default(now())
-  contextSummary String?
-  summarizedAt   DateTime?
+  id                       String    @id @default(uuid())
+  userId                   String
+  title                    String?
+  model                    String
+  systemPrompt             String?
+  totalTokens              Int       @default(0)
+  isArchived               Boolean   @default(false)
+  lastMessageAt            DateTime  @default(now())
+  createdAt                DateTime  @default(now())
+  contextSummary           String?
+  summarizedAt             DateTime?
   // پیام‌های تا این timestamp قبلاً توی contextSummary خلاصه شده‌اند — برای واکشی فقط
   // پیام‌های «بعد از آخرین خلاصه‌سازی» (docs/PRD-chat-context-and-summarization.md بخش ۳.۱)
   summarizedUntilCreatedAt DateTime?
@@ -187,21 +189,21 @@ model Conversation {
 }
 
 model Message {
-  id             String      @id @default(uuid())
-  conversationId String
-  userId         String? // denormalized از conversation.userId — برای groupBy تجمیعی آنالیز مصرف (بخش ۱۷) بدون join
-  role           MessageRole
-  content        String
-  images         Json?
-  tokensInput    Int         @default(0)
-  tokensOutput   Int         @default(0)
-  costToman      Int         @default(0) // هزینه‌ی دقیق همین پیام (تومان)، در لحظه‌ی ایجاد محاسبه‌شده — نه بازمحاسبه‌ی بعدی با نرخ/قیمت فعلی
-  costUsdMicros  Int         @default(0)
-  costInputUsdMicros  Int    @default(0) // سهم توکن ورودی از costUsdMicros — برای میانگین وزنی قیمت ورودی/خروجی در آنالیز (بدون بازمحاسبه با قیمت فعلی مدل)
-  costOutputUsdMicros Int    @default(0)
-  model          String?
-  topicId        String?
-  createdAt      DateTime    @default(now())
+  id                  String      @id @default(uuid())
+  conversationId      String
+  userId              String? // denormalized از conversation.userId — برای groupBy تجمیعی آنالیز مصرف (بخش ۱۷) بدون join
+  role                MessageRole
+  content             String
+  images              Json?
+  tokensInput         Int         @default(0)
+  tokensOutput        Int         @default(0)
+  costToman           Int         @default(0) // هزینه‌ی دقیق همین پیام (تومان)، در لحظه‌ی ایجاد محاسبه‌شده — نه بازمحاسبه‌ی بعدی با نرخ/قیمت فعلی
+  costUsdMicros       Int         @default(0)
+  costInputUsdMicros  Int         @default(0) // سهم توکن ورودی از costUsdMicros — برای میانگین وزنی قیمت ورودی/خروجی در آنالیز (بدون بازمحاسبه با قیمت فعلی مدل)
+  costOutputUsdMicros Int         @default(0)
+  model               String?
+  topicId             String?
+  createdAt           DateTime    @default(now())
 
   conversation Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   user         User?            @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -235,9 +237,9 @@ model Payment {
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
 
-  user         User          @relation(fields: [userId], references: [id])
-  plan         Plan?         @relation(fields: [planId], references: [id])
-  discountCode DiscountCode? @relation(fields: [discountCodeId], references: [id])
+  user         User                    @relation(fields: [userId], references: [id])
+  plan         Plan?                   @relation(fields: [planId], references: [id])
+  discountCode DiscountCode?           @relation(fields: [discountCodeId], references: [id])
   invoice      Invoice?
   redemption   DiscountCodeRedemption?
 
@@ -260,18 +262,18 @@ enum PaymentStatus {
 // فقط برای پرداخت‌های COMPLETED صادر می‌شود — رسید داخلی، نه فاکتور رسمی سامانه‌ی مودیان
 // (آن بخش موضوع حقوقی/مالیاتی جداست و در این نسخه پیاده‌سازی نشده)
 model Invoice {
-  id         String   @id @default(uuid())
-  number     Int      @unique @default(autoincrement())
-  paymentId  String   @unique
+  id         String          @id @default(uuid())
+  number     Int             @unique @default(autoincrement())
+  paymentId  String          @unique
   userId     String
   planName   String? // WALLET_TOPUP پلنی ندارد — «شارژ کیف‌پول» به‌جایش نوشته می‌شود
   amount     Int // تومان — مبلغ نهایی پرداخت‌شده
-  taxAmount  Int      @default(0) // تومان — رزرو برای مالیات بر ارزش افزوده در آینده، فعلاً محاسبه نمی‌شود
+  taxAmount  Int             @default(0) // تومان — رزرو برای مالیات بر ارزش افزوده در آینده، فعلاً محاسبه نمی‌شود
   provider   PaymentProvider
   refId      String?
   buyerName  String?
   buyerPhone String
-  issuedAt   DateTime @default(now())
+  issuedAt   DateTime        @default(now())
 
   payment Payment @relation(fields: [paymentId], references: [id])
   user    User    @relation(fields: [userId], references: [id])
@@ -371,11 +373,11 @@ model UserQuotaOverride {
 // ─── Wallet ────────────────────────────────────────────────────────────────────
 
 model Wallet {
-  id          String   @id @default(uuid())
-  userId      String   @unique
-  balanceToman Int     @default(0) // تومان
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id           String   @id @default(uuid())
+  userId       String   @unique
+  balanceToman Int      @default(0) // تومان
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   transactions WalletTransaction[]
@@ -468,15 +470,15 @@ enum AiModelType {
 }
 
 model AiModel {
-  id              String      @id @default(uuid())
-  name            String      @unique
-  displayName     String
-  provider        String
-  modelType       AiModelType @default(CHAT)
-  inputPricePerM  Float       @default(0)
-  outputPricePerM Float       @default(0)
-  supportsVision  Boolean     @default(false)
-  supportsImageGen Boolean    @default(false) // docs/PRD-chat-images.md — تولید عکس
+  id                           String      @id @default(uuid())
+  name                         String      @unique
+  displayName                  String
+  provider                     String
+  modelType                    AiModelType @default(CHAT)
+  inputPricePerM               Float       @default(0)
+  outputPricePerM              Float       @default(0)
+  supportsVision               Boolean     @default(false)
+  supportsImageGen             Boolean     @default(false) // docs/PRD-chat-images.md — تولید عکس
   // قیمت‌گذاری تولید عکس بر اساس توکن واقعی مصرف‌شده است (نه یک عدد ثابت هر عکس) — درست مثل
   // مدل‌های چت. سه نرخ لازم است چون هر کدام یک نوع توکن جدا است:
   //   ۱) متن ورودی (prompt) → همان inputPricePerM بالا دوباره استفاده می‌شود
@@ -486,12 +488,12 @@ model AiModel {
   // generateImageRaw/editImageRaw)، نه از این نرخ‌ها به‌تنهایی؛ این‌ها فقط قیمت هر ۱M توکن‌اند.
   imageGenInputImagePricePerM  Float?
   imageGenOutputImagePricePerM Float?
-  imageGenQuality  String? // دقیقاً همان رشته‌ای که به provider پاس داده می‌شود — مثل "low"/"medium"/"high" (خانواده‌ی gpt-image) یا "standard"/"hd" (dall-e-3)
-  imageGenSize     String? // مثل "1024x1024" — مستقیم به provider پاس داده می‌شود
-  isActive        Boolean     @default(true)
-  sortOrder       Int         @default(0)
-  tier            ModelTier   @default(MEDIUM)
-  createdAt       DateTime    @default(now())
+  imageGenQuality              String? // دقیقاً همان رشته‌ای که به provider پاس داده می‌شود — مثل "low"/"medium"/"high" (خانواده‌ی gpt-image) یا "standard"/"hd" (dall-e-3)
+  imageGenSize                 String? // مثل "1024x1024" — مستقیم به provider پاس داده می‌شود
+  isActive                     Boolean     @default(true)
+  sortOrder                    Int         @default(0)
+  tier                         ModelTier   @default(MEDIUM)
+  createdAt                    DateTime    @default(now())
 
   // شمارش دقیق توکن — برای مدل‌های OpenAI-family یک tokenizer واقعی داریم؛
   // برای بقیه‌ی پروایدرها (Claude، Grok، ...) که tokenizer آفلاین ندارند،
@@ -620,15 +622,15 @@ model SalesBotConfig {
 
 // singleton — context عمومی + تنظیمات خلاصه‌سازی مبتنی بر توکن برای چت اصلی (دقیقاً الگوی SalesBotConfig)
 model ChatConfig {
-  id                   String   @id @default("singleton")
-  globalContextMd      String   @db.Text @default("")
-  summaryTriggerTokens Int      @default(5000) // هر چند توکن از آخرین خلاصه‌سازی، دوباره خلاصه شود
-  summaryMaxTokens     Int      @default(200)  // حداکثر طول خروجی خلاصه — کوتاه نگه داشته می‌شود
-  maxImagesPerMessage  Int      @default(4)    // docs/PRD-chat-images.md بخش ۵.۶
-  maxImageSizeMb       Int      @default(8)    // سقف سایز هر عکس بعد از decode
-  allowedImageFormats  Json     @default("[\"png\",\"jpeg\",\"webp\",\"gif\"]") // string[] — فقط از این چهارتا که magic-byte برایشان چک می‌شود
-  implicitImageGenEnabled Boolean @default(true) // تشخیص خودکار نیت تولید عکس وسط چت معمولی (بدون toggle صریح) — heuristic، نه قطعی
-  updatedAt            DateTime @updatedAt
+  id                      String   @id @default("singleton")
+  globalContextMd         String   @default("") @db.Text
+  summaryTriggerTokens    Int      @default(5000) // هر چند توکن از آخرین خلاصه‌سازی، دوباره خلاصه شود
+  summaryMaxTokens        Int      @default(200) // حداکثر طول خروجی خلاصه — کوتاه نگه داشته می‌شود
+  maxImagesPerMessage     Int      @default(4) // docs/PRD-chat-images.md بخش ۵.۶
+  maxImageSizeMb          Int      @default(8) // سقف سایز هر عکس بعد از decode
+  allowedImageFormats     Json     @default("[\"png\",\"jpeg\",\"webp\",\"gif\"]") // string[] — فقط از این چهارتا که magic-byte برایشان چک می‌شود
+  implicitImageGenEnabled Boolean  @default(true) // تشخیص خودکار نیت تولید عکس وسط چت معمولی (بدون toggle صریح) — heuristic، نه قطعی
+  updatedAt               DateTime @updatedAt
 
   @@map("chat_config")
 }
@@ -654,7 +656,7 @@ model GrowthConfig {
 model OnboardingGift {
   id          String   @id @default("singleton")
   title       String   @default("هدیه ویژه نیوو به کاربران تازه")
-  description String   @db.Text @default("")
+  description String   @default("") @db.Text
   audioUrl    String?
   isActive    Boolean  @default(true)
   updatedAt   DateTime @updatedAt
@@ -774,13 +776,13 @@ model SalesKbEntry {
 // ─── Usage Analytics ────────────────────────────────────────────────────────────
 
 model Topic {
-  id        String    @id @default(uuid())
-  name      String    @unique // "برنامه‌نویسی", "ترجمه", "نگارش", "پزشکی", "ریاضی", ...
+  id        String   @id @default(uuid())
+  name      String   @unique // "برنامه‌نویسی", "ترجمه", "نگارش", "پزشکی", "ریاضی", ...
   keywords  Json // string[] — قابل ویرایش در ادمین
   color     String? // برای نمودار، مثلاً "#4F46E5"
-  sortOrder Int       @default(0)
-  isActive  Boolean   @default(true)
-  createdAt DateTime  @default(now())
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
 
   messages Message[]
 
@@ -806,11 +808,11 @@ model UserSegment {
 }
 
 model LimitHitEvent {
-  id        String        @id @default(uuid())
+  id        String       @id @default(uuid())
   userId    String
   type      LimitHitType
-  date      DateTime      @db.Date
-  createdAt DateTime      @default(now())
+  date      DateTime     @db.Date
+  createdAt DateTime     @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -831,35 +833,35 @@ enum LimitHitType {
 // docs/PRD-global-budget-gateway.md بخش ۱۸
 
 model LaunchCampaign {
-  id                        String         @id @default(uuid())
-  name                      String
-  startAt                   DateTime
-  endAt                     DateTime? // null = تا وقتی دستی بسته شود
-  capacity                  Int
-  grantedCount              Int            @default(0) // افزایش اتمیک — بخش ۱۸.۳
-  maxWaitlistSize           Int? // null = بدون سقف — بخش ۱۸.۱۵ («ایمنی هزینه‌ی لیست انتظار»)
-  status                    CampaignStatus @default(ACTIVE)
+  id              String         @id @default(uuid())
+  name            String
+  startAt         DateTime
+  endAt           DateTime? // null = تا وقتی دستی بسته شود
+  capacity        Int
+  grantedCount    Int            @default(0) // افزایش اتمیک — بخش ۱۸.۳
+  maxWaitlistSize Int? // null = بدون سقف — بخش ۱۸.۱۵ («ایمنی هزینه‌ی لیست انتظار»)
+  status          CampaignStatus @default(ACTIVE)
 
   waitlistMessage           String // پیام انگیزشیِ «پیش‌ثبت‌نام تکمیل شد ...» — همین داخل اپ نمایش داده می‌شود، محدودیت پیامکی ندارد
   waitlistFullMessage       String? // وقتی حتی لیست انتظار هم پر شده — بخش ۱۸.۱۵
-  waitlistDailyMessageLimit Int            @default(4)
+  waitlistDailyMessageLimit Int     @default(4)
 
-  displayCounterEnabled     Boolean        @default(true)
-  displayInitialPctMin      Int            @default(15)
-  displayInitialPctMax      Int            @default(25)
-  displayFloorMin           Int            @default(3)
-  displayFloorMax           Int            @default(8)
-  displayAnimationTickMs    Int            @default(500)
-  displayDecrementMin       Int            @default(1)
-  displayDecrementMax       Int            @default(3)
+  displayCounterEnabled  Boolean @default(true)
+  displayInitialPctMin   Int     @default(15)
+  displayInitialPctMax   Int     @default(25)
+  displayFloorMin        Int     @default(3)
+  displayFloorMax        Int     @default(8)
+  displayAnimationTickMs Int     @default(500)
+  displayDecrementMin    Int     @default(1)
+  displayDecrementMax    Int     @default(3)
 
   // پیامک‌ها با الگوی از پیش تأییدشده در پنل کاوه‌نگار ارسال می‌شوند، نه متن آزاد
   // (بخش ۱۸.۷ نسخه‌ی جدید) — دقیقاً همان روشی که برای OTP استفاده می‌شود
-  grantedSmsTemplate        String? // نام الگوی کاوه‌نگار برای پیامک «دسترسی باز شد»
-  reminderSteps             Json           @default("[]") // [{dayOffset:1, template:"نام الگو در کاوه‌نگار"}, ...]
+  grantedSmsTemplate String? // نام الگوی کاوه‌نگار برای پیامک «دسترسی باز شد»
+  reminderSteps      Json    @default("[]") // [{dayOffset:1, template:"نام الگو در کاوه‌نگار"}, ...]
 
-  createdAt                 DateTime       @default(now())
-  createdByAdminId          String?
+  createdAt        DateTime @default(now())
+  createdByAdminId String?
 
   waitlistEntries WaitlistEntry[]
 
@@ -916,14 +918,14 @@ enum WaitlistStatus {
 // ─── مقالات (SEO) — docs/PRD-articles-seo-blog.md ──────────────────────────────
 
 model ArticleCategory {
-  id        String    @id @default(uuid())
-  name      String    @unique
-  slug      String    @unique
-  sortOrder Int       @default(0)
-  isActive  Boolean   @default(true)
-  createdAt DateTime  @default(now())
+  id        String   @id @default(uuid())
+  name      String   @unique
+  slug      String   @unique
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
 
-  articles  Article[]
+  articles Article[]
 
   @@map("article_categories")
 }
@@ -934,20 +936,20 @@ enum ArticleStatus {
 }
 
 model Article {
-  id               String          @id @default(uuid())
-  slug             String          @unique
+  id               String        @id @default(uuid())
+  slug             String        @unique
   title            String
-  metaDescription  String?         @db.Text
+  metaDescription  String?       @db.Text
   coverImageUrl    String?
-  contentMd        String          @db.Text
+  contentMd        String        @db.Text
   categoryId       String?
-  status           ArticleStatus   @default(DRAFT)
-  isPinnedInBanner Boolean         @default(false)
+  status           ArticleStatus @default(DRAFT)
+  isPinnedInBanner Boolean       @default(false)
   publishedAt      DateTime?
-  createdAt        DateTime        @default(now())
-  updatedAt        DateTime        @updatedAt
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
 
-  category         ArticleCategory? @relation(fields: [categoryId], references: [id])
+  category ArticleCategory? @relation(fields: [categoryId], references: [id])
 
   @@index([status, publishedAt])
   @@map("articles")
@@ -985,4 +987,46 @@ model AdminDeviceToken {
 
   @@index([adminId])
   @@map("admin_device_tokens")
+}
+
+// docs/PRD-user-push-notifications-and-mobile-app-flows.md بخش ۳ — توکن FCM اپ اندروید کاربر عادی.
+// userId تا وقتی کاربر با OTP لاگین نکرده null است (شناسه‌ی ناشناس فقط deviceUuid)؛ verifyOtp آن را
+// به userId واقعی وصل می‌کند تا تاریخچه‌ی پوش قطع نشود.
+model DeviceToken {
+  id         String   @id @default(uuid())
+  deviceUuid String   @unique
+  fcmToken   String
+  userId     String?
+  user       User?    @relation("UserDeviceTokens", fields: [userId], references: [id], onDelete: SetNull)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([userId])
+  @@map("device_tokens")
+}
+
+// docs/PRD-user-push-notifications-and-mobile-app-flows.md بخش ۳/۶ — کمپین پوش که ادمین از پنل
+// برای دسته‌ای از کاربران می‌فرستد؛ sentCount/failedCount بعد از ارسال واقعی پر می‌شوند
+model PushCampaign {
+  id               String              @id @default(uuid())
+  title            String
+  body             String
+  segment          PushCampaignSegment
+  phoneList        String[]            @default([])
+  sentCount        Int                 @default(0)
+  failedCount      Int                 @default(0)
+  createdByAdminId String
+  createdByAdmin   User                @relation("PushCampaignCreatedBy", fields: [createdByAdminId], references: [id])
+  createdAt        DateTime            @default(now())
+
+  @@index([createdAt])
+  @@map("push_campaigns")
+}
+
+enum PushCampaignSegment {
+  ALL
+  REGISTERED_ONLY
+  ANONYMOUS_ONLY
+  ACTIVE_SUBSCRIBERS
+  PHONE_LIST
 }

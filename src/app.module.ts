@@ -31,6 +31,8 @@ import { ArticlesModule } from './modules/articles/articles.module'
 import { LiveStatsModule } from './modules/live-stats/live-stats.module'
 import { NetworkOutageModule } from './modules/network-outage/network-outage.module'
 import { AdminNotificationsModule } from './modules/admin-notifications/admin-notifications.module'
+import { DeviceTokensModule } from './modules/device-tokens/device-tokens.module'
+import { PushNotificationsModule } from './modules/push-notifications/push-notifications.module'
 import { QueueModule } from './queue/queue.module'
 
 @Module({
@@ -65,6 +67,8 @@ import { QueueModule } from './queue/queue.module'
     LiveStatsModule,
     NetworkOutageModule,
     AdminNotificationsModule,
+    DeviceTokensModule,
+    PushNotificationsModule,
   ],
   providers: [{ provide: APP_FILTER, useClass: AllExceptionsFilter }],
 })

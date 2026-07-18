@@ -11,7 +11,7 @@ import { AdminNotificationsService } from '../admin-notifications/admin-notifica
 import { fa } from '../../i18n/fa'
 import { InitiatePaymentDto } from './dto/initiate-payment.dto'
 import { InitiateWalletTopupDto } from './dto/initiate-wallet-topup.dto'
-import type { Payment, Plan, User } from '@prisma/client'
+import type { Payment, Plan, Prisma, User } from '@prisma/client'
 
 const SUBSCRIPTION_DAYS = 30
 
@@ -71,6 +71,12 @@ export class PaymentsService {
       callbackUrl,
     })
 
+    // docs/PRD-user-push-notifications-and-mobile-app-flows.md بخش ۴ — source=app بعداً روی
+    // ریدایرکت برگشتی verify() سوار می‌شود تا CallbackPage.tsx دکمه‌ی «بازگشت به اپ» نشان دهد
+    const metadata: Prisma.InputJsonObject = {}
+    if (upgradeCreditToman > 0) Object.assign(metadata, { isUpgrade: true, upgradeCreditToman })
+    if (dto.source === 'app') Object.assign(metadata, { source: 'app' })
+
     await this.prisma.payment.create({
       data: {
         userId,
@@ -79,7 +85,7 @@ export class PaymentsService {
         provider: gateway.name,
         providerRef,
         ...(discountCodeId ? { discountCodeId } : {}),
-        ...(upgradeCreditToman > 0 ? { metadata: { isUpgrade: true, upgradeCreditToman } } : {}),
+        ...(Object.keys(metadata).length ? { metadata } : {}),
       },
     })
 
@@ -155,6 +161,7 @@ export class PaymentsService {
         amount: dto.amountToman,
         provider: gateway.name,
         providerRef,
+        ...(dto.source === 'app' ? { metadata: { source: 'app' } } : {}),
       },
     })
 
@@ -183,6 +190,15 @@ export class PaymentsService {
     return this.verify(gateway, providerRef, success)
   }
 
+  // docs/PRD-user-push-notifications-and-mobile-app-flows.md بخش ۴/۵.۵ — اگر initiate با source=app
+  // صدا زده شده بود (متادیتای پرداخت آن را نگه داشته)، همان علامت روی هر ریدایرکت برگشتی هم سوار
+  // می‌شود تا CallbackPage.tsx بتواند دکمه‌ی «بازگشت به اپ» را نشان دهد
+  private withSourceParam(url: string, metadata: Prisma.JsonValue | null | undefined): string {
+    const isFromApp = !!metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+      && (metadata as Record<string, unknown>).source === 'app'
+    return isFromApp ? `${url}&source=app` : url
+  }
+
   private async verify(gateway: PaymentGateway, providerRef: string, callbackSuccess: boolean) {
     const appUrl = this.config.get<string>('APP_URL')
 
@@ -192,7 +208,7 @@ export class PaymentsService {
         await this.prisma.payment.update({ where: { providerRef }, data: { status: 'FAILED' } })
       }
       this.logger.warn(`verify: callback reported failure for providerRef=${providerRef} (paymentFound=${!!payment})`)
-      return { redirect: `${appUrl}/payment?status=failed` }
+      return { redirect: this.withSourceParam(`${appUrl}/payment?status=failed`, payment?.metadata) }
     }
 
     const payment = await this.prisma.payment.findUnique({
@@ -209,7 +225,7 @@ export class PaymentsService {
     if (payment.status === 'COMPLETED') {
       const invoice = await this.prisma.invoice.findUnique({ where: { paymentId: payment.id } })
       this.logger.log(`verify: already COMPLETED — idempotent redirect (invoiceId=${invoice?.id ?? 'none'})`)
-      return { redirect: `${appUrl}/payment?status=success&refId=${payment.refId}&invoiceId=${invoice?.id ?? ''}` }
+      return { redirect: this.withSourceParam(`${appUrl}/payment?status=success&refId=${payment.refId}&invoiceId=${invoice?.id ?? ''}`, payment.metadata) }
     }
     if (payment.status !== 'PENDING') throw new BadRequestException(fa.payment.invalidStatus)
 
@@ -220,7 +236,7 @@ export class PaymentsService {
     if (!success) {
       await this.prisma.payment.update({ where: { providerRef }, data: { status: 'FAILED' } })
       this.logger.warn(`verify: gateway verify failed for providerRef=${providerRef} — marked FAILED`)
-      return { redirect: `${appUrl}/payment?status=failed` }
+      return { redirect: this.withSourceParam(`${appUrl}/payment?status=failed`, payment.metadata) }
     }
 
     if (payment.kind === 'WALLET_TOPUP') {
@@ -312,7 +328,7 @@ export class PaymentsService {
       )
     }
 
-    return { redirect: `${appUrl}/payment?status=success&refId=${refId}&invoiceId=${invoice.id}` }
+    return { redirect: this.withSourceParam(`${appUrl}/payment?status=success&refId=${refId}&invoiceId=${invoice.id}`, payment.metadata) }
   }
 
   // docs/PRD-pay-as-you-go-wallet.md بخش ۵.۱ — شارژ موفق: کیف‌پول credit می‌شود، و فقط اگر این
@@ -398,7 +414,7 @@ export class PaymentsService {
       )
       .catch((err) => this.logger.error(`admin notification failed for wallet topup payment=${payment.id}`, err))
 
-    return { redirect: `${appUrl}/payment?status=success&refId=${refId}&invoiceId=${invoice.id}` }
+    return { redirect: this.withSourceParam(`${appUrl}/payment?status=success&refId=${refId}&invoiceId=${invoice.id}`, payment.metadata) }
   }
 
   private async issueReferralRewards(referredUserId: string, referrerUserId: string): Promise<void> {
