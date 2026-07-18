@@ -1,5 +1,5 @@
 import { plainToInstance } from 'class-transformer'
-import { IsInt, IsString, IsUrl, Min, validateSync } from 'class-validator'
+import { IsInt, IsOptional, IsString, IsUrl, Min, validateSync } from 'class-validator'
 
 class EnvironmentVariables {
   @IsString() DATABASE_URL: string
@@ -18,6 +18,10 @@ class EnvironmentVariables {
 
   @IsUrl({ require_tld: false }) APP_URL: string
   @IsUrl({ require_tld: false }) API_URL: string
+
+  // پوش FCM اپ موبایل ادمین (docs/PRD-admin-notifications-and-mobile.md بخش ۵) — عمداً اختیاری،
+  // بدون آن فقط پوش غیرفعال می‌ماند، بقیه‌ی سیستم (لیست/polling) بدون آن هم کار می‌کند
+  @IsOptional() @IsString() FIREBASE_SERVICE_ACCOUNT?: string
 
   @IsInt() @Min(1) PORT: number = 3001
 }

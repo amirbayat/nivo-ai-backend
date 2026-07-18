@@ -121,6 +121,40 @@ export class LiveStatsService {
     return parseStatsHash(raw)
   }
 
+  /** خطای ۵xx بک‌اند را در همان الگوی سطل دقیقه‌ای ثبت می‌کند —
+   * docs/PRD-admin-notifications-and-mobile.md بخش ۴ (SYSTEM_ERROR_SPIKE) این را می‌خواند */
+  async recordServerError(): Promise<void> {
+    const key = `sys:err:${minuteBucket(new Date())}`
+    const pipeline = this.redis.pipeline()
+    pipeline.hincrby(key, 'count', 1)
+    pipeline.expire(key, 3 * 86400)
+    await pipeline.exec()
+  }
+
+  /** جمع خطای ۵xx در N دقیقه‌ی اخیر — برای چک آستانه‌ی SYSTEM_ERROR_SPIKE */
+  async getServerErrorCount(minutes: number): Promise<number> {
+    const now = new Date()
+    const buckets: string[] = []
+    for (let i = 0; i < minutes; i++) {
+      buckets.push(minuteBucket(new Date(now.getTime() - i * 60_000)))
+    }
+
+    const pipeline = this.redis.pipeline()
+    buckets.forEach((b) => pipeline.hget(`sys:err:${b}`, 'count'))
+    const results = await pipeline.exec()
+
+    return buckets.reduce((sum, _b, i) => sum + Number((results?.[i]?.[1] as string | null) ?? 0), 0)
+  }
+
+  /** جمع تماس‌های Liara (کل و ناموفق) در N دقیقه‌ی اخیر — برای چک آستانه‌ی LIARA_ERROR_RATE */
+  async getLiaraFailureStats(minutes: number): Promise<{ total: number; fail: number }> {
+    const series = await this.getTimeseries(minutes)
+    return series.reduce(
+      (acc, bucket) => ({ total: acc.total + bucket.total, fail: acc.fail + bucket.fail }),
+      { total: 0, fail: 0 },
+    )
+  }
+
   /** سری زمانی به بازه‌ی دقیقه — برای نمودار «N دقیقه‌ی اخیر» */
   async getTimeseries(minutes: number): Promise<(LiaraStatsBucket & { bucket: string })[]> {
     const now = new Date()

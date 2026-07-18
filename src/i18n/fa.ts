@@ -156,6 +156,23 @@ export const fa = {
     alreadyOpen: 'یک قطعی از قبل ثبت شده و هنوز پایان نیافته است',
     noneOpen: 'هیچ قطعی بازی برای پایان دادن وجود ندارد',
   },
+  adminNotification: {
+    notFound: 'نوتیفیکیشن یافت نشد',
+    paymentTitle: 'پرداخت جدید',
+    paymentBody: (planName: string, amount: number, phone: string) =>
+      `اشتراک ${planName} به مبلغ ${amount.toLocaleString('fa-IR')} تومان توسط ${phone} خریداری شد`,
+    walletTopupTitle: 'شارژ کیف‌پول جدید',
+    walletTopupBody: (amount: number, phone: string) =>
+      `کیف‌پول ${phone} به مبلغ ${amount.toLocaleString('fa-IR')} تومان شارژ شد`,
+    ticketTitle: 'تیکت پشتیبانی جدید',
+    ticketBody: (subject: string, phone: string) => `تیکت جدید از ${phone}: «${subject}»`,
+    systemErrorTitle: 'مشکل سیستمی',
+    systemErrorBody: (count: number, minutes: number) =>
+      `${count.toLocaleString('fa-IR')} خطای سرور در ${minutes.toLocaleString('fa-IR')} دقیقه‌ی اخیر ثبت شد`,
+    liaraErrorTitle: 'نرخ خطای بالای Liara AI',
+    liaraErrorBody: (failRate: number, sampleSize: number, minutes: number) =>
+      `${(failRate * 100).toLocaleString('fa-IR')}٪ از ${sampleSize.toLocaleString('fa-IR')} تماس به Liara AI در ${minutes.toLocaleString('fa-IR')} دقیقه‌ی اخیر ناموفق بود`,
+  },
   chatImages: {
     tooMany: (max: number) => `حداکثر ${max.toLocaleString('fa-IR')} عکس در هر پیام مجاز است`,
     invalidFormat: 'فرمت عکس نامعتبر است — فقط PNG/JPEG/WEBP/GIF مجاز است',

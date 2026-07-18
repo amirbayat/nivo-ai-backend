@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common'
+import { APP_FILTER } from '@nestjs/core'
 import { ConfigModule } from '@nestjs/config'
 import { validate } from './config/env.validation'
+import { AllExceptionsFilter } from './common/filters/http-exception.filter'
 import { PrismaModule } from './prisma/prisma.module'
 import { RedisModule } from './redis/redis.module'
 import { StorageModule } from './storage/storage.module'
@@ -28,6 +30,7 @@ import { AppConfigModule } from './modules/app-config/app-config.module'
 import { ArticlesModule } from './modules/articles/articles.module'
 import { LiveStatsModule } from './modules/live-stats/live-stats.module'
 import { NetworkOutageModule } from './modules/network-outage/network-outage.module'
+import { AdminNotificationsModule } from './modules/admin-notifications/admin-notifications.module'
 import { QueueModule } from './queue/queue.module'
 
 @Module({
@@ -61,6 +64,8 @@ import { QueueModule } from './queue/queue.module'
     ArticlesModule,
     LiveStatsModule,
     NetworkOutageModule,
+    AdminNotificationsModule,
   ],
+  providers: [{ provide: APP_FILTER, useClass: AllExceptionsFilter }],
 })
 export class AppModule {}

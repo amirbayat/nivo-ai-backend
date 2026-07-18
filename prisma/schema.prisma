@@ -39,6 +39,7 @@ model User {
   wallet             Wallet?
   tickets            SupportTicket[]
   limitHitEvents     LimitHitEvent[]
+  adminDeviceTokens  AdminDeviceToken[] @relation("AdminDeviceTokens")
   waitlistEntry      WaitlistEntry?
   issuedDiscountCodes    DiscountCode[]           @relation("IssuedDiscountCodes")
   discountRedemptions    DiscountCodeRedemption[]
@@ -950,4 +951,38 @@ model Article {
 
   @@index([status, publishedAt])
   @@map("articles")
+}
+
+// docs/PRD-admin-notifications-and-mobile.md — نوتیف داخلی ادمین (پرداخت/تیکت/مشکل سیستمی/نرخ خطای Liara)
+model AdminNotification {
+  id        String                @id @default(uuid())
+  type      AdminNotificationType
+  title     String
+  body      String
+  metadata  Json?
+  readBy    String[]              @default([])
+  createdAt DateTime              @default(now())
+
+  @@index([createdAt])
+  @@map("admin_notifications")
+}
+
+enum AdminNotificationType {
+  PAYMENT_COMPLETED
+  WALLET_TOPUP_COMPLETED
+  TICKET_CREATED
+  SYSTEM_ERROR_SPIKE
+  LIARA_ERROR_RATE
+}
+
+// توکن FCM هر نصب اپ موبایل ادمین — برای ارسال پوش هدفمند وقتی پنل باز نیست
+model AdminDeviceToken {
+  id        String   @id @default(uuid())
+  adminId   String
+  admin     User     @relation("AdminDeviceTokens", fields: [adminId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  createdAt DateTime @default(now())
+
+  @@index([adminId])
+  @@map("admin_device_tokens")
 }

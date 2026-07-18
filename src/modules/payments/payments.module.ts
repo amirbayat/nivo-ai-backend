@@ -7,9 +7,10 @@ import { VandarGateway } from './gateways/vandar.gateway'
 import { ZibalGateway } from './gateways/zibal.gateway'
 import { UsageModule } from '../usage/usage.module'
 import { GrowthModule } from '../growth/growth.module'
+import { AdminNotificationsModule } from '../admin-notifications/admin-notifications.module'
 
 @Module({
-  imports: [UsageModule, GrowthModule],
+  imports: [UsageModule, GrowthModule, AdminNotificationsModule],
   controllers: [PaymentsController],
   providers: [PaymentsService, PaymentGatewayRegistry, ZarinpalGateway, VandarGateway, ZibalGateway],
 })

@@ -12,7 +12,7 @@ export class TicketsController {
 
   @Post()
   create(@CurrentUser() user: JwtPayload, @Body() dto: CreateTicketDto) {
-    return this.ticketsService.create(user.sub, dto)
+    return this.ticketsService.create(user.sub, user.phone, dto)
   }
 
   @Get()

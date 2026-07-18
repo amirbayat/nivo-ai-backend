@@ -7,6 +7,8 @@ const SUMMARY_CRON = '0 2 * * *'
 const MODEL_FEEDBACK_SUMMARY_CRON = '0 3 * * *' // یک ساعت بعد از فیدبک عمومی، تا فشار هم‌زمان روی AI provider نباشد
 const WAITLIST_REMINDER_CRON = '0 9 * * *' // ساعت ۹ صبح — پیامک یادآوری در ساعت معقولی برسد
 const CHAT_IMAGE_CLEANUP_CRON = '15 * * * *' // ساعتی یک‌بار — عکس‌های چت قدیمی‌تر از ۲۴ ساعت حذف می‌شوند
+// docs/PRD-admin-notifications-and-mobile.md بخش ۴/۷ — چک آستانه‌ی خطای سیستمی/Liara هر ۵ دقیقه
+const ADMIN_ALERTS_CRON = '*/5 * * * *'
 
 @Injectable()
 export class QueueService implements OnApplicationBootstrap {
@@ -22,6 +24,8 @@ export class QueueService implements OnApplicationBootstrap {
     private readonly waitlistReminderQueue: Queue,
     @InjectQueue('chat-image-cleanup')
     private readonly chatImageCleanupQueue: Queue,
+    @InjectQueue('admin-alerts')
+    private readonly adminAlertsQueue: Queue,
   ) {}
 
   async onApplicationBootstrap() {
@@ -83,5 +87,16 @@ export class QueueService implements OnApplicationBootstrap {
       { repeat: { cron: CHAT_IMAGE_CLEANUP_CRON } },
     )
     this.logger.log(`Chat image cleanup job scheduled: ${CHAT_IMAGE_CLEANUP_CRON}`)
+
+    const adminAlertsRepeatables = await this.adminAlertsQueue.getRepeatableJobs()
+    for (const job of adminAlertsRepeatables) {
+      await this.adminAlertsQueue.removeRepeatableByKey(job.key)
+    }
+    await this.adminAlertsQueue.add(
+      'check',
+      {},
+      { repeat: { cron: ADMIN_ALERTS_CRON } },
+    )
+    this.logger.log(`Admin alerts check job scheduled: ${ADMIN_ALERTS_CRON}`)
   }
 }

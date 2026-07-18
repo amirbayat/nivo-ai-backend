@@ -2,7 +2,6 @@ import { NestFactory } from '@nestjs/core'
 import { ValidationPipe } from '@nestjs/common'
 import type { NestExpressApplication } from '@nestjs/platform-express'
 import { AppModule } from './app.module'
-import { AllExceptionsFilter } from './common/filters/http-exception.filter'
 
 // docs/PRD-chat-images.md بخش ۵.۲ — قبلاً هیچ override ای اینجا نبود (سقف پیش‌فرض
 // express روی این مقدار نبود، بدون هیچ هماهنگی مشخصی با سقف ۲۰ مگابایتی nginx در پروداکشن)؛
@@ -29,7 +28,8 @@ async function bootstrap() {
     }),
   )
 
-  app.useGlobalFilters(new AllExceptionsFilter())
+  // AllExceptionsFilter از این‌جا حذف شد — چون حالا برای دریافت LiveStatsService از طریق DI
+  // به APP_FILTER نیاز دارد (رجیستر شده در app.module.ts)، نه instantiate دستی که DI ندارد.
 
   const allowedOrigins = (process.env.CORS_ORIGINS ?? 'http://localhost:5173,http://localhost:5174').split(',')
   app.enableCors({

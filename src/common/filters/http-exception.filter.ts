@@ -7,10 +7,15 @@ import {
   Logger,
 } from '@nestjs/common'
 import { Request, Response } from 'express'
+import { LiveStatsService } from '../../modules/live-stats/live-stats.service'
 
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
   private readonly logger = new Logger(AllExceptionsFilter.name)
+
+  // با APP_FILTER (به‌جای `new AllExceptionsFilter()` دستی در main.ts) رجیستر می‌شود تا این
+  // تزریق کار کند — docs/PRD-admin-notifications-and-mobile.md بخش ۴/۸ (SYSTEM_ERROR_SPIKE)
+  constructor(private readonly liveStats: LiveStatsService) {}
 
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp()
@@ -29,6 +34,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     if (status >= 500) {
       this.logger.error(exception)
+      this.liveStats.recordServerError().catch((err) => this.logger.error('recordServerError failed', err))
     }
 
     const body =

@@ -1,18 +1,25 @@
 import {
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common'
 import { TicketPriority, TicketStatus } from '@prisma/client'
 import { PrismaService } from '../../prisma/prisma.service'
 import { fa } from '../../i18n/fa'
 import { CreateTicketDto } from './dto/create-ticket.dto'
+import { AdminNotificationsService } from '../admin-notifications/admin-notifications.service'
 
 @Injectable()
 export class TicketsService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(TicketsService.name)
 
-  async create(userId: string, dto: CreateTicketDto) {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly adminNotifications: AdminNotificationsService,
+  ) {}
+
+  async create(userId: string, userPhone: string, dto: CreateTicketDto) {
     const ticket = await this.prisma.supportTicket.create({
       data: {
         userId,
@@ -21,6 +28,18 @@ export class TicketsService {
         priority: dto.priority ?? TicketPriority.NORMAL,
       },
     })
+
+    // نوتیف ادمین — docs/PRD-admin-notifications-and-mobile.md بخش ۴. فایر-اند-فورگت، شکستش
+    // نباید ثبت تیکت کاربر را fail کند
+    this.adminNotifications
+      .notify(
+        'TICKET_CREATED',
+        fa.adminNotification.ticketTitle,
+        fa.adminNotification.ticketBody(dto.subject, userPhone),
+        { ticketId: ticket.id, userId },
+      )
+      .catch((err) => this.logger.error(`admin notification failed for ticket=${ticket.id}`, err))
+
     return { message: fa.ticket.created, ticket }
   }
 

@@ -7,6 +7,7 @@ import { DiscountCodeService } from '../growth/discount-code.service'
 import { GrowthConfigService } from '../growth/growth-config.service'
 import { PaymentGatewayRegistry } from './gateways/payment-gateway.registry'
 import { PaymentGateway } from './gateways/payment-gateway.interface'
+import { AdminNotificationsService } from '../admin-notifications/admin-notifications.service'
 import { fa } from '../../i18n/fa'
 import { InitiatePaymentDto } from './dto/initiate-payment.dto'
 import { InitiateWalletTopupDto } from './dto/initiate-wallet-topup.dto'
@@ -30,6 +31,7 @@ export class PaymentsService {
     private readonly discountCodeService: DiscountCodeService,
     private readonly growthConfigService: GrowthConfigService,
     private readonly config: ConfigService,
+    private readonly adminNotifications: AdminNotificationsService,
   ) {}
 
   async initiate(userId: string, dto: InitiatePaymentDto) {
@@ -292,6 +294,17 @@ export class PaymentsService {
 
     this.logger.log(`verify: payment COMPLETED, subscription activated, invoice ${invoice.id} created`)
 
+    // نوتیف ادمین — docs/PRD-admin-notifications-and-mobile.md بخش ۴. فایر-اند-فورگت با catch،
+    // دقیقاً مثل الگوی پاداش معرفی زیر — شکست نوتیف هرگز نباید پرداخت را fail کند
+    this.adminNotifications
+      .notify(
+        'PAYMENT_COMPLETED',
+        fa.adminNotification.paymentTitle,
+        fa.adminNotification.paymentBody(plan.name, payment.amount, payment.user.phone),
+        { paymentId: payment.id, userId: payment.userId, planName: plan.name, amount: payment.amount },
+      )
+      .catch((err) => this.logger.error(`admin notification failed for payment=${payment.id}`, err))
+
     // پاداش دوطرفه‌ی معرفی دوستان — بعد از تراکنش اصلی و غیربحرانی؛ شکستش نباید پرداخت رو fail کنه
     if (isReferredUser && isFirstCompletedPayment) {
       this.issueReferralRewards(payment.userId, payment.user.referredByUserId!).catch((err) =>
@@ -375,6 +388,15 @@ export class PaymentsService {
 
     await this.tokenService.invalidatePlanCache(payment.userId)
     this.logger.log(`completeWalletTopup: wallet credited ${payment.amount} for user=${payment.userId}, invoice=${invoice.id}`)
+
+    this.adminNotifications
+      .notify(
+        'WALLET_TOPUP_COMPLETED',
+        fa.adminNotification.walletTopupTitle,
+        fa.adminNotification.walletTopupBody(payment.amount, payment.user.phone),
+        { paymentId: payment.id, userId: payment.userId, amount: payment.amount },
+      )
+      .catch((err) => this.logger.error(`admin notification failed for wallet topup payment=${payment.id}`, err))
 
     return { redirect: `${appUrl}/payment?status=success&refId=${refId}&invoiceId=${invoice.id}` }
   }
