@@ -42,14 +42,9 @@ export class PushFcmService {
       sentCount += response.successCount
       failedCount += response.failureCount
 
-      // پاسخ کامل هر توکن را لاگ می‌کنیم — روی موفقیت فقط messageId، روی شکست کد/پیام خطای
-      // واقعی Firebase (مثلاً messaging/registration-token-not-registered،
-      // messaging/mismatched-credential وقتی توکن مال یک پروژه‌ی Firebase دیگر است)
       response.responses.forEach((r, idx) => {
         const token = chunk[idx]
-        if (r.success) {
-          this.logger.log(`FCM OK token=${token.slice(0, 16)}... messageId=${r.messageId}`)
-        } else {
+        if (!r.success) {
           this.logger.error(
             `FCM FAILED token=${token.slice(0, 16)}... code=${r.error?.code} message=${r.error?.message}`,
           )
@@ -57,8 +52,6 @@ export class PushFcmService {
         }
       })
     }
-
-    this.logger.log(`sendToTokens: done — sentCount=${sentCount} failedCount=${failedCount} invalidTokens=${invalidTokens.length}`)
 
     return { sentCount, failedCount, invalidTokens }
   }
