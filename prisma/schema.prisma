@@ -39,6 +39,8 @@ model User {
   wallet              Wallet?
   tickets             SupportTicket[]
   limitHitEvents      LimitHitEvent[]
+  liaraApiKey         LiaraApiKey?
+  liaraUsageSnapshots LiaraUsageSnapshot[]
   adminDeviceTokens   AdminDeviceToken[]       @relation("AdminDeviceTokens")
   deviceTokens        DeviceToken[]            @relation("UserDeviceTokens")
   pushCampaigns       PushCampaign[]           @relation("PushCampaignCreatedBy")
@@ -318,6 +320,44 @@ model DailyUsage {
   @@unique([userId, date])
   @@index([date])
   @@map("daily_usage")
+}
+
+// docs/PRD-liara-usage-reconciliation.md — یک کلید API اختصاصی روی لیارا به‌ازای هر
+// کاربر (نه کلید مشترک پلتفرم)، تا مصرف واقعی هر کاربر از لاگ‌های خودِ لیارا قابل تفکیک باشد.
+// encryptedKey اولین secret خامی است که در این پروژه در دیتابیس نگه داشته می‌شود — رمزنگاری‌شده
+// با secret-cipher.ts (AES-256-GCM)، نه plain text.
+model LiaraApiKey {
+  id           String   @id @default(uuid())
+  userId       String   @unique
+  keyName      String   @unique // نام کوتاه روی لیارا — الگوی u+۱۴کاراکتر hex (محدودیت لیارا: ۳-۱۵ کاراکتر)
+  encryptedKey String // مقدار خام کلید، رمزنگاری‌شده — فقط یک‌بار در پاسخ ساخت از لیارا برمی‌گردد
+  liaraKeyId   String? // فیلد _id برگشتی از لیارا، برای مدیریت/حذف آینده
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("liara_api_keys")
+}
+
+// roll-up روزانه‌ی مصرف واقعیِ گزارش‌شده توسط لیارا (از GET /ai-logs/logs، فیلترشده با کلید
+// اختصاصی همین کاربر) — برای مقایسه‌ی «عدد داخلی ما» در برابر «عدد واقعی لیارا» در پنل آنالیز.
+// فقط از لحظه‌ی فعال‌شدن LiaraApiKey برای هر کاربر به بعد داده دارد؛ بازه‌های قبل‌تر عمداً رکورد ندارند.
+model LiaraUsageSnapshot {
+  id                  String   @id @default(uuid())
+  userId              String
+  date                DateTime @db.Date
+  realTokensTotal     Int      @default(0)
+  realCostToman       Int      @default(0)
+  realTextCostToman   Int      @default(0)
+  realImageCostToman  Int      @default(0)
+  requestCount        Int      @default(0)
+  syncedAt            DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date])
+  @@index([date])
+  @@map("liara_usage_snapshots")
 }
 
 enum FeedbackCategory {

@@ -9,6 +9,10 @@ const WAITLIST_REMINDER_CRON = '0 9 * * *' // ساعت ۹ صبح — پیامک 
 const CHAT_IMAGE_CLEANUP_CRON = '15 * * * *' // ساعتی یک‌بار — عکس‌های چت قدیمی‌تر از ۲۴ ساعت حذف می‌شوند
 // docs/PRD-admin-notifications-and-mobile.md بخش ۴/۷ — چک آستانه‌ی خطای سیستمی/Liara هر ۵ دقیقه
 const ADMIN_ALERTS_CRON = '*/5 * * * *'
+// docs/PRD-liara-usage-reconciliation.md — بعد از بقیه‌ی جاب‌های شبانه، مصرف واقعی «دیروز» را
+// از لاگ‌های لیارا می‌کشد (لاگ‌های لیارا معمولاً بدون تأخیر ثبت می‌شوند، ولی این ساعت حاشیه‌ی
+// امنی برای پایان کامل روز UTC می‌گذارد)
+const LIARA_USAGE_SYNC_CRON = '30 2 * * *'
 
 @Injectable()
 export class QueueService implements OnApplicationBootstrap {
@@ -26,6 +30,8 @@ export class QueueService implements OnApplicationBootstrap {
     private readonly chatImageCleanupQueue: Queue,
     @InjectQueue('admin-alerts')
     private readonly adminAlertsQueue: Queue,
+    @InjectQueue('liara-usage-sync')
+    private readonly liaraUsageSyncQueue: Queue,
   ) {}
 
   async onApplicationBootstrap() {
@@ -98,5 +104,16 @@ export class QueueService implements OnApplicationBootstrap {
       { repeat: { cron: ADMIN_ALERTS_CRON } },
     )
     this.logger.log(`Admin alerts check job scheduled: ${ADMIN_ALERTS_CRON}`)
+
+    const liaraUsageSyncRepeatables = await this.liaraUsageSyncQueue.getRepeatableJobs()
+    for (const job of liaraUsageSyncRepeatables) {
+      await this.liaraUsageSyncQueue.removeRepeatableByKey(job.key)
+    }
+    await this.liaraUsageSyncQueue.add(
+      'sync',
+      {},
+      { repeat: { cron: LIARA_USAGE_SYNC_CRON } },
+    )
+    this.logger.log(`Liara usage sync job scheduled: ${LIARA_USAGE_SYNC_CRON}`)
   }
 }

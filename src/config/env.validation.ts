@@ -13,6 +13,14 @@ class EnvironmentVariables {
   @IsUrl({ require_tld: false }) LIARA_AI_BASE_URL: string
   @IsString() LIARA_API_KEY: string
 
+  // docs/PRD-liara-usage-reconciliation.md — رصد مصرف واقعی هر کاربر با کلید اختصاصی روی لیارا.
+  // عمداً اختیاری: بدون این‌ها provisioning fail می‌شود و chat بی‌صدا روی LIARA_API_KEY مشترک
+  // fallback می‌کند — دیپلوی فعلی بدون ست‌کردنشان نباید بشکند.
+  @IsOptional() @IsString() LIARA_MANAGEMENT_JWT?: string
+  @IsOptional() @IsString() LIARA_WORKSPACE_NAME?: string
+  @IsOptional() @IsUrl({ require_tld: false }) LIARA_MANAGEMENT_BASE_URL?: string
+  @IsOptional() @IsString() LIARA_KEY_ENCRYPTION_SECRET?: string
+
   @IsString() ZARINPAL_MERCHANT_ID: string
   @IsString() KAVENEGAR_API_KEY: string
 

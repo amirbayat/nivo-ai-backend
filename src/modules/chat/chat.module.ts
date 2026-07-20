@@ -8,11 +8,12 @@ import { UsageAnalyticsModule } from '../usage-analytics/usage-analytics.module'
 import { CampaignModule } from '../campaign/campaign.module'
 import { ChatConfigModule } from '../chat-config/chat-config.module'
 import { LiveStatsModule } from '../live-stats/live-stats.module'
+import { LiaraModule } from '../liara/liara.module'
 
 @Module({
   imports: [
     UsageModule, RedisModule, ModelRouterModule, UsageAnalyticsModule,
-    CampaignModule, ChatConfigModule, LiveStatsModule,
+    CampaignModule, ChatConfigModule, LiveStatsModule, LiaraModule,
   ],
   controllers: [ChatController],
   providers: [ChatService],

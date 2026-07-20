@@ -119,6 +119,12 @@ export interface UserUsageRow {
   segment: string | null
   text: UserTypeUsage
   image: UserTypeUsage
+  // docs/PRD-liara-usage-reconciliation.md — مصرف واقعیِ گزارش‌شده توسط لیارا (از کلید اختصاصی
+  // این کاربر)، در برابر costToman بالا که صرفاً محاسبه‌ی داخلی ماست. null یعنی هنوز
+  // LiaraUsageSnapshot ای برای این کاربر/بازه نداریم (نه صفر واقعی) — نمایش باید «—» باشد.
+  liaraRealCostToman: number | null
+  liaraRequestCount: number
+  liaraMatchPct: number | null
 }
 
 /**
@@ -148,7 +154,7 @@ export class UsageAnalyticsService {
   }
 
   private async computeOverview(range: DateRange) {
-    const [usage, revenue, modelBreakdown] = await Promise.all([
+    const [usage, revenue, modelBreakdown, liaraUsage] = await Promise.all([
       this.prisma.dailyUsage.aggregate({
         where: { date: { gte: range.from, lte: range.to } },
         _sum: {
@@ -164,6 +170,10 @@ export class UsageAnalyticsService {
         _sum: { amount: true },
       }),
       this.getModelBreakdown(range),
+      this.prisma.liaraUsageSnapshot.aggregate({
+        where: { date: { gte: range.from, lte: range.to } },
+        _sum: { realCostToman: true },
+      }),
     ])
 
     const totalTokens = (usage._sum.freeTokensUsed ?? 0) + (usage._sum.paidTokensUsed ?? 0)
@@ -188,6 +198,12 @@ export class UsageAnalyticsService {
     const textBreakdown = modelBreakdown.filter((m) => m.modelType === 'TEXT')
     const imageBreakdown = modelBreakdown.filter((m) => m.modelType === 'IMAGE')
 
+    // docs/PRD-liara-usage-reconciliation.md — عدد داخلی ما چند درصد عدد واقعی لیارا است.
+    // null (نه ۰٪) وقتی هنوز هیچ LiaraUsageSnapshot ای برای این بازه نداریم — قبل از فعال‌شدن
+    // این فیچر، بازه‌های قدیمی همیشه همین حالت را دارند.
+    const liaraRealCostToman = liaraUsage._sum.realCostToman ?? 0
+    const liaraMatchPct = liaraRealCostToman > 0 ? (costToman / liaraRealCostToman) * 100 : null
+
     return {
       totalTokens,
       totalMessages,
@@ -206,6 +222,8 @@ export class UsageAnalyticsService {
       topModel: modelBreakdown[0]?.model ?? null,
       text: summarizeModelTypeBreakdown(textBreakdown),
       image: summarizeModelTypeBreakdown(imageBreakdown),
+      liaraRealCostToman,
+      liaraMatchPct,
     }
   }
 
@@ -392,7 +410,7 @@ export class UsageAnalyticsService {
   async getUsers(range: DateRange, segmentLabel?: string): Promise<UserUsageRow[]> {
     const days = daysBetweenInclusive(range.from, range.to)
 
-    const [perUserModel, revenueRows, segments, imageModelNames] = await Promise.all([
+    const [perUserModel, revenueRows, segments, imageModelNames, liaraUsageRows] = await Promise.all([
       this.prisma.message.groupBy({
         by: ['userId', 'model'],
         where: { role: 'ASSISTANT', userId: { not: null }, createdAt: { gte: range.from, lte: range.to } },
@@ -406,7 +424,18 @@ export class UsageAnalyticsService {
       }),
       this.listSegments(),
       this.getImageModelNames(),
+      this.prisma.liaraUsageSnapshot.groupBy({
+        by: ['userId'],
+        where: { date: { gte: range.from, lte: range.to } },
+        _sum: { realCostToman: true, requestCount: true },
+      }),
     ])
+    const liaraByUser = new Map(
+      liaraUsageRows.map((r) => [
+        r.userId,
+        { realCostToman: r._sum.realCostToman ?? 0, requestCount: r._sum.requestCount ?? 0 },
+      ]),
+    )
 
     interface TypeAgg {
       messages: number
@@ -442,7 +471,9 @@ export class UsageAnalyticsService {
     }
 
     const revenueMap = new Map(revenueRows.map((r) => [r.userId, r._sum.amount ?? 0]))
-    const userIds = Array.from(byUser.keys())
+    // یونیون با کاربرهایی که فقط در LiaraUsageSnapshot داده دارند (نادر، ولی ممکن است — مثلاً
+    // پیامی در بازه ثبت نشده ولی کلید اختصاصی‌شان جایی دیگر مصرف داشته)
+    const userIds = Array.from(new Set([...byUser.keys(), ...liaraByUser.keys()]))
     const users = userIds.length
       ? await this.prisma.user.findMany({
           where: { id: { in: userIds } },
@@ -463,12 +494,13 @@ export class UsageAnalyticsService {
     })
 
     let results: UserUsageRow[] = userIds.map((userId) => {
-      const agg = byUser.get(userId)!
+      const agg = byUser.get(userId) ?? { ...emptyTypeAgg(), text: emptyTypeAgg(), image: emptyTypeAgg() }
       const revenueToman = revenueMap.get(userId) ?? 0
       const avgMessagesPerDay = agg.messages / days
       const avgTokensPerDay = (agg.tokensInput + agg.tokensOutput) / days
       const segment = this.matchSegment(segments, avgMessagesPerDay, avgTokensPerDay)
       const user = userMap.get(userId)
+      const liara = liaraByUser.get(userId)
       return {
         userId,
         phone: user?.phone ?? null,
@@ -486,6 +518,9 @@ export class UsageAnalyticsService {
         segment: segment?.label ?? null,
         text: toTypeUsage(agg.text),
         image: toTypeUsage(agg.image),
+        liaraRealCostToman: liara ? liara.realCostToman : null,
+        liaraRequestCount: liara?.requestCount ?? 0,
+        liaraMatchPct: liara && liara.realCostToman > 0 ? (agg.costToman / liara.realCostToman) * 100 : null,
       }
     })
 

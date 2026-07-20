@@ -8,11 +8,13 @@ import { ModelFeedbackSummaryProcessor } from './processors/model-feedback-summa
 import { WaitlistReminderProcessor } from './processors/waitlist-reminder.processor'
 import { ChatImageCleanupProcessor } from './processors/chat-image-cleanup.processor'
 import { AdminAlertsProcessor } from './processors/admin-alerts.processor'
+import { LiaraUsageSyncProcessor } from './processors/liara-usage-sync.processor'
 import { PrismaModule } from '../prisma/prisma.module'
 import { MessageFeedbackModule } from '../modules/message-feedback/message-feedback.module'
 import { CampaignModule } from '../modules/campaign/campaign.module'
 import { LiveStatsModule } from '../modules/live-stats/live-stats.module'
 import { AdminNotificationsModule } from '../modules/admin-notifications/admin-notifications.module'
+import { LiaraModule } from '../modules/liara/liara.module'
 
 @Module({
   imports: [
@@ -29,11 +31,13 @@ import { AdminNotificationsModule } from '../modules/admin-notifications/admin-n
     BullModule.registerQueue({ name: 'waitlist-reminder' }),
     BullModule.registerQueue({ name: 'chat-image-cleanup' }),
     BullModule.registerQueue({ name: 'admin-alerts' }),
+    BullModule.registerQueue({ name: 'liara-usage-sync' }),
     PrismaModule,
     MessageFeedbackModule,
     CampaignModule,
     LiveStatsModule,
     AdminNotificationsModule,
+    LiaraModule,
   ],
   providers: [
     QueueService,
@@ -43,6 +47,7 @@ import { AdminNotificationsModule } from '../modules/admin-notifications/admin-n
     WaitlistReminderProcessor,
     ChatImageCleanupProcessor,
     AdminAlertsProcessor,
+    LiaraUsageSyncProcessor,
   ],
 })
 export class QueueModule {}
