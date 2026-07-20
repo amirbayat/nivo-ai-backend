@@ -27,26 +27,27 @@ model User {
   referredByUser   User?   @relation("Referrals", fields: [referredByUserId], references: [id])
   referredUsers    User[]  @relation("Referrals")
 
-  conversations       Conversation[]
-  messages            Message[]
-  subscription        Subscription?
-  payments            Payment[]
-  invoices            Invoice[]
-  refreshTokens       RefreshToken[]
-  dailyUsages         DailyUsage[]
-  feedbacks           Feedback[]
-  quotaOverride       UserQuotaOverride?
-  wallet              Wallet?
-  tickets             SupportTicket[]
-  limitHitEvents      LimitHitEvent[]
-  liaraApiKey         LiaraApiKey?
-  liaraUsageSnapshots LiaraUsageSnapshot[]
-  adminDeviceTokens   AdminDeviceToken[]       @relation("AdminDeviceTokens")
-  deviceTokens        DeviceToken[]            @relation("UserDeviceTokens")
-  pushCampaigns       PushCampaign[]           @relation("PushCampaignCreatedBy")
-  waitlistEntry       WaitlistEntry?
-  issuedDiscountCodes DiscountCode[]           @relation("IssuedDiscountCodes")
-  discountRedemptions DiscountCodeRedemption[]
+  conversations             Conversation[]
+  messages                  Message[]
+  subscription              Subscription?
+  payments                  Payment[]
+  invoices                  Invoice[]
+  refreshTokens             RefreshToken[]
+  dailyUsages               DailyUsage[]
+  feedbacks                 Feedback[]
+  quotaOverride             UserQuotaOverride?
+  wallet                    Wallet?
+  tickets                   SupportTicket[]
+  limitHitEvents            LimitHitEvent[]
+  liaraApiKey               LiaraApiKey?
+  liaraUsageSnapshots       LiaraUsageSnapshot[]
+  liaraKeyProvisioningIssue LiaraKeyProvisioningIssue?
+  adminDeviceTokens         AdminDeviceToken[]         @relation("AdminDeviceTokens")
+  deviceTokens              DeviceToken[]              @relation("UserDeviceTokens")
+  pushCampaigns             PushCampaign[]             @relation("PushCampaignCreatedBy")
+  waitlistEntry             WaitlistEntry?
+  issuedDiscountCodes       DiscountCode[]             @relation("IssuedDiscountCodes")
+  discountRedemptions       DiscountCodeRedemption[]
 
   @@map("users")
 }
@@ -343,21 +344,38 @@ model LiaraApiKey {
 // اختصاصی همین کاربر) — برای مقایسه‌ی «عدد داخلی ما» در برابر «عدد واقعی لیارا» در پنل آنالیز.
 // فقط از لحظه‌ی فعال‌شدن LiaraApiKey برای هر کاربر به بعد داده دارد؛ بازه‌های قبل‌تر عمداً رکورد ندارند.
 model LiaraUsageSnapshot {
-  id                  String   @id @default(uuid())
-  userId              String
-  date                DateTime @db.Date
-  realTokensTotal     Int      @default(0)
-  realCostToman       Int      @default(0)
-  realTextCostToman   Int      @default(0)
-  realImageCostToman  Int      @default(0)
-  requestCount        Int      @default(0)
-  syncedAt            DateTime @default(now())
+  id                 String   @id @default(uuid())
+  userId             String
+  date               DateTime @db.Date
+  realTokensTotal    Int      @default(0)
+  realCostToman      Int      @default(0)
+  realTextCostToman  Int      @default(0)
+  realImageCostToman Int      @default(0)
+  requestCount       Int      @default(0)
+  syncedAt           DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, date])
   @@index([date])
   @@map("liara_usage_snapshots")
+}
+
+// کاربرانی که تلاش برای ساخت کلید اختصاصی‌شان fail شده (JWT مدیریتی نامعتبر، لیارا در دسترس
+// نیست، ...) — تا وقتی موفق نشده این ردیف می‌ماند، هم برای نمایش در پنل ادمین (چند کاربر الان
+// روی کلید مشترک fallback هستند و چرا) و هم به‌عنوان صف retry جاب دوره‌ای. با موفقیت هر تلاش
+// (لازی در chat.service یا از جاب retry) این ردیف حذف می‌شود.
+model LiaraKeyProvisioningIssue {
+  id            String   @id @default(uuid())
+  userId        String   @unique
+  lastError     String
+  attemptCount  Int      @default(1)
+  firstFailedAt DateTime @default(now())
+  lastAttemptAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("liara_key_provisioning_issues")
 }
 
 enum FeedbackCategory {

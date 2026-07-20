@@ -13,6 +13,9 @@ const ADMIN_ALERTS_CRON = '*/5 * * * *'
 // از لاگ‌های لیارا می‌کشد (لاگ‌های لیارا معمولاً بدون تأخیر ثبت می‌شوند، ولی این ساعت حاشیه‌ی
 // امنی برای پایان کامل روز UTC می‌گذارد)
 const LIARA_USAGE_SYNC_CRON = '30 2 * * *'
+// docs/PRD-liara-usage-reconciliation.md — کاربرانی که ساخت کلید اختصاصی‌شان قبلاً fail شده را
+// دوره‌ای دوباره امتحان می‌کند (مثلاً بعد از تمدید JWT مدیریتی در Hamravesh)
+const LIARA_KEY_RETRY_CRON = '*/15 * * * *'
 
 @Injectable()
 export class QueueService implements OnApplicationBootstrap {
@@ -32,6 +35,8 @@ export class QueueService implements OnApplicationBootstrap {
     private readonly adminAlertsQueue: Queue,
     @InjectQueue('liara-usage-sync')
     private readonly liaraUsageSyncQueue: Queue,
+    @InjectQueue('liara-key-retry')
+    private readonly liaraKeyRetryQueue: Queue,
   ) {}
 
   async onApplicationBootstrap() {
@@ -115,5 +120,16 @@ export class QueueService implements OnApplicationBootstrap {
       { repeat: { cron: LIARA_USAGE_SYNC_CRON } },
     )
     this.logger.log(`Liara usage sync job scheduled: ${LIARA_USAGE_SYNC_CRON}`)
+
+    const liaraKeyRetryRepeatables = await this.liaraKeyRetryQueue.getRepeatableJobs()
+    for (const job of liaraKeyRetryRepeatables) {
+      await this.liaraKeyRetryQueue.removeRepeatableByKey(job.key)
+    }
+    await this.liaraKeyRetryQueue.add(
+      'retry',
+      {},
+      { repeat: { cron: LIARA_KEY_RETRY_CRON } },
+    )
+    this.logger.log(`Liara key retry job scheduled: ${LIARA_KEY_RETRY_CRON}`)
   }
 }

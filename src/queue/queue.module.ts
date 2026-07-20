@@ -9,6 +9,7 @@ import { WaitlistReminderProcessor } from './processors/waitlist-reminder.proces
 import { ChatImageCleanupProcessor } from './processors/chat-image-cleanup.processor'
 import { AdminAlertsProcessor } from './processors/admin-alerts.processor'
 import { LiaraUsageSyncProcessor } from './processors/liara-usage-sync.processor'
+import { LiaraKeyRetryProcessor } from './processors/liara-key-retry.processor'
 import { PrismaModule } from '../prisma/prisma.module'
 import { MessageFeedbackModule } from '../modules/message-feedback/message-feedback.module'
 import { CampaignModule } from '../modules/campaign/campaign.module'
@@ -32,6 +33,7 @@ import { LiaraModule } from '../modules/liara/liara.module'
     BullModule.registerQueue({ name: 'chat-image-cleanup' }),
     BullModule.registerQueue({ name: 'admin-alerts' }),
     BullModule.registerQueue({ name: 'liara-usage-sync' }),
+    BullModule.registerQueue({ name: 'liara-key-retry' }),
     PrismaModule,
     MessageFeedbackModule,
     CampaignModule,
@@ -48,6 +50,7 @@ import { LiaraModule } from '../modules/liara/liara.module'
     ChatImageCleanupProcessor,
     AdminAlertsProcessor,
     LiaraUsageSyncProcessor,
+    LiaraKeyRetryProcessor,
   ],
 })
 export class QueueModule {}
