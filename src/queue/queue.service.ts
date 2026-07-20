@@ -9,10 +9,8 @@ const WAITLIST_REMINDER_CRON = '0 9 * * *' // ساعت ۹ صبح — پیامک 
 const CHAT_IMAGE_CLEANUP_CRON = '15 * * * *' // ساعتی یک‌بار — عکس‌های چت قدیمی‌تر از ۲۴ ساعت حذف می‌شوند
 // docs/PRD-admin-notifications-and-mobile.md بخش ۴/۷ — چک آستانه‌ی خطای سیستمی/Liara هر ۵ دقیقه
 const ADMIN_ALERTS_CRON = '*/5 * * * *'
-// docs/PRD-liara-usage-reconciliation.md — بعد از بقیه‌ی جاب‌های شبانه، مصرف واقعی «دیروز» را
-// از لاگ‌های لیارا می‌کشد (لاگ‌های لیارا معمولاً بدون تأخیر ثبت می‌شوند، ولی این ساعت حاشیه‌ی
-// امنی برای پایان کامل روز UTC می‌گذارد)
-const LIARA_USAGE_SYNC_CRON = '30 2 * * *'
+// موقتاً هر ۵ دقیقه برای رصد نزدیک‌به‌لحظه‌ی مصرف امروز — بعداً دوباره به یک‌بار در شبانه‌روز برمی‌گردد
+const LIARA_USAGE_SYNC_CRON = '*/5 * * * *'
 // docs/PRD-liara-usage-reconciliation.md — کاربرانی که ساخت کلید اختصاصی‌شان قبلاً fail شده را
 // دوره‌ای دوباره امتحان می‌کند (مثلاً بعد از تمدید JWT مدیریتی در Hamravesh)
 const LIARA_KEY_RETRY_CRON = '*/15 * * * *'

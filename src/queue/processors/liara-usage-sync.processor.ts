@@ -3,18 +3,18 @@ import { Logger } from '@nestjs/common'
 import { PrismaService } from '../../prisma/prisma.service'
 import { LiaraManagementService, type LiaraLogEntry } from '../../modules/liara/liara-management.service'
 
-// docs/PRD-liara-usage-reconciliation.md — روزی یک‌بار برای «دیروز» (تاریخ UTC)، مصرف واقعی هر
-// کاربرِ دارای کلید اختصاصی را از GET /ai-logs/logs می‌کشد و در LiaraUsageSnapshot ذخیره می‌کند.
+// docs/PRD-liara-usage-reconciliation.md — مصرف واقعی هر کاربرِ دارای کلید اختصاصی را از
+// GET /ai-logs/logs می‌کشد و در LiaraUsageSnapshot ذخیره می‌کند.
 // این job فقط از لحظه‌ی فعال‌شدن LiaraApiKey هر کاربر به بعد داده تولید می‌کند — بازه‌های قبلی
 // عمداً بدون رکورد می‌مانند (نه صفر اشتباه).
+// موقتاً بازه‌ی «امروز تا همین لحظه» (UTC) را می‌کشد تا با cron هر ۵ دقیقه‌ای رصد نزدیک‌به‌لحظه
+// ممکن شود؛ هر بار کل بازه‌ی امروز را از نو محاسبه و upsert می‌کند (بدون جمع‌زدن تجمعی).
 const CONCURRENCY = 5
 
-function yesterdayUtcRange(): { date: Date; from: Date; to: Date } {
+function todayUtcRangeSoFar(): { date: Date; from: Date; to: Date } {
   const now = new Date()
   const todayUtc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
-  const from = new Date(todayUtc.getTime() - 24 * 60 * 60 * 1000)
-  const to = new Date(todayUtc.getTime() - 1)
-  return { date: from, from, to }
+  return { date: todayUtc, from: todayUtc, to: now }
 }
 
 function isImageLog(entry: LiaraLogEntry): boolean {
@@ -35,7 +35,7 @@ export class LiaraUsageSyncProcessor {
     const users = await this.prisma.liaraApiKey.findMany({ select: { userId: true, keyName: true } })
     if (!users.length) return
 
-    const { date, from, to } = yesterdayUtcRange()
+    const { date, from, to } = todayUtcRangeSoFar()
     let synced = 0
     let failed = 0
 
