@@ -392,7 +392,7 @@ export class AdminService {
     since.setDate(since.getDate() - days)
     since.setHours(0, 0, 0, 0)
 
-    const [costRows, revenueRows] = await Promise.all([
+    const [costRows, revenueRows, liaraRows] = await Promise.all([
       this.prisma.dailyUsage.groupBy({
         by: ['date'],
         where: { date: { gte: since } },
@@ -406,18 +406,32 @@ export class AdminService {
         GROUP BY DATE_TRUNC('day', "createdAt")
         ORDER BY day ASC
       `,
+      this.prisma.liaraUsageSnapshot.groupBy({
+        by: ['date'],
+        where: { date: { gte: since } },
+        _sum: { realCostToman: true },
+        orderBy: { date: 'asc' },
+      }),
     ])
 
     const revenueMap = new Map(
       revenueRows.map(r => [r.day.toISOString().slice(0, 10), Number(r.revenue)]),
     )
+    // نبود رکورد یعنی هنوز کلید اختصاصی لیارا برای هیچ کاربری فعال نبوده — null نه صفر
+    const liaraMap = new Map(
+      liaraRows.map(r => [r.date.toISOString().slice(0, 10), r._sum.realCostToman ?? 0]),
+    )
 
-    return costRows.map(r => ({
-      date: r.date.toISOString().slice(0, 10),
-      aiCostToman: r._sum.costToman ?? 0,
-      aiCostUsd: (r._sum.costUsdMicros ?? 0) / 1_000_000,
-      revenueToman: revenueMap.get(r.date.toISOString().slice(0, 10)) ?? 0,
-    }))
+    return costRows.map(r => {
+      const date = r.date.toISOString().slice(0, 10)
+      return {
+        date,
+        aiCostToman: r._sum.costToman ?? 0,
+        aiCostUsd: (r._sum.costUsdMicros ?? 0) / 1_000_000,
+        revenueToman: revenueMap.get(date) ?? 0,
+        liaraCostToman: liaraMap.get(date) ?? null,
+      }
+    })
   }
 
   async getPricingAlert() {
