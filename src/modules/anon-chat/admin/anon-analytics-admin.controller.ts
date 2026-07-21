@@ -3,8 +3,13 @@ import { JwtGuard } from '../../../common/guards/jwt.guard'
 import { AdminGuard } from '../../../common/guards/admin.guard'
 import { AnonAnalyticsService } from './anon-analytics.service'
 
+const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/
+
 function parseRange(from?: string, to?: string) {
-  const toDate = to ? new Date(to) : new Date()
+  let toDate = to ? new Date(to) : new Date()
+  if (to && DATE_ONLY_RE.test(to)) {
+    toDate = new Date(toDate.getTime() + 24 * 60 * 60 * 1000 - 1)
+  }
   const fromDate = from ? new Date(from) : new Date(toDate.getTime() - 30 * 24 * 60 * 60 * 1000)
   return { from: fromDate, to: toDate }
 }
