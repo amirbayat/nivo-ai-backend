@@ -1104,6 +1104,9 @@ model AnonymousChatConfig {
   dailyMessageLimitAfterFree Int      @default(5) // m — بعد از اتمام n، سقف روزانه
   maxInputTokens             Int      @default(2000)
   maxOutputTokens            Int      @default(1000)
+  // null یعنی از پیش‌فرض provider استفاده شود — مقادیر مجاز در REASONING_EFFORT_VALUES
+  // (src/modules/plans/reasoning-effort.constants.ts)
+  reasoningEffort            String?
   // حالت ۱ (عادی): باکس همیشه‌نمایان بالای اینپوت، مثل GiftBanner
   signupBannerMessage        String   @default("🎁 با ثبت‌نام رایگان، اعتبار و امکانات بیشتری بگیرید") @db.Text
   // حالت ۲ (ورود به ناحیه‌ی محدود، بعد از اتمام n): هنوز اجازه‌ی چت دارد

@@ -15,6 +15,7 @@ import type { Response } from 'express'
 import { isModelUnavailableError, unwrapAiSdkError } from '../../common/utils/ai-error.util'
 import { PrismaService } from '../../prisma/prisma.service'
 import { RedisService } from '../../redis/redis.service'
+import type { ReasoningEffortValue } from '../plans/reasoning-effort.constants'
 import { TokenEstimatorService } from '../usage/token-estimator.service'
 import { nextIranMidnightISO } from '../usage/token.service'
 import { AnonChatConfigService } from './anon-chat-config.service'
@@ -176,6 +177,11 @@ export class AnonChatService {
         messages: coreMessages,
         maxOutputTokens: config.maxOutputTokens,
         timeout: { chunkMs: 30_000 },
+        // فرانت چت رایگان reasoning را نمایش نمی‌دهد؛ بدون این override مدل‌های reasoning
+        // (خانواده‌ی gpt-5) با effort پیش‌فرض provider (معمولاً medium) بخشی از سقف خروجی و
+        // زمان را صرف استدلال نامرئی می‌کنند — ادمین می‌تواند این را پایین بیاورد یا خالی
+        // بگذارد تا از پیش‌فرض provider استفاده شود
+        ...(config.reasoningEffort ? { reasoning: config.reasoningEffort as ReasoningEffortValue } : {}),
         onError: ({ error }) => {
           capturedProviderError = error
         },

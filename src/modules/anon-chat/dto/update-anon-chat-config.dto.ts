@@ -1,4 +1,5 @@
-import { IsBoolean, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator'
+import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator'
+import { REASONING_EFFORT_VALUES } from '../../plans/reasoning-effort.constants'
 
 export class UpdateAnonChatConfigDto {
   @IsOptional()
@@ -9,6 +10,10 @@ export class UpdateAnonChatConfigDto {
   @IsString()
   @MaxLength(100)
   defaultModel?: string
+
+  @IsOptional()
+  @IsIn(REASONING_EFFORT_VALUES)
+  reasoningEffort?: string | null
 
   @IsOptional()
   @IsInt()
