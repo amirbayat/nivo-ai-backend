@@ -83,8 +83,15 @@ model Plan {
 
   // میزان reasoning effort برای پاسخ اصلی چت این پلن (مدل‌های reasoning مثل خانواده‌ی gpt-5) —
   // 'minimal' | 'low' | 'medium' | 'high'؛ null = پیش‌فرض provider (معمولاً medium). می‌تواند
-  // به‌ازای هر استپ بودجه‌ای (PlanRoutingStep.reasoningEffort) override شود.
+  // به‌ازای هر استپ بودجه‌ای (PlanRoutingStep.reasoningEffort) override شود. اگر کاربر از
+  // دراپ‌دون «سریع/هوشمند» کنار ارسال پیام انتخاب کند، به‌جای این مقدار fastReasoningEffort/
+  // smartReasoningEffort استفاده می‌شود؛ این‌جا فقط پیش‌فرض وقتی هیچ‌کدام انتخاب نشده باشد.
   reasoningEffort String?
+  // معادل حالت «سریع» دراپ‌دون کنار ارسال پیام — انتخاب مدل را عوض نمی‌کند، فقط این مقدار به‌جای
+  // reasoningEffort بالا استفاده می‌شود. null = 'none' (بدون فکر)
+  fastReasoningEffort String?
+  // معادل حالت «هوشمند» دراپ‌دون کنار ارسال پیام. null = 'low' (فکر کم)
+  smartReasoningEffort String?
 
   // context اختصاصی این پلن — بعد از context عمومی (ChatConfig.globalContextMd) به system prompt چت اصلی اضافه می‌شود
   // (docs/PRD-chat-context-and-summarization.md بخش ۴)

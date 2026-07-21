@@ -29,6 +29,10 @@ export interface PlanLimits {
   simpleModel: string | null
   // میزان reasoning effort پیش‌فرض این پلن — null = پیش‌فرض provider (docs/PERFORMANCE بحث reasoning)
   reasoningEffort: string | null
+  // معادل حالت «سریع»/«هوشمند» دراپ‌دون کنار ارسال پیام چت — کاربر اگر انتخاب کند، به‌جای
+  // reasoningEffort بالا استفاده می‌شود (chat.service.ts streamChat)
+  fastReasoningEffort: string | null
+  smartReasoningEffort: string | null
   dailyMessageLimit: number | null
   throttledMessageCount: number | null
   throttledInputTokens: number | null
@@ -385,6 +389,8 @@ export class TokenService {
         planName: sub.plan.name,
         simpleModel: sub.plan.simpleModel ?? null,
         reasoningEffort: sub.plan.reasoningEffort ?? null,
+        fastReasoningEffort: sub.plan.fastReasoningEffort ?? null,
+        smartReasoningEffort: sub.plan.smartReasoningEffort ?? null,
         dailyMessageLimit: sub.plan.dailyMessageLimit ?? null,
         throttledMessageCount: sub.plan.throttledMessageCount ?? null,
         throttledInputTokens: sub.plan.throttledInputTokens ?? null,
@@ -422,6 +428,8 @@ export class TokenService {
         planName: freePlan?.name ?? 'Free',
         simpleModel: freePlan?.simpleModel ?? null,
         reasoningEffort: freePlan?.reasoningEffort ?? null,
+        fastReasoningEffort: freePlan?.fastReasoningEffort ?? null,
+        smartReasoningEffort: freePlan?.smartReasoningEffort ?? null,
         dailyMessageLimit: freePlan?.dailyMessageLimit ?? null,
         throttledMessageCount: freePlan?.throttledMessageCount ?? null,
         throttledInputTokens: freePlan?.throttledInputTokens ?? null,

@@ -364,6 +364,16 @@ export class ChatService {
     const modelId = routed.modelId
     this.modelRouter.log({ userId, conversationId, ...routed }).catch(() => {})
 
+    // دراپ‌دون «سریع/هوشمند» کنار ارسال پیام — فقط reasoning effort را override می‌کند، انتخاب
+    // مدل (routed.modelId) دست‌نخورده می‌ماند. بدون انتخاب کاربر، رفتار قبلی (reasoningEffort
+    // پیش‌فرض پلن/استپ بودجه‌ای که ModelRouterService برگردانده) ادامه دارد.
+    const reasoningEffort =
+      dto.thinkingMode === 'fast'
+        ? plan.fastReasoningEffort ?? 'none'
+        : dto.thinkingMode === 'smart'
+          ? plan.smartReasoningEffort ?? 'low'
+          : routed.reasoningEffort
+
     // ── تصاویر: اعتبارسنجی امنیتی + چک vision (preflight) ──────────────────
     // docs/PRD-chat-images.md بخش ۵.۱ — قبل از این، هیچ چک فرمت/حجم/magic-bytes ای
     // روی dto.images نبود؛ سقف‌ها هم از تنظیمات ادمین (ChatConfig) خوانده می‌شوند، نه ثابت در کد.
@@ -555,8 +565,9 @@ export class ChatService {
         // این مدت سکوت شد (گیرکردن واقعی اتصال) قطع شود (docs/PERFORMANCE-AND-CONCURRENCY.md بخش ۸)
         timeout: { chunkMs: 30_000 },
         // میزان reasoning effort قابل‌تنظیم در ادمین — پیش‌فرض پلن، با امکان override به‌ازای
-        // استپ بودجه‌ای (مسیریابی مدل). null یعنی از پیش‌فرض provider استفاده شود (کلید ست نمی‌شود)
-        ...(routed.reasoningEffort ? { reasoning: routed.reasoningEffort as ReasoningEffort } : {}),
+        // استپ بودجه‌ای (مسیریابی مدل) یا انتخاب کاربر (دراپ‌دون سریع/هوشمند، بالاتر). null یعنی
+        // از پیش‌فرض provider استفاده شود (کلید ست نمی‌شود)
+        ...(reasoningEffort ? { reasoning: reasoningEffort as ReasoningEffort } : {}),
         onError: ({ error }) => {
           capturedProviderError = error
         },

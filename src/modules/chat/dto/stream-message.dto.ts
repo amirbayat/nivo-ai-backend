@@ -1,4 +1,4 @@
-import { IsBoolean, IsOptional, IsString, IsArray, ArrayMaxSize, MaxLength } from 'class-validator'
+import { IsBoolean, IsIn, IsOptional, IsString, IsArray, ArrayMaxSize, MaxLength } from 'class-validator'
 import { fa } from '../../../i18n/fa'
 
 export class StreamMessageDto {
@@ -10,6 +10,12 @@ export class StreamMessageDto {
   @IsString({ message: fa.validation.required })
   @MaxLength(50, { message: fa.validation.stringTooLong })
   model?: string
+
+  // دراپ‌دون «سریع/هوشمند» کنار ارسال پیام — فقط روی reasoning effort اثر می‌گذارد، نه انتخاب
+  // مدل (که همچنان دست ModelRouterService است). خالی = رفتار قبلی (reasoningEffort پیش‌فرض پلن/استپ بودجه‌ای)
+  @IsOptional()
+  @IsIn(['fast', 'smart'], { message: fa.validation.required })
+  thinkingMode?: 'fast' | 'smart'
 
   @IsOptional()
   @IsArray()

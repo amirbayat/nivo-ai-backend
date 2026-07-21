@@ -80,6 +80,8 @@ export class PlansService {
         ...(dto.rollingWindowHours !== undefined && { rollingWindowHours: dto.rollingWindowHours }),
         ...(dto.contextMd !== undefined && { contextMd: dto.contextMd }),
         ...(dto.reasoningEffort !== undefined && { reasoningEffort: dto.reasoningEffort ?? null }),
+        ...(dto.fastReasoningEffort !== undefined && { fastReasoningEffort: dto.fastReasoningEffort ?? null }),
+        ...(dto.smartReasoningEffort !== undefined && { smartReasoningEffort: dto.smartReasoningEffort ?? null }),
         ...(dto.trialMessageThreshold !== undefined && { trialMessageThreshold: dto.trialMessageThreshold ?? null }),
         ...(dto.trialDailyMessageLimit !== undefined && { trialDailyMessageLimit: dto.trialDailyMessageLimit ?? null }),
         ...(dto.trialThrottledMessageCount !== undefined && {

@@ -96,6 +96,14 @@ export class CreatePlanDto {
   reasoningEffort?: string | null
 
   @IsOptional()
+  @IsIn(REASONING_EFFORT_VALUES, { message: fa.validation.required })
+  fastReasoningEffort?: string | null
+
+  @IsOptional()
+  @IsIn(REASONING_EFFORT_VALUES, { message: fa.validation.required })
+  smartReasoningEffort?: string | null
+
+  @IsOptional()
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(1, { message: fa.validation.numberPositive })
   trialMessageThreshold?: number | null
