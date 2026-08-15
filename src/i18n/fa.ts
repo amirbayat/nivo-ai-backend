@@ -180,4 +180,17 @@ export const fa = {
     contentMismatch: 'محتوای عکس با فرمت اعلام‌شده مطابقت ندارد',
     formatNotAllowed: (allowed: string) => `فرمت این عکس مجاز نیست — فقط ${allowed} پذیرفته می‌شود`,
   },
+  // docs/PRD-discovery-and-credits.md — دیسکاوری (سبک‌های آماده‌ی عکس/متن) + پروژه‌ها + اعتبار «نیوو»
+  discovery: {
+    promptNotFound: 'این سبک یافت نشد یا دیگر فعال نیست',
+    projectNotFound: 'پروژه یافت نشد',
+    insufficientCredits: 'اعتبار نیوو کافی نیست — لطفاً شارژ کنید',
+    generationFailed: 'تولید ناموفق بود — اعتبار شما کسر نشد، دوباره امتحان کنید',
+    userImageRequired: 'این سبک نیاز به آپلود عکس دارد',
+    requestReceived: 'درخواست شما ثبت شد — تیم ما بررسی می‌کند',
+    customAmountBelowMinimum: (min: number) => `حداقل مقدار مجاز برای این بسته ${min.toLocaleString('fa-IR')} نیوو است`,
+  },
+  credits: {
+    signupBonusDescription: 'شارژ اولیه‌ی رایگان خوش‌آمدگویی',
+  },
 } as const

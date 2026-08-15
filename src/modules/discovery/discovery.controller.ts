@@ -1,0 +1,63 @@
+import { Body, Controller, Get, Param, Post, Query, Res, UseGuards } from '@nestjs/common'
+import type { Response } from 'express'
+import { CreativeOutputType, CreativeSegment } from '@prisma/client'
+import { JwtGuard } from '../../common/guards/jwt.guard'
+import { CurrentUser, JwtPayload } from '../../common/decorators/current-user.decorator'
+import { DiscoveryGenerationService } from './discovery-generation.service'
+import { GenerateCreativeDto } from './dto/generate-creative.dto'
+import { CreatePromptRequestDto } from './dto/create-prompt-request.dto'
+import { UploadDiscoveryImageDto } from './dto/upload-input-image.dto'
+
+// v2 — دیسکاوری (کاتالوگ سبک‌های آماده + تولید + گالری + درخواست فیچر)، بخش ۵.۳/۵.۴/۵.۵/۵.۹/۵.۱۰
+@Controller('v2/discovery')
+@UseGuards(JwtGuard)
+export class DiscoveryController {
+  constructor(private readonly discoveryService: DiscoveryGenerationService) {}
+
+  @Get('catalog')
+  catalog(
+    @Query('outputType') outputType?: CreativeOutputType,
+    @Query('segment') segment?: CreativeSegment,
+    @Query('trending') trending?: string,
+    @Query('categoryId') categoryId?: string,
+    @Query('sort') sort?: 'newest' | 'cheapest' | 'priciest' | 'sortOrder',
+  ) {
+    return this.discoveryService.listCatalog({ outputType, segment, trending: trending === 'true', categoryId, sort })
+  }
+
+  @Get('categories')
+  categories() {
+    return this.discoveryService.listCategories()
+  }
+
+  @Get('gallery')
+  gallery(@CurrentUser() user: JwtPayload, @Query('projectId') projectId?: string) {
+    return this.discoveryService.gallery(user.sub, projectId)
+  }
+
+  // فرانت با axios (هدر Authorization واقعی) + responseType:'blob' صدا می‌زند —
+  // useAuthedImageUrl موجود در فرانت را عیناً برای این مسیر هم استفاده می‌کنیم
+  @Get('images/:key')
+  async getImage(@CurrentUser() user: JwtPayload, @Param('key') key: string, @Res() res: Response) {
+    const { buffer, mimeType } = await this.discoveryService.getImage(user.sub, key)
+    res.setHeader('Content-Type', mimeType)
+    res.send(buffer)
+  }
+
+  // قبل از generate برای سبک‌های requiresUserImage=true صدا زده می‌شود — کلید MinIO برگشتی
+  // داخل GenerateCreativeDto.inputImageKeys فرستاده می‌شود
+  @Post('upload-image')
+  uploadImage(@Body() dto: UploadDiscoveryImageDto) {
+    return this.discoveryService.uploadInputImage(dto.image)
+  }
+
+  @Post('generate')
+  generate(@CurrentUser() user: JwtPayload, @Body() dto: GenerateCreativeDto) {
+    return this.discoveryService.generate(user.sub, dto)
+  }
+
+  @Post('requests')
+  createRequest(@CurrentUser() user: JwtPayload, @Body() dto: CreatePromptRequestDto) {
+    return this.discoveryService.createPromptRequest(user.sub, dto)
+  }
+}

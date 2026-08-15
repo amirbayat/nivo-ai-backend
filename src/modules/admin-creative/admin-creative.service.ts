@@ -1,0 +1,148 @@
+import { Injectable, NotFoundException } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
+import { PrismaService } from '../../prisma/prisma.service'
+import { StorageService } from '../../storage/storage.service'
+import { ChatConfigService } from '../chat-config/chat-config.service'
+import { parseChatImageDataUrl, validateChatImages } from '../../common/validators/chat-image.validator'
+import { fa } from '../../i18n/fa'
+import { CreateCreativePromptDto } from './dto/create-creative-prompt.dto'
+import { UpdateCreativePromptDto } from './dto/update-creative-prompt.dto'
+import { UpdateCreditConfigDto } from './dto/update-credit-config.dto'
+import { CreateCreditPackageDto } from './dto/create-credit-package.dto'
+import { UpdateCreditPackageDto } from './dto/update-credit-package.dto'
+import { ReviewPromptRequestDto } from './dto/review-prompt-request.dto'
+import { CreateCreativeCategoryDto } from './dto/create-creative-category.dto'
+import { UpdateCreativeCategoryDto } from './dto/update-creative-category.dto'
+import { CreativeSegment } from '@prisma/client'
+
+// پنل ادمین برای بخش دیسکاوری/نیوو — بخش ۵.۷ سند فنی. عمداً ماژول جدا از AdminModule موجود
+// (نه اضافه‌شدن به admin.service.ts غول‌پیکر) تا ریسک تغییر روی کد پرکاربرد فعلی صفر باشد؛
+// همان guard (JwtGuard+AdminGuard) و همان قرارداد /admin/* را حفظ می‌کند.
+@Injectable()
+export class AdminCreativeService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly config: ConfigService,
+    private readonly storage: StorageService,
+    private readonly chatConfig: ChatConfigService,
+  ) {}
+
+  // ── سبک‌های آماده (CreativePrompt) ──────────────────────────────────────────
+  // آپلود «عکس نمونه» یک سبک از پنل ادمین — همون محدودیت‌های فرمت/حجم/magic-bytes چت
+  // (ChatConfig ادمین) رو رعایت می‌کند تا مسیر اعتبارسنجی دوباره نوشته نشود؛ URL برگشتی از
+  // مسیر عمومی DiscoveryPublicController سرو می‌شود (نه presigned URL مستقیم MinIO) تا
+  // endpoint MinIO داخلی هیچ‌وقت به فرانت لو نرود.
+  async uploadExampleImage(dataUrl: string): Promise<{ url: string }> {
+    const chatConfig = await this.chatConfig.getConfig()
+    validateChatImages([dataUrl], {
+      maxCount: 1,
+      maxSizeMb: chatConfig.maxImageSizeMb,
+      allowedFormats: chatConfig.allowedImageFormats as string[],
+    })
+    // validateChatImages بالا همین دیتا-یو‌آرال رو با parseChatImageDataUrl چک کرده، پس اینجا حتماً null نیست
+    const parsed = parseChatImageDataUrl(dataUrl)!
+    const key = await this.storage.uploadImage(parsed.buffer, parsed.ext)
+    const apiUrl = this.config.get<string>('API_URL', 'http://localhost:3000')
+    return { url: `${apiUrl}/api/v1/v2/discovery/example-images/${key}` }
+  }
+
+  getPrompts() {
+    return this.prisma.creativePrompt.findMany({ orderBy: [{ sortOrder: 'asc' }, { createdAt: 'desc' }] })
+  }
+
+  async getPrompt(id: string) {
+    const prompt = await this.prisma.creativePrompt.findUnique({ where: { id } })
+    if (!prompt) throw new NotFoundException(fa.discovery.promptNotFound)
+    return prompt
+  }
+
+  createPrompt(dto: CreateCreativePromptDto) {
+    // segment قدیمی دیگر از ادمین گرفته نمی‌شود — فقط برای سازگاری عقب‌رو با GENERAL پر می‌شود؛
+    // دسته‌بندی واقعی از این پس categoryId (درخت CreativeCategory) است
+    return this.prisma.creativePrompt.create({ data: { ...dto, segment: dto.segment ?? CreativeSegment.GENERAL } })
+  }
+
+  async updatePrompt(id: string, dto: UpdateCreativePromptDto) {
+    await this.getPrompt(id)
+    return this.prisma.creativePrompt.update({ where: { id }, data: dto })
+  }
+
+  async deletePrompt(id: string) {
+    await this.getPrompt(id)
+    await this.prisma.creativePrompt.delete({ where: { id } })
+    return { message: 'سبک حذف شد' }
+  }
+
+  // ── تنظیمات نیوو (CreditConfig singleton) ───────────────────────────────────
+  getCreditConfig() {
+    return this.prisma.creditConfig.upsert({ where: { id: 'singleton' }, create: { id: 'singleton' }, update: {} })
+  }
+
+  updateCreditConfig(dto: UpdateCreditConfigDto) {
+    return this.prisma.creditConfig.upsert({
+      where: { id: 'singleton' },
+      create: { id: 'singleton', ...dto },
+      update: dto,
+    })
+  }
+
+  // ── بسته‌های خرید (CreditPackage) ────────────────────────────────────────────
+  getCreditPackages() {
+    return this.prisma.creditPackage.findMany({ orderBy: { sortOrder: 'asc' } })
+  }
+
+  createCreditPackage(dto: CreateCreditPackageDto) {
+    return this.prisma.creditPackage.create({ data: dto })
+  }
+
+  async updateCreditPackage(id: string, dto: UpdateCreditPackageDto) {
+    const pkg = await this.prisma.creditPackage.findUnique({ where: { id } })
+    if (!pkg) throw new NotFoundException(fa.errors.notFound)
+    return this.prisma.creditPackage.update({ where: { id }, data: dto })
+  }
+
+  async deleteCreditPackage(id: string) {
+    const pkg = await this.prisma.creditPackage.findUnique({ where: { id } })
+    if (!pkg) throw new NotFoundException(fa.errors.notFound)
+    await this.prisma.creditPackage.delete({ where: { id } })
+    return { message: 'بسته حذف شد' }
+  }
+
+  // ── درخت دسته‌بندی دیسکاوری (CreativeCategory) ──────────────────────────────
+  getCategories() {
+    return this.prisma.creativeCategory.findMany({ orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] })
+  }
+
+  createCategory(dto: CreateCreativeCategoryDto) {
+    return this.prisma.creativeCategory.create({ data: dto })
+  }
+
+  async updateCategory(id: string, dto: UpdateCreativeCategoryDto) {
+    const category = await this.prisma.creativeCategory.findUnique({ where: { id } })
+    if (!category) throw new NotFoundException(fa.errors.notFound)
+    return this.prisma.creativeCategory.update({ where: { id }, data: dto })
+  }
+
+  async deleteCategory(id: string) {
+    const category = await this.prisma.creativeCategory.findUnique({ where: { id } })
+    if (!category) throw new NotFoundException(fa.errors.notFound)
+    // پرامپت‌های زیر این دسته و زیردسته‌ها onDelete:SetNull هستند — حذف امن است، فقط categoryId خالی می‌شود
+    await this.prisma.creativeCategory.delete({ where: { id } })
+    return { message: 'دسته حذف شد' }
+  }
+
+  // ── صف بررسی درخواست‌های سبک/فیچر جدید (CreativePromptRequest) ──────────────
+  getPromptRequests(reviewed?: string) {
+    return this.prisma.creativePromptRequest.findMany({
+      where: reviewed !== undefined ? { isReviewed: reviewed === 'true' } : {},
+      orderBy: { createdAt: 'desc' },
+      include: { user: { select: { phone: true, name: true } }, prompt: { select: { title: true } } },
+    })
+  }
+
+  async reviewPromptRequest(id: string, dto: ReviewPromptRequestDto) {
+    const req = await this.prisma.creativePromptRequest.findUnique({ where: { id } })
+    if (!req) throw new NotFoundException(fa.errors.notFound)
+    return this.prisma.creativePromptRequest.update({ where: { id }, data: dto })
+  }
+}

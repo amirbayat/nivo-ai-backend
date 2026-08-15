@@ -64,8 +64,13 @@ export interface RouteInput {
   usagePct: number // ۰ تا ۱۰۰+ — درصد مصرف بودجه‌ی روزانه
   simpleModel?: string | null // مدل ثابت پلن برای پیام‌های SIMPLE
   reasoningEffort?: string | null // پیش‌فرض reasoning effort پلن — استپ فعلی می‌تواند override کند
-  // docs/PRD-pay-as-you-go-wallet.md — بدون طبقه‌بندی/fallback پله‌ای؛ همیشه انتخاب دستی کاربر
+  // docs/PRD-pay-as-you-go-wallet.md — بدون طبقه‌بندی/fallback پله‌ای SIMPLE/MEDIUM/COMPLEX قدیمی؛
+  // انتخاب مدل این پلن یا دستی است، یا یکی از دو حالت خودکار زیر (selectionMode)
   isPayAsYouGo?: boolean
+  // docs/PRD-model-selection-modes.md — فقط وقتی isPayAsYouGo=true و manualModel خالی باشد اثر دارد:
+  // 'cost_optimized' → ارزان‌ترین مدل مجاز (بر اساس مجموع inputPricePerM+outputPricePerM)
+  // 'best_answer'    → قوی‌ترین مدل مجاز صرف‌نظر از قیمت (بالاترین tier، سپس گران‌ترین به‌عنوان تای‌بریک)
+  selectionMode?: 'cost_optimized' | 'best_answer'
 }
 
 export interface RouteResult {
@@ -104,18 +109,11 @@ export class ModelRouterService {
   }
 
   async route(input: RouteInput): Promise<RouteResult> {
-    // docs/PRD-pay-as-you-go-wallet.md بخش ۵.۳ — کلاً از مسیر classify/candidates/steps رد می‌شود:
-    // بدون طبقه‌بندی SIMPLE/MEDIUM/COMPLEX، بدون fallback پله‌ای بودجه‌ای — همیشه دقیقاً همان
-    // مدلی که کاربر انتخاب کرده (فرانت برای این پلن اصلاً حالت «بهینه» را نشان نمی‌دهد)
+    // docs/PRD-model-selection-modes.md — کلاً از مسیر classify/steps پله‌ای بودجه‌ای رد می‌شود:
+    // یا انتخاب دستی کاربر عیناً استفاده می‌شود، یا یکی از دو حالت خودکار (مصرف بهینه/بهترین پاسخ)
+    // بین مدل‌های مجاز پلن انتخاب می‌کند و دقیقاً همان مدل واقعاً استفاده‌شده از کیف‌پول کم می‌شود
     if (input.isPayAsYouGo) {
-      return {
-        modelId: input.manualModel ?? input.allowedModels[0],
-        tier: ModelTier.MEDIUM,
-        method: 'pay_as_you_go_manual',
-        confidence: 1,
-        overriddenManualModel: null,
-        reasoningEffort: input.reasoningEffort ?? null,
-      }
+      return this.routePayAsYouGo(input)
     }
 
     const config = await this.getConfig()
@@ -161,6 +159,72 @@ export class ModelRouterService {
     }
 
     return this.routeMediumComplex(input, candidates, tier, method, confidence)
+  }
+
+  private async routePayAsYouGo(input: RouteInput): Promise<RouteResult> {
+    // انتخاب دستی کاربر — عیناً همان مدل، بدون هیچ override‌ای (docs/PRD-model-selection-modes.md بخش ۳.۱)
+    if (input.manualModel) {
+      return {
+        modelId: input.manualModel,
+        tier: ModelTier.MEDIUM,
+        method: 'payg_manual',
+        confidence: 1,
+        overriddenManualModel: null,
+        reasoningEffort: input.reasoningEffort ?? null,
+      }
+    }
+
+    const candidates = await this.prisma.aiModel.findMany({
+      where: {
+        name: { in: input.allowedModels },
+        isActive: true,
+        modelType: 'CHAT',
+        ...(input.hasImages ? { supportsVision: true } : {}),
+      },
+    })
+
+    // هیچ مدل مجازی شرایط رو نداره (مثلاً هیچ‌کدام vision ندارند) — فال‌بک امن
+    if (!candidates.length) {
+      return {
+        modelId: input.allowedModels[0],
+        tier: ModelTier.MEDIUM,
+        method: 'payg_fallback_empty',
+        confidence: 1,
+        overriddenManualModel: null,
+        reasoningEffort: input.reasoningEffort ?? null,
+      }
+    }
+
+    if (input.selectionMode === 'cost_optimized') {
+      // ارزان‌ترین مدلِ توانا — مجموع قیمت ورودی+خروجی به ازای هر میلیون توکن، صعودی
+      const cheapest = [...candidates].sort(
+        (a, b) => (a.inputPricePerM + a.outputPricePerM) - (b.inputPricePerM + b.outputPricePerM),
+      )[0]
+      return {
+        modelId: cheapest.name,
+        tier: cheapest.tier,
+        method: 'payg_cost_optimized',
+        confidence: 1,
+        overriddenManualModel: null,
+        reasoningEffort: input.reasoningEffort ?? null,
+      }
+    }
+
+    // پیش‌فرض این پلن، و صریحاً برای selectionMode==='best_answer': قوی‌ترین مدل مجاز صرف‌نظر از
+    // قیمت — بالاترین tier، و در صورت تساوی tier، گران‌ترین (proxy برای باکیفیت‌تر در همان سطح)
+    const best = [...candidates].sort((a, b) => {
+      const tierDiff = TIER_RANK[b.tier] - TIER_RANK[a.tier]
+      if (tierDiff !== 0) return tierDiff
+      return (b.inputPricePerM + b.outputPricePerM) - (a.inputPricePerM + a.outputPricePerM)
+    })[0]
+    return {
+      modelId: best.name,
+      tier: best.tier,
+      method: 'payg_best_answer',
+      confidence: 1,
+      overriddenManualModel: null,
+      reasoningEffort: input.reasoningEffort ?? null,
+    }
   }
 
   private routeSimple(

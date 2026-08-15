@@ -13,5 +13,7 @@ import { AdminNotificationsModule } from '../admin-notifications/admin-notificat
   imports: [UsageModule, GrowthModule, AdminNotificationsModule],
   controllers: [PaymentsController],
   providers: [PaymentsService, PaymentGatewayRegistry, ZarinpalGateway, VandarGateway, ZibalGateway],
+  // exports شد چون CreditsModule جدید (نیوو) برای استفاده‌ی مجدد از initiateWalletTopup به این سرویس نیاز دارد
+  exports: [PaymentsService],
 })
 export class PaymentsModule {}

@@ -1,0 +1,148 @@
+// ─── اعتبار «نیوو» — واحد نمایشی روی همان Wallet موجود، نه ارز جدا ─────────────
+
+// singleton (مثل ChatConfig/GrowthConfig) — نرخ تبدیل و ضریب فروش، هر دو از ادمین قابل‌تغییر
+model CreditConfig {
+  id                String   @id @default("singleton")
+  tomanPerCredit    Int      @default(1200) // ارزش پایه‌ی هر ۱ نیوو، قبل از ضریب فروش
+  purchaseMarkup    Float    @default(1.3)  // ضریب فروش بسته — همان مفهوم Plan.payAsYouGoMarkup
+  freeSignupCredits Int      @default(20)   // شارژ اولیه‌ی رایگان که هر کاربر تازه‌وارد لحظه‌ی ثبت‌نام می‌گیرد — جایگزین سیستم قدیمی dailyFreeTokens/monthlyTotalTokens
+  updatedAt         DateTime @updatedAt
+
+  @@map("credit_config")
+}
+
+// بسته‌های خرید — قیمت نهایی در لحظه‌ی نمایش/خرید محاسبه می‌شود:
+// credits × tomanPerCredit × purchaseMarkup × (1 - discountPercent/100)
+model CreditPackage {
+  id              String   @id @default(uuid())
+  credits         Int
+  discountPercent Int      @default(0) // تخفیف پلکانی روی بسته‌های بزرگ‌تر (بعد از اعمال purchaseMarkup)
+  isPopular       Boolean  @default(false)
+  isBestValue     Boolean  @default(false)
+  isActive        Boolean  @default(true)
+  sortOrder       Int      @default(0)
+  createdAt       DateTime @default(now())
+
+  @@map("credit_packages")
+}
+
+enum CreativeOutputType {
+  IMAGE
+  TEXT
+}
+
+enum CreativeSegment {
+  GENERAL
+  INSTAGRAM
+  YOUTUBE
+  BUSINESS
+}
+
+// یک «سبک» آماده در دیسکاوری — هم عکس هم متن. contextMd دقیقاً هم‌الگوی
+// Plan.contextMd/ChatConfig.globalContextMd موجود است: از پنل ادمین قابل‌تغییر،
+// به system prompt همان فراخوانی اضافه می‌شود.
+model CreativePrompt {
+  id                 String             @id @default(uuid())
+  title              String
+  outputType         CreativeOutputType
+  segment            CreativeSegment
+  description        String?
+  contextMd          String             @db.Text // «context» ادمین برای این سبک خاص
+  userPromptTemplate String             @db.Text // جای‌خالی که با ورودی کاربر پر می‌شود
+  exampleImageUrl    String?
+  aspectRatio        String? // فقط IMAGE — مثل AiModel.imageGenSize
+  requiresUserImage  Boolean            @default(false) // IMAGE: نیاز به آپلود عکس کاربر دارد یا نه
+  creditCost         Int // هزینه‌ی ثابت به نیوو — همانی که قبل از تولید به کاربر نشان داده می‌شود
+  preferredModel     String? // نام AiModel پیشنهادی؛ اگر خالی، همان زنجیره‌ی fallback فعلی پلن استفاده می‌شود
+  isTrending         Boolean            @default(false)
+  isActive           Boolean            @default(true)
+  sortOrder          Int                @default(0)
+  tags               Json               @default("[]") // string[]
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  generations CreativeGeneration[]
+  requests    CreativePromptRequest[]
+
+  @@index([outputType, segment, isActive])
+  @@map("creative_prompts")
+}
+
+enum CreativeGenerationStatus {
+  SUCCEEDED
+  FAILED
+}
+
+// یک تولید مشخص — creditCost این‌جا snapshot لحظه‌ی تولید است (اگر بعداً قیمت prompt
+// عوض شد، تاریخچه دست‌نخورده می‌ماند). costToman هزینه‌ی واقعی AI برای مانیتورینگ
+// حاشیه‌ی سود ادمین است — نه چیزی که از کیف‌پول کاربر کم می‌شود.
+model CreativeGeneration {
+  id             String                   @id @default(uuid())
+  userId         String
+  promptId       String
+  projectId      String? // اختیاری — اگر کاربر موقع تولید یک پروژه انتخاب کرده باشد
+  outputType     CreativeOutputType
+  inputImageKeys Json? // string[] کلید MinIO عکس(های) ورودی کاربر
+  outputImageKey String?
+  outputText     String?                  @db.Text
+  creditCost     Int
+  costToman      Int // هزینه‌ی واقعی AI — از calcImageGenCost/calcCost موجود
+  model          String? // نام AiModel واقعاً استفاده‌شده
+  status         CreativeGenerationStatus @default(SUCCEEDED)
+  failureReason  String?
+  createdAt      DateTime                 @default(now())
+
+  user    User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  prompt  CreativePrompt @relation(fields: [promptId], references: [id])
+  project Project?       @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([projectId, createdAt]) // برای فیلتر گالری بر اساس پروژه
+  @@map("creative_generations")
+}
+
+// پروژه‌ی کاربر (پیج اینستاگرام/کانال یوتیوب) — contextMd دقیقاً هم‌الگوی
+// CreativePrompt.contextMd/Plan.contextMd، فقط این یکی مال خودِ کاربر است، نه ادمین.
+// موقع تولید، ترتیب system prompt: ChatConfig.globalContextMd → Project.contextMd
+// (اگر انتخاب شده) → CreativePrompt.contextMd → userPromptTemplate پرشده.
+model Project {
+  id           String   @id @default(uuid())
+  userId       String
+  name         String
+  platform     CreativeSegment // فقط INSTAGRAM/YOUTUBE/GENERAL معنا دارد اینجا؛ اعتبارسنجی در DTO
+  niche        String?
+  contextMd    String   @db.Text // لحن برند/سبک ثابت — «context پروژه»
+  brandColor   String? // هگز یا نام گرادینت، فقط برای نمایش UI
+  logoImageKey String? // کلید MinIO — اختیاری، فاز بعد کامل می‌شود
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user        User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  generations CreativeGeneration[]
+
+  @@index([userId])
+  @@map("projects")
+}
+
+// درخواست «سبک/فیچر جدید» — عمداً مدل جدا از Feedback چون به ساختار
+// (پلتفرم، لینک نمونه، ارتباط به یک کارت خاص) نیاز داریم که Feedback ندارد.
+model CreativePromptRequest {
+  id           String   @id @default(uuid())
+  userId       String
+  promptId     String? // اگر مرتبط با یک کارت خاص بوده («دقیقاً این نیست که می‌خوام»)
+  title        String
+  description  String   @db.Text
+  platform     CreativeSegment?
+  referenceUrl String?
+  isReviewed   Boolean  @default(false)
+  adminNote    String?
+  createdAt    DateTime @default(now())
+
+  user   User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  prompt CreativePrompt? @relation(fields: [promptId], references: [id], onDelete: SetNull)
+
+  @@index([isReviewed, createdAt])
+  @@map("creative_prompt_requests")
+}
+

@@ -227,11 +227,57 @@ export class AuthService {
       waitlisted = await this.campaign.applyToNewUser(user.id, user.phone)
     }
 
+    // شارژ اولیه‌ی رایگان نیوو — فقط دقیقاً یک‌بار، لحظه‌ی اولین ثبت‌نام واقعی
+    // (docs/PRD-discovery-and-credits.md بخش ۲.۲). مقدار برگشتی (signupBonusCredits) فقط همین
+    // یک‌بار در پاسخ verify-otp پر می‌شود — فرانت همین‌جا مدال خوش‌آمد را نشان می‌دهد،
+    // بدون نیاز به فیلد/endpoint جدید برای «آیا قبلاً دیده شده».
+    let signupBonusCredits: number | null = null
+    if (isNewUser) {
+      signupBonusCredits = await this.grantSignupCredits(user.id)
+    }
+
     const tokens = await this.issueTokens(user.id, user.phone, user.role)
     return {
       ...tokens,
       user: { id: user.id, phone: user.phone, role: user.role, name: user.name },
       waitlisted,
+      signupBonusCredits,
+    }
+  }
+
+  // کیف‌پول را با معادل تومانی CreditConfig.freeSignupCredits شارژ می‌کند — دقیقاً هم‌الگوی
+  // PaymentsService.completeWalletTopup (wallet.upsert + WalletTransaction نوع CREDIT).
+  // شکست این عملیات هرگز نباید ثبت‌نام/لاگین را fail کند.
+  private async grantSignupCredits(userId: string): Promise<number | null> {
+    try {
+      const config = await this.prisma.creditConfig.upsert({
+        where: { id: 'singleton' },
+        create: { id: 'singleton' },
+        update: {},
+      })
+      if (config.freeSignupCredits <= 0) return null
+
+      const amountToman = config.freeSignupCredits * config.tomanPerCredit
+      await this.prisma.$transaction(async (tx) => {
+        const wallet = await tx.wallet.upsert({
+          where: { userId },
+          create: { userId, balanceToman: amountToman },
+          update: { balanceToman: { increment: amountToman } },
+        })
+        await tx.walletTransaction.create({
+          data: {
+            walletId: wallet.id,
+            type: 'CREDIT',
+            amountToman,
+            description: fa.credits.signupBonusDescription,
+            metadata: { reason: 'signup_bonus', credits: config.freeSignupCredits },
+          },
+        })
+      })
+      return config.freeSignupCredits
+    } catch (err) {
+      this.logger.error(`grantSignupCredits failed for user=${userId}`, err as Error)
+      return null
     }
   }
 

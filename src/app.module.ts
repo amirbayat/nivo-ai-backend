@@ -36,6 +36,10 @@ import { DeviceTokensModule } from './modules/device-tokens/device-tokens.module
 import { PushNotificationsModule } from './modules/push-notifications/push-notifications.module'
 import { QueueModule } from './queue/queue.module'
 import { AnonChatModule } from './modules/anon-chat/anon-chat.module'
+import { CreditsModule } from './modules/credits/credits.module'
+import { ProjectsModule } from './modules/projects/projects.module'
+import { DiscoveryModule } from './modules/discovery/discovery.module'
+import { AdminCreativeModule } from './modules/admin-creative/admin-creative.module'
 
 @Module({
   imports: [
@@ -73,6 +77,10 @@ import { AnonChatModule } from './modules/anon-chat/anon-chat.module'
     DeviceTokensModule,
     PushNotificationsModule,
     AnonChatModule,
+    CreditsModule,
+    ProjectsModule,
+    DiscoveryModule,
+    AdminCreativeModule,
   ],
   providers: [{ provide: APP_FILTER, useClass: AllExceptionsFilter }],
 })

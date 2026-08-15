@@ -17,5 +17,14 @@ echo ">>> Seeding usage-analytics topics/segments..."
 npx ts-node --transpile-only prisma/seeds/topics.seed.ts
 npx ts-node --transpile-only prisma/seeds/segments.seed.ts
 
+echo ">>> Seeding credit packages (نیوو)..."
+npx ts-node --transpile-only prisma/seeds/credit-packages.seed.ts
+
+echo ">>> Seeding discovery category tree..."
+npx ts-node --transpile-only prisma/seeds/creative-categories.seed.ts
+
+echo ">>> Seeding sample discovery prompts..."
+npx ts-node --transpile-only prisma/seeds/creative-prompts.seed.ts
+
 echo ">>> Starting NestJS..."
 exec npm run start:dev

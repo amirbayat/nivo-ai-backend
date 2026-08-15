@@ -24,7 +24,7 @@ export class StreamMessageDto {
   images?: string[]
 
   // docs/PRD-chat-images.md بخش ۵.۵ — حالت صریح تولید عکس؛ content همان prompt تولید است.
-  // وقتی true است، model باید یک مدل supportsImageGen مشخص باشد (نه 'optimal')
+  // وقتی true است، model باید یک مدل supportsImageGen مشخص باشد (نه یکی از سنتینل‌های خودکار 'optimal'/'cost_optimized'/'best_answer')
   @IsOptional()
   @IsBoolean({ message: fa.validation.mustBeBoolean })
   generateImage?: boolean
