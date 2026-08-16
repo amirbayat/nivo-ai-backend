@@ -1,6 +1,5 @@
 import { Body, Controller, Get, Param, Post, Query, Res, UseGuards } from '@nestjs/common'
 import type { Response } from 'express'
-import { CreativeOutputType, CreativeSegment } from '@prisma/client'
 import { JwtGuard } from '../../common/guards/jwt.guard'
 import { CurrentUser, JwtPayload } from '../../common/decorators/current-user.decorator'
 import { DiscoveryGenerationService } from './discovery-generation.service'
@@ -14,22 +13,8 @@ import { UploadDiscoveryImageDto } from './dto/upload-input-image.dto'
 export class DiscoveryController {
   constructor(private readonly discoveryService: DiscoveryGenerationService) {}
 
-  @Get('catalog')
-  catalog(
-    @Query('outputType') outputType?: CreativeOutputType,
-    @Query('segment') segment?: CreativeSegment,
-    @Query('trending') trending?: string,
-    @Query('categoryId') categoryId?: string,
-    @Query('sort') sort?: 'newest' | 'cheapest' | 'priciest' | 'sortOrder',
-  ) {
-    return this.discoveryService.listCatalog({ outputType, segment, trending: trending === 'true', categoryId, sort })
-  }
-
-  @Get('categories')
-  categories() {
-    return this.discoveryService.listCategories()
-  }
-
+  // catalog/categories به DiscoveryPublicController منتقل شدند — کاربر مهمان هم باید بتواند
+  // استودیو محتوا را قبل از ثبت‌نام اکسپلور کند
   @Get('gallery')
   gallery(@CurrentUser() user: JwtPayload, @Query('projectId') projectId?: string) {
     return this.discoveryService.gallery(user.sub, projectId)

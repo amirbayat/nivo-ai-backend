@@ -22,6 +22,7 @@ import { AnonAnalyticsAdminController } from './admin/anon-analytics-admin.contr
     AnonAnalyticsService,
   ],
   // AnonMigrationService توسط AuthModule صدا زده می‌شود (migration-on-login)
-  exports: [AnonMigrationService],
+  // AnonIdentityService توسط DiscoveryModule صدا زده می‌شود (امتحان رایگان استودیو محتوا برای مهمان)
+  exports: [AnonMigrationService, AnonIdentityService],
 })
 export class AnonChatModule {}

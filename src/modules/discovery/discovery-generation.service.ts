@@ -11,6 +11,7 @@ import { StorageService } from '../../storage/storage.service'
 import { ImageGenerationService } from '../../common/services/image-generation.service'
 import { CreditsService } from '../credits/credits.service'
 import { GenerateCreativeDto } from './dto/generate-creative.dto'
+import { GenerateAnonCreativeDto } from './dto/generate-anon-creative.dto'
 import { fa } from '../../i18n/fa'
 import { mimeTypeForExt, parseChatImageDataUrl, validateChatImages } from '../../common/validators/chat-image.validator'
 
@@ -172,6 +173,63 @@ export class DiscoveryGenerationService {
           failureReason: (err as Error).message?.slice(0, 500) ?? 'unknown',
         },
       })
+      throw new BadRequestException(fa.discovery.generationFailed)
+    }
+  }
+
+  // امتحان رایگان یک‌باره‌ی مهمان — همون خط لوله‌ی generate() ولی بدون کاربر واقعی: بدون
+  // preflight/کسر موجودی، بدون Project، از کلید مشترک Liara (نه resolveApiKey(userId))، و
+  // کاملاً ephemeral (نه CreativeGeneration، نه آپلود عکس خروجی در MinIO) — نتیجه فقط در پاسخ
+  // API برمی‌گردد. gate یک‌بارمصرف (claim/revert) در DiscoveryAnonService است، نه اینجا.
+  async generateAnonPreview(
+    dto: GenerateAnonCreativeDto,
+  ): Promise<{ outputType: CreativeOutputType; outputText?: string; outputImageDataUrl?: string }> {
+    const prompt = await this.prisma.creativePrompt.findUnique({ where: { id: dto.promptId } })
+    if (!prompt || !prompt.isActive) throw new NotFoundException(fa.discovery.promptNotFound)
+    if (prompt.requiresUserImage && !(dto.inputImageKeys?.length)) {
+      throw new BadRequestException(fa.discovery.userImageRequired)
+    }
+
+    const systemPrompt = await this.buildSystemPrompt(prompt.contextMd)
+    const finalUserPrompt = this.fillTemplate(prompt.userPromptTemplate, dto.userInput ?? '')
+    const apiKey = this.config.get<string>('LIARA_API_KEY')!
+
+    try {
+      if (prompt.outputType === CreativeOutputType.IMAGE) {
+        const model = await this.resolveModel(prompt.preferredModel, CreativeOutputType.IMAGE)
+        if (!model) throw new BadRequestException(fa.discovery.generationFailed)
+
+        const fullPrompt = `${systemPrompt}\n\n${finalUserPrompt}`.trim()
+        const inputImageBuffers = dto.inputImageKeys?.length
+          ? await Promise.all(dto.inputImageKeys.map(key => this.storage.downloadImage(key)))
+          : []
+
+        const result = inputImageBuffers.length
+          ? await this.imageGen.editImage({
+              modelId: model.name, prompt: fullPrompt, images: inputImageBuffers, apiKey,
+              size: model.imageGenSize ?? prompt.aspectRatio ?? undefined, quality: model.imageGenQuality ?? undefined,
+            })
+          : await this.imageGen.generateImage({
+              modelId: model.name, prompt: fullPrompt, apiKey,
+              size: model.imageGenSize ?? prompt.aspectRatio ?? undefined, quality: model.imageGenQuality ?? undefined,
+            })
+
+        return { outputType: CreativeOutputType.IMAGE, outputImageDataUrl: `data:image/png;base64,${result.base64}` }
+      }
+
+      const model = await this.resolveModel(prompt.preferredModel, CreativeOutputType.TEXT)
+      const modelName = model?.name ?? this.config.get<string>('SUMMARY_MODEL') ?? 'openai/gpt-4o-mini'
+      const provider = createOpenAICompatible({ name: 'liara', baseURL: this.config.get<string>('LIARA_AI_BASE_URL')!, apiKey })
+
+      const { text } = await generateText({
+        model: provider(modelName),
+        system: systemPrompt || undefined,
+        prompt: finalUserPrompt,
+      })
+
+      return { outputType: CreativeOutputType.TEXT, outputText: text }
+    } catch (err) {
+      this.logger.error(`anon discovery preview failed for prompt=${prompt.id}`, err as Error)
       throw new BadRequestException(fa.discovery.generationFailed)
     }
   }

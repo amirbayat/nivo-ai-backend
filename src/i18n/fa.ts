@@ -189,6 +189,7 @@ export const fa = {
     userImageRequired: 'این سبک نیاز به آپلود عکس دارد',
     requestReceived: 'درخواست شما ثبت شد — تیم ما بررسی می‌کند',
     customAmountBelowMinimum: (min: number) => `حداقل مقدار مجاز برای این بسته ${min.toLocaleString('fa-IR')} نیوو است`,
+    anonTrialAlreadyUsed: 'شما قبلاً از تولید رایگان مهمان استفاده کرده‌اید — برای ادامه ثبت‌نام کنید',
   },
   credits: {
     signupBonusDescription: 'شارژ اولیه‌ی رایگان خوش‌آمدگویی',

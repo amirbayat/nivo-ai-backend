@@ -1311,11 +1311,13 @@ model AnonymousChatConfig {
 // کلید durable enforcement بر پایه‌ی IP — چون client می‌تواند localStorage را پاک کند
 // ولی IP همچنان همان می‌ماند (حداقل برای همان روز/جلسه)
 model AnonymousIdentity {
-  id                   String   @id @default(uuid())
-  ip                   String   @unique
-  lifetimeMessageCount Int      @default(0)
-  firstSeenAt          DateTime @default(now())
-  lastSeenAt           DateTime @default(now())
+  id                   String    @id @default(uuid())
+  ip                   String    @unique
+  lifetimeMessageCount Int       @default(0)
+  // یک‌بار برای همیشه ست می‌شود (نه شمارنده) — امتحان رایگان یک‌باره‌ی استودیو محتوا برای مهمان
+  discoveryTrialUsedAt DateTime?
+  firstSeenAt          DateTime  @default(now())
+  lastSeenAt           DateTime  @default(now())
 
   sessions AnonymousSession[]
 
