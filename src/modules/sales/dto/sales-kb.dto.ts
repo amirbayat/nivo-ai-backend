@@ -1,4 +1,4 @@
-import { Type } from 'class-transformer'
+import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
@@ -8,70 +8,75 @@ import {
   IsString,
   MinLength,
   ValidateNested,
-} from 'class-validator'
+} from 'class-validator';
 
-export const SALES_KB_KINDS = ['EXAMPLE', 'OBJECTION', 'FAQ', 'PERSONA_GUIDANCE'] as const
+export const SALES_KB_KINDS = [
+  'EXAMPLE',
+  'OBJECTION',
+  'FAQ',
+  'PERSONA_GUIDANCE',
+] as const;
 
 export class CreateSalesKbEntryDto {
   @IsIn(SALES_KB_KINDS)
-  kind!: (typeof SALES_KB_KINDS)[number]
+  kind!: (typeof SALES_KB_KINDS)[number];
 
   @IsString()
   @MinLength(1)
-  label!: string
+  label!: string;
 
   @IsOptional()
   @IsArray()
-  tags?: string[]
+  tags?: string[];
 
   @IsString()
   @MinLength(1)
-  userMessage!: string
+  userMessage!: string;
 
   @IsString()
   @MinLength(1)
-  assistantReply!: string
+  assistantReply!: string;
 
   @IsOptional()
   @IsString()
-  note?: string
+  note?: string;
 
   @IsOptional()
   @IsBoolean()
-  isActive?: boolean
+  isActive?: boolean;
 }
 
 export class UpdateSalesKbEntryDto {
   @IsOptional()
   @IsIn(SALES_KB_KINDS)
-  kind?: (typeof SALES_KB_KINDS)[number]
+  kind?: (typeof SALES_KB_KINDS)[number];
 
   @IsOptional()
   @IsString()
   @MinLength(1)
-  label?: string
+  label?: string;
 
   @IsOptional()
   @IsArray()
-  tags?: string[]
+  tags?: string[];
 
   @IsOptional()
   @IsString()
   @MinLength(1)
-  userMessage?: string
+  userMessage?: string;
 
   @IsOptional()
   @IsString()
   @MinLength(1)
-  assistantReply?: string
+  assistantReply?: string;
 
   @IsOptional()
   @IsString()
-  note?: string
+  note?: string;
 
   @IsOptional()
   @IsBoolean()
-  isActive?: boolean
+  isActive?: boolean;
 }
 
 export class BulkImportSalesKbDto {
@@ -79,11 +84,11 @@ export class BulkImportSalesKbDto {
   @ArrayMaxSize(1000)
   @ValidateNested({ each: true })
   @Type(() => CreateSalesKbEntryDto)
-  entries!: CreateSalesKbEntryDto[]
+  entries!: CreateSalesKbEntryDto[];
 }
 
 export class TestRetrievalDto {
   @IsString()
   @MinLength(1)
-  sampleMessage!: string
+  sampleMessage!: string;
 }

@@ -1,8 +1,8 @@
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common'
-import { join } from 'node:path'
-import Piscina from 'piscina'
-import { AiModelRegistryService } from './ai-model-registry.service'
-import type { TokenEstimateTask } from './token-estimator.worker'
+import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { join } from 'node:path';
+import Piscina from 'piscina';
+import { AiModelRegistryService } from './ai-model-registry.service';
+import type { TokenEstimateTask } from './token-estimator.worker';
 
 /**
  * Replaces the old `Math.ceil(text.length / 3)` guess (docs/PRD-global-budget-gateway.md بخش ۹).
@@ -25,7 +25,7 @@ import type { TokenEstimateTask } from './token-estimator.worker'
  */
 @Injectable()
 export class TokenEstimatorService implements OnModuleDestroy {
-  private readonly logger = new Logger(TokenEstimatorService.name)
+  private readonly logger = new Logger(TokenEstimatorService.name);
 
   // maxThreads کوچک عمداً — این CPU-bound است، نه I/O-bound؛ تعداد thread بیشتر از
   // core های واقعی موجود روی container فقط context-switch اضافه می‌کنه، سرعت نمی‌ده
@@ -33,20 +33,24 @@ export class TokenEstimatorService implements OnModuleDestroy {
     filename: join(__dirname, 'token-estimator.worker.js'),
     minThreads: 1,
     maxThreads: 2,
-  })
+  });
 
   constructor(private readonly modelRegistry: AiModelRegistryService) {}
 
   async estimateTokens(text: string, modelId: string): Promise<number> {
-    if (!text) return 0
+    if (!text) return 0;
 
     const { tokenizerFamily, avgCharsPerToken } =
-      await this.modelRegistry.getModelInfo(modelId)
+      await this.modelRegistry.getModelInfo(modelId);
 
-    return this.pool.run({ text, tokenizerFamily, avgCharsPerToken })
+    return this.pool.run({ text, tokenizerFamily, avgCharsPerToken });
   }
 
   async onModuleDestroy() {
-    await this.pool.destroy().catch((err) => this.logger.error('token estimator pool destroy failed', err))
+    await this.pool
+      .destroy()
+      .catch((err) =>
+        this.logger.error('token estimator pool destroy failed', err),
+      );
   }
 }

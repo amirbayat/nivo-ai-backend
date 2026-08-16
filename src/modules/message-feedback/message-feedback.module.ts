@@ -1,7 +1,7 @@
-import { Module } from '@nestjs/common'
-import { MessageFeedbackController } from './message-feedback.controller'
-import { MessageFeedbackService } from './message-feedback.service'
-import { PrismaModule } from '../../prisma/prisma.module'
+import { Module } from '@nestjs/common';
+import { MessageFeedbackController } from './message-feedback.controller';
+import { MessageFeedbackService } from './message-feedback.service';
+import { PrismaModule } from '../../prisma/prisma.module';
 
 @Module({
   imports: [PrismaModule],

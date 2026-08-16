@@ -1,79 +1,90 @@
-import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator'
-import { REASONING_EFFORT_VALUES } from '../../plans/reasoning-effort.constants'
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsBoolean,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  Max,
+  MaxLength,
+  Min,
+} from 'class-validator';
+import { REASONING_EFFORT_VALUES } from '../../plans/reasoning-effort.constants';
 
 export class UpdateAnonChatConfigDto {
   @IsOptional()
   @IsBoolean()
-  enabled?: boolean
+  enabled?: boolean;
 
   @IsOptional()
   @IsString()
   @MaxLength(100)
-  defaultModel?: string
+  defaultModel?: string;
 
   @IsOptional()
   @IsIn(REASONING_EFFORT_VALUES)
-  reasoningEffort?: string | null
+  reasoningEffort?: string | null;
 
   @IsOptional()
   @IsInt()
   @Min(0)
   @Max(1000)
-  freeMessageLimit?: number
+  freeMessageLimit?: number;
 
   @IsOptional()
   @IsInt()
   @Min(0)
   @Max(1000)
-  dailyMessageLimitAfterFree?: number
+  dailyMessageLimitAfterFree?: number;
 
   @IsOptional()
   @IsInt()
   @Min(100)
   @Max(20_000)
-  maxInputTokens?: number
+  maxInputTokens?: number;
 
   @IsOptional()
   @IsInt()
   @Min(100)
   @Max(20_000)
-  maxOutputTokens?: number
+  maxOutputTokens?: number;
 
   @IsOptional()
   @IsString()
   @MaxLength(1000)
-  signupBannerMessage?: string
+  signupBannerMessage?: string;
 
   @IsOptional()
   @IsString()
   @MaxLength(1000)
-  limitedZoneMessage?: string
+  limitedZoneMessage?: string;
 
   @IsOptional()
   @IsString()
   @MaxLength(1000)
-  blockedMessage?: string
+  blockedMessage?: string;
 
   @IsOptional()
   @IsString()
   @MaxLength(200)
-  hintTitle?: string
+  hintTitle?: string;
 
   @IsOptional()
   @IsString()
   @MaxLength(500)
-  hintSubtitle?: string
+  hintSubtitle?: string;
 
   @IsOptional()
   @IsInt()
   @Min(0)
   @Max(50)
-  signupBannerAfterMessages?: number
+  signupBannerAfterMessages?: number;
 
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(20)
   @IsString({ each: true })
   @MaxLength(200, { each: true })
-  samplePrompts?: string[]
+  samplePrompts?: string[];
 }

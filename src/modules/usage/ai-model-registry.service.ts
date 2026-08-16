@@ -1,14 +1,14 @@
-import { Injectable } from '@nestjs/common'
-import { PrismaService } from '../../prisma/prisma.service'
-import { RedisService } from '../../redis/redis.service'
+import { Injectable } from '@nestjs/common';
+import { PrismaService } from '../../prisma/prisma.service';
+import { RedisService } from '../../redis/redis.service';
 
-export type TokenizerFamily = 'o200k_base' | 'cl100k_base' | 'approximate'
+export type TokenizerFamily = 'o200k_base' | 'cl100k_base' | 'approximate';
 
 export interface ModelInfo {
-  inputPricePerM: number
-  outputPricePerM: number
-  tokenizerFamily: TokenizerFamily
-  avgCharsPerToken: number
+  inputPricePerM: number;
+  outputPricePerM: number;
+  tokenizerFamily: TokenizerFamily;
+  avgCharsPerToken: number;
 }
 
 // used only if a model id has no AiModel row at all (e.g. never seeded) —
@@ -18,10 +18,10 @@ const FALLBACK: ModelInfo = {
   outputPricePerM: 0.6,
   tokenizerFamily: 'o200k_base',
   avgCharsPerToken: 4,
-}
+};
 
 function cacheKey(modelId: string) {
-  return `ai_model:${modelId}`
+  return `ai_model:${modelId}`;
 }
 
 /**
@@ -40,8 +40,8 @@ export class AiModelRegistryService {
   ) {}
 
   async getModelInfo(modelId: string): Promise<ModelInfo> {
-    const cached = await this.redis.get(cacheKey(modelId))
-    if (cached) return JSON.parse(cached) as ModelInfo
+    const cached = await this.redis.get(cacheKey(modelId));
+    if (cached) return JSON.parse(cached) as ModelInfo;
 
     const model = await this.prisma.aiModel.findUnique({
       where: { name: modelId },
@@ -51,7 +51,7 @@ export class AiModelRegistryService {
         tokenizerFamily: true,
         avgCharsPerToken: true,
       },
-    })
+    });
 
     const info: ModelInfo = model
       ? {
@@ -60,13 +60,13 @@ export class AiModelRegistryService {
           tokenizerFamily: model.tokenizerFamily as TokenizerFamily,
           avgCharsPerToken: model.avgCharsPerToken,
         }
-      : FALLBACK
+      : FALLBACK;
 
-    await this.redis.set(cacheKey(modelId), JSON.stringify(info), 'EX', 300)
-    return info
+    await this.redis.set(cacheKey(modelId), JSON.stringify(info), 'EX', 300);
+    return info;
   }
 
   async invalidate(modelId: string): Promise<void> {
-    await this.redis.del(cacheKey(modelId))
+    await this.redis.del(cacheKey(modelId));
   }
 }

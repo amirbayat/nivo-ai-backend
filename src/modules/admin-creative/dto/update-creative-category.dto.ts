@@ -1,22 +1,28 @@
-import { Type } from 'class-transformer'
-import { IsBoolean, IsInt, IsOptional, IsString, IsUUID } from 'class-validator'
-import { fa } from '../../../i18n/fa'
+import { Type } from 'class-transformer';
+import {
+  IsBoolean,
+  IsInt,
+  IsOptional,
+  IsString,
+  IsUUID,
+} from 'class-validator';
+import { fa } from '../../../i18n/fa';
 
 export class UpdateCreativeCategoryDto {
   @IsOptional()
   @IsString()
-  name?: string
+  name?: string;
 
   @IsOptional()
   @IsUUID(undefined, { message: fa.validation.required })
-  parentId?: string | null
+  parentId?: string | null;
 
   @IsOptional()
   @Type(() => Number)
   @IsInt()
-  sortOrder?: number
+  sortOrder?: number;
 
   @IsOptional()
   @IsBoolean({ message: fa.validation.mustBeBoolean })
-  isActive?: boolean
+  isActive?: boolean;
 }

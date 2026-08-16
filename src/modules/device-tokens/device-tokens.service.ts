@@ -1,11 +1,11 @@
-import { Injectable, Logger } from '@nestjs/common'
-import { PrismaService } from '../../prisma/prisma.service'
+import { Injectable, Logger } from '@nestjs/common';
+import { PrismaService } from '../../prisma/prisma.service';
 
 // docs/PRD-user-push-notifications-and-mobile-app-flows.md بخش ۳/۵.۲ — توکن FCM کاربر عادی
 // اپ اندروید؛ قبل از لاگین با deviceUuid ناشناس ثبت می‌شود، بعد از OTP به userId وصل می‌شود
 @Injectable()
 export class DeviceTokensService {
-  private readonly logger = new Logger(DeviceTokensService.name)
+  private readonly logger = new Logger(DeviceTokensService.name);
 
   constructor(private readonly prisma: PrismaService) {}
 
@@ -14,7 +14,7 @@ export class DeviceTokensService {
       where: { deviceUuid },
       create: { deviceUuid, fcmToken },
       update: { fcmToken },
-    })
+    });
   }
 
   // از auth.service.ts: verifyOtp صدا زده می‌شود — نباید لاگین را fail کند، پس caller خودش try/catch می‌کند
@@ -22,6 +22,6 @@ export class DeviceTokensService {
     await this.prisma.deviceToken.updateMany({
       where: { deviceUuid, userId: null },
       data: { userId },
-    })
+    });
   }
 }

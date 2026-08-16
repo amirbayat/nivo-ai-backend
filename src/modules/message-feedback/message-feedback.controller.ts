@@ -6,15 +6,15 @@ import {
   Post,
   Query,
   UseGuards,
-} from '@nestjs/common'
-import { JwtGuard } from '../../common/guards/jwt.guard'
-import { AdminGuard } from '../../common/guards/admin.guard'
+} from '@nestjs/common';
+import { JwtGuard } from '../../common/guards/jwt.guard';
+import { AdminGuard } from '../../common/guards/admin.guard';
 import {
   CurrentUser,
   JwtPayload,
-} from '../../common/decorators/current-user.decorator'
-import { MessageFeedbackService } from './message-feedback.service'
-import { SubmitMessageFeedbackDto } from './dto/submit-feedback.dto'
+} from '../../common/decorators/current-user.decorator';
+import { MessageFeedbackService } from './message-feedback.service';
+import { SubmitMessageFeedbackDto } from './dto/submit-feedback.dto';
 
 @Controller()
 export class MessageFeedbackController {
@@ -29,7 +29,7 @@ export class MessageFeedbackController {
     @Param('id') id: string,
     @Body() dto: SubmitMessageFeedbackDto,
   ) {
-    return this.messageFeedbackService.submit(user.sub, id, dto)
+    return this.messageFeedbackService.submit(user.sub, id, dto);
   }
 
   @Get('admin/model-feedback')
@@ -40,24 +40,24 @@ export class MessageFeedbackController {
     @Query('model') model?: string,
     @Query('vote') vote?: string,
   ) {
-    const voteFilter = vote === 'UP' || vote === 'DOWN' ? vote : undefined
+    const voteFilter = vote === 'UP' || vote === 'DOWN' ? vote : undefined;
     return this.messageFeedbackService.getAll(
       page ? Number(page) : 1,
       limit ? Number(limit) : 20,
       model,
       voteFilter,
-    )
+    );
   }
 
   @Get('admin/model-feedback/summary')
   @UseGuards(JwtGuard, AdminGuard)
   getSummary() {
-    return this.messageFeedbackService.getSummary()
+    return this.messageFeedbackService.getSummary();
   }
 
   @Post('admin/model-feedback/trigger')
   @UseGuards(JwtGuard, AdminGuard)
   triggerSummary() {
-    return this.messageFeedbackService.triggerSummary()
+    return this.messageFeedbackService.triggerSummary();
   }
 }

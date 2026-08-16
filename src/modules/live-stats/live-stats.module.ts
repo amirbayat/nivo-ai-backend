@@ -1,6 +1,6 @@
-import { Module } from '@nestjs/common'
-import { LiveStatsService } from './live-stats.service'
-import { LiveStatsAdminController } from './live-stats-admin.controller'
+import { Module } from '@nestjs/common';
+import { LiveStatsService } from './live-stats.service';
+import { LiveStatsAdminController } from './live-stats-admin.controller';
 
 @Module({
   controllers: [LiveStatsAdminController],

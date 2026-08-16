@@ -1,6 +1,6 @@
-import { Module } from '@nestjs/common'
-import { ChatConfigService } from './chat-config.service'
-import { ChatConfigAdminController } from './chat-config-admin.controller'
+import { Module } from '@nestjs/common';
+import { ChatConfigService } from './chat-config.service';
+import { ChatConfigAdminController } from './chat-config-admin.controller';
 
 @Module({
   controllers: [ChatConfigAdminController],

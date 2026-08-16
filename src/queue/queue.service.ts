@@ -1,23 +1,23 @@
-import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common'
-import { InjectQueue } from '@nestjs/bull'
-import type { Queue } from 'bull'
+import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bull';
+import type { Queue } from 'bull';
 
-const FLUSH_CRON = '*/5 * * * *'
-const SUMMARY_CRON = '0 2 * * *'
-const MODEL_FEEDBACK_SUMMARY_CRON = '0 3 * * *' // یک ساعت بعد از فیدبک عمومی، تا فشار هم‌زمان روی AI provider نباشد
-const WAITLIST_REMINDER_CRON = '0 9 * * *' // ساعت ۹ صبح — پیامک یادآوری در ساعت معقولی برسد
-const CHAT_IMAGE_CLEANUP_CRON = '15 * * * *' // ساعتی یک‌بار — عکس‌های چت قدیمی‌تر از ۲۴ ساعت حذف می‌شوند
+const FLUSH_CRON = '*/5 * * * *';
+const SUMMARY_CRON = '0 2 * * *';
+const MODEL_FEEDBACK_SUMMARY_CRON = '0 3 * * *'; // یک ساعت بعد از فیدبک عمومی، تا فشار هم‌زمان روی AI provider نباشد
+const WAITLIST_REMINDER_CRON = '0 9 * * *'; // ساعت ۹ صبح — پیامک یادآوری در ساعت معقولی برسد
+const CHAT_IMAGE_CLEANUP_CRON = '15 * * * *'; // ساعتی یک‌بار — عکس‌های چت قدیمی‌تر از ۲۴ ساعت حذف می‌شوند
 // docs/PRD-admin-notifications-and-mobile.md بخش ۴/۷ — چک آستانه‌ی خطای سیستمی/Liara هر ۵ دقیقه
-const ADMIN_ALERTS_CRON = '*/5 * * * *'
+const ADMIN_ALERTS_CRON = '*/5 * * * *';
 // موقتاً هر ۵ دقیقه برای رصد نزدیک‌به‌لحظه‌ی مصرف امروز — بعداً دوباره به یک‌بار در شبانه‌روز برمی‌گردد
-const LIARA_USAGE_SYNC_CRON = '*/5 * * * *'
+const LIARA_USAGE_SYNC_CRON = '*/5 * * * *';
 // docs/PRD-liara-usage-reconciliation.md — کاربرانی که ساخت کلید اختصاصی‌شان قبلاً fail شده را
 // دوره‌ای دوباره امتحان می‌کند (مثلاً بعد از تمدید JWT مدیریتی در Hamravesh)
-const LIARA_KEY_RETRY_CRON = '*/15 * * * *'
+const LIARA_KEY_RETRY_CRON = '*/15 * * * *';
 
 @Injectable()
 export class QueueService implements OnApplicationBootstrap {
-  private readonly logger = new Logger(QueueService.name)
+  private readonly logger = new Logger(QueueService.name);
 
   constructor(
     @InjectQueue('token-flush') private readonly tokenFlushQueue: Queue,
@@ -38,96 +38,105 @@ export class QueueService implements OnApplicationBootstrap {
   ) {}
 
   async onApplicationBootstrap() {
-    const tokenRepeatables = await this.tokenFlushQueue.getRepeatableJobs()
+    const tokenRepeatables = await this.tokenFlushQueue.getRepeatableJobs();
     for (const job of tokenRepeatables) {
-      await this.tokenFlushQueue.removeRepeatableByKey(job.key)
+      await this.tokenFlushQueue.removeRepeatableByKey(job.key);
     }
     await this.tokenFlushQueue.add(
       'flush',
       {},
       { repeat: { cron: FLUSH_CRON } },
-    )
-    this.logger.log(`Token flush job scheduled: ${FLUSH_CRON}`)
+    );
+    this.logger.log(`Token flush job scheduled: ${FLUSH_CRON}`);
 
     const summaryRepeatables =
-      await this.feedbackSummaryQueue.getRepeatableJobs()
+      await this.feedbackSummaryQueue.getRepeatableJobs();
     for (const job of summaryRepeatables) {
-      await this.feedbackSummaryQueue.removeRepeatableByKey(job.key)
+      await this.feedbackSummaryQueue.removeRepeatableByKey(job.key);
     }
     await this.feedbackSummaryQueue.add(
       'summarize',
       {},
       { repeat: { cron: SUMMARY_CRON } },
-    )
-    this.logger.log(`Feedback summary job scheduled: ${SUMMARY_CRON}`)
+    );
+    this.logger.log(`Feedback summary job scheduled: ${SUMMARY_CRON}`);
 
     const modelFeedbackRepeatables =
-      await this.modelFeedbackSummaryQueue.getRepeatableJobs()
+      await this.modelFeedbackSummaryQueue.getRepeatableJobs();
     for (const job of modelFeedbackRepeatables) {
-      await this.modelFeedbackSummaryQueue.removeRepeatableByKey(job.key)
+      await this.modelFeedbackSummaryQueue.removeRepeatableByKey(job.key);
     }
     await this.modelFeedbackSummaryQueue.add(
       'summarize',
       {},
       { repeat: { cron: MODEL_FEEDBACK_SUMMARY_CRON } },
-    )
+    );
     this.logger.log(
       `Model feedback summary job scheduled: ${MODEL_FEEDBACK_SUMMARY_CRON}`,
-    )
+    );
 
-    const waitlistRepeatables = await this.waitlistReminderQueue.getRepeatableJobs()
+    const waitlistRepeatables =
+      await this.waitlistReminderQueue.getRepeatableJobs();
     for (const job of waitlistRepeatables) {
-      await this.waitlistReminderQueue.removeRepeatableByKey(job.key)
+      await this.waitlistReminderQueue.removeRepeatableByKey(job.key);
     }
     await this.waitlistReminderQueue.add(
       'send-reminders',
       {},
       { repeat: { cron: WAITLIST_REMINDER_CRON } },
-    )
-    this.logger.log(`Waitlist reminder job scheduled: ${WAITLIST_REMINDER_CRON}`)
+    );
+    this.logger.log(
+      `Waitlist reminder job scheduled: ${WAITLIST_REMINDER_CRON}`,
+    );
 
-    const chatImageCleanupRepeatables = await this.chatImageCleanupQueue.getRepeatableJobs()
+    const chatImageCleanupRepeatables =
+      await this.chatImageCleanupQueue.getRepeatableJobs();
     for (const job of chatImageCleanupRepeatables) {
-      await this.chatImageCleanupQueue.removeRepeatableByKey(job.key)
+      await this.chatImageCleanupQueue.removeRepeatableByKey(job.key);
     }
     await this.chatImageCleanupQueue.add(
       'cleanup',
       {},
       { repeat: { cron: CHAT_IMAGE_CLEANUP_CRON } },
-    )
-    this.logger.log(`Chat image cleanup job scheduled: ${CHAT_IMAGE_CLEANUP_CRON}`)
+    );
+    this.logger.log(
+      `Chat image cleanup job scheduled: ${CHAT_IMAGE_CLEANUP_CRON}`,
+    );
 
-    const adminAlertsRepeatables = await this.adminAlertsQueue.getRepeatableJobs()
+    const adminAlertsRepeatables =
+      await this.adminAlertsQueue.getRepeatableJobs();
     for (const job of adminAlertsRepeatables) {
-      await this.adminAlertsQueue.removeRepeatableByKey(job.key)
+      await this.adminAlertsQueue.removeRepeatableByKey(job.key);
     }
     await this.adminAlertsQueue.add(
       'check',
       {},
       { repeat: { cron: ADMIN_ALERTS_CRON } },
-    )
-    this.logger.log(`Admin alerts check job scheduled: ${ADMIN_ALERTS_CRON}`)
+    );
+    this.logger.log(`Admin alerts check job scheduled: ${ADMIN_ALERTS_CRON}`);
 
-    const liaraUsageSyncRepeatables = await this.liaraUsageSyncQueue.getRepeatableJobs()
+    const liaraUsageSyncRepeatables =
+      await this.liaraUsageSyncQueue.getRepeatableJobs();
     for (const job of liaraUsageSyncRepeatables) {
-      await this.liaraUsageSyncQueue.removeRepeatableByKey(job.key)
+      await this.liaraUsageSyncQueue.removeRepeatableByKey(job.key);
     }
     await this.liaraUsageSyncQueue.add(
       'sync',
       {},
       { repeat: { cron: LIARA_USAGE_SYNC_CRON } },
-    )
-    this.logger.log(`Liara usage sync job scheduled: ${LIARA_USAGE_SYNC_CRON}`)
+    );
+    this.logger.log(`Liara usage sync job scheduled: ${LIARA_USAGE_SYNC_CRON}`);
 
-    const liaraKeyRetryRepeatables = await this.liaraKeyRetryQueue.getRepeatableJobs()
+    const liaraKeyRetryRepeatables =
+      await this.liaraKeyRetryQueue.getRepeatableJobs();
     for (const job of liaraKeyRetryRepeatables) {
-      await this.liaraKeyRetryQueue.removeRepeatableByKey(job.key)
+      await this.liaraKeyRetryQueue.removeRepeatableByKey(job.key);
     }
     await this.liaraKeyRetryQueue.add(
       'retry',
       {},
       { repeat: { cron: LIARA_KEY_RETRY_CRON } },
-    )
-    this.logger.log(`Liara key retry job scheduled: ${LIARA_KEY_RETRY_CRON}`)
+    );
+    this.logger.log(`Liara key retry job scheduled: ${LIARA_KEY_RETRY_CRON}`);
   }
 }

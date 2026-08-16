@@ -1,85 +1,96 @@
-import { Type } from 'class-transformer'
-import { IsBoolean, IsIn, IsNumber, IsOptional, IsString, Min } from 'class-validator'
-import { MODEL_TIERS, MODEL_TYPES, TOKENIZER_FAMILIES } from './create-model.dto'
+import { Type } from 'class-transformer';
+import {
+  IsBoolean,
+  IsIn,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Min,
+} from 'class-validator';
+import {
+  MODEL_TIERS,
+  MODEL_TYPES,
+  TOKENIZER_FAMILIES,
+} from './create-model.dto';
 
 export class UpdateModelDto {
   @IsOptional()
   @IsString()
-  name?: string
+  name?: string;
 
   @IsOptional()
   @IsString()
-  displayName?: string
+  displayName?: string;
 
   @IsOptional()
   @IsString()
-  provider?: string
+  provider?: string;
 
   @IsOptional()
   @IsIn(MODEL_TYPES)
-  modelType?: (typeof MODEL_TYPES)[number]
+  modelType?: (typeof MODEL_TYPES)[number];
 
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
-  inputPricePerM?: number
+  inputPricePerM?: number;
 
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
-  outputPricePerM?: number
+  outputPricePerM?: number;
 
   @IsOptional()
   @IsBoolean()
-  supportsVision?: boolean
+  supportsVision?: boolean;
 
   // docs/PRD-chat-images.md بخش ۵.۵
   @IsOptional()
   @IsBoolean()
-  supportsImageGen?: boolean
+  supportsImageGen?: boolean;
 
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
-  imageGenInputImagePricePerM?: number
+  imageGenInputImagePricePerM?: number;
 
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
-  imageGenOutputImagePricePerM?: number
+  imageGenOutputImagePricePerM?: number;
 
   @IsOptional()
   @IsString()
-  imageGenQuality?: string
+  imageGenQuality?: string;
 
   @IsOptional()
   @IsString()
-  imageGenSize?: string
+  imageGenSize?: string;
 
   @IsOptional()
   @IsBoolean()
-  isActive?: boolean
+  isActive?: boolean;
 
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
-  sortOrder?: number
+  sortOrder?: number;
 
   @IsOptional()
   @IsIn(MODEL_TIERS)
-  tier?: (typeof MODEL_TIERS)[number]
+  tier?: (typeof MODEL_TIERS)[number];
 
   @IsOptional()
   @IsIn(TOKENIZER_FAMILIES)
-  tokenizerFamily?: (typeof TOKENIZER_FAMILIES)[number]
+  tokenizerFamily?: (typeof TOKENIZER_FAMILIES)[number];
 
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
-  avgCharsPerToken?: number
+  avgCharsPerToken?: number;
 }

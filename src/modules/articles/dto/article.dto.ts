@@ -1,71 +1,77 @@
-import { IsBoolean, IsIn, IsOptional, IsString, MinLength } from 'class-validator'
+import {
+  IsBoolean,
+  IsIn,
+  IsOptional,
+  IsString,
+  MinLength,
+} from 'class-validator';
 
-export const ARTICLE_STATUSES = ['DRAFT', 'PUBLISHED'] as const
+export const ARTICLE_STATUSES = ['DRAFT', 'PUBLISHED'] as const;
 
 export class CreateArticleDto {
   @IsString()
   @MinLength(1)
-  title!: string
+  title!: string;
 
   @IsOptional()
   @IsString()
-  slug?: string
+  slug?: string;
 
   @IsOptional()
   @IsString()
-  metaDescription?: string
+  metaDescription?: string;
 
   @IsOptional()
   @IsString()
-  coverImageUrl?: string
+  coverImageUrl?: string;
 
   @IsString()
-  contentMd!: string
+  contentMd!: string;
 
   @IsOptional()
   @IsString()
-  categoryId?: string
+  categoryId?: string;
 
   @IsOptional()
   @IsIn(ARTICLE_STATUSES)
-  status?: (typeof ARTICLE_STATUSES)[number]
+  status?: (typeof ARTICLE_STATUSES)[number];
 
   @IsOptional()
   @IsBoolean()
-  isPinnedInBanner?: boolean
+  isPinnedInBanner?: boolean;
 }
 
 export class UpdateArticleDto {
   @IsOptional()
   @IsString()
   @MinLength(1)
-  title?: string
+  title?: string;
 
   @IsOptional()
   @IsString()
-  slug?: string
+  slug?: string;
 
   @IsOptional()
   @IsString()
-  metaDescription?: string
+  metaDescription?: string;
 
   @IsOptional()
   @IsString()
-  coverImageUrl?: string
+  coverImageUrl?: string;
 
   @IsOptional()
   @IsString()
-  contentMd?: string
+  contentMd?: string;
 
   @IsOptional()
   @IsString()
-  categoryId?: string
+  categoryId?: string;
 
   @IsOptional()
   @IsIn(ARTICLE_STATUSES)
-  status?: (typeof ARTICLE_STATUSES)[number]
+  status?: (typeof ARTICLE_STATUSES)[number];
 
   @IsOptional()
   @IsBoolean()
-  isPinnedInBanner?: boolean
+  isPinnedInBanner?: boolean;
 }

@@ -1,75 +1,83 @@
-import { IsString, IsOptional, IsArray, IsNumber, IsBoolean, ValidateNested, IsIn } from 'class-validator'
-import { Type } from 'class-transformer'
+import {
+  IsString,
+  IsOptional,
+  IsArray,
+  IsNumber,
+  IsBoolean,
+  ValidateNested,
+  IsIn,
+} from 'class-validator';
+import { Type } from 'class-transformer';
 
 export class SalesChatMessageDto {
   @IsString()
   @IsIn(['user', 'assistant'])
-  role: 'user' | 'assistant'
+  role: 'user' | 'assistant';
 
   @IsString()
-  content: string
+  content: string;
 }
 
 export class SalesChatDto {
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => SalesChatMessageDto)
-  messages: SalesChatMessageDto[]
+  messages: SalesChatMessageDto[];
 
   @IsString()
-  sessionId: string
+  sessionId: string;
 }
 
-export const CTA_CLICK_TYPES = ['free_start', 'pricing'] as const
+export const CTA_CLICK_TYPES = ['free_start', 'pricing'] as const;
 
 export class TrackCtaClickDto {
   @IsString()
   @IsIn(CTA_CLICK_TYPES)
-  type: (typeof CTA_CLICK_TYPES)[number]
+  type: (typeof CTA_CLICK_TYPES)[number];
 }
 
 export class SaveLeadDto {
   @IsOptional()
   @IsString()
-  sessionId?: string
+  sessionId?: string;
 
   @IsOptional()
   @IsString()
-  phone?: string
+  phone?: string;
 
   @IsOptional()
   @IsString()
-  name?: string
+  name?: string;
 
   @IsOptional()
   @IsNumber()
-  age?: number
+  age?: number;
 
   @IsOptional()
   @IsString()
-  city?: string
+  city?: string;
 
   @IsOptional()
   @IsString()
-  jobTitle?: string
+  jobTitle?: string;
 
   @IsOptional()
   @IsArray()
-  interests?: string[]
+  interests?: string[];
 
   @IsOptional()
   @IsArray()
-  chatHistory?: SalesChatMessageDto[]
+  chatHistory?: SalesChatMessageDto[];
 
   @IsOptional()
   @IsString()
-  recommendedPlan?: string
+  recommendedPlan?: string;
 
   @IsOptional()
   @IsString()
-  source?: string
+  source?: string;
 
   @IsOptional()
   @IsBoolean()
-  discountRequested?: boolean
+  discountRequested?: boolean;
 }

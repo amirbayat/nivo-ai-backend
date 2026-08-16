@@ -1,15 +1,26 @@
-import { Body, Controller, Get, Headers, NotFoundException, Param, Post, Query, Req, Res } from '@nestjs/common'
-import type { Request, Response } from 'express'
-import { CreativeOutputType, CreativeSegment } from '@prisma/client'
-import { PrismaService } from '../../prisma/prisma.service'
-import { StorageService } from '../../storage/storage.service'
-import { mimeTypeForExt } from '../../common/validators/chat-image.validator'
-import { fa } from '../../i18n/fa'
-import { AnonIdentityService } from '../anon-chat/anon-identity.service'
-import { DiscoveryGenerationService } from './discovery-generation.service'
-import { DiscoveryAnonService } from './discovery-anon.service'
-import { UploadDiscoveryImageDto } from './dto/upload-input-image.dto'
-import { GenerateAnonCreativeDto } from './dto/generate-anon-creative.dto'
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  NotFoundException,
+  Param,
+  Post,
+  Query,
+  Req,
+  Res,
+} from '@nestjs/common';
+import type { Request, Response } from 'express';
+import { CreativeOutputType, CreativeSegment } from '@prisma/client';
+import { PrismaService } from '../../prisma/prisma.service';
+import { StorageService } from '../../storage/storage.service';
+import { mimeTypeForExt } from '../../common/validators/chat-image.validator';
+import { fa } from '../../i18n/fa';
+import { AnonIdentityService } from '../anon-chat/anon-identity.service';
+import { DiscoveryGenerationService } from './discovery-generation.service';
+import { DiscoveryAnonService } from './discovery-anon.service';
+import { UploadDiscoveryImageDto } from './dto/upload-input-image.dto';
+import { GenerateAnonCreativeDto } from './dto/generate-anon-creative.dto';
 
 // مسیر عمومی (بدون JwtGuard) — کاتالوگ/دسته‌بندی‌ها + عکس نمونه‌ی سبک‌ها + امتحان رایگان
 // یک‌باره‌ی تولید برای کاربر مهمان (anon/*، مالکیت/محدودیت از طریق هدر X-Anon-Session-Id + IP
@@ -32,12 +43,18 @@ export class DiscoveryPublicController {
     @Query('categoryId') categoryId?: string,
     @Query('sort') sort?: 'newest' | 'cheapest' | 'priciest' | 'sortOrder',
   ) {
-    return this.discoveryService.listCatalog({ outputType, segment, trending: trending === 'true', categoryId, sort })
+    return this.discoveryService.listCatalog({
+      outputType,
+      segment,
+      trending: trending === 'true',
+      categoryId,
+      sort,
+    });
   }
 
   @Get('categories')
   categories() {
-    return this.discoveryService.listCategories()
+    return this.discoveryService.listCategories();
   }
 
   // این‌ها در DiscoverPage با <img src=...> ساده (بدون هدر Authorization) نمایش داده می‌شوند،
@@ -51,19 +68,25 @@ export class DiscoveryPublicController {
     const prompt = await this.prisma.creativePrompt.findFirst({
       where: { exampleImageUrl: { contains: key }, isActive: true },
       select: { id: true },
-    })
-    if (!prompt) throw new NotFoundException(fa.errors.notFound)
+    });
+    if (!prompt) throw new NotFoundException(fa.errors.notFound);
 
-    const ext = key.split('.').pop() ?? 'png'
-    const buffer = await this.storage.downloadImage(key)
-    res.setHeader('Content-Type', mimeTypeForExt(ext))
-    res.send(buffer)
+    const ext = key.split('.').pop() ?? 'png';
+    const buffer = await this.storage.downloadImage(key);
+    res.setHeader('Content-Type', mimeTypeForExt(ext));
+    res.send(buffer);
   }
 
   @Get('anon/status')
-  async anonStatus(@Headers('x-anon-session-id') clientToken: string, @Req() req: Request) {
-    const context = await this.identityService.resolveContext(getClientIp(req), clientToken)
-    return this.discoveryAnonService.getStatus(context.identity)
+  async anonStatus(
+    @Headers('x-anon-session-id') clientToken: string,
+    @Req() req: Request,
+  ) {
+    const context = await this.identityService.resolveContext(
+      getClientIp(req),
+      clientToken,
+    );
+    return this.discoveryAnonService.getStatus(context.identity);
   }
 
   // قبل از anon/generate برای سبک‌های requiresUserImage=true صدا زده می‌شود — همون
@@ -74,8 +97,8 @@ export class DiscoveryPublicController {
     @Body() dto: UploadDiscoveryImageDto,
     @Req() req: Request,
   ) {
-    await this.identityService.resolveContext(getClientIp(req), clientToken)
-    return this.discoveryService.uploadInputImage(dto.image)
+    await this.identityService.resolveContext(getClientIp(req), clientToken);
+    return this.discoveryService.uploadInputImage(dto.image);
   }
 
   @Post('anon/generate')
@@ -84,12 +107,19 @@ export class DiscoveryPublicController {
     @Body() dto: GenerateAnonCreativeDto,
     @Req() req: Request,
   ) {
-    const context = await this.identityService.resolveContext(getClientIp(req), clientToken)
-    return this.discoveryAnonService.generate(context, dto)
+    const context = await this.identityService.resolveContext(
+      getClientIp(req),
+      clientToken,
+    );
+    return this.discoveryAnonService.generate(context, dto);
   }
 }
 
 // همان الگوی دقیق anon-chat.controller.ts/sales.controller.ts
 function getClientIp(req: Request): string {
-  return (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ?? req.socket.remoteAddress ?? 'unknown'
+  return (
+    (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ??
+    req.socket.remoteAddress ??
+    'unknown'
+  );
 }

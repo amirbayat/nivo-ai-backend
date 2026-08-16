@@ -1,14 +1,28 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common'
-import { JwtGuard } from '../../common/guards/jwt.guard'
-import { AdminGuard } from '../../common/guards/admin.guard'
-import { SalesAdminService } from './sales-admin.service'
-import { UpdateSalesBotConfigDto, UpdateLeadFollowUpDto, SendLeadSmsDto } from './dto/sales-admin.dto'
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
+import { JwtGuard } from '../../common/guards/jwt.guard';
+import { AdminGuard } from '../../common/guards/admin.guard';
+import { SalesAdminService } from './sales-admin.service';
+import {
+  UpdateSalesBotConfigDto,
+  UpdateLeadFollowUpDto,
+  SendLeadSmsDto,
+} from './dto/sales-admin.dto';
 import {
   BulkImportSalesKbDto,
   CreateSalesKbEntryDto,
   TestRetrievalDto,
   UpdateSalesKbEntryDto,
-} from './dto/sales-kb.dto'
+} from './dto/sales-kb.dto';
 
 @Controller('admin/sales-bot')
 @UseGuards(JwtGuard, AdminGuard)
@@ -17,22 +31,22 @@ export class SalesAdminController {
 
   @Get('config')
   getConfig() {
-    return this.salesAdminService.getConfig()
+    return this.salesAdminService.getConfig();
   }
 
   @Patch('config')
   updateConfig(@Body() dto: UpdateSalesBotConfigDto) {
-    return this.salesAdminService.updateConfig(dto)
+    return this.salesAdminService.updateConfig(dto);
   }
 
   @Get('analytics/overview')
   getAnalyticsOverview(@Query('from') from: string, @Query('to') to: string) {
-    return this.salesAdminService.getAnalyticsOverview(from, to)
+    return this.salesAdminService.getAnalyticsOverview(from, to);
   }
 
   @Get('analytics/timeseries')
   getAnalyticsTimeseries(@Query('from') from: string, @Query('to') to: string) {
-    return this.salesAdminService.getAnalyticsTimeseries(from, to)
+    return this.salesAdminService.getAnalyticsTimeseries(from, to);
   }
 
   @Get('leads')
@@ -41,63 +55,76 @@ export class SalesAdminController {
     @Query('limit') limit?: string,
     @Query('status') status?: string,
   ) {
-    return this.salesAdminService.getLeads(page ? Number(page) : 1, limit ? Number(limit) : 20, status)
+    return this.salesAdminService.getLeads(
+      page ? Number(page) : 1,
+      limit ? Number(limit) : 20,
+      status,
+    );
   }
 
   @Patch('leads/:id')
-  updateLeadFollowUp(@Param('id') id: string, @Body() dto: UpdateLeadFollowUpDto) {
-    return this.salesAdminService.updateLeadFollowUp(id, dto.followUpStatus)
+  updateLeadFollowUp(
+    @Param('id') id: string,
+    @Body() dto: UpdateLeadFollowUpDto,
+  ) {
+    return this.salesAdminService.updateLeadFollowUp(id, dto.followUpStatus);
   }
 
   @Post('leads/:id/sms')
   sendLeadSms(@Param('id') id: string, @Body() dto: SendLeadSmsDto) {
-    return this.salesAdminService.sendLeadSms(id, dto.message)
+    return this.salesAdminService.sendLeadSms(id, dto.message);
   }
 
   // ─── پایگاه دانش (RAG) — docs/PRD-sales-kb-rag-and-plan-context.md بخش الف.۱۰ ──
   @Get('kb')
   listKbEntries(@Query('kind') kind?: string) {
-    return this.salesAdminService.listKbEntries(kind)
+    return this.salesAdminService.listKbEntries(kind);
   }
 
   @Post('kb')
   createKbEntry(@Body() dto: CreateSalesKbEntryDto) {
-    return this.salesAdminService.createKbEntry(dto)
+    return this.salesAdminService.createKbEntry(dto);
   }
 
   @Patch('kb/:id')
   updateKbEntry(@Param('id') id: string, @Body() dto: UpdateSalesKbEntryDto) {
-    return this.salesAdminService.updateKbEntry(id, dto)
+    return this.salesAdminService.updateKbEntry(id, dto);
   }
 
   @Delete('kb/:id')
   deleteKbEntry(@Param('id') id: string) {
-    return this.salesAdminService.deleteKbEntry(id)
+    return this.salesAdminService.deleteKbEntry(id);
   }
 
   @Post('kb/bulk-import')
   bulkImportKb(@Body() dto: BulkImportSalesKbDto) {
-    return this.salesAdminService.bulkImportKbEntries(dto.entries)
+    return this.salesAdminService.bulkImportKbEntries(dto.entries);
   }
 
   @Post('kb/test-retrieval')
   testKbRetrieval(@Body() dto: TestRetrievalDto) {
-    return this.salesAdminService.testKbRetrieval(dto.sampleMessage)
+    return this.salesAdminService.testKbRetrieval(dto.sampleMessage);
   }
 
   @Post('kb/recompute-embeddings')
   recomputeKbEmbeddings() {
-    return this.salesAdminService.recomputeKbEmbeddings()
+    return this.salesAdminService.recomputeKbEmbeddings();
   }
 
   // ─── تاریخچه‌ی مکالمات — docs/PRD-sales-kb-rag-and-plan-context.md بخش الف.۱۱ ──
   @Get('sessions')
-  listChatSessions(@Query('page') page?: string, @Query('limit') limit?: string) {
-    return this.salesAdminService.listChatSessions(page ? Number(page) : 1, limit ? Number(limit) : 20)
+  listChatSessions(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.salesAdminService.listChatSessions(
+      page ? Number(page) : 1,
+      limit ? Number(limit) : 20,
+    );
   }
 
   @Get('sessions/export')
   exportChatSessionsKb(@Query('sessionId') sessionId?: string) {
-    return this.salesAdminService.exportChatSessionsKb(sessionId)
+    return this.salesAdminService.exportChatSessionsKb(sessionId);
   }
 }

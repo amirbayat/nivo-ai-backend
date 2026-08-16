@@ -1,9 +1,12 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common'
-import { JwtGuard } from '../../common/guards/jwt.guard'
-import { CurrentUser, JwtPayload } from '../../common/decorators/current-user.decorator'
-import { TicketsService } from './tickets.service'
-import { CreateTicketDto } from './dto/create-ticket.dto'
-import { CreateReplyDto } from './dto/create-reply.dto'
+import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import { JwtGuard } from '../../common/guards/jwt.guard';
+import {
+  CurrentUser,
+  JwtPayload,
+} from '../../common/decorators/current-user.decorator';
+import { TicketsService } from './tickets.service';
+import { CreateTicketDto } from './dto/create-ticket.dto';
+import { CreateReplyDto } from './dto/create-reply.dto';
 
 @Controller('tickets')
 @UseGuards(JwtGuard)
@@ -12,17 +15,17 @@ export class TicketsController {
 
   @Post()
   create(@CurrentUser() user: JwtPayload, @Body() dto: CreateTicketDto) {
-    return this.ticketsService.create(user.sub, user.phone, dto)
+    return this.ticketsService.create(user.sub, user.phone, dto);
   }
 
   @Get()
   findAll(@CurrentUser() user: JwtPayload) {
-    return this.ticketsService.findByUser(user.sub)
+    return this.ticketsService.findByUser(user.sub);
   }
 
   @Get(':id')
   findOne(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
-    return this.ticketsService.findOneByUser(user.sub, id)
+    return this.ticketsService.findOneByUser(user.sub, id);
   }
 
   @Post(':id/reply')
@@ -31,6 +34,6 @@ export class TicketsController {
     @Param('id') id: string,
     @Body() dto: CreateReplyDto,
   ) {
-    return this.ticketsService.addUserReply(user.sub, id, dto.body)
+    return this.ticketsService.addUserReply(user.sub, id, dto.body);
   }
 }

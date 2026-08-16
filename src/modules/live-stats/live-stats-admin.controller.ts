@@ -1,7 +1,7 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common'
-import { JwtGuard } from '../../common/guards/jwt.guard'
-import { AdminGuard } from '../../common/guards/admin.guard'
-import { LiveStatsService } from './live-stats.service'
+import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { JwtGuard } from '../../common/guards/jwt.guard';
+import { AdminGuard } from '../../common/guards/admin.guard';
+import { LiveStatsService } from './live-stats.service';
 
 @Controller('admin/live-stats')
 @UseGuards(JwtGuard, AdminGuard)
@@ -14,19 +14,19 @@ export class LiveStatsAdminController {
     const [activeStreams, today] = await Promise.all([
       this.liveStats.getActiveStreamCount(),
       this.liveStats.getTodayStats(),
-    ])
-    return { activeStreams, today }
+    ]);
+    return { activeStreams, today };
   }
 
   @Get('timeseries')
   getTimeseries(@Query('minutes') minutes?: string) {
-    const parsed = Math.min(Math.max(Number(minutes) || 60, 1), 24 * 60)
-    return this.liveStats.getTimeseries(parsed)
+    const parsed = Math.min(Math.max(Number(minutes) || 60, 1), 24 * 60);
+    return this.liveStats.getTimeseries(parsed);
   }
 
   @Get('daily-peaks')
   getDailyPeaks(@Query('days') days?: string) {
-    const parsed = Math.min(Math.max(Number(days) || 14, 1), 90)
-    return this.liveStats.getDailyPeaks(parsed)
+    const parsed = Math.min(Math.max(Number(days) || 14, 1), 90);
+    return this.liveStats.getDailyPeaks(parsed);
   }
 }

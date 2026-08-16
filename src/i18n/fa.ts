@@ -14,8 +14,10 @@ export const fa = {
     otpSent: 'کد تأیید ارسال شد',
     otpExpired: 'کد تأیید منقضی شده است',
     otpInvalid: 'کد تأیید اشتباه است',
-    otpTooManyRequests: (minutes: number) => `تعداد درخواست بیش از حد مجاز است. لطفاً ${minutes.toLocaleString('fa-IR')} دقیقه صبر کنید`,
-    otpTooManyAttempts: (minutes: number) => `تعداد تلاش‌های ناموفق زیاد است. لطفاً ${minutes.toLocaleString('fa-IR')} دقیقه صبر کنید`,
+    otpTooManyRequests: (minutes: number) =>
+      `تعداد درخواست بیش از حد مجاز است. لطفاً ${minutes.toLocaleString('fa-IR')} دقیقه صبر کنید`,
+    otpTooManyAttempts: (minutes: number) =>
+      `تعداد تلاش‌های ناموفق زیاد است. لطفاً ${minutes.toLocaleString('fa-IR')} دقیقه صبر کنید`,
     unauthorized: 'دسترسی غیرمجاز',
     tokenExpired: 'نشست شما منقضی شده است',
     refreshTokenInvalid: 'توکن نامعتبر است',
@@ -32,19 +34,27 @@ export const fa = {
     monthlyQuotaExceeded: 'سهمیه ماهانه شما تمام شده است',
     modelNotAllowed: 'این مدل در پلن فعلی شما در دسترس نیست',
     streamError: 'خطا در دریافت پاسخ. دوباره تلاش کنید',
-    modelUnavailable: 'این مدل موقتاً در دسترس نیست. لطفاً مدل دیگری انتخاب کنید یا دوباره تلاش کنید',
+    modelUnavailable:
+      'این مدل موقتاً در دسترس نیست. لطفاً مدل دیگری انتخاب کنید یا دوباره تلاش کنید',
     conversationNotFound: 'مکالمه یافت نشد',
-    inputTooLong: (limit: number) => `پیام شما بیش از ${limit} توکن است. لطفاً آن را کوتاه‌تر کنید`,
-    budgetExceeded: 'توکن روزانه‌ی شما تمام شده است. برای ادامه، پلن خود را ارتقا دهید.',
+    inputTooLong: (limit: number) =>
+      `پیام شما بیش از ${limit} توکن است. لطفاً آن را کوتاه‌تر کنید`,
+    budgetExceeded:
+      'توکن روزانه‌ی شما تمام شده است. برای ادامه، پلن خود را ارتقا دهید.',
     walletInsufficient: 'موجودی کیف پول برای ادامه کافی نیست',
     dailyMessageLimitExceeded: 'به سقف پیام روزانه رسیدید',
-    dailyBlocked: 'به محدودیت پیام روزانه رسیدید. برای ارسال پیام بیشتر پلن خود را ارتقا دهید.',
+    dailyBlocked:
+      'به محدودیت پیام روزانه رسیدید. برای ارسال پیام بیشتر پلن خود را ارتقا دهید.',
     throttledNotice: 'پیام‌های باقی‌مانده امروز با محدودیت توکن ارسال می‌شوند',
-    rollingWindowBlocked: (hours: number) => `تعداد پیام‌های شما در ${hours} ساعت اخیر به سقف مجاز رسیده.`,
-    imageGenNotSupported: 'پلن فعلی شما امکان تولید عکس را ندارد. برای استفاده از این قابلیت، پلن خود را ارتقا دهید.',
+    rollingWindowBlocked: (hours: number) =>
+      `تعداد پیام‌های شما در ${hours} ساعت اخیر به سقف مجاز رسیده.`,
+    imageGenNotSupported:
+      'پلن فعلی شما امکان تولید عکس را ندارد. برای استفاده از این قابلیت، پلن خود را ارتقا دهید.',
     imageGenFailed: 'تولید عکس ناموفق بود. دوباره تلاش کنید',
-    imageGenPolicyViolation: 'این درخواست به‌خاطر سیاست‌های ایمنی محتوا رد شد. لطفاً توصیف دیگری امتحان کنید.',
-    imageGenRateLimited: 'به سقف تعداد درخواست تولید/ویرایش عکس این پلن رسیده‌اید. کمی بعد دوباره امتحان کنید.',
+    imageGenPolicyViolation:
+      'این درخواست به‌خاطر سیاست‌های ایمنی محتوا رد شد. لطفاً توصیف دیگری امتحان کنید.',
+    imageGenRateLimited:
+      'به سقف تعداد درخواست تولید/ویرایش عکس این پلن رسیده‌اید. کمی بعد دوباره امتحان کنید.',
   },
   payment: {
     pending: 'در انتظار پرداخت',
@@ -61,8 +71,10 @@ export const fa = {
   },
   payAsYouGo: {
     notConfigured: 'پلن Pay-as-you-go در حال حاضر تنظیم نشده است',
-    minActivation: (min: number) => `برای فعال‌سازی اولیه حداقل باید ${min.toLocaleString('fa-IR')} تومان شارژ کنید`,
-    minTopup: (min: number) => `حداقل مبلغ شارژ ${min.toLocaleString('fa-IR')} تومان است`,
+    minActivation: (min: number) =>
+      `برای فعال‌سازی اولیه حداقل باید ${min.toLocaleString('fa-IR')} تومان شارژ کنید`,
+    minTopup: (min: number) =>
+      `حداقل مبلغ شارژ ${min.toLocaleString('fa-IR')} تومان است`,
     insufficientBalance: 'موجودی کیف‌پول کافی نیست. لطفاً شارژ کنید',
     messageDebitDescription: 'مصرف پیام چت (Pay-as-you-go)',
     adminRefundDescription: 'بازگشت وجه توسط ادمین (خروج از Pay-as-you-go)',
@@ -99,7 +111,8 @@ export const fa = {
     tooManyRequests: 'تعداد درخواست‌ها بیش از حد مجاز است',
   },
   sms: {
-    otpText: (code: string) => `کد تأیید دستیار AI: ${code}\nاین کد ۲ دقیقه اعتبار دارد`,
+    otpText: (code: string) =>
+      `کد تأیید دستیار AI: ${code}\nاین کد ۲ دقیقه اعتبار دارد`,
     subscriptionActivated: (planName: string, refId: string) =>
       `اشتراک ${planName} شما فعال شد. کد پیگیری: ${refId}`,
     sendFailed: 'ارسال پیامک با خطا مواجه شد. لطفاً دوباره تلاش کنید',
@@ -122,7 +135,8 @@ export const fa = {
   budget: {
     dailyExceeded: 'بودجه روزانه شما به پایان رسیده است',
     walletInsufficient: 'موجودی کیف پول برای ادامه کافی نیست',
-    sessionLimit: 'به سقف مصرف توکن امروزِ پلن شما رسیدید. برای ادامه، پلن خود را ارتقا دهید.',
+    sessionLimit:
+      'به سقف مصرف توکن امروزِ پلن شما رسیدید. برای ادامه، پلن خود را ارتقا دهید.',
   },
   upsell: {
     free: 'برای ادامه استفاده، پلن حرفه‌ای تهیه کنید',
@@ -131,7 +145,8 @@ export const fa = {
   },
   wallet: {
     notFound: 'کیف پول یافت نشد',
-    credited: (amount: number) => `${amount.toLocaleString('fa-IR')} ریال به کیف پول شما افزوده شد`,
+    credited: (amount: number) =>
+      `${amount.toLocaleString('fa-IR')} ریال به کیف پول شما افزوده شد`,
     insufficient: 'موجودی کیف پول کافی نیست',
   },
   ticket: {
@@ -147,7 +162,8 @@ export const fa = {
     summaryNotReady: 'هنوز بازخورد جدیدی برای خلاصه‌سازی وجود ندارد',
   },
   waitlist: {
-    limitReached: 'سهمیه‌ی روزانه‌ی پیش‌ثبت‌نام شما تمام شد. برای پیام بیشتر و مدل‌های پیشرفته، منتظر بمانید تا ثبت‌نامتان تکمیل شود',
+    limitReached:
+      'سهمیه‌ی روزانه‌ی پیش‌ثبت‌نام شما تمام شد. برای پیام بیشتر و مدل‌های پیشرفته، منتظر بمانید تا ثبت‌نامتان تکمیل شود',
     invalidToken: 'لینک نامعتبر یا منقضی شده است',
     campaignNotFound: 'کمپینی یافت نشد',
     notWaiting: 'این کاربر در لیست انتظار نیست',
@@ -165,7 +181,8 @@ export const fa = {
     walletTopupBody: (amount: number, phone: string) =>
       `کیف‌پول ${phone} به مبلغ ${amount.toLocaleString('fa-IR')} تومان شارژ شد`,
     ticketTitle: 'تیکت پشتیبانی جدید',
-    ticketBody: (subject: string, phone: string) => `تیکت جدید از ${phone}: «${subject}»`,
+    ticketBody: (subject: string, phone: string) =>
+      `تیکت جدید از ${phone}: «${subject}»`,
     systemErrorTitle: 'مشکل سیستمی',
     systemErrorBody: (count: number, minutes: number) =>
       `${count.toLocaleString('fa-IR')} خطای سرور در ${minutes.toLocaleString('fa-IR')} دقیقه‌ی اخیر ثبت شد`,
@@ -174,24 +191,30 @@ export const fa = {
       `${(failRate * 100).toLocaleString('fa-IR')}٪ از ${sampleSize.toLocaleString('fa-IR')} تماس به Liara AI در ${minutes.toLocaleString('fa-IR')} دقیقه‌ی اخیر ناموفق بود`,
   },
   chatImages: {
-    tooMany: (max: number) => `حداکثر ${max.toLocaleString('fa-IR')} عکس در هر پیام مجاز است`,
+    tooMany: (max: number) =>
+      `حداکثر ${max.toLocaleString('fa-IR')} عکس در هر پیام مجاز است`,
     invalidFormat: 'فرمت عکس نامعتبر است — فقط PNG/JPEG/WEBP/GIF مجاز است',
-    tooLarge: (maxMb: number) => `حجم هر عکس نباید بیشتر از ${maxMb.toLocaleString('fa-IR')} مگابایت باشد`,
+    tooLarge: (maxMb: number) =>
+      `حجم هر عکس نباید بیشتر از ${maxMb.toLocaleString('fa-IR')} مگابایت باشد`,
     contentMismatch: 'محتوای عکس با فرمت اعلام‌شده مطابقت ندارد',
-    formatNotAllowed: (allowed: string) => `فرمت این عکس مجاز نیست — فقط ${allowed} پذیرفته می‌شود`,
+    formatNotAllowed: (allowed: string) =>
+      `فرمت این عکس مجاز نیست — فقط ${allowed} پذیرفته می‌شود`,
   },
   // docs/PRD-discovery-and-credits.md — دیسکاوری (سبک‌های آماده‌ی عکس/متن) + پروژه‌ها + اعتبار «نیوو»
   discovery: {
     promptNotFound: 'این سبک یافت نشد یا دیگر فعال نیست',
     projectNotFound: 'پروژه یافت نشد',
     insufficientCredits: 'اعتبار نیوو کافی نیست — لطفاً شارژ کنید',
-    generationFailed: 'تولید ناموفق بود — اعتبار شما کسر نشد، دوباره امتحان کنید',
+    generationFailed:
+      'تولید ناموفق بود — اعتبار شما کسر نشد، دوباره امتحان کنید',
     userImageRequired: 'این سبک نیاز به آپلود عکس دارد',
     requestReceived: 'درخواست شما ثبت شد — تیم ما بررسی می‌کند',
-    customAmountBelowMinimum: (min: number) => `حداقل مقدار مجاز برای این بسته ${min.toLocaleString('fa-IR')} نیوو است`,
-    anonTrialAlreadyUsed: 'شما قبلاً از تولید رایگان مهمان استفاده کرده‌اید — برای ادامه ثبت‌نام کنید',
+    customAmountBelowMinimum: (min: number) =>
+      `حداقل مقدار مجاز برای این بسته ${min.toLocaleString('fa-IR')} نیوو است`,
+    anonTrialAlreadyUsed:
+      'شما قبلاً از تولید رایگان مهمان استفاده کرده‌اید — برای ادامه ثبت‌نام کنید',
   },
   credits: {
     signupBonusDescription: 'شارژ اولیه‌ی رایگان خوش‌آمدگویی',
   },
-} as const
+} as const;

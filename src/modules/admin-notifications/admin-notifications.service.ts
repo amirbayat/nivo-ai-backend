@@ -1,14 +1,14 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common'
-import { AdminNotificationType, Prisma } from '@prisma/client'
-import { PrismaService } from '../../prisma/prisma.service'
-import { fa } from '../../i18n/fa'
-import { FcmService } from './fcm.service'
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { AdminNotificationType, Prisma } from '@prisma/client';
+import { PrismaService } from '../../prisma/prisma.service';
+import { fa } from '../../i18n/fa';
+import { FcmService } from './fcm.service';
 
-const PAGE_SIZE = 30
+const PAGE_SIZE = 30;
 
 @Injectable()
 export class AdminNotificationsService {
-  private readonly logger = new Logger(AdminNotificationsService.name)
+  private readonly logger = new Logger(AdminNotificationsService.name);
 
   constructor(
     private readonly prisma: PrismaService,
@@ -28,13 +28,18 @@ export class AdminNotificationsService {
   ) {
     const notification = await this.prisma.adminNotification.create({
       data: { type, title, body, metadata },
-    })
+    });
 
     this.fcm
       .sendToAllAdmins(title, body)
-      .catch((err) => this.logger.error(`fcm push failed for notification ${notification.id}`, err))
+      .catch((err) =>
+        this.logger.error(
+          `fcm push failed for notification ${notification.id}`,
+          err,
+        ),
+      );
 
-    return notification
+    return notification;
   }
 
   async list(page = 1) {
@@ -45,33 +50,36 @@ export class AdminNotificationsService {
         take: PAGE_SIZE,
       }),
       this.prisma.adminNotification.count(),
-    ])
-    return { items, total, page, pageSize: PAGE_SIZE }
+    ]);
+    return { items, total, page, pageSize: PAGE_SIZE };
   }
 
   unreadCount(adminId: string) {
     return this.prisma.adminNotification.count({
       where: { NOT: { readBy: { has: adminId } } },
-    })
+    });
   }
 
   async markRead(id: string, adminId: string) {
-    const notification = await this.prisma.adminNotification.findUnique({ where: { id } })
-    if (!notification) throw new NotFoundException(fa.adminNotification.notFound)
-    if (notification.readBy.includes(adminId)) return notification
+    const notification = await this.prisma.adminNotification.findUnique({
+      where: { id },
+    });
+    if (!notification)
+      throw new NotFoundException(fa.adminNotification.notFound);
+    if (notification.readBy.includes(adminId)) return notification;
 
     return this.prisma.adminNotification.update({
       where: { id },
       data: { readBy: { push: adminId } },
-    })
+    });
   }
 
   async markAllRead(adminId: string) {
     const { count } = await this.prisma.adminNotification.updateMany({
       where: { NOT: { readBy: { has: adminId } } },
       data: { readBy: { push: adminId } },
-    })
-    return { updatedCount: count }
+    });
+    return { updatedCount: count };
   }
 
   async registerDeviceToken(adminId: string, token: string) {
@@ -79,6 +87,6 @@ export class AdminNotificationsService {
       where: { token },
       create: { adminId, token },
       update: { adminId },
-    })
+    });
   }
 }

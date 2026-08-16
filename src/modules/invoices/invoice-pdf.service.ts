@@ -1,25 +1,25 @@
-import { Injectable, OnModuleDestroy } from '@nestjs/common'
-import * as fs from 'fs'
-import * as path from 'path'
-import puppeteer, { Browser } from 'puppeteer'
-import { Invoice } from '@prisma/client'
-import { fa } from '../../i18n/fa'
+import { Injectable, OnModuleDestroy } from '@nestjs/common';
+import * as fs from 'fs';
+import * as path from 'path';
+import puppeteer, { Browser } from 'puppeteer';
+import { Invoice } from '@prisma/client';
+import { fa } from '../../i18n/fa';
 
-const FONT_DIR = path.join(process.cwd(), 'assets/fonts')
+const FONT_DIR = path.join(process.cwd(), 'assets/fonts');
 
 const PROVIDER_LABELS: Record<string, string> = {
   ZARINPAL: 'زرین‌پال',
   VANDAR: 'وندار',
   ZIBAL: 'زیبال',
-}
+};
 
 function toman(amountToman: number): string {
-  return amountToman.toLocaleString('en-US')
+  return amountToman.toLocaleString('en-US');
 }
 
 function invoiceNumber(inv: Invoice): string {
-  const year = new Date(inv.issuedAt).getFullYear() - 621 // میلادی به شمسی، تقریبی — فقط برای شماره‌گذاری نمایشی
-  return `INV-${year}-${String(inv.number).padStart(6, '0')}`
+  const year = new Date(inv.issuedAt).getFullYear() - 621; // میلادی به شمسی، تقریبی — فقط برای شماره‌گذاری نمایشی
+  return `INV-${year}-${String(inv.number).padStart(6, '0')}`;
 }
 
 function escapeHtml(value: string): string {
@@ -27,7 +27,7 @@ function escapeHtml(value: string): string {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
+    .replace(/"/g, '&quot;');
 }
 
 /**
@@ -37,9 +37,13 @@ function escapeHtml(value: string): string {
  */
 @Injectable()
 export class InvoicePdfService implements OnModuleDestroy {
-  private browserPromise: Promise<Browser> | null = null
-  private readonly fontRegularBase64 = fs.readFileSync(path.join(FONT_DIR, 'Vazirmatn-Regular.ttf')).toString('base64')
-  private readonly fontBoldBase64 = fs.readFileSync(path.join(FONT_DIR, 'Vazirmatn-Bold.ttf')).toString('base64')
+  private browserPromise: Promise<Browser> | null = null;
+  private readonly fontRegularBase64 = fs
+    .readFileSync(path.join(FONT_DIR, 'Vazirmatn-Regular.ttf'))
+    .toString('base64');
+  private readonly fontBoldBase64 = fs
+    .readFileSync(path.join(FONT_DIR, 'Vazirmatn-Bold.ttf'))
+    .toString('base64');
 
   private async getBrowser(): Promise<Browser> {
     if (!this.browserPromise) {
@@ -47,15 +51,15 @@ export class InvoicePdfService implements OnModuleDestroy {
         headless: true,
         executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
         args: ['--no-sandbox', '--disable-setuid-sandbox'],
-      })
+      });
     }
-    return this.browserPromise
+    return this.browserPromise;
   }
 
   async onModuleDestroy() {
     if (this.browserPromise) {
-      const browser = await this.browserPromise
-      await browser.close()
+      const browser = await this.browserPromise;
+      await browser.close();
     }
   }
 
@@ -65,8 +69,8 @@ export class InvoicePdfService implements OnModuleDestroy {
       ['نام خریدار', invoice.buyerName ? escapeHtml(invoice.buyerName) : '—'],
       ['شماره موبایل', invoice.buyerPhone],
       ['درگاه پرداخت', PROVIDER_LABELS[invoice.provider] ?? invoice.provider],
-    ]
-    if (invoice.refId) rows.push(['کد پیگیری', invoice.refId])
+    ];
+    if (invoice.refId) rows.push(['کد پیگیری', invoice.refId]);
 
     return `<!doctype html>
 <html lang="fa" dir="rtl">
@@ -130,22 +134,22 @@ export class InvoicePdfService implements OnModuleDestroy {
 
   <div class="footer">این یک رسید داخلی است، نه فاکتور رسمی سامانه‌ی مودیان.</div>
 </body>
-</html>`
+</html>`;
   }
 
   async generate(invoice: Invoice): Promise<Buffer> {
-    const browser = await this.getBrowser()
-    const page = await browser.newPage()
+    const browser = await this.getBrowser();
+    const page = await browser.newPage();
     try {
-      await page.setContent(this.buildHtml(invoice), { waitUntil: 'load' })
+      await page.setContent(this.buildHtml(invoice), { waitUntil: 'load' });
       const pdf = await page.pdf({
         format: 'a4',
         printBackground: true,
         margin: { top: '0', bottom: '0', left: '0', right: '0' },
-      })
-      return Buffer.from(pdf)
+      });
+      return Buffer.from(pdf);
     } finally {
-      await page.close()
+      await page.close();
     }
   }
 }

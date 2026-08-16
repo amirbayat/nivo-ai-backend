@@ -3,16 +3,16 @@ import {
   Injectable,
   Logger,
   NotFoundException,
-} from '@nestjs/common'
-import { TicketPriority, TicketStatus } from '@prisma/client'
-import { PrismaService } from '../../prisma/prisma.service'
-import { fa } from '../../i18n/fa'
-import { CreateTicketDto } from './dto/create-ticket.dto'
-import { AdminNotificationsService } from '../admin-notifications/admin-notifications.service'
+} from '@nestjs/common';
+import { TicketPriority, TicketStatus } from '@prisma/client';
+import { PrismaService } from '../../prisma/prisma.service';
+import { fa } from '../../i18n/fa';
+import { CreateTicketDto } from './dto/create-ticket.dto';
+import { AdminNotificationsService } from '../admin-notifications/admin-notifications.service';
 
 @Injectable()
 export class TicketsService {
-  private readonly logger = new Logger(TicketsService.name)
+  private readonly logger = new Logger(TicketsService.name);
 
   constructor(
     private readonly prisma: PrismaService,
@@ -27,7 +27,7 @@ export class TicketsService {
         body: dto.body,
         priority: dto.priority ?? TicketPriority.NORMAL,
       },
-    })
+    });
 
     // نوتیف ادمین — docs/PRD-admin-notifications-and-mobile.md بخش ۴. فایر-اند-فورگت، شکستش
     // نباید ثبت تیکت کاربر را fail کند
@@ -38,9 +38,14 @@ export class TicketsService {
         fa.adminNotification.ticketBody(dto.subject, userPhone),
         { ticketId: ticket.id, userId },
       )
-      .catch((err) => this.logger.error(`admin notification failed for ticket=${ticket.id}`, err))
+      .catch((err) =>
+        this.logger.error(
+          `admin notification failed for ticket=${ticket.id}`,
+          err,
+        ),
+      );
 
-    return { message: fa.ticket.created, ticket }
+    return { message: fa.ticket.created, ticket };
   }
 
   async findByUser(userId: string) {
@@ -55,8 +60,8 @@ export class TicketsService {
         createdAt: true,
         updatedAt: true,
       },
-    })
-    return { tickets }
+    });
+    return { tickets };
   }
 
   async findOneByUser(userId: string, ticketId: string) {
@@ -65,22 +70,25 @@ export class TicketsService {
       include: {
         replies: { orderBy: { createdAt: 'asc' } },
       },
-    })
+    });
 
-    if (!ticket) throw new NotFoundException(fa.ticket.notFound)
-    if (ticket.userId !== userId) throw new ForbiddenException(fa.errors.forbidden)
+    if (!ticket) throw new NotFoundException(fa.ticket.notFound);
+    if (ticket.userId !== userId)
+      throw new ForbiddenException(fa.errors.forbidden);
 
-    return { ticket }
+    return { ticket };
   }
 
   async addUserReply(userId: string, ticketId: string, body: string) {
     const ticket = await this.prisma.supportTicket.findUnique({
       where: { id: ticketId },
-    })
+    });
 
-    if (!ticket) throw new NotFoundException(fa.ticket.notFound)
-    if (ticket.userId !== userId) throw new ForbiddenException(fa.errors.forbidden)
-    if (ticket.status === TicketStatus.CLOSED) throw new ForbiddenException(fa.ticket.closed)
+    if (!ticket) throw new NotFoundException(fa.ticket.notFound);
+    if (ticket.userId !== userId)
+      throw new ForbiddenException(fa.errors.forbidden);
+    if (ticket.status === TicketStatus.CLOSED)
+      throw new ForbiddenException(fa.ticket.closed);
 
     const reply = await this.prisma.ticketReply.create({
       data: {
@@ -88,15 +96,15 @@ export class TicketsService {
         body,
         fromAdmin: false,
       },
-    })
+    });
 
-    return { reply }
+    return { reply };
   }
 
   // ── Admin methods ────────────────────────────────────────────────────────────
 
   async findAll(status?: string) {
-    const where = status ? { status: status as TicketStatus } : {}
+    const where = status ? { status: status as TicketStatus } : {};
 
     const tickets = await this.prisma.supportTicket.findMany({
       where,
@@ -110,9 +118,9 @@ export class TicketsService {
           take: 1,
         },
       },
-    })
+    });
 
-    return { tickets }
+    return { tickets };
   }
 
   async findOne(ticketId: string) {
@@ -122,19 +130,19 @@ export class TicketsService {
         user: { select: { id: true, phone: true, name: true } },
         replies: { orderBy: { createdAt: 'asc' } },
       },
-    })
+    });
 
-    if (!ticket) throw new NotFoundException(fa.ticket.notFound)
+    if (!ticket) throw new NotFoundException(fa.ticket.notFound);
 
-    return { ticket }
+    return { ticket };
   }
 
   async addAdminReply(ticketId: string, body: string, adminNote?: string) {
     const ticket = await this.prisma.supportTicket.findUnique({
       where: { id: ticketId },
-    })
+    });
 
-    if (!ticket) throw new NotFoundException(fa.ticket.notFound)
+    if (!ticket) throw new NotFoundException(fa.ticket.notFound);
 
     const [reply] = await this.prisma.$transaction([
       this.prisma.ticketReply.create({
@@ -147,9 +155,9 @@ export class TicketsService {
           ...(adminNote !== undefined ? { adminNote } : {}),
         },
       }),
-    ])
+    ]);
 
-    return { reply }
+    return { reply };
   }
 
   async updateStatus(
@@ -160,9 +168,9 @@ export class TicketsService {
   ) {
     const ticket = await this.prisma.supportTicket.findUnique({
       where: { id: ticketId },
-    })
+    });
 
-    if (!ticket) throw new NotFoundException(fa.ticket.notFound)
+    if (!ticket) throw new NotFoundException(fa.ticket.notFound);
 
     const updated = await this.prisma.supportTicket.update({
       where: { id: ticketId },
@@ -171,8 +179,8 @@ export class TicketsService {
         ...(priority !== undefined ? { priority } : {}),
         ...(adminNote !== undefined ? { adminNote } : {}),
       },
-    })
+    });
 
-    return { message: fa.ticket.updated, ticket: updated }
+    return { message: fa.ticket.updated, ticket: updated };
   }
 }

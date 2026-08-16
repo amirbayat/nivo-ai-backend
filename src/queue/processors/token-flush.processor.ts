@@ -17,13 +17,14 @@ export class TokenFlushProcessor {
     const today = new Date().toISOString().slice(0, 10);
     const date = new Date(today);
 
-    const [freeKeys, dpKeys, reqKeys, costKeys, costUsdKeys] = await Promise.all([
-      this.scanKeys(`token:free:*:${today}`),
-      this.scanKeys(`token:dailypaid:*:${today}`),
-      this.scanKeys(`token:req:*:${today}`),
-      this.scanKeys(`cost:daily:*:${today}`),
-      this.scanKeys(`cost_usd:daily:*:${today}`),
-    ]);
+    const [freeKeys, dpKeys, reqKeys, costKeys, costUsdKeys] =
+      await Promise.all([
+        this.scanKeys(`token:free:*:${today}`),
+        this.scanKeys(`token:dailypaid:*:${today}`),
+        this.scanKeys(`token:req:*:${today}`),
+        this.scanKeys(`cost:daily:*:${today}`),
+        this.scanKeys(`cost_usd:daily:*:${today}`),
+      ]);
 
     if (
       !freeKeys.length &&
@@ -35,7 +36,13 @@ export class TokenFlushProcessor {
       return;
 
     // fetch all values in one round-trip batch
-    const allKeys = [...freeKeys, ...dpKeys, ...reqKeys, ...costKeys, ...costUsdKeys];
+    const allKeys = [
+      ...freeKeys,
+      ...dpKeys,
+      ...reqKeys,
+      ...costKeys,
+      ...costUsdKeys,
+    ];
     const values = await Promise.all(allKeys.map((k) => this.redis.get(k)));
 
     // build userId → aggregated usage map

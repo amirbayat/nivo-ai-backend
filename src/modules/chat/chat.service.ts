@@ -5,40 +5,60 @@ import {
   Injectable,
   Logger,
   NotFoundException,
-} from '@nestjs/common'
-import { ConfigService } from '@nestjs/config'
-import * as crypto from 'crypto'
-import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
-import { streamText, generateObject, APICallError } from 'ai'
-import type { ModelMessage, UserModelMessage } from 'ai'
-import { ModelTier, Prisma, type AiModel } from '@prisma/client'
-import { z } from 'zod'
-import { isModelUnavailableError, unwrapAiSdkError } from '../../common/utils/ai-error.util'
-import { PrismaService } from '../../prisma/prisma.service'
-import { RedisService } from '../../redis/redis.service'
-import { TokenService, rollingWindowKey, type PlanLimits } from '../usage/token.service'
-import { PricingService } from '../usage/pricing.service'
-import { TokenEstimatorService } from '../usage/token-estimator.service'
-import { ModelRouterService } from '../model-router/model-router.service'
-import { UsageAnalyticsService } from '../usage-analytics/usage-analytics.service'
-import { TopicService } from '../usage-analytics/topic.service'
-import { CampaignService } from '../campaign/campaign.service'
-import { ChatConfigService } from '../chat-config/chat-config.service'
-import { LiveStatsService } from '../live-stats/live-stats.service'
-import { LiaraKeyProvisioningService } from '../liara/liara-key-provisioning.service'
-import { StorageService } from '../../storage/storage.service'
-import { ImageGenerationService, ImageApiError } from '../../common/services/image-generation.service'
-import { fa } from '../../i18n/fa'
-import type { Response } from 'express'
-import { StreamMessageDto } from './dto/stream-message.dto'
-import { validateChatImages, parseChatImageDataUrl } from '../../common/validators/chat-image.validator'
-import { detectImageGenIntent, detectImageEditIntent } from './image-gen-intent'
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import * as crypto from 'crypto';
+import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
+import { streamText, generateObject, APICallError } from 'ai';
+import type { ModelMessage, UserModelMessage } from 'ai';
+import { ModelTier, Prisma, type AiModel } from '@prisma/client';
+import { z } from 'zod';
+import {
+  isModelUnavailableError,
+  unwrapAiSdkError,
+} from '../../common/utils/ai-error.util';
+import { PrismaService } from '../../prisma/prisma.service';
+import { RedisService } from '../../redis/redis.service';
+import {
+  TokenService,
+  rollingWindowKey,
+  type PlanLimits,
+} from '../usage/token.service';
+import { PricingService } from '../usage/pricing.service';
+import { TokenEstimatorService } from '../usage/token-estimator.service';
+import { ModelRouterService } from '../model-router/model-router.service';
+import { UsageAnalyticsService } from '../usage-analytics/usage-analytics.service';
+import { TopicService } from '../usage-analytics/topic.service';
+import { CampaignService } from '../campaign/campaign.service';
+import { ChatConfigService } from '../chat-config/chat-config.service';
+import { LiveStatsService } from '../live-stats/live-stats.service';
+import { LiaraKeyProvisioningService } from '../liara/liara-key-provisioning.service';
+import { StorageService } from '../../storage/storage.service';
+import {
+  ImageGenerationService,
+  ImageApiError,
+} from '../../common/services/image-generation.service';
+import { fa } from '../../i18n/fa';
+import type { Response } from 'express';
+import { StreamMessageDto } from './dto/stream-message.dto';
+import {
+  validateChatImages,
+  parseChatImageDataUrl,
+} from '../../common/validators/chat-image.validator';
+import {
+  detectImageGenIntent,
+  detectImageEditIntent,
+} from './image-gen-intent';
 
-const OPTIMAL_MODE = 'optimal' // legacy — مقداری که قبل از این تغییر توی localStorage/DB ذخیره شده بود، معادل «بهترین پاسخ» فعلی
+const OPTIMAL_MODE = 'optimal'; // legacy — مقداری که قبل از این تغییر توی localStorage/DB ذخیره شده بود، معادل «بهترین پاسخ» فعلی
 // docs/PRD-model-selection-modes.md — دو حالت خودکار جدید که جایگزین OPTIMAL_MODE قدیمی شدند
-const COST_OPTIMIZED_MODE = 'cost_optimized'
-const BEST_ANSWER_MODE = 'best_answer'
-const AUTO_MODE_SENTINELS = [OPTIMAL_MODE, COST_OPTIMIZED_MODE, BEST_ANSWER_MODE]
+const COST_OPTIMIZED_MODE = 'cost_optimized';
+const BEST_ANSWER_MODE = 'best_answer';
+const AUTO_MODE_SENTINELS = [
+  OPTIMAL_MODE,
+  COST_OPTIMIZED_MODE,
+  BEST_ANSWER_MODE,
+];
 
 // the input-length gate below runs before model routing (the router itself
 // uses input length as a heuristic signal), so the exact model isn't known
@@ -46,21 +66,22 @@ const AUTO_MODE_SENTINELS = [OPTIMAL_MODE, COST_OPTIMIZED_MODE, BEST_ANSWER_MODE
 // (including the free plan's only model) and a close-enough reference for
 // this pre-routing safety check; real billing always uses the SDK's actual
 // usage.inputTokens/outputTokens for the model that ends up running.
-const PRE_ROUTING_REFERENCE_MODEL = 'openai/gpt-4o-mini'
+const PRE_ROUTING_REFERENCE_MODEL = 'openai/gpt-4o-mini';
 
 // همان union که 'ai' برای LanguageModelCallOptions.reasoning می‌خواهد — به‌صورت type export
 // شده نیست، پس اینجا تکرارش می‌کنیم. مقدار Plan.reasoningEffort/PlanRoutingStep.reasoningEffort
 // در DTO ادمین با @IsIn به همین مقادیر محدود شده، پس این cast امن است.
-type ReasoningEffort = 'provider-default' | 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+type ReasoningEffort =
+  'provider-default' | 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 
 const LEGACY_MODEL_MAP: Record<string, string> = {
   'gpt-4o-mini': 'openai/gpt-4o-mini',
   'gpt-4o': 'openai/gpt-4o',
   'gpt-4-turbo': 'openai/gpt-4-turbo',
-}
+};
 
 function resolveModelId(id: string): string {
-  return LEGACY_MODEL_MAP[id] ?? id
+  return LEGACY_MODEL_MAP[id] ?? id;
 }
 
 // ImageApiError دیگر اینجا تعریف نمی‌شود — از src/common/services/image-generation.service.ts
@@ -69,7 +90,7 @@ function resolveModelId(id: string): string {
 
 @Injectable()
 export class ChatService {
-  private readonly logger = new Logger(ChatService.name)
+  private readonly logger = new Logger(ChatService.name);
 
   constructor(
     private readonly prisma: PrismaService,
@@ -95,12 +116,12 @@ export class ChatService {
   // پلتفرم fallback می‌کند — این مسیر هرگز نباید تجربه‌ی چت کاربر را بشکند.
   private async resolveUserApiKey(userId: string): Promise<string> {
     try {
-      return await this.liaraKeyProvisioning.getApiKeyForUser(userId)
+      return await this.liaraKeyProvisioning.getApiKeyForUser(userId);
     } catch (err) {
       this.logger.warn(
         `Liara per-user key unavailable for user=${userId}, falling back to shared key: ${(err as Error).message}`,
-      )
-      return this.config.get<string>('LIARA_API_KEY')!
+      );
+      return this.config.get<string>('LIARA_API_KEY')!;
     }
   }
 
@@ -109,7 +130,7 @@ export class ChatService {
       name: 'liara',
       baseURL: this.config.get<string>('LIARA_AI_BASE_URL')!,
       apiKey,
-    })
+    });
   }
 
   // برای درخواست‌های کوچک/یک‌باره‌ی داخلی (عنوان‌سازی، خلاصه‌سازی) به‌جای generateText.
@@ -118,17 +139,17 @@ export class ChatService {
   // هم از آن استفاده می‌کند) درست کار می‌کنند — پس همین‌جا هم به‌جای تک‌درخواست، استریم می‌کنیم
   // و متن کامل را جمع می‌زنیم؛ رفتار برای caller یکسان است، فقط مسیر گیت‌وی فرق می‌کند.
   private async generateTextViaStream(params: {
-    modelId: string
-    system: string
-    userContent: string
-    maxOutputTokens: number
-    apiKey: string
+    modelId: string;
+    system: string;
+    userContent: string;
+    maxOutputTokens: number;
+    apiKey: string;
   }): Promise<string> {
     // اگر provider call fail بشه (بعد از exhaust شدن retry داخلی)، streamText خودش یک
     // NoOutputGeneratedError جدید و بدون cause می‌سازه و throw می‌کنه (چون هیچ step‌ای ثبت
     // نشده) — خطای واقعی (RetryError/APICallError) فقط توی همین callback در دسترسه، وگرنه
     // در catch سطح caller (generateTitle) دیگه قابل unwrap نیست
-    let capturedProviderError: unknown
+    let capturedProviderError: unknown;
     const result = streamText({
       model: this.buildProvider(params.apiKey)(params.modelId),
       system: params.system,
@@ -143,18 +164,18 @@ export class ChatService {
       // (docs/PERFORMANCE-AND-CONCURRENCY.md بخش ۸) — این‌ها کارهای کوچک و کوتاهند
       timeout: 20_000,
       onError: ({ error }) => {
-        capturedProviderError = error
+        capturedProviderError = error;
       },
-    })
-    let text = ''
+    });
+    let text = '';
     try {
       for await (const chunk of result.textStream) {
-        text += chunk
+        text += chunk;
       }
     } catch (err) {
-      throw capturedProviderError ?? err
+      throw capturedProviderError ?? err;
     }
-    return text
+    return text;
   }
 
   async streamChat(
@@ -177,62 +198,76 @@ export class ChatService {
         contextSummary: true,
         summarizedUntilCreatedAt: true,
       },
-    })
-    if (!conversation) throw new NotFoundException(fa.conversations.notFound)
+    });
+    if (!conversation) throw new NotFoundException(fa.conversations.notFound);
     if (conversation.userId !== userId)
-      throw new ForbiddenException(fa.conversations.forbidden)
+      throw new ForbiddenException(fa.conversations.forbidden);
 
-    const plan = await this.tokenService.getCachedPlan(userId)
+    const plan = await this.tokenService.getCachedPlan(userId);
 
     // ── دوره‌ی آزمایشی کاربر تازه (docs/PRD-growth-traction-features.md بخش ۳) — منطق کامل
     // (شامل توضیح fallback) در TokenService.getEffectiveLimits؛ همان تابع را usage.controller
     // (بنر محدودیت) هم صدا می‌زند تا این دو جا از هم عقب نیفتند.
-    const { inTrial, lifetimeMessageCount, effectiveN, effectiveM, effectiveRollingLimit, effectiveRollingHours } =
-      await this.tokenService.getEffectiveLimits(userId, plan)
+    const {
+      inTrial,
+      lifetimeMessageCount,
+      effectiveN,
+      effectiveM,
+      effectiveRollingLimit,
+      effectiveRollingHours,
+    } = await this.tokenService.getEffectiveLimits(userId, plan);
 
     // ── چهار چک مستقل زیر قبلاً یکی‌یکی (متوالی) اجرا می‌شدند؛ هیچ‌کدام به نتیجه‌ی
     // بقیه نیاز ندارد، پس با Promise.all موازی می‌شوند (docs/PERFORMANCE-AND-CONCURRENCY.md
     // بخش ۱) — ترتیب throw کردن خطاها بعد از این، دقیقاً مثل قبل حفظ شده (فقط fetch موازی شد)
-    const [manualLimitRaw, todayCount, waitlistLimit, rollingWindow] = await Promise.all([
-      this.redis.get(`manual_limit:${userId}`),
-      this.tokenService.getTodayRequestCount(userId),
-      this.campaignService.getWaitingDailyLimit(userId),
-      this.tokenService.getRollingWindowStatus(userId, {
-        rollingWindowLimit: effectiveRollingLimit,
-        rollingWindowHours: effectiveRollingHours ?? plan.rollingWindowHours,
-      }),
-    ])
+    const [manualLimitRaw, todayCount, waitlistLimit, rollingWindow] =
+      await Promise.all([
+        this.redis.get(`manual_limit:${userId}`),
+        this.tokenService.getTodayRequestCount(userId),
+        this.campaignService.getWaitingDailyLimit(userId),
+        this.tokenService.getRollingWindowStatus(userId, {
+          rollingWindowLimit: effectiveRollingLimit,
+          rollingWindowHours: effectiveRollingHours ?? plan.rollingWindowHours,
+        }),
+      ]);
 
     // ── manual limit set by admin ──────────────────────────────────────────
     if (manualLimitRaw) {
       const ml = JSON.parse(manualLimitRaw) as {
-        type: string
-        reason: string
-        expiresAt: number
-      }
-      const remaining = Math.ceil((ml.expiresAt - Date.now()) / 60_000)
+        type: string;
+        reason: string;
+        expiresAt: number;
+      };
+      const remaining = Math.ceil((ml.expiresAt - Date.now()) / 60_000);
       const msg = ml.reason
         ? `${ml.reason} (${remaining} دقیقه دیگر)`
-        : `دسترسی شما توسط ادمین موقتاً محدود شده است (${remaining} دقیقه دیگر)`
-      throw new HttpException({ message: msg }, 429)
+        : `دسترسی شما توسط ادمین موقتاً محدود شده است (${remaining} دقیقه دیگر)`;
+      throw new HttpException({ message: msg }, 429);
     }
 
     // ── سقف موقت لیست انتظار کمپین سافت‌لانچ — بخش ۱۸.۴ ────────────────────
     if (waitlistLimit !== null && todayCount >= waitlistLimit) {
-      this.usageAnalytics.logLimitHit(userId, 'DAILY_MESSAGE_BLOCKED').catch(() => {})
-      throw new HttpException({ message: fa.waitlist.limitReached, waitlisted: true }, 429)
+      this.usageAnalytics
+        .logLimitHit(userId, 'DAILY_MESSAGE_BLOCKED')
+        .catch(() => {});
+      throw new HttpException(
+        { message: fa.waitlist.limitReached, waitlisted: true },
+        429,
+      );
     }
 
     // ── three-zone daily message limit ────────────────────────────────────
-    const N = effectiveN // normal zone ceiling (null = unlimited)
-    const M = effectiveM ?? 0 // throttled zone size
+    const N = effectiveN; // normal zone ceiling (null = unlimited)
+    const M = effectiveM ?? 0; // throttled zone size
 
-    let messageStage: 'normal' | 'throttled' = 'normal'
+    let messageStage: 'normal' | 'throttled' = 'normal';
 
     if (N !== null) {
       if (todayCount >= N + M) {
         // ── BLOCKED ────────────────────────────────────────────────────────
-        this.usageAnalytics.logLimitHit(userId, 'DAILY_MESSAGE_BLOCKED').catch(() => {})
+        this.usageAnalytics
+          .logLimitHit(userId, 'DAILY_MESSAGE_BLOCKED')
+          .catch(() => {});
         throw new HttpException(
           {
             message: fa.chat.dailyBlocked,
@@ -240,11 +275,11 @@ export class ChatService {
             stage: 'blocked',
           },
           429,
-        )
+        );
       }
       if (todayCount >= N) {
         // ── THROTTLED ──────────────────────────────────────────────────────
-        messageStage = 'throttled'
+        messageStage = 'throttled';
       }
     }
 
@@ -252,72 +287,78 @@ export class ChatService {
     // مکمل سقف روزانه‌ی بالا، نه جایگزین آن — هر دو باید هم‌زمان رعایت شوند.
     // null یعنی این پلن اصلاً محدودیت پنجره‌ای ندارد.
     if (rollingWindow.blocked) {
-      this.usageAnalytics.logLimitHit(userId, 'ROLLING_WINDOW_BLOCKED').catch(() => {})
+      this.usageAnalytics
+        .logLimitHit(userId, 'ROLLING_WINDOW_BLOCKED')
+        .catch(() => {});
       throw new HttpException(
         {
-          message: fa.chat.rollingWindowBlocked(effectiveRollingHours ?? plan.rollingWindowHours),
+          message: fa.chat.rollingWindowBlocked(
+            effectiveRollingHours ?? plan.rollingWindowHours,
+          ),
           stage: 'rolling_window_blocked',
           planTier: plan.planTier,
           resetAt: rollingWindow.resetAt,
         },
         429,
-      )
+      );
     }
 
     // ── input token limit (adjusted for throttled zone) ───────────────────
-    let effectiveInputLimit = this.tokenService.resolveInputLimit(plan)
+    let effectiveInputLimit = this.tokenService.resolveInputLimit(plan);
     if (messageStage === 'throttled' && plan.throttledInputTokens) {
-      effectiveInputLimit = plan.throttledInputTokens
+      effectiveInputLimit = plan.throttledInputTokens;
     }
     const estimatedInput = await this.tokenEstimator.estimateTokens(
       dto.content,
       PRE_ROUTING_REFERENCE_MODEL,
-    )
+    );
     if (estimatedInput > effectiveInputLimit) {
-      this.usageAnalytics.logLimitHit(userId, 'INPUT_TOO_LONG').catch(() => {})
-      throw new BadRequestException(fa.chat.inputTooLong(effectiveInputLimit))
+      this.usageAnalytics.logLimitHit(userId, 'INPUT_TOO_LONG').catch(() => {});
+      throw new BadRequestException(fa.chat.inputTooLong(effectiveInputLimit));
     }
 
     // ── budget check + usage percentage (برای مسیریابی استپی Router) ────────
     // در دوره‌ی آزمایشی، بودجه‌ی روزانه هم مثل سقف‌های تعداد پیام نادیده گرفته می‌شود.
     // docs/PRD-pay-as-you-go-wallet.md — پلن PAYG اصلاً بودجه‌ی درصدی priceMonthly ندارد؛
     // گیت واقعی مصرف این پلن چند خط پایین‌تر (بعد از مشخص‌شدن مدل) با موجودی کیف‌پول است.
-    let usagePct: number
+    let usagePct: number;
     if (inTrial || plan.isPayAsYouGo) {
-      usagePct = 0
+      usagePct = 0;
     } else {
       try {
-        ;({ usagePct } = await this.pricingService.assertBudget(
+        ({ usagePct } = await this.pricingService.assertBudget(
           userId,
           plan.priceMonthly,
           plan.planTier,
-        ))
+        ));
       } catch (err) {
-        this.usageAnalytics.logLimitHit(userId, 'BUDGET_EXCEEDED').catch(() => {})
-        throw err
+        this.usageAnalytics
+          .logLimitHit(userId, 'BUDGET_EXCEEDED')
+          .catch(() => {});
+        throw err;
       }
     }
 
-    const allowed = plan.allowedModels
+    const allowed = plan.allowedModels;
     if (allowed.length === 0)
-      throw new ForbiddenException(fa.chat.modelNotAllowed)
+      throw new ForbiddenException(fa.chat.modelNotAllowed);
 
     // docs/PRD-liara-usage-reconciliation.md — یک‌بار برای کل این درخواست resolve می‌شود؛
     // چت معمولی، تیتر، خلاصه‌سازی و تولید عکس (اگر مسیر این درخواست به آن‌جا برود) همه از همین
     // apiKey استفاده می‌کنند تا مصرف واقعی این کاربر روی لیارا زیر یک کلید قابل تفکیک بماند.
-    const apiKey = await this.resolveUserApiKey(userId)
+    const apiKey = await this.resolveUserApiKey(userId);
 
     // اینجا زودتر از قبل گرفته می‌شود (قبلاً پایین‌تر، کنار اعتبارسنجی عکس بود) چون
     // implicitImageGenEnabled همین‌جا لازم است — کش ۶۰ ثانیه‌ای درون‌حافظه‌ای، هزینه‌ی اضافه ندارد
-    const chatConfig = await this.chatConfigService.getConfig()
+    const chatConfig = await this.chatConfigService.getConfig();
 
     // docs/PRD-chat-images.md بخش ۵.۵ — تولید عکس مسیر کاملاً جدایی است: نه Router (طبقه‌بندی
     // SIMPLE/MEDIUM/COMPLEX بی‌معنی است)، نه vision-preflight، نه سهمیه‌ی توکنی خروجی. مدل یا
     // صراحتاً انتخاب شده (toggle فرانت) یا از روی نیت پیام (LLM classifier) تشخیص داده می‌شود.
-    const explicitImageToggle = dto.generateImage === true
-    let imageIntent: { wantsImage: boolean; isEdit: boolean } | null = null
+    const explicitImageToggle = dto.generateImage === true;
+    let imageIntent: { wantsImage: boolean; isEdit: boolean } | null = null;
     if (!explicitImageToggle && chatConfig.implicitImageGenEnabled) {
-      const hasAttachedImage = Boolean(dto.images?.length)
+      const hasAttachedImage = Boolean(dto.images?.length);
       const hasRecentConversationImage =
         !hasAttachedImage &&
         Boolean(
@@ -325,12 +366,28 @@ export class ChatService {
             where: { conversationId, images: { not: Prisma.DbNull } },
             select: { id: true },
           }),
-        )
-      imageIntent = await this.classifyImageIntent(dto.content, hasAttachedImage, hasRecentConversationImage, userId, apiKey)
+        );
+      imageIntent = await this.classifyImageIntent(
+        dto.content,
+        hasAttachedImage,
+        hasRecentConversationImage,
+        userId,
+        apiKey,
+      );
     }
     if (explicitImageToggle || imageIntent?.wantsImage) {
-      const isEditIntent = explicitImageToggle ? Boolean(dto.images?.length) : Boolean(imageIntent?.isEdit)
-      return this.handleImageGeneration(res, conversationId, userId, dto, plan, isEditIntent, apiKey)
+      const isEditIntent = explicitImageToggle
+        ? Boolean(dto.images?.length)
+        : Boolean(imageIntent?.isEdit);
+      return this.handleImageGeneration(
+        res,
+        conversationId,
+        userId,
+        dto,
+        plan,
+        isEditIntent,
+        apiKey,
+      );
     }
 
     // ── model selection via Router — همیشه اجرا می‌شود، حتی روی انتخاب دستی ──
@@ -338,24 +395,24 @@ export class ChatService {
     // مدل صرف‌نظر از قیمت). برای پلن‌های غیر-PAYG (که این selectionMode دیده نمی‌شود)، Router طبق
     // منطق قدیمی SIMPLE/MEDIUM/COMPLEX عمل می‌کند و اگر مدل مشخصی انتخاب شده باشد، برای پیام‌های
     // SIMPLE باز هم بی‌صدا override می‌شود (بخش ۲/۸ PRD-model-router.md).
-    const rawModelChoice = dto.model ?? conversation.model
+    const rawModelChoice = dto.model ?? conversation.model;
     const selectionMode: 'cost_optimized' | 'best_answer' | undefined =
       rawModelChoice === COST_OPTIMIZED_MODE
         ? 'cost_optimized'
         : rawModelChoice === BEST_ANSWER_MODE || rawModelChoice === OPTIMAL_MODE
           ? 'best_answer'
-          : undefined
+          : undefined;
     const manualModel = AUTO_MODE_SENTINELS.includes(rawModelChoice)
       ? undefined
-      : resolveModelId(rawModelChoice)
+      : resolveModelId(rawModelChoice);
     const validManualModel =
-      manualModel && allowed.includes(manualModel) ? manualModel : undefined
+      manualModel && allowed.includes(manualModel) ? manualModel : undefined;
 
     const lastAssistant = await this.prisma.message.findFirst({
       where: { conversationId, role: 'ASSISTANT' },
       orderBy: { createdAt: 'desc' },
       select: { content: true },
-    })
+    });
 
     const routed = await this.modelRouter.route({
       userId,
@@ -370,19 +427,19 @@ export class ChatService {
       reasoningEffort: plan.reasoningEffort,
       isPayAsYouGo: plan.isPayAsYouGo,
       selectionMode,
-    })
-    const modelId = routed.modelId
-    this.modelRouter.log({ userId, conversationId, ...routed }).catch(() => {})
+    });
+    const modelId = routed.modelId;
+    this.modelRouter.log({ userId, conversationId, ...routed }).catch(() => {});
 
     // دراپ‌دون «سریع/هوشمند» کنار ارسال پیام — فقط reasoning effort را override می‌کند، انتخاب
     // مدل (routed.modelId) دست‌نخورده می‌ماند. بدون انتخاب کاربر، رفتار قبلی (reasoningEffort
     // پیش‌فرض پلن/استپ بودجه‌ای که ModelRouterService برگردانده) ادامه دارد.
     const reasoningEffort =
       dto.thinkingMode === 'fast'
-        ? plan.fastReasoningEffort ?? 'none'
+        ? (plan.fastReasoningEffort ?? 'none')
         : dto.thinkingMode === 'smart'
-          ? plan.smartReasoningEffort ?? 'low'
-          : routed.reasoningEffort
+          ? (plan.smartReasoningEffort ?? 'low')
+          : routed.reasoningEffort;
 
     // ── تصاویر: اعتبارسنجی امنیتی + چک vision (preflight) ──────────────────
     // docs/PRD-chat-images.md بخش ۵.۱ — قبل از این، هیچ چک فرمت/حجم/magic-bytes ای
@@ -393,7 +450,7 @@ export class ChatService {
         maxCount: chatConfig.maxImagesPerMessage,
         maxSizeMb: chatConfig.maxImageSizeMb,
         allowedFormats: chatConfig.allowedImageFormats as string[],
-      })
+      });
 
       // نکته: وقتی rawModelChoice یکی از سه سنتینل خودکار باشد، aiModel با این نام پیدا نمی‌شود
       // (modelRecord=null) و این چک بی‌اثر می‌ماند — Router خودش تضمین می‌کند مدل انتخابی از vision
@@ -401,11 +458,11 @@ export class ChatService {
       const modelRecord = await this.prisma.aiModel.findFirst({
         where: { name: rawModelChoice, isActive: true },
         select: { supportsVision: true },
-      })
+      });
       if (modelRecord && !modelRecord.supportsVision) {
         throw new BadRequestException(
           'این مدل از تصویر پشتیبانی نمی‌کند. لطفاً یک مدل Vision‌دار انتخاب کنید.',
-        )
+        );
       }
     }
 
@@ -414,7 +471,7 @@ export class ChatService {
     const estimatedForQuota = await this.tokenEstimator.estimateTokens(
       dto.content,
       modelId,
-    )
+    );
     // docs/PRD-pay-as-you-go-wallet.md — PAYG سقف توکن رایگان/ماهانه ندارد؛ همان bypass موجود
     // برای دوره‌ی آزمایشی اینجا هم استفاده می‌شود (checkQuota با bypass=true چیزی نمی‌سنجد)
     const quota = await this.tokenService.checkQuota(
@@ -422,43 +479,50 @@ export class ChatService {
       plan,
       estimatedForQuota,
       inTrial || plan.isPayAsYouGo,
-    )
+    );
     const throttledMax = this.tokenService.resolveOutputThrottle(
       plan.outputThrottleSteps,
       todayCount,
-    )
-    let maxOut = Math.min(quota.remaining, throttledMax)
+    );
+    let maxOut = Math.min(quota.remaining, throttledMax);
     // further restrict output if in throttled zone
     if (messageStage === 'throttled' && plan.throttledOutputTokens) {
-      maxOut = Math.min(maxOut, plan.throttledOutputTokens)
+      maxOut = Math.min(maxOut, plan.throttledOutputTokens);
     }
 
     // ── گیت مصرف PAYG — بدون بودجه‌ی درصدی، فقط موجودی واقعی کیف‌پول ────────
     // docs/PRD-pay-as-you-go-wallet.md بخش ۵.۲ — تخمین بدبینانه (فرض مصرف کامل maxOut خروجی)
     // تا هیچ‌وقت پیامی اجازه‌ی شروع پیدا نکند که موجودی برایش کافی نیست (بدون موجودی منفی)
     if (plan.isPayAsYouGo) {
-      const markup = plan.payAsYouGoMarkup ?? 1.3
-      const worstCase = await this.pricingService.calcCost(estimatedForQuota, maxOut, modelId)
-      const balance = await this.pricingService.getWalletBalance(userId)
+      const markup = plan.payAsYouGoMarkup ?? 1.3;
+      const worstCase = await this.pricingService.calcCost(
+        estimatedForQuota,
+        maxOut,
+        modelId,
+      );
+      const balance = await this.pricingService.getWalletBalance(userId);
       if (balance < Math.ceil(worstCase.costToman * markup)) {
         throw new HttpException(
-          { message: fa.payAsYouGo.insufficientBalance, stage: 'wallet_insufficient' },
+          {
+            message: fa.payAsYouGo.insufficientBalance,
+            stage: 'wallet_insufficient',
+          },
           402,
-        )
+        );
       }
     }
 
     // ── ALL CHECKS PASSED — start SSE stream ──────────────────────────────
-    res.setHeader('Content-Type', 'text/event-stream')
-    res.setHeader('Cache-Control', 'no-cache')
-    res.setHeader('Connection', 'keep-alive')
-    res.setHeader('X-Accel-Buffering', 'no')
-    res.flushHeaders()
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
 
     // ── send stage info so frontend can update the banner ────────────────
     if (N !== null) {
-      const remainingNormal = Math.max(0, N - todayCount)
-      const remainingThrottled = Math.max(0, N + M - todayCount)
+      const remainingNormal = Math.max(0, N - todayCount);
+      const remainingThrottled = Math.max(0, N + M - todayCount);
       res.write(
         `data: ${JSON.stringify({
           info: 'stage',
@@ -466,29 +530,29 @@ export class ChatService {
           remainingNormal,
           remainingThrottled,
         })}\n\n`,
-      )
+      );
     }
 
     if (throttledMax < 4096) {
       res.write(
         `data: ${JSON.stringify({ info: 'output_throttled', maxOutputTokens: throttledMax })}\n\n`,
-      )
+      );
     }
 
     // برای بنر «چند نفر الان دارن چت می‌کنن» توی ادمین — فقط شمارنده، بدون هیچ محتوایی
-    const streamToken = await this.liveStats.trackStreamStart()
+    const streamToken = await this.liveStats.trackStreamStart();
     // این مقدار اولیه فقط برای خطاهای زودهنگام (قبل از رسیدن به streamText) استفاده می‌شود؛
     // درست قبل از streamText دوباره ست می‌شود تا «تأخیر چت» واقعاً فقط زمان مدل را اندازه بگیرد
     // (نه topic classify/DB/عنوان‌سازی که قبلاً به‌اشتباه داخل همین بازه حساب می‌شدند)
-    let chatCallStart = Date.now()
+    let chatCallStart = Date.now();
     // اگر provider call fail بشه، streamText بعد از exhaust شدن retry داخلی یک
     // NoOutputGeneratedError جدید و بدون cause throw می‌کنه (چون هیچ step‌ای ثبت نشده) —
     // خطای واقعی (RetryError/APICallError) فقط توی onError در دسترسه، وگرنه در catch پایین
     // دیگه قابل unwrap نیست
-    let capturedProviderError: unknown
+    let capturedProviderError: unknown;
 
     try {
-      const topicId = await this.topicService.classify(dto.content)
+      const topicId = await this.topicService.classify(dto.content);
 
       // docs/PRD-chat-images.md بخش ۵.۴ — برای مدل همچنان base64 خام (dto.images) استفاده
       // می‌شود (پایین‌تر)؛ اینجا فقط برای ماندگاری در DB به MinIO آپلود می‌شود. اگر یک عکس
@@ -497,18 +561,24 @@ export class ChatService {
         ? (
             await Promise.all(
               dto.images.map(async (dataUrl) => {
-                const parsed = parseChatImageDataUrl(dataUrl)
-                if (!parsed) return null
+                const parsed = parseChatImageDataUrl(dataUrl);
+                if (!parsed) return null;
                 try {
-                  return await this.storageService.uploadImage(parsed.buffer, parsed.ext, conversationId)
+                  return await this.storageService.uploadImage(
+                    parsed.buffer,
+                    parsed.ext,
+                    conversationId,
+                  );
                 } catch (err) {
-                  this.logger.warn(`MinIO upload failed, image will not be persisted: ${(err as Error).message}`)
-                  return null
+                  this.logger.warn(
+                    `MinIO upload failed, image will not be persisted: ${(err as Error).message}`,
+                  );
+                  return null;
                 }
               }),
             )
           ).filter((key): key is string => key !== null)
-        : []
+        : [];
 
       await this.prisma.message.create({
         data: {
@@ -519,29 +589,36 @@ export class ChatService {
           ...(topicId ? { topicId } : {}),
           ...(persistedImageKeys.length ? { images: persistedImageKeys } : {}),
         },
-      })
+      });
 
       // ── build context: global + plan context, سپس خلاصه‌ی احتمالی، سپس پیام‌های
       // «بعد از آخرین خلاصه‌سازی» (نه یک سقف ثابت پیام) — docs/PRD-chat-context-and-summarization.md بخش ۳/۴
       // (chatConfig بالاتر، قبل از preflight تصاویر، همین‌جا گرفته شده — کش ۶۰ ثانیه‌ای سرویس)
-      const systemParts: string[] = []
-      if (chatConfig.globalContextMd) systemParts.push(chatConfig.globalContextMd)
-      if (plan.contextMd) systemParts.push(plan.contextMd)
-      if (conversation.systemPrompt) systemParts.push(conversation.systemPrompt)
+      const systemParts: string[] = [];
+      if (chatConfig.globalContextMd)
+        systemParts.push(chatConfig.globalContextMd);
+      if (plan.contextMd) systemParts.push(plan.contextMd);
+      if (conversation.systemPrompt)
+        systemParts.push(conversation.systemPrompt);
       if (conversation.contextSummary) {
-        systemParts.push(`خلاصه‌ی مکالمه تا این‌جا:\n${conversation.contextSummary}`)
+        systemParts.push(
+          `خلاصه‌ی مکالمه تا این‌جا:\n${conversation.contextSummary}`,
+        );
       }
 
-      const cutoff = conversation.summarizedUntilCreatedAt
+      const cutoff = conversation.summarizedUntilCreatedAt;
       const recentMessages = await this.prisma.message.findMany({
-        where: { conversationId, ...(cutoff ? { createdAt: { gt: cutoff } } : {}) },
+        where: {
+          conversationId,
+          ...(cutoff ? { createdAt: { gt: cutoff } } : {}),
+        },
         orderBy: { createdAt: 'asc' },
         select: { id: true, role: true, content: true, createdAt: true },
-      })
+      });
 
-      const hasImages = Boolean(dto.images?.length)
+      const hasImages = Boolean(dto.images?.length);
       const coreMessages: ModelMessage[] = recentMessages.map((m, idx) => {
-        const isLast = idx === recentMessages.length - 1
+        const isLast = idx === recentMessages.length - 1;
         if (isLast && m.role === 'USER' && hasImages) {
           const visionMsg: UserModelMessage = {
             role: 'user',
@@ -552,8 +629,8 @@ export class ChatService {
               })),
               { type: 'text' as const, text: m.content },
             ],
-          }
-          return visionMsg
+          };
+          return visionMsg;
         }
         return {
           role:
@@ -563,10 +640,10 @@ export class ChatService {
                 ? 'assistant'
                 : 'system',
           content: m.content,
-        }
-      })
+        };
+      });
 
-      chatCallStart = Date.now()
+      chatCallStart = Date.now();
       const result = streamText({
         model: this.buildProvider(apiKey)(modelId),
         system: systemParts.join('\n\n') || undefined,
@@ -578,15 +655,17 @@ export class ChatService {
         // میزان reasoning effort قابل‌تنظیم در ادمین — پیش‌فرض پلن، با امکان override به‌ازای
         // استپ بودجه‌ای (مسیریابی مدل) یا انتخاب کاربر (دراپ‌دون سریع/هوشمند، بالاتر). null یعنی
         // از پیش‌فرض provider استفاده شود (کلید ست نمی‌شود)
-        ...(reasoningEffort ? { reasoning: reasoningEffort as ReasoningEffort } : {}),
+        ...(reasoningEffort
+          ? { reasoning: reasoningEffort as ReasoningEffort }
+          : {}),
         onError: ({ error }) => {
-          capturedProviderError = error
+          capturedProviderError = error;
         },
-      })
+      });
 
-      let fullContent = ''
-      let reasoningActive = false
-      const isFirstMessage = recentMessages.length === 1
+      let fullContent = '';
+      let reasoningActive = false;
+      const isFirstMessage = recentMessages.length === 1;
 
       // fullStream (نه فقط textStream) چون مدل‌های reasoning (خانواده‌ی gpt-5) قبل از متن نهایی
       // یک فاز استدلال نامرئی دارند — با تفکیک reasoning-*/text-delta می‌شود به فرانت گفت «داره
@@ -595,34 +674,52 @@ export class ChatService {
       // این را هم جدا استریم می‌کنیم تا فرانت بتواند کم‌رنگ/محو نشانش بدهد.
       for await (const part of result.stream) {
         if (part.type === 'reasoning-start') {
-          reasoningActive = true
-          res.write(`data: ${JSON.stringify({ info: 'reasoning', reasoning: true })}\n\n`)
+          reasoningActive = true;
+          res.write(
+            `data: ${JSON.stringify({ info: 'reasoning', reasoning: true })}\n\n`,
+          );
         } else if (part.type === 'reasoning-delta') {
           // فیلد جدا از «chunk» عمداً — چون فرانت هر پیامی با فیلد chunk را مستقیم به متن
           // اصلی پاسخ اضافه می‌کند؛ استفاده از همان اسم این متن استدلال را قاطی جواب می‌کرد
-          res.write(`data: ${JSON.stringify({ info: 'reasoning-chunk', reasoningChunk: part.text })}\n\n`)
+          res.write(
+            `data: ${JSON.stringify({ info: 'reasoning-chunk', reasoningChunk: part.text })}\n\n`,
+          );
         } else if (part.type === 'reasoning-end') {
           if (reasoningActive) {
-            reasoningActive = false
-            res.write(`data: ${JSON.stringify({ info: 'reasoning', reasoning: false })}\n\n`)
+            reasoningActive = false;
+            res.write(
+              `data: ${JSON.stringify({ info: 'reasoning', reasoning: false })}\n\n`,
+            );
           }
         } else if (part.type === 'text-delta') {
           if (reasoningActive) {
-            reasoningActive = false
-            res.write(`data: ${JSON.stringify({ info: 'reasoning', reasoning: false })}\n\n`)
+            reasoningActive = false;
+            res.write(
+              `data: ${JSON.stringify({ info: 'reasoning', reasoning: false })}\n\n`,
+            );
           }
-          fullContent += part.text
-          res.write(`data: ${JSON.stringify({ chunk: part.text })}\n\n`)
+          fullContent += part.text;
+          res.write(`data: ${JSON.stringify({ chunk: part.text })}\n\n`);
         }
       }
 
-      const usage = await result.usage
+      const usage = await result.usage;
       // اینجا دقیقاً «زمان مدل» است — از شروع streamText تا مصرف کامل استریم (reasoning + متن)،
       // بدون DB/عنوان‌سازی/خلاصه‌سازی که بعدش می‌آیند (docs/PERFORMANCE-AND-CONCURRENCY.md)
-      this.liveStats.recordLiaraCall('chat', true, Date.now() - chatCallStart).catch(() => {})
-      const tokensUsed = usage.totalTokens ?? 0
-      const { costToman, costUsdMicros, costInputUsdMicros, costOutputUsdMicros } =
-        await this.pricingService.calcCost(usage.inputTokens ?? 0, usage.outputTokens ?? 0, modelId)
+      this.liveStats
+        .recordLiaraCall('chat', true, Date.now() - chatCallStart)
+        .catch(() => {});
+      const tokensUsed = usage.totalTokens ?? 0;
+      const {
+        costToman,
+        costUsdMicros,
+        costInputUsdMicros,
+        costOutputUsdMicros,
+      } = await this.pricingService.calcCost(
+        usage.inputTokens ?? 0,
+        usage.outputTokens ?? 0,
+        modelId,
+      );
 
       const assistantMessage = await this.prisma.message.create({
         data: {
@@ -638,7 +735,7 @@ export class ChatService {
           costOutputUsdMicros,
           model: modelId,
         },
-      })
+      });
 
       await Promise.all([
         this.tokenService.increment(userId, tokensUsed, quota.source),
@@ -657,7 +754,9 @@ export class ChatService {
           where: { id: userId },
           data: {
             lifetimeMessageCount: { increment: 1 },
-            ...(inTrial && plan.trialMessageThreshold !== null && lifetimeMessageCount + 1 >= plan.trialMessageThreshold
+            ...(inTrial &&
+            plan.trialMessageThreshold !== null &&
+            lifetimeMessageCount + 1 >= plan.trialMessageThreshold
               ? { trialEndedAt: new Date() }
               : {}),
           },
@@ -666,23 +765,43 @@ export class ChatService {
         // نباید سهمی از سقف پنجره‌ی لغزان مصرف کند (effectiveRollingLimit چون در دوره‌ی
         // آزمایشی ممکن است با مقدار همیشگی پلن فرق کند)
         ...(effectiveRollingLimit !== null
-          ? [this.redis.zadd(rollingWindowKey(userId), Date.now(), `${Date.now()}:${crypto.randomUUID()}`)]
+          ? [
+              this.redis.zadd(
+                rollingWindowKey(userId),
+                Date.now(),
+                `${Date.now()}:${crypto.randomUUID()}`,
+              ),
+            ]
           : []),
-      ])
+      ]);
 
       // docs/PRD-pay-as-you-go-wallet.md بخش ۵.۲ — هزینه‌ی واقعی × ضریب پلن از کیف‌پول کم می‌شود؛
       // پیش‌چک بدبینانه‌ی بالاتر (maxOut کامل) تضمین می‌کند این تقریباً هیچ‌وقت insufficient نشود،
       // ولی خطا اینجا فقط لاگ می‌شود نه throw — پیام و پاسخ قبلاً موفق برای کاربر تمام شده‌اند
       if (plan.isPayAsYouGo) {
         this.pricingService
-          .debitWallet(userId, costToman, plan.payAsYouGoMarkup ?? 1.3, fa.payAsYouGo.messageDebitDescription, {
-            messageId: assistantMessage.id,
-            conversationId,
-          })
+          .debitWallet(
+            userId,
+            costToman,
+            plan.payAsYouGoMarkup ?? 1.3,
+            fa.payAsYouGo.messageDebitDescription,
+            {
+              messageId: assistantMessage.id,
+              conversationId,
+            },
+          )
           .then((ok) => {
-            if (!ok) this.logger.error(`debitWallet: insufficient balance for user=${userId} message=${assistantMessage.id}`)
+            if (!ok)
+              this.logger.error(
+                `debitWallet: insufficient balance for user=${userId} message=${assistantMessage.id}`,
+              );
           })
-          .catch((err) => this.logger.error(`debitWallet failed for user=${userId} message=${assistantMessage.id}`, err))
+          .catch((err) =>
+            this.logger.error(
+              `debitWallet failed for user=${userId} message=${assistantMessage.id}`,
+              err,
+            ),
+          );
       }
 
       // فقط برای اولین پیام مکالمه: منتظر عنوان می‌مانیم (نه fire-and-forget) تا همان لحظه با یک
@@ -691,18 +810,27 @@ export class ChatService {
       // تنها هزینه: استریم کمی بعد از پایان متن قابل‌مشاهده بسته می‌شود (یک تولید ۴۰ توکنی)،
       // و فقط برای پیام اول هر مکالمه — نه هر پیام.
       if (!conversation.title && isFirstMessage) {
-        const title = await this.generateTitle(conversationId, fullContent, modelId, apiKey)
+        const title = await this.generateTitle(
+          conversationId,
+          fullContent,
+          modelId,
+          apiKey,
+        );
         if (title) {
-          res.write(`data: ${JSON.stringify({ info: 'title', title })}\n\n`)
+          res.write(`data: ${JSON.stringify({ info: 'title', title })}\n\n`);
         }
       }
 
       // خلاصه‌سازی همچنان fire-and-forget می‌ماند (می‌تواند طول بکشد و روی هر پیام چک می‌شود، نه
       // فقط اولی) — عنوانِ ناشی از خلاصه‌سازی با invalidate پیام بعدی به‌روز می‌شود، نه این‌جا
-      const tokensSinceSummaryText = recentMessages.map(m => m.content).join('\n') + fullContent
-      const tokensSinceSummary = await this.tokenEstimator.estimateTokens(tokensSinceSummaryText, modelId)
+      const tokensSinceSummaryText =
+        recentMessages.map((m) => m.content).join('\n') + fullContent;
+      const tokensSinceSummary = await this.tokenEstimator.estimateTokens(
+        tokensSinceSummaryText,
+        modelId,
+      );
       if (tokensSinceSummary > chatConfig.summaryTriggerTokens) {
-        const messagesToSummarize = [...recentMessages, assistantMessage]
+        const messagesToSummarize = [...recentMessages, assistantMessage];
         this.summarizeConversation(
           conversationId,
           conversation.contextSummary,
@@ -710,26 +838,30 @@ export class ChatService {
           modelId,
           chatConfig.summaryMaxTokens,
           apiKey,
-        ).catch(() => {})
+        ).catch(() => {});
       }
 
-      res.write(`data: [DONE]\n\n`)
+      res.write(`data: [DONE]\n\n`);
     } catch (err: unknown) {
-      const rootError = capturedProviderError ?? err
-      const isModelError = isModelUnavailableError(rootError)
-      const actualError = unwrapAiSdkError(rootError)
-      const message = isModelError ? fa.chat.modelUnavailable : fa.chat.streamError
+      const rootError = capturedProviderError ?? err;
+      const isModelError = isModelUnavailableError(rootError);
+      const actualError = unwrapAiSdkError(rootError);
+      const message = isModelError
+        ? fa.chat.modelUnavailable
+        : fa.chat.streamError;
       this.logger.error(
         `streamChat failed (model=${modelId}): ${actualError instanceof Error ? actualError.message : String(actualError)}`,
         actualError instanceof Error ? actualError.stack : undefined,
-      )
+      );
       res.write(
         `data: ${JSON.stringify({ error: message, code: isModelError ? 'model_unavailable' : 'stream_error' })}\n\n`,
-      )
-      this.liveStats.recordLiaraCall('chat', false, Date.now() - chatCallStart).catch(() => {})
+      );
+      this.liveStats
+        .recordLiaraCall('chat', false, Date.now() - chatCallStart)
+        .catch(() => {});
     } finally {
-      res.end()
-      this.liveStats.trackStreamEnd(streamToken).catch(() => {})
+      res.end();
+      this.liveStats.trackStreamEnd(streamToken).catch(() => {});
     }
   }
 
@@ -749,8 +881,10 @@ export class ChatService {
       wantsImage: hasAttachedImage
         ? detectImageEditIntent(content)
         : detectImageGenIntent(content),
-      isEdit: hasAttachedImage || (hasRecentConversationImage && detectImageEditIntent(content)),
-    })
+      isEdit:
+        hasAttachedImage ||
+        (hasRecentConversationImage && detectImageEditIntent(content)),
+    });
     try {
       const { object, usage } = await generateObject({
         model: this.buildProvider(apiKey)(PRE_ROUTING_REFERENCE_MODEL),
@@ -772,45 +906,53 @@ isEdit: اگر wantsImage=true، آیا منظورش ویرایش/ادامه‌�
 فقط JSON برگردان.`,
         messages: [{ role: 'user', content: content.slice(0, 500) }],
         abortSignal: AbortSignal.timeout(6_000),
-      })
+      });
       if (usage) {
         const { costToman, costUsdMicros } = await this.pricingService.calcCost(
           usage.inputTokens ?? 0,
           usage.outputTokens ?? 0,
           PRE_ROUTING_REFERENCE_MODEL,
-        )
-        this.pricingService.trackCost(userId, costToman, costUsdMicros).catch(() => {})
+        );
+        this.pricingService
+          .trackCost(userId, costToman, costUsdMicros)
+          .catch(() => {});
       }
-      return object
+      return object;
     } catch (err) {
-      this.logger.warn(`Image intent classification failed, falling back to heuristic: ${(err as Error).message}`)
-      return fallback()
+      this.logger.warn(
+        `Image intent classification failed, falling back to heuristic: ${(err as Error).message}`,
+      );
+      return fallback();
     }
   }
 
   // چون گیت‌وی ما previous_response_id (حافظه‌ی مکالمه‌ی خودِ OpenAI برای عکس) را ندارد، خودمان
   // آخرین عکس مرتبط این مکالمه (آپلودی یا تولیدشده، فرقی نمی‌کند) را برای ادامه‌ی ویرایش می‌گیریم
-  private async resolveLastConversationImages(conversationId: string): Promise<Buffer[]> {
+  private async resolveLastConversationImages(
+    conversationId: string,
+  ): Promise<Buffer[]> {
     const lastImageMessage = await this.prisma.message.findFirst({
       where: { conversationId, images: { not: Prisma.DbNull } },
       orderBy: { createdAt: 'desc' },
       select: { images: true },
-    })
-    const keys = (lastImageMessage?.images as string[] | null) ?? []
+    });
+    const keys = (lastImageMessage?.images as string[] | null) ?? [];
     const buffers = await Promise.all(
       keys.map(async (keyOrDataUrl): Promise<Buffer | null> => {
         if (this.storageService.isStorageKey(keyOrDataUrl)) {
           try {
-            return await this.storageService.downloadImage(keyOrDataUrl)
+            return await this.storageService.downloadImage(keyOrDataUrl);
           } catch (err) {
-            this.logger.warn(`Failed to download last conversation image for edit continuation: ${(err as Error).message}`)
-            return null
+            this.logger.warn(
+              `Failed to download last conversation image for edit continuation: ${(err as Error).message}`,
+            );
+            return null;
           }
         }
-        return parseChatImageDataUrl(keyOrDataUrl)?.buffer ?? null
+        return parseChatImageDataUrl(keyOrDataUrl)?.buffer ?? null;
       }),
-    )
-    return buffers.filter((b): b is Buffer => b !== null)
+    );
+    return buffers.filter((b): b is Buffer => b !== null);
   }
 
   // یک مدل تولید عکس ممکن است چند ردیف با کیفیت/قیمت مختلف داشته باشد (مثلاً low/medium/high
@@ -821,8 +963,11 @@ isEdit: اگر wantsImage=true، آیا منظورش ویرایش/ادامه‌�
     prompt: string,
     userId: string,
     apiKey: string,
-  ): Promise<{ tier: ModelTier; size: '1024x1024' | '1024x1536' | '1536x1024' }> {
-    const fallback = { tier: ModelTier.MEDIUM, size: '1024x1024' as const }
+  ): Promise<{
+    tier: ModelTier;
+    size: '1024x1024' | '1024x1536' | '1536x1024';
+  }> {
+    const fallback = { tier: ModelTier.MEDIUM, size: '1024x1024' as const };
     try {
       const { object, usage } = await generateObject({
         model: this.buildProvider(apiKey)(PRE_ROUTING_REFERENCE_MODEL),
@@ -839,7 +984,7 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
 فقط JSON برگردان.`,
         messages: [{ role: 'user', content: prompt.slice(0, 1000) }],
         abortSignal: AbortSignal.timeout(8_000),
-      })
+      });
       // این هم یک تماس واقعی به Liara است و هزینه‌ی واقعی دارد — قبلاً اینجا ردیابی نمی‌شد،
       // یعنی روی Liara شارژ می‌شد ولی توی حساب‌وکتاب داخلی ما اصلاً دیده نمی‌شد
       if (usage) {
@@ -847,13 +992,17 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
           usage.inputTokens ?? 0,
           usage.outputTokens ?? 0,
           PRE_ROUTING_REFERENCE_MODEL,
-        )
-        this.pricingService.trackCost(userId, costToman, costUsdMicros).catch(() => {})
+        );
+        this.pricingService
+          .trackCost(userId, costToman, costUsdMicros)
+          .catch(() => {});
       }
-      return object
+      return object;
     } catch (err) {
-      this.logger.warn(`Image prompt classification failed, falling back to MEDIUM/1024x1024: ${(err as Error).message}`)
-      return fallback
+      this.logger.warn(
+        `Image prompt classification failed, falling back to MEDIUM/1024x1024: ${(err as Error).message}`,
+      );
+      return fallback;
     }
   }
 
@@ -865,13 +1014,16 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
     idealTier: ModelTier,
     idealSize: string,
   ): AiModel[] {
-    const tierScore = (t: string | null) => (t === idealTier ? 2 : 0)
-    const sizeScore = (s: string | null) => (s === idealSize ? 1 : 0)
+    const tierScore = (t: string | null) => (t === idealTier ? 2 : 0);
+    const sizeScore = (s: string | null) => (s === idealSize ? 1 : 0);
     return [...candidates].sort((a, b) => {
-      const scoreDiff = (tierScore(b.tier) + sizeScore(b.imageGenSize)) - (tierScore(a.tier) + sizeScore(a.imageGenSize))
-      if (scoreDiff !== 0) return scoreDiff
-      return a.sortOrder - b.sortOrder
-    })
+      const scoreDiff =
+        tierScore(b.tier) +
+        sizeScore(b.imageGenSize) -
+        (tierScore(a.tier) + sizeScore(a.imageGenSize));
+      if (scoreDiff !== 0) return scoreDiff;
+      return a.sortOrder - b.sortOrder;
+    });
   }
 
   // تخمین محافظه‌کارانه (نه دقیق) — چون هزینه‌ی واقعی فقط بعد از دریافت usage از provider معلوم
@@ -879,18 +1031,25 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
   // بزرگ‌تر از واقعیت است تا کاربر رد نشود از قلم بیفتد و بعداً موجودی‌اش منفی شود.
   // اعداد توکن خروجی از مستندات OpenAI برای gpt-image (low/medium/high در 1024×1024) گرفته شده؛
   // برای ابعاد غیرمربعی یا مدل‌های دیگر همچنان یک سقفِ بالا (نه دقیق) کافی است.
-  private estimateWorstCaseImageUsd(model: AiModel, hasInputImages: boolean): number {
-    const OUTPUT_TOKENS_BY_TIER: Record<string, number> = { SIMPLE: 300, MEDIUM: 1100, COMPLEX: 4200 }
-    const outputTokens = OUTPUT_TOKENS_BY_TIER[model.tier] ?? 4200
-    const textTokens = 300 // سقف بالا برای یک prompt معمولی
-    const imageInputTokens = hasInputImages ? 1500 : 0 // فقط حالت ویرایش — تخمین سقف بالا هر عکس ورودی
+  private estimateWorstCaseImageUsd(
+    model: AiModel,
+    hasInputImages: boolean,
+  ): number {
+    const OUTPUT_TOKENS_BY_TIER: Record<string, number> = {
+      SIMPLE: 300,
+      MEDIUM: 1100,
+      COMPLEX: 4200,
+    };
+    const outputTokens = OUTPUT_TOKENS_BY_TIER[model.tier] ?? 4200;
+    const textTokens = 300; // سقف بالا برای یک prompt معمولی
+    const imageInputTokens = hasInputImages ? 1500 : 0; // فقط حالت ویرایش — تخمین سقف بالا هر عکس ورودی
     return (
       (textTokens * model.inputPricePerM) / 1_000_000 +
-      (imageInputTokens * (model.imageGenInputImagePricePerM ?? 0)) / 1_000_000 +
+      (imageInputTokens * (model.imageGenInputImagePricePerM ?? 0)) /
+        1_000_000 +
       (outputTokens * (model.imageGenOutputImagePricePerM ?? 0)) / 1_000_000
-    )
+    );
   }
-
 
   // docs/PRD-chat-images.md بخش ۵.۵ — مسیر تولید عکس: مستقل از streamText/Router. پیش‌نمایش‌های
   // تدریجی (partial_images) و تصویر نهایی هرکدام با یک رویداد SSE جدا برگردانده می‌شوند.
@@ -909,18 +1068,25 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
     // (که ممکن است چند سطح کیفیت/قیمت مختلف از یک یا چند مدل باشند) بهترین را انتخاب می‌کنیم.
     // اگر کاربر عکس هم فرستاده باشد، این یک درخواست «ویرایش/ترکیب» است (images/edits) نه تولید
     // از صفر — دقیقاً مثل مثال gpt-image-1-mini (چند عکس ورودی + prompt → یک عکس جدید)
-    const hasExplicitInputImages = Boolean(dto.images?.length)
+    const hasExplicitInputImages = Boolean(dto.images?.length);
     // isEditIntent (از classifyImageIntent) یعنی این ادامه‌ی ویرایش یک عکس قبلی همین مکالمه‌ست،
     // حتی اگه کاربر خودش دوباره عکس رو پیوست نکرده باشه («نه، صورتیش کن» بدون آپلود دوباره)
 
     // سقف مستقل تولید/ویرایش عکس این پلن — قبل از هر ذخیره‌سازی/فراخوانی provider چک می‌شود
     // (مثل بقیه‌ی preflight‌های streamChat)، چون هر عکس چند برابر گران‌تر از یک پیام معمولی است
-    const rateLimit = await this.tokenService.getImageGenRateLimitStatus(userId, plan)
+    const rateLimit = await this.tokenService.getImageGenRateLimitStatus(
+      userId,
+      plan,
+    );
     if (rateLimit.blocked) {
       throw new HttpException(
-        { message: fa.chat.imageGenRateLimited, stage: 'image_gen_rate_limited', resetAt: rateLimit.resetAt },
+        {
+          message: fa.chat.imageGenRateLimited,
+          stage: 'image_gen_rate_limited',
+          resetAt: rateLimit.resetAt,
+        },
         429,
-      )
+      );
     }
 
     // این مسیر (برخلاف چت معمولی) زودتر return می‌کند و هیچ‌وقت به کد ذخیره‌سازی پیام کاربر
@@ -931,18 +1097,24 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
       ? (
           await Promise.all(
             dto.images.map(async (dataUrl) => {
-              const parsed = parseChatImageDataUrl(dataUrl)
-              if (!parsed) return null
+              const parsed = parseChatImageDataUrl(dataUrl);
+              if (!parsed) return null;
               try {
-                return await this.storageService.uploadImage(parsed.buffer, parsed.ext, conversationId)
+                return await this.storageService.uploadImage(
+                  parsed.buffer,
+                  parsed.ext,
+                  conversationId,
+                );
               } catch (err) {
-                this.logger.warn(`MinIO upload failed for input image, keeping raw base64: ${(err as Error).message}`)
-                return dataUrl
+                this.logger.warn(
+                  `MinIO upload failed for input image, keeping raw base64: ${(err as Error).message}`,
+                );
+                return dataUrl;
               }
             }),
           )
         ).filter((key): key is string => key !== null)
-      : []
+      : [];
 
     await this.prisma.message.create({
       data: {
@@ -950,76 +1122,106 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
         userId,
         role: 'USER',
         content: dto.content,
-        ...(persistedInputImageKeys.length ? { images: persistedInputImageKeys } : {}),
+        ...(persistedInputImageKeys.length
+          ? { images: persistedInputImageKeys }
+          : {}),
       },
-    })
+    });
 
-    const requestedModel = dto.model && !AUTO_MODE_SENTINELS.includes(dto.model) ? resolveModelId(dto.model) : undefined
+    const requestedModel =
+      dto.model && !AUTO_MODE_SENTINELS.includes(dto.model)
+        ? resolveModelId(dto.model)
+        : undefined;
     const explicitModelRecord =
       requestedModel && plan.allowedModels.includes(requestedModel)
         ? await this.prisma.aiModel.findFirst({
-            where: { name: requestedModel, isActive: true, supportsImageGen: true },
+            where: {
+              name: requestedModel,
+              isActive: true,
+              supportsImageGen: true,
+            },
           })
-        : null
+        : null;
 
     const candidates = await this.prisma.aiModel.findMany({
-      where: { name: { in: plan.allowedModels }, supportsImageGen: true, isActive: true },
+      where: {
+        name: { in: plan.allowedModels },
+        supportsImageGen: true,
+        isActive: true,
+      },
       orderBy: { sortOrder: 'asc' },
-    })
+    });
     if (!candidates.length) {
-      throw new BadRequestException({ message: fa.chat.imageGenNotSupported, code: 'IMAGE_GEN_NOT_SUPPORTED' })
+      throw new BadRequestException({
+        message: fa.chat.imageGenNotSupported,
+        code: 'IMAGE_GEN_NOT_SUPPORTED',
+      });
     }
 
     // زنجیره‌ی fallback: اگر مدل دقیقاً درخواست‌شده/پیش‌فرضِ پلن هست اول امتحان می‌شود، بعد
     // بقیه‌ی مدل‌های ranked (بهترین تطابق کیفیت اول) — اگر اولی fail کند (نه به‌خاطر سیاست
     // محتوا)، به بعدی fallback می‌شود، نه اینکه کل درخواست fail شود
-    let candidateChain: AiModel[]
+    let candidateChain: AiModel[];
     if (explicitModelRecord) {
-      candidateChain = [explicitModelRecord, ...candidates.filter(c => c.id !== explicitModelRecord.id)]
+      candidateChain = [
+        explicitModelRecord,
+        ...candidates.filter((c) => c.id !== explicitModelRecord.id),
+      ];
     } else {
-      const { tier: idealTier, size: idealSize } = await this.classifyImagePrompt(dto.content, userId, apiKey)
-      const ranked = this.rankImageModelCandidates(candidates, idealTier, idealSize)
+      const { tier: idealTier, size: idealSize } =
+        await this.classifyImagePrompt(dto.content, userId, apiKey);
+      const ranked = this.rankImageModelCandidates(
+        candidates,
+        idealTier,
+        idealSize,
+      );
       const defaultRecord = plan.defaultImageGenModel
-        ? ranked.find(c => c.name === plan.defaultImageGenModel)
-        : undefined
+        ? ranked.find((c) => c.name === plan.defaultImageGenModel)
+        : undefined;
       candidateChain = defaultRecord
-        ? [defaultRecord, ...ranked.filter(c => c.id !== defaultRecord.id)]
-        : ranked
+        ? [defaultRecord, ...ranked.filter((c) => c.id !== defaultRecord.id)]
+        : ranked;
     }
 
     if (plan.isPayAsYouGo) {
-      const markup = plan.payAsYouGoMarkup ?? 1.3
-      const balance = await this.pricingService.getWalletBalance(userId)
-      const hasAnyInputImages = hasExplicitInputImages || isEditIntent
-      const affordableChain: AiModel[] = []
+      const markup = plan.payAsYouGoMarkup ?? 1.3;
+      const balance = await this.pricingService.getWalletBalance(userId);
+      const hasAnyInputImages = hasExplicitInputImages || isEditIntent;
+      const affordableChain: AiModel[] = [];
       for (const candidate of candidateChain) {
         const { costToman } = await this.pricingService.calcFlatCostToman(
           this.estimateWorstCaseImageUsd(candidate, hasAnyInputImages),
-        )
-        if (balance >= Math.ceil(costToman * markup)) affordableChain.push(candidate)
+        );
+        if (balance >= Math.ceil(costToman * markup))
+          affordableChain.push(candidate);
       }
       if (!affordableChain.length) {
         throw new HttpException(
-          { message: fa.payAsYouGo.insufficientBalance, stage: 'wallet_insufficient' },
+          {
+            message: fa.payAsYouGo.insufficientBalance,
+            stage: 'wallet_insufficient',
+          },
           402,
-        )
+        );
       }
-      candidateChain = affordableChain
+      candidateChain = affordableChain;
     }
 
-    res.setHeader('Content-Type', 'text/event-stream')
-    res.setHeader('Cache-Control', 'no-cache')
-    res.setHeader('Connection', 'keep-alive')
-    res.setHeader('X-Accel-Buffering', 'no')
-    res.flushHeaders()
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
 
     // وقتی toggle صریح فرانت فعال بوده، فرانت از قبل isGeneratingImage را خودش true کرده —
     // ولی وقتی تشخیص ضمنی/heuristic باعث اومدن به این مسیر شده، فرانت هیچ‌وقت از قبل خبر نداشت
     // این پیام قراره تولید عکس بشه؛ بدون این رویداد، لودینگ آماده‌سازی عکس اصلاً نشون داده نمی‌شد
-    res.write(`data: ${JSON.stringify({ info: 'image-generation-started' })}\n\n`)
+    res.write(
+      `data: ${JSON.stringify({ info: 'image-generation-started' })}\n\n`,
+    );
 
-    const streamToken = await this.liveStats.trackStreamStart()
-    const callStart = Date.now()
+    const streamToken = await this.liveStats.trackStreamStart();
+    const callStart = Date.now();
 
     try {
       // اگر کاربر خودش عکس نفرستاده ولی این ادامه‌ی یک ویرایش قبلی تشخیص داده شده («نه، صورتیش
@@ -1033,21 +1235,23 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
             .map((p) => p.buffer)
         : isEditIntent
           ? await this.resolveLastConversationImages(conversationId)
-          : []
+          : [];
 
       // پیش‌نمایش تدریجی واقعی (نه صرفاً یک انیمیشن تزئینی) — provider تا ۲ نسخه‌ی جزئی و
       // واضح‌ترشونده قبل از تصویر نهایی برمی‌گرداند؛ همون لحظه به فرانت هم می‌فرستیمش
       const onPartial = (base64: string) => {
         res.write(
           `data: ${JSON.stringify({ info: 'image-partial', image: `data:image/png;base64,${base64}` })}\n\n`,
-        )
-      }
+        );
+      };
 
       // زنجیره‌ی fallback — روی خطای سیاست محتوا اصلاً fallback نمی‌کنیم (مدل دیگر هم رد
       // می‌کند، فقط هزینه/تأخیر اضافه می‌شود)، ولی روی خطای شبکه/provider به مدل بعدی می‌رویم
-      let modelRecord: AiModel | null = null
-      let result: Awaited<ReturnType<typeof this.imageGen.generateImage>> | null = null
-      let lastErr: unknown = null
+      let modelRecord: AiModel | null = null;
+      let result: Awaited<
+        ReturnType<typeof this.imageGen.generateImage>
+      > | null = null;
+      let lastErr: unknown = null;
       for (const candidate of candidateChain) {
         try {
           result = inputImageBuffers.length
@@ -1067,35 +1271,53 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
                 size: candidate.imageGenSize ?? undefined,
                 quality: candidate.imageGenQuality ?? undefined,
                 onPartial,
-              })
-          modelRecord = candidate
-          lastErr = null
-          break
+              });
+          modelRecord = candidate;
+          lastErr = null;
+          break;
         } catch (err) {
-          lastErr = err
-          if (err instanceof ImageApiError && err.isPolicyViolation) throw err
-          this.logger.warn(`image gen failed with model=${candidate.name}, trying next fallback: ${(err as Error).message}`)
+          lastErr = err;
+          if (err instanceof ImageApiError && err.isPolicyViolation) throw err;
+          this.logger.warn(
+            `image gen failed with model=${candidate.name}, trying next fallback: ${(err as Error).message}`,
+          );
         }
       }
-      if (!result || !modelRecord) throw lastErr ?? new Error('image generation: no candidate model succeeded')
-      const modelId = modelRecord.name
-      this.liveStats.recordLiaraCall('chat', true, Date.now() - callStart).catch(() => {})
+      if (!result || !modelRecord)
+        throw (
+          lastErr ?? new Error('image generation: no candidate model succeeded')
+        );
+      const modelId = modelRecord.name;
+      this.liveStats
+        .recordLiaraCall('chat', true, Date.now() - callStart)
+        .catch(() => {});
 
-      const { costToman, costUsdMicros, costInputUsdMicros, costOutputUsdMicros } =
-        await this.pricingService.calcImageGenCost(result.usage, modelRecord)
-      const buffer = Buffer.from(result.base64, 'base64')
+      const {
+        costToman,
+        costUsdMicros,
+        costInputUsdMicros,
+        costOutputUsdMicros,
+      } = await this.pricingService.calcImageGenCost(result.usage, modelRecord);
+      const buffer = Buffer.from(result.base64, 'base64');
 
-      let imageKey: string | null = null
+      let imageKey: string | null = null;
       try {
-        imageKey = await this.storageService.uploadImage(buffer, 'png', conversationId)
+        imageKey = await this.storageService.uploadImage(
+          buffer,
+          'png',
+          conversationId,
+        );
       } catch (err) {
-        this.logger.warn(`MinIO upload failed for generated image: ${(err as Error).message}`)
+        this.logger.warn(
+          `MinIO upload failed for generated image: ${(err as Error).message}`,
+        );
       }
 
       // اگر آپلود به MinIO fail بشه، عکس رو کامل از دست نمی‌دیم — همون base64 خام رو ذخیره
       // می‌کنیم (فرمت قدیمی که کد خواندنش رو از قبل پشتیبانی می‌کند، isStorageKey تشخیصش می‌ده)؛
       // وگرنه پیام دستیار با content خالی و بدون عکس، کاملاً نامرئی می‌شد (نه متن نه عکس)
-      const persistedImage = imageKey ?? `data:image/png;base64,${result.base64}`
+      const persistedImage =
+        imageKey ?? `data:image/png;base64,${result.base64}`;
 
       const assistantMessage = await this.prisma.message.create({
         data: {
@@ -1110,7 +1332,7 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
           costOutputUsdMicros,
           model: modelId,
         },
-      })
+      });
 
       await Promise.all([
         this.pricingService.trackCost(userId, costToman, costUsdMicros),
@@ -1119,38 +1341,55 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
           where: { id: conversationId },
           data: { lastMessageAt: new Date() },
         }),
-      ])
+      ]);
 
       if (plan.isPayAsYouGo) {
         this.pricingService
-          .debitWallet(userId, costToman, plan.payAsYouGoMarkup ?? 1.3, fa.payAsYouGo.messageDebitDescription, {
-            messageId: assistantMessage.id,
-            conversationId,
-            kind: 'image-generation',
-          })
+          .debitWallet(
+            userId,
+            costToman,
+            plan.payAsYouGoMarkup ?? 1.3,
+            fa.payAsYouGo.messageDebitDescription,
+            {
+              messageId: assistantMessage.id,
+              conversationId,
+              kind: 'image-generation',
+            },
+          )
           .then((ok) => {
-            if (!ok) this.logger.error(`debitWallet: insufficient balance for user=${userId} message=${assistantMessage.id}`)
+            if (!ok)
+              this.logger.error(
+                `debitWallet: insufficient balance for user=${userId} message=${assistantMessage.id}`,
+              );
           })
-          .catch((err) => this.logger.error(`debitWallet failed (image-gen) for user=${userId}`, err))
+          .catch((err) =>
+            this.logger.error(
+              `debitWallet failed (image-gen) for user=${userId}`,
+              err,
+            ),
+          );
       }
 
-      const dataUrl = `data:image/png;base64,${result.base64}`
+      const dataUrl = `data:image/png;base64,${result.base64}`;
       res.write(
         `data: ${JSON.stringify({ info: 'image-generated', image: dataUrl, messageId: assistantMessage.id })}\n\n`,
-      )
-      res.write('data: [DONE]\n\n')
+      );
+      res.write('data: [DONE]\n\n');
     } catch (err) {
-      this.liveStats.recordLiaraCall('chat', false, Date.now() - callStart).catch(() => {})
-      const isPolicyViolation = err instanceof ImageApiError && err.isPolicyViolation
+      this.liveStats
+        .recordLiaraCall('chat', false, Date.now() - callStart)
+        .catch(() => {});
+      const isPolicyViolation =
+        err instanceof ImageApiError && err.isPolicyViolation;
       this.logger.error(
         `image generation failed${err instanceof ImageApiError ? ` (code=${err.code})` : ''}: ${(err as Error).message}`,
-      )
+      );
       res.write(
         `data: ${JSON.stringify({ error: isPolicyViolation ? fa.chat.imageGenPolicyViolation : fa.chat.imageGenFailed })}\n\n`,
-      )
+      );
     } finally {
-      res.end()
-      this.liveStats.trackStreamEnd(streamToken).catch(() => {})
+      res.end();
+      this.liveStats.trackStreamEnd(streamToken).catch(() => {});
     }
   }
 
@@ -1165,7 +1404,7 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
     modelId: string,
     apiKey: string,
   ): Promise<string | null> {
-    const callStart = Date.now()
+    const callStart = Date.now();
     try {
       const text = await this.generateTextViaStream({
         modelId,
@@ -1179,21 +1418,27 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
         // نماند و خروجی خالی برگردد (دقیقاً همین اتفاق در لاگ پروداکشن دیده شد)
         maxOutputTokens: 300,
         apiKey,
-      })
-      this.liveStats.recordLiaraCall('title', true, Date.now() - callStart).catch(() => {})
-      const title = text.trim().replace(/^["'«»\n]+|["'«»\n]+$/g, '')
+      });
+      this.liveStats
+        .recordLiaraCall('title', true, Date.now() - callStart)
+        .catch(() => {});
+      const title = text.trim().replace(/^["'«»\n]+|["'«»\n]+$/g, '');
       if (title) {
         await this.prisma.conversation.update({
           where: { id: conversationId },
           data: { title },
-        })
-        return title
+        });
+        return title;
       }
-      this.logger.warn(`generateTitle: model returned empty title (conversation=${conversationId})`)
-      return null
+      this.logger.warn(
+        `generateTitle: model returned empty title (conversation=${conversationId})`,
+      );
+      return null;
     } catch (err) {
-      this.liveStats.recordLiaraCall('title', false, Date.now() - callStart).catch(() => {})
-      const actualError = unwrapAiSdkError(err)
+      this.liveStats
+        .recordLiaraCall('title', false, Date.now() - callStart)
+        .catch(() => {});
+      const actualError = unwrapAiSdkError(err);
 
       if (APICallError.isInstance(actualError)) {
         // خطای واقعی سمت Liara/provider — statusCode و responseBody دقیقاً همون چیزیه که
@@ -1202,14 +1447,14 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
           `generateTitle failed (conversation=${conversationId}, model=${modelId}) — API call error: ` +
             `statusCode=${actualError.statusCode} url=${actualError.url} isRetryable=${actualError.isRetryable} ` +
             `responseBody=${actualError.responseBody ?? '(none)'} requestBodyValues=${JSON.stringify(actualError.requestBodyValues)}`,
-        )
+        );
       } else {
         this.logger.error(
           `generateTitle failed (conversation=${conversationId}, model=${modelId}): ${err instanceof Error ? err.message : String(err)}`,
           err instanceof Error ? err.stack : undefined,
-        )
+        );
       }
-      return null
+      return null;
     }
   }
 
@@ -1224,14 +1469,14 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
     apiKey: string,
   ): Promise<void> {
     const transcript = messages
-      .map(m => `${m.role === 'USER' ? 'کاربر' : 'دستیار'}: ${m.content}`)
-      .join('\n')
+      .map((m) => `${m.role === 'USER' ? 'کاربر' : 'دستیار'}: ${m.content}`)
+      .join('\n');
     const input = previousSummary
       ? `خلاصه‌ی قبلی:\n${previousSummary}\n\nادامه‌ی مکالمه:\n${transcript}`
-      : transcript
+      : transcript;
 
-    const callStart = Date.now()
-    let summary: string
+    const callStart = Date.now();
+    let summary: string;
     try {
       summary = await this.generateTextViaStream({
         modelId,
@@ -1242,17 +1487,21 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
         userContent: input,
         maxOutputTokens: maxSummaryTokens,
         apiKey,
-      })
-      this.liveStats.recordLiaraCall('summary', true, Date.now() - callStart).catch(() => {})
+      });
+      this.liveStats
+        .recordLiaraCall('summary', true, Date.now() - callStart)
+        .catch(() => {});
     } catch (err) {
-      this.liveStats.recordLiaraCall('summary', false, Date.now() - callStart).catch(() => {})
-      throw err
+      this.liveStats
+        .recordLiaraCall('summary', false, Date.now() - callStart)
+        .catch(() => {});
+      throw err;
     }
 
-    const trimmedSummary = summary.trim()
-    if (!trimmedSummary) return
+    const trimmedSummary = summary.trim();
+    if (!trimmedSummary) return;
 
-    const lastMessage = messages[messages.length - 1]
+    const lastMessage = messages[messages.length - 1];
     await this.prisma.conversation.update({
       where: { id: conversationId },
       data: {
@@ -1260,10 +1509,10 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
         summarizedAt: new Date(),
         summarizedUntilCreatedAt: lastMessage.createdAt,
       },
-    })
+    });
 
     // بازسازی عنوان بر اساس خلاصه‌ی تازه — بدون قید «اگه از قبل نداشت»، چون قطعاً تا این
     // مرحله عنوان از قبل ساخته شده و می‌خواهیم با تحول مکالمه به‌روز بماند
-    await this.generateTitle(conversationId, trimmedSummary, modelId, apiKey)
+    await this.generateTitle(conversationId, trimmedSummary, modelId, apiKey);
   }
 }

@@ -1,8 +1,8 @@
-import { Injectable } from '@nestjs/common'
-import { PrismaService } from '../../prisma/prisma.service'
-import type { SalesBotConfig } from '@prisma/client'
+import { Injectable } from '@nestjs/common';
+import { PrismaService } from '../../prisma/prisma.service';
+import type { SalesBotConfig } from '@prisma/client';
 
-const CACHE_TTL_MS = 60_000
+const CACHE_TTL_MS = 60_000;
 
 // مقدار پیش‌فرض — نسخه‌ی بازنویسی‌شده‌ی docs/PRD-sales-kb-rag-and-plan-context.md بخش الف.۸
 // (پرامپت کوتاه‌تر + قابل ترکیب با نمونه‌های بازیابی‌شده از پایگاه دانش، به‌جای یک پرامپت
@@ -68,10 +68,10 @@ export const DEFAULT_CONTEXT_MD = `تو نیوو هستی، یک مشاور خر
 ## پلن‌ها
 - رایگان: ۵ پیام هر ۳ ساعت، بدون هزینه
 - اکو: ۱۹۹,۰۰۰ تومان/ماه، محدودیت بیشتر باز می‌شود
-- پلاس: ۴۹۹,۰۰۰ تومان/ماه، بیشترین محدودیت و مدل‌ها`
+- پلاس: ۴۹۹,۰۰۰ تومان/ماه، بیشترین محدودیت و مدل‌ها`;
 
 export const DEFAULT_DISCOUNT_PROMPT =
-  'به نظر می‌رسه هنوز مطمئن نیستی — یه کد تخفیف ویژه برات کنار بذارم؟ فقط شماره‌ت رو بده 🎁'
+  'به نظر می‌رسه هنوز مطمئن نیستی — یه کد تخفیف ویژه برات کنار بذارم؟ فقط شماره‌ت رو بده 🎁';
 
 export type UpdatableSalesBotConfig = Partial<
   Pick<
@@ -85,7 +85,7 @@ export type UpdatableSalesBotConfig = Partial<
     | 'discountMinMessages'
     | 'discountPromptText'
   >
->
+>;
 
 /**
  * تک نقطه‌ی دسترسی به SalesBotConfig (singleton) — هم برای مسیر چت عمومی (بدون لاگین،
@@ -95,40 +95,51 @@ export type UpdatableSalesBotConfig = Partial<
  */
 @Injectable()
 export class SalesConfigService {
-  private cached: SalesBotConfig | null = null
-  private cachedAt = 0
+  private cached: SalesBotConfig | null = null;
+  private cachedAt = 0;
 
   constructor(private readonly prisma: PrismaService) {}
 
   async getConfig(): Promise<SalesBotConfig> {
-    const now = Date.now()
-    if (this.cached && now - this.cachedAt < CACHE_TTL_MS) return this.cached
+    const now = Date.now();
+    if (this.cached && now - this.cachedAt < CACHE_TTL_MS) return this.cached;
 
     const config = await this.prisma.salesBotConfig.upsert({
       where: { id: 'singleton' },
-      create: { id: 'singleton', contextMd: DEFAULT_CONTEXT_MD, discountPromptText: DEFAULT_DISCOUNT_PROMPT },
+      create: {
+        id: 'singleton',
+        contextMd: DEFAULT_CONTEXT_MD,
+        discountPromptText: DEFAULT_DISCOUNT_PROMPT,
+      },
       update: {},
-    })
+    });
 
-    this.cached = config
-    this.cachedAt = now
-    return config
+    this.cached = config;
+    this.cachedAt = now;
+    return config;
   }
 
   async updateConfig(data: UpdatableSalesBotConfig): Promise<SalesBotConfig> {
     // dto class fields با مقدار undefined هم به‌صورت key صریح روی instance ست می‌شوند
     // (به خاطر useDefineForClassFields در تایپ‌اسکریپت)، پس باید قبل از spread حذف شوند
     // وگرنه مقادیر پیش‌فرض create را با undefined بازنویسی می‌کنند.
-    const definedData = Object.fromEntries(Object.entries(data).filter(([, v]) => v !== undefined))
+    const definedData = Object.fromEntries(
+      Object.entries(data).filter(([, v]) => v !== undefined),
+    );
 
     const config = await this.prisma.salesBotConfig.upsert({
       where: { id: 'singleton' },
-      create: { id: 'singleton', contextMd: DEFAULT_CONTEXT_MD, discountPromptText: DEFAULT_DISCOUNT_PROMPT, ...definedData },
+      create: {
+        id: 'singleton',
+        contextMd: DEFAULT_CONTEXT_MD,
+        discountPromptText: DEFAULT_DISCOUNT_PROMPT,
+        ...definedData,
+      },
       update: definedData,
-    })
+    });
 
-    this.cached = config
-    this.cachedAt = Date.now()
-    return config
+    this.cached = config;
+    this.cachedAt = Date.now();
+    return config;
   }
 }

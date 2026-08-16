@@ -1,10 +1,10 @@
-import { Module } from '@nestjs/common'
-import { UsageModule } from '../usage/usage.module'
-import { GrowthConfigService } from './growth-config.service'
-import { OnboardingGiftService } from './onboarding-gift.service'
-import { DiscountCodeService } from './discount-code.service'
-import { GrowthPublicController } from './growth-public.controller'
-import { GrowthAdminController } from './growth-admin.controller'
+import { Module } from '@nestjs/common';
+import { UsageModule } from '../usage/usage.module';
+import { GrowthConfigService } from './growth-config.service';
+import { OnboardingGiftService } from './onboarding-gift.service';
+import { DiscountCodeService } from './discount-code.service';
+import { GrowthPublicController } from './growth-public.controller';
+import { GrowthAdminController } from './growth-admin.controller';
 
 @Module({
   imports: [UsageModule],

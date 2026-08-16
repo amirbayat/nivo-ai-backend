@@ -1,15 +1,15 @@
-import { Body, Controller, Get, Patch, UseGuards } from '@nestjs/common'
-import { Prisma } from '@prisma/client'
-import { JwtGuard } from '../../common/guards/jwt.guard'
-import { AdminGuard } from '../../common/guards/admin.guard'
-import { PrismaService } from '../../prisma/prisma.service'
-import { ModelRouterService } from './model-router.service'
-import { UpdateRoutingConfigDto } from './dto/update-routing-config.dto'
+import { Body, Controller, Get, Patch, UseGuards } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
+import { JwtGuard } from '../../common/guards/jwt.guard';
+import { AdminGuard } from '../../common/guards/admin.guard';
+import { PrismaService } from '../../prisma/prisma.service';
+import { ModelRouterService } from './model-router.service';
+import { UpdateRoutingConfigDto } from './dto/update-routing-config.dto';
 
-const SINGLETON_ID = 'singleton'
+const SINGLETON_ID = 'singleton';
 
 function toUpdateData(dto: UpdateRoutingConfigDto) {
-  const { simpleKeywords, complexKeywords, ...rest } = dto
+  const { simpleKeywords, complexKeywords, ...rest } = dto;
   return {
     ...rest,
     ...(simpleKeywords !== undefined && {
@@ -18,7 +18,7 @@ function toUpdateData(dto: UpdateRoutingConfigDto) {
     ...(complexKeywords !== undefined && {
       complexKeywords: complexKeywords as Prisma.InputJsonValue,
     }),
-  }
+  };
 }
 
 @Controller('admin/model-routing-config')
@@ -31,17 +31,17 @@ export class ModelRoutingConfigController {
 
   @Get()
   async get() {
-    const config = await this.prisma.modelRoutingConfig.findFirst()
+    const config = await this.prisma.modelRoutingConfig.findFirst();
     return (
       config ??
       this.prisma.modelRoutingConfig.create({ data: { id: SINGLETON_ID } })
-    )
+    );
   }
 
   @Patch()
   async update(@Body() dto: UpdateRoutingConfigDto) {
-    const data = toUpdateData(dto)
-    const existing = await this.prisma.modelRoutingConfig.findFirst()
+    const data = toUpdateData(dto);
+    const existing = await this.prisma.modelRoutingConfig.findFirst();
     const updated = existing
       ? await this.prisma.modelRoutingConfig.update({
           where: { id: existing.id },
@@ -49,9 +49,9 @@ export class ModelRoutingConfigController {
         })
       : await this.prisma.modelRoutingConfig.create({
           data: { id: SINGLETON_ID, ...data },
-        })
+        });
 
-    await this.modelRouter.invalidateConfigCache()
-    return updated
+    await this.modelRouter.invalidateConfigCache();
+    return updated;
   }
 }

@@ -1,5 +1,5 @@
-import { marked } from 'marked'
-import type { Article, ArticleCategory } from '@prisma/client'
+import { marked } from 'marked';
+import type { Article, ArticleCategory } from '@prisma/client';
 
 // این استایل عمداً جدا از باندل React است (بخش ۳ docs/PRD-articles-seo-blog.md) —
 // همون پالت رنگی/فونت فرانت اصلی (slate/emerald، IRANYekanMsn) را دستی تکرار می‌کند
@@ -79,29 +79,39 @@ const BASE_STYLE = `
     display: inline-block; margin-top: 16px; padding: 12px 28px; border-radius: 12px;
     background: #10b981; color: #fff; font-weight: 700; font-size: 14px;
   }
-`
+`;
 
 function escapeHtml(s: string): string {
   return s
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
+    .replace(/"/g, '&quot;');
 }
 
 function formatDate(d: Date): string {
-  return new Intl.DateTimeFormat('fa-IR', { year: 'numeric', month: 'long', day: 'numeric' }).format(d)
+  return new Intl.DateTimeFormat('fa-IR', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  }).format(d);
 }
 
 interface LayoutOptions {
-  title: string
-  description: string
-  ogImage?: string | null
-  canonicalPath: string
-  bodyHtml: string
+  title: string;
+  description: string;
+  ogImage?: string | null;
+  canonicalPath: string;
+  bodyHtml: string;
 }
 
-function renderLayout({ title, description, ogImage, canonicalPath, bodyHtml }: LayoutOptions): string {
+function renderLayout({
+  title,
+  description,
+  ogImage,
+  canonicalPath,
+  bodyHtml,
+}: LayoutOptions): string {
   return `<!DOCTYPE html>
 <html dir="rtl" lang="fa">
 <head>
@@ -133,27 +143,28 @@ function renderLayout({ title, description, ogImage, canonicalPath, bodyHtml }: 
     ${bodyHtml}
   </main>
 </body>
-</html>`
+</html>`;
 }
 
 export function renderArticleListPage(opts: {
-  categories: ArticleCategory[]
-  activeCategorySlug?: string
-  articles: (Article & { category: ArticleCategory | null })[]
+  categories: ArticleCategory[];
+  activeCategorySlug?: string;
+  articles: (Article & { category: ArticleCategory | null })[];
 }): string {
-  const { categories, activeCategorySlug, articles } = opts
+  const { categories, activeCategorySlug, articles } = opts;
 
   const categoryLinks = [
     `<li><a href="/blog" class="${!activeCategorySlug ? 'active' : ''}">همه‌ی مقالات</a></li>`,
     ...categories.map(
-      c => `<li><a href="/blog?category=${encodeURIComponent(c.slug)}" class="${activeCategorySlug === c.slug ? 'active' : ''}">${escapeHtml(c.name)}</a></li>`,
+      (c) =>
+        `<li><a href="/blog?category=${encodeURIComponent(c.slug)}" class="${activeCategorySlug === c.slug ? 'active' : ''}">${escapeHtml(c.name)}</a></li>`,
     ),
-  ].join('')
+  ].join('');
 
   const cards = articles.length
     ? articles
         .map(
-          a => `<a class="card" href="/blog/${encodeURIComponent(a.slug)}">
+          (a) => `<a class="card" href="/blog/${encodeURIComponent(a.slug)}">
         ${a.category ? `<div class="cat">${escapeHtml(a.category.name)}</div>` : ''}
         <h2>${escapeHtml(a.title)}</h2>
         <p>${escapeHtml(a.metaDescription ?? '')}</p>
@@ -161,7 +172,7 @@ export function renderArticleListPage(opts: {
       </a>`,
         )
         .join('')
-    : `<div class="empty">هنوز مقاله‌ای منتشر نشده.</div>`
+    : `<div class="empty">هنوز مقاله‌ای منتشر نشده.</div>`;
 
   const bodyHtml = `
     <div class="layout">
@@ -170,19 +181,24 @@ export function renderArticleListPage(opts: {
         <h3>دسته‌بندی‌ها</h3>
         <ul>${categoryLinks}</ul>
       </aside>
-    </div>`
+    </div>`;
 
   return renderLayout({
     title: 'مقالات نیوو — آموزش و راهنمای هوش مصنوعی',
-    description: 'مقالات آموزشی نیوو درباره‌ی هوش مصنوعی، کاربردها، و راهنمای استفاده.',
+    description:
+      'مقالات آموزشی نیوو درباره‌ی هوش مصنوعی، کاربردها، و راهنمای استفاده.',
     canonicalPath: '/blog',
     bodyHtml,
-  })
+  });
 }
 
-export function renderArticlePage(article: Article & { category: ArticleCategory | null }): string {
-  const bodyMd = marked.parse(article.contentMd) as string
-  const description = article.metaDescription ?? article.contentMd.replace(/[#*_`]/g, '').slice(0, 160)
+export function renderArticlePage(
+  article: Article & { category: ArticleCategory | null },
+): string {
+  const bodyMd = marked.parse(article.contentMd) as string;
+  const description =
+    article.metaDescription ??
+    article.contentMd.replace(/[#*_`]/g, '').slice(0, 160);
 
   const bodyHtml = `
     <article class="post">
@@ -196,7 +212,7 @@ export function renderArticlePage(article: Article & { category: ArticleCategory
         <p>ChatGPT، Claude، Gemini، Grok، DeepSeek و مدل‌های دیگه — با پرداخت ریالی و به‌صرفه، بدون فیلترشکن و بدون کارت بانکی خارجی.</p>
         <a href="/login">شروع رایگان ←</a>
       </footer>
-    </article>`
+    </article>`;
 
   return renderLayout({
     title: `${article.title} | نیوو`,
@@ -204,5 +220,5 @@ export function renderArticlePage(article: Article & { category: ArticleCategory
     ogImage: article.coverImageUrl,
     canonicalPath: `/blog/${article.slug}`,
     bodyHtml,
-  })
+  });
 }

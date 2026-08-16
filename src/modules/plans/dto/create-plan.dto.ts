@@ -1,175 +1,186 @@
-import { IsArray, IsBoolean, IsIn, IsInt, IsNumber, IsObject, IsOptional, IsString, MaxLength, Min } from 'class-validator'
-import { fa } from '../../../i18n/fa'
-import { REASONING_EFFORT_VALUES } from '../reasoning-effort.constants'
+import {
+  IsArray,
+  IsBoolean,
+  IsIn,
+  IsInt,
+  IsNumber,
+  IsObject,
+  IsOptional,
+  IsString,
+  MaxLength,
+  Min,
+} from 'class-validator';
+import { fa } from '../../../i18n/fa';
+import { REASONING_EFFORT_VALUES } from '../reasoning-effort.constants';
 
 export class CreatePlanDto {
   @IsString({ message: fa.validation.required })
   @MaxLength(100, { message: fa.validation.stringTooLong })
-  name: string
+  name: string;
 
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(0, { message: fa.validation.numberPositive })
-  priceMonthly: number // تومان
+  priceMonthly: number; // تومان
 
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(0, { message: fa.validation.numberPositive })
-  dailyFreeTokens: number
+  dailyFreeTokens: number;
 
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(0, { message: fa.validation.numberPositive })
-  monthlyTotalTokens: number
+  monthlyTotalTokens: number;
 
   @IsArray({ message: fa.validation.mustBeArray })
   @IsString({ each: true, message: fa.validation.required })
-  allowedModels: string[]
+  allowedModels: string[];
 
   @IsOptional()
   @IsObject({ message: fa.validation.required })
-  features?: Record<string, unknown>
+  features?: Record<string, unknown>;
 
   @IsBoolean({ message: fa.validation.mustBeBoolean })
-  isActive: boolean
+  isActive: boolean;
 
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(0, { message: fa.validation.numberPositive })
-  sortOrder: number
+  sortOrder: number;
 
   @IsOptional()
   @IsBoolean({ message: fa.validation.mustBeBoolean })
-  isPopular?: boolean
+  isPopular?: boolean;
 
   @IsOptional()
   @IsArray({ message: fa.validation.mustBeArray })
   @IsString({ each: true, message: fa.validation.required })
-  featuredModels?: string[]
+  featuredModels?: string[];
 
   @IsOptional()
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(1, { message: fa.validation.numberPositive })
-  featuredModelsCount?: number
+  featuredModelsCount?: number;
 
   @IsOptional()
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(1, { message: fa.validation.numberPositive })
-  dailyMessageLimit?: number | null
+  dailyMessageLimit?: number | null;
 
   @IsOptional()
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(1, { message: fa.validation.numberPositive })
-  maxInputTokens?: number
+  maxInputTokens?: number;
 
   @IsOptional()
   @IsArray({ message: fa.validation.mustBeArray })
-  outputThrottleSteps?: { afterMessages: number; maxOutputTokens: number }[]
+  outputThrottleSteps?: { afterMessages: number; maxOutputTokens: number }[];
 
   @IsOptional()
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(0, { message: fa.validation.numberPositive })
-  throttledMessageCount?: number | null
+  throttledMessageCount?: number | null;
 
   @IsOptional()
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(1, { message: fa.validation.numberPositive })
-  throttledInputTokens?: number | null
+  throttledInputTokens?: number | null;
 
   @IsOptional()
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(1, { message: fa.validation.numberPositive })
-  throttledOutputTokens?: number | null
+  throttledOutputTokens?: number | null;
 
   @IsOptional()
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(1, { message: fa.validation.numberPositive })
-  rollingWindowLimit?: number | null
+  rollingWindowLimit?: number | null;
 
   @IsOptional()
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(1, { message: fa.validation.numberPositive })
-  rollingWindowHours?: number
+  rollingWindowHours?: number;
 
   @IsOptional()
   @IsString({ message: fa.validation.required })
-  contextMd?: string
+  contextMd?: string;
 
   @IsOptional()
   @IsIn(REASONING_EFFORT_VALUES, { message: fa.validation.required })
-  reasoningEffort?: string | null
+  reasoningEffort?: string | null;
 
   @IsOptional()
   @IsIn(REASONING_EFFORT_VALUES, { message: fa.validation.required })
-  fastReasoningEffort?: string | null
+  fastReasoningEffort?: string | null;
 
   @IsOptional()
   @IsIn(REASONING_EFFORT_VALUES, { message: fa.validation.required })
-  smartReasoningEffort?: string | null
+  smartReasoningEffort?: string | null;
 
   @IsOptional()
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(1, { message: fa.validation.numberPositive })
-  trialMessageThreshold?: number | null
+  trialMessageThreshold?: number | null;
 
   @IsOptional()
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(1, { message: fa.validation.numberPositive })
-  trialDailyMessageLimit?: number | null
+  trialDailyMessageLimit?: number | null;
 
   @IsOptional()
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(0, { message: fa.validation.numberPositive })
-  trialThrottledMessageCount?: number | null
+  trialThrottledMessageCount?: number | null;
 
   @IsOptional()
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(1, { message: fa.validation.numberPositive })
-  trialRollingWindowLimit?: number | null
+  trialRollingWindowLimit?: number | null;
 
   @IsOptional()
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(1, { message: fa.validation.numberPositive })
-  trialRollingWindowHours?: number | null
+  trialRollingWindowHours?: number | null;
 
   // docs/PRD-pay-as-you-go-wallet.md
   @IsOptional()
   @IsBoolean({ message: fa.validation.mustBeBoolean })
-  isPayAsYouGo?: boolean
+  isPayAsYouGo?: boolean;
 
   @IsOptional()
   @IsNumber({}, { message: fa.validation.mustBeNumber })
   @Min(1, { message: fa.validation.numberPositive })
-  payAsYouGoMarkup?: number
+  payAsYouGoMarkup?: number;
 
   @IsOptional()
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(0, { message: fa.validation.numberPositive })
-  payAsYouGoMinActivationToman?: number
+  payAsYouGoMinActivationToman?: number;
 
   @IsOptional()
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(0, { message: fa.validation.numberPositive })
-  payAsYouGoMinTopupToman?: number
+  payAsYouGoMinTopupToman?: number;
 
   @IsOptional()
   @IsArray({ message: fa.validation.mustBeArray })
   @IsInt({ each: true, message: fa.validation.mustBeNumber })
-  payAsYouGoTopupPresets?: number[]
+  payAsYouGoTopupPresets?: number[];
 
   // تنظیمات تولید/ویرایش عکس مخصوص این پلن
   @IsOptional()
   @IsString({ message: fa.validation.required })
-  defaultImageGenModel?: string | null
+  defaultImageGenModel?: string | null;
 
   @IsOptional()
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(1, { message: fa.validation.numberPositive })
-  maxImageGenPerDay?: number | null
+  maxImageGenPerDay?: number | null;
 
   @IsOptional()
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(1, { message: fa.validation.numberPositive })
-  maxImageGenPerWindow?: number | null
+  maxImageGenPerWindow?: number | null;
 
   @IsOptional()
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(1, { message: fa.validation.numberPositive })
-  imageGenWindowHours?: number | null
+  imageGenWindowHours?: number | null;
 }

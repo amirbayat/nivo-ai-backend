@@ -1,48 +1,48 @@
-import { Injectable, Logger } from '@nestjs/common'
-import { ConfigService } from '@nestjs/config'
-import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
-import { embed, cosineSimilarity } from 'ai'
-import type { SalesKbKind } from '@prisma/client'
-import { PrismaService } from '../../prisma/prisma.service'
-import { PricingService } from '../usage/pricing.service'
-import { SalesConfigService } from './sales-config.service'
+import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
+import { embed, cosineSimilarity } from 'ai';
+import type { SalesKbKind } from '@prisma/client';
+import { PrismaService } from '../../prisma/prisma.service';
+import { PricingService } from '../usage/pricing.service';
+import { SalesConfigService } from './sales-config.service';
 
 // docs/PRD-sales-kb-rag-and-plan-context.md بخش الف.۶-الف.۷ —
 // بدون pgvector: با مقیاس چند صد نمونه، مقایسه‌ی برداری در حافظه‌ی خود پردازش
 // (نه یک افزونه‌ی جدید Postgres) کاملاً کافی و در حد چند میلی‌ثانیه است.
-const CACHE_TTL_MS = 60_000
-const SIMILARITY_THRESHOLD = 0.75
-const MAX_RETRIEVED = 5
+const CACHE_TTL_MS = 60_000;
+const SIMILARITY_THRESHOLD = 0.75;
+const MAX_RETRIEVED = 5;
 
-const IRAN_OFFSET_MS = 3.5 * 60 * 60 * 1000
+const IRAN_OFFSET_MS = 3.5 * 60 * 60 * 1000;
 function iranDate(): string {
-  return new Date(Date.now() + IRAN_OFFSET_MS).toISOString().slice(0, 10)
+  return new Date(Date.now() + IRAN_OFFSET_MS).toISOString().slice(0, 10);
 }
 
 export interface SalesKbEntryInput {
-  kind: SalesKbKind
-  label: string
-  tags?: string[]
-  userMessage: string
-  assistantReply: string
-  note?: string | null
-  isActive?: boolean
+  kind: SalesKbKind;
+  label: string;
+  tags?: string[];
+  userMessage: string;
+  assistantReply: string;
+  note?: string | null;
+  isActive?: boolean;
 }
 
-export type SalesKbEntryUpdateInput = Partial<SalesKbEntryInput>
+export type SalesKbEntryUpdateInput = Partial<SalesKbEntryInput>;
 
 interface CachedEntry {
-  id: string
-  userMessage: string
-  assistantReply: string
-  embedding: number[]
-  embeddingModel: string | null
+  id: string;
+  userMessage: string;
+  assistantReply: string;
+  embedding: number[];
+  embeddingModel: string | null;
 }
 
 export interface RetrievalDebugResult {
-  id: string
-  userMessage: string
-  score: number
+  id: string;
+  userMessage: string;
+  score: number;
 }
 
 /**
@@ -57,11 +57,11 @@ export interface RetrievalDebugResult {
  */
 @Injectable()
 export class SalesKbService {
-  private readonly logger = new Logger(SalesKbService.name)
-  private readonly provider
+  private readonly logger = new Logger(SalesKbService.name);
+  private readonly provider;
 
-  private cache: CachedEntry[] | null = null
-  private cachedAt = 0
+  private cache: CachedEntry[] | null = null;
+  private cachedAt = 0;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -73,53 +73,68 @@ export class SalesKbService {
       name: 'liara',
       baseURL: this.config.get<string>('LIARA_AI_BASE_URL')!,
       apiKey: this.config.get<string>('LIARA_API_KEY')!,
-    })
+    });
   }
 
   /** برای sales.service.ts — روی هر پیام کاربر صدا زده می‌شود. */
-  async retrieveRelevant(userText: string): Promise<{ userMessage: string; assistantReply: string }[]> {
-    const activeModel = await this.getActiveEmbeddingModel()
-    const entries = (await this.getActiveEntriesCached()).filter(e => e.embeddingModel === activeModel)
-    if (entries.length === 0) return []
+  async retrieveRelevant(
+    userText: string,
+  ): Promise<{ userMessage: string; assistantReply: string }[]> {
+    const activeModel = await this.getActiveEmbeddingModel();
+    const entries = (await this.getActiveEntriesCached()).filter(
+      (e) => e.embeddingModel === activeModel,
+    );
+    if (entries.length === 0) return [];
 
-    const embedded = await this.computeEmbedding(userText, activeModel)
-    if (!embedded) return [] // اگر تماس embedding شکست خورد، پاسخ اصلی بدون بلوک KB ادامه پیدا می‌کند
+    const embedded = await this.computeEmbedding(userText, activeModel);
+    if (!embedded) return []; // اگر تماس embedding شکست خورد، پاسخ اصلی بدون بلوک KB ادامه پیدا می‌کند
 
     return entries
-      .map(entry => ({ entry, score: cosineSimilarity(embedded.embedding, entry.embedding) }))
-      .filter(s => s.score >= SIMILARITY_THRESHOLD)
+      .map((entry) => ({
+        entry,
+        score: cosineSimilarity(embedded.embedding, entry.embedding),
+      }))
+      .filter((s) => s.score >= SIMILARITY_THRESHOLD)
       .sort((a, b) => b.score - a.score)
       .slice(0, MAX_RETRIEVED)
-      .map(s => ({ userMessage: s.entry.userMessage, assistantReply: s.entry.assistantReply }))
+      .map((s) => ({
+        userMessage: s.entry.userMessage,
+        assistantReply: s.entry.assistantReply,
+      }));
   }
 
   /** برای دکمه‌ی «تست بازیابی» در تب پایگاه دانش ادمین — امتیاز خام همه‌ی نمونه‌های فعال را نشان می‌دهد. */
   async testRetrieval(sampleMessage: string): Promise<RetrievalDebugResult[]> {
-    const activeModel = await this.getActiveEmbeddingModel()
-    const entries = (await this.getActiveEntriesCached()).filter(e => e.embeddingModel === activeModel)
-    const embedded = await this.computeEmbedding(sampleMessage, activeModel)
-    if (!embedded) return []
+    const activeModel = await this.getActiveEmbeddingModel();
+    const entries = (await this.getActiveEntriesCached()).filter(
+      (e) => e.embeddingModel === activeModel,
+    );
+    const embedded = await this.computeEmbedding(sampleMessage, activeModel);
+    if (!embedded) return [];
 
     return entries
-      .map(entry => ({
+      .map((entry) => ({
         id: entry.id,
         userMessage: entry.userMessage,
         score: cosineSimilarity(embedded.embedding, entry.embedding),
       }))
       .sort((a, b) => b.score - a.score)
-      .slice(0, 10)
+      .slice(0, 10);
   }
 
   async list(kind?: SalesKbKind) {
     return this.prisma.salesKbEntry.findMany({
       where: kind ? { kind } : {},
       orderBy: { createdAt: 'desc' },
-    })
+    });
   }
 
   async create(input: SalesKbEntryInput) {
-    const activeModel = await this.getActiveEmbeddingModel()
-    const embedded = await this.computeEmbedding(input.userMessage, activeModel)
+    const activeModel = await this.getActiveEmbeddingModel();
+    const embedded = await this.computeEmbedding(
+      input.userMessage,
+      activeModel,
+    );
     const entry = await this.prisma.salesKbEntry.create({
       data: {
         kind: input.kind,
@@ -129,46 +144,58 @@ export class SalesKbService {
         assistantReply: input.assistantReply,
         note: input.note ?? null,
         isActive: input.isActive ?? true,
-        ...(embedded ? { embedding: embedded.embedding, embeddingModel: activeModel } : {}),
+        ...(embedded
+          ? { embedding: embedded.embedding, embeddingModel: activeModel }
+          : {}),
       },
-    })
-    this.invalidateCache()
-    return entry
+    });
+    this.invalidateCache();
+    return entry;
   }
 
   async update(id: string, input: SalesKbEntryUpdateInput) {
-    const data: Record<string, unknown> = { ...input }
+    const data: Record<string, unknown> = { ...input };
     if (input.userMessage !== undefined) {
-      const activeModel = await this.getActiveEmbeddingModel()
-      const embedded = await this.computeEmbedding(input.userMessage, activeModel)
+      const activeModel = await this.getActiveEmbeddingModel();
+      const embedded = await this.computeEmbedding(
+        input.userMessage,
+        activeModel,
+      );
       if (embedded) {
-        data.embedding = embedded.embedding
-        data.embeddingModel = activeModel
+        data.embedding = embedded.embedding;
+        data.embeddingModel = activeModel;
       }
     }
-    const entry = await this.prisma.salesKbEntry.update({ where: { id }, data })
-    this.invalidateCache()
-    return entry
+    const entry = await this.prisma.salesKbEntry.update({
+      where: { id },
+      data,
+    });
+    this.invalidateCache();
+    return entry;
   }
 
   async remove(id: string) {
-    await this.prisma.salesKbEntry.delete({ where: { id } })
-    this.invalidateCache()
+    await this.prisma.salesKbEntry.delete({ where: { id } });
+    this.invalidateCache();
   }
 
   /** آپلود دسته‌ای از تب ادمین — عمداً پی‌درپی (نه Promise.all) تا فشار ناگهانی به Liara وارد نشود. */
-  async bulkImport(inputs: SalesKbEntryInput[]): Promise<{ created: number; failed: number; errors: string[] }> {
-    let created = 0
-    const errors: string[] = []
+  async bulkImport(
+    inputs: SalesKbEntryInput[],
+  ): Promise<{ created: number; failed: number; errors: string[] }> {
+    let created = 0;
+    const errors: string[] = [];
     for (const input of inputs) {
       try {
-        await this.create(input)
-        created++
+        await this.create(input);
+        created++;
       } catch (err) {
-        errors.push(`"${input.label}": ${err instanceof Error ? err.message : String(err)}`)
+        errors.push(
+          `"${input.label}": ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
     }
-    return { created, failed: errors.length, errors }
+    return { created, failed: errors.length, errors };
   }
 
   /**
@@ -176,77 +203,96 @@ export class SalesKbService {
    * این متد همه‌ی نمونه‌ها را با مدل فعلی دوباره embed می‌کند. عمداً همه (حتی isActive=false).
    */
   async recomputeAll(): Promise<{ updated: number; failed: number }> {
-    const activeModel = await this.getActiveEmbeddingModel()
-    const all = await this.prisma.salesKbEntry.findMany({ select: { id: true, userMessage: true } })
-    let updated = 0
-    let failed = 0
+    const activeModel = await this.getActiveEmbeddingModel();
+    const all = await this.prisma.salesKbEntry.findMany({
+      select: { id: true, userMessage: true },
+    });
+    let updated = 0;
+    let failed = 0;
     for (const row of all) {
-      const embedded = await this.computeEmbedding(row.userMessage, activeModel)
+      const embedded = await this.computeEmbedding(
+        row.userMessage,
+        activeModel,
+      );
       if (!embedded) {
-        failed++
-        continue
+        failed++;
+        continue;
       }
       await this.prisma.salesKbEntry.update({
         where: { id: row.id },
         data: { embedding: embedded.embedding, embeddingModel: activeModel },
-      })
-      updated++
+      });
+      updated++;
     }
-    this.invalidateCache()
-    return { updated, failed }
+    this.invalidateCache();
+    return { updated, failed };
   }
 
   private async getActiveEmbeddingModel(): Promise<string> {
-    const cfg = await this.salesConfig.getConfig()
-    return cfg.embeddingModel
+    const cfg = await this.salesConfig.getConfig();
+    return cfg.embeddingModel;
   }
 
   private async getActiveEntriesCached(): Promise<CachedEntry[]> {
-    const now = Date.now()
-    if (this.cache && now - this.cachedAt < CACHE_TTL_MS) return this.cache
+    const now = Date.now();
+    if (this.cache && now - this.cachedAt < CACHE_TTL_MS) return this.cache;
 
     const rows = await this.prisma.salesKbEntry.findMany({
       where: { isActive: true },
-      select: { id: true, userMessage: true, assistantReply: true, embedding: true, embeddingModel: true },
-    })
+      select: {
+        id: true,
+        userMessage: true,
+        assistantReply: true,
+        embedding: true,
+        embeddingModel: true,
+      },
+    });
 
     this.cache = rows
-      .filter(r => Array.isArray(r.embedding))
-      .map(r => ({
+      .filter((r) => Array.isArray(r.embedding))
+      .map((r) => ({
         id: r.id,
         userMessage: r.userMessage,
         assistantReply: r.assistantReply,
         embedding: r.embedding as unknown as number[],
         embeddingModel: r.embeddingModel,
-      }))
-    this.cachedAt = now
-    return this.cache
+      }));
+    this.cachedAt = now;
+    return this.cache;
   }
 
   private invalidateCache(): void {
-    this.cache = null
+    this.cache = null;
   }
 
-  private async computeEmbedding(text: string, modelId: string): Promise<{ embedding: number[] } | null> {
+  private async computeEmbedding(
+    text: string,
+    modelId: string,
+  ): Promise<{ embedding: number[] } | null> {
     try {
       const { embedding, usage } = await embed({
         model: this.provider.embeddingModel(modelId),
         value: text,
-      })
-      this.recordEmbeddingUsage(usage.tokens, modelId).catch(() => {})
-      return { embedding }
+      });
+      this.recordEmbeddingUsage(usage.tokens, modelId).catch(() => {});
+      return { embedding };
     } catch (err) {
-      this.logger.error(`embedding computation failed: ${err instanceof Error ? err.message : String(err)}`)
-      return null
+      this.logger.error(
+        `embedding computation failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return null;
     }
   }
 
   // آنالیتیکس هزینه‌ی embedding — جدا از هزینه‌ی چت روی همان sales_bot_daily_usage
   // (docs/PRD-sales-kb-rag-and-plan-context.md بخش الف.۱۲). شکست این بخش هرگز نباید
   // پاسخ اصلی به کاربر را fail کند — همیشه با .catch بی‌صدا فراخوانی می‌شود.
-  private async recordEmbeddingUsage(tokens: number, modelId: string): Promise<void> {
-    const cost = await this.pricing.calcCost(tokens, 0, modelId)
-    const date = new Date(iranDate())
+  private async recordEmbeddingUsage(
+    tokens: number,
+    modelId: string,
+  ): Promise<void> {
+    const cost = await this.pricing.calcCost(tokens, 0, modelId);
+    const date = new Date(iranDate());
     await this.prisma.salesBotDailyUsage.upsert({
       where: { date },
       create: {
@@ -262,6 +308,6 @@ export class SalesKbService {
         embeddingCostToman: { increment: cost.costToman },
         embeddingCostUsdMicros: { increment: cost.costUsdMicros },
       },
-    })
+    });
   }
 }

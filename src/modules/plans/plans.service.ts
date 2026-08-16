@@ -1,10 +1,10 @@
-import { Injectable, NotFoundException } from '@nestjs/common'
-import { Prisma } from '@prisma/client'
-import { PrismaService } from '../../prisma/prisma.service'
-import { RedisService } from '../../redis/redis.service'
-import { fa } from '../../i18n/fa'
-import { CreatePlanDto } from './dto/create-plan.dto'
-import { UpdatePlanDto } from './dto/update-plan.dto'
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
+import { PrismaService } from '../../prisma/prisma.service';
+import { RedisService } from '../../redis/redis.service';
+import { fa } from '../../i18n/fa';
+import { CreatePlanDto } from './dto/create-plan.dto';
+import { UpdatePlanDto } from './dto/update-plan.dto';
 
 @Injectable()
 export class PlansService {
@@ -17,13 +17,13 @@ export class PlansService {
     return this.prisma.plan.findMany({
       where: { isActive: true },
       orderBy: { sortOrder: 'asc' },
-    })
+    });
   }
 
   findAllAdmin() {
     return this.prisma.plan.findMany({
       orderBy: { sortOrder: 'asc' },
-    })
+    });
   }
 
   // فقط فیلدهای عمومی/غیرحساس — بدون قیمت — برای ساخت آیکون/توضیح مدل در فرانت (دراپ‌داون چت، کارت پلن‌ها)
@@ -45,13 +45,13 @@ export class PlansService {
         supportsImageGen: true,
         sortOrder: true,
       },
-    })
+    });
   }
 
   async findOne(id: string) {
-    const plan = await this.prisma.plan.findUnique({ where: { id } })
-    if (!plan) throw new NotFoundException(fa.plans.notFound)
-    return plan
+    const plan = await this.prisma.plan.findUnique({ where: { id } });
+    if (!plan) throw new NotFoundException(fa.plans.notFound);
+    return plan;
   }
 
   create(dto: CreatePlanDto) {
@@ -67,23 +67,49 @@ export class PlansService {
         sortOrder: dto.sortOrder,
         dailyMessageLimit: dto.dailyMessageLimit ?? null,
         ...(dto.isPopular !== undefined && { isPopular: dto.isPopular }),
-        ...(dto.featuredModels !== undefined && { featuredModels: dto.featuredModels as Prisma.InputJsonValue }),
-        ...(dto.featuredModelsCount !== undefined && { featuredModelsCount: dto.featuredModelsCount }),
-        ...(dto.maxInputTokens !== undefined && { maxInputTokens: dto.maxInputTokens }),
-        ...(dto.outputThrottleSteps !== undefined && {
-          outputThrottleSteps: dto.outputThrottleSteps as Prisma.InputJsonValue,
+        ...(dto.featuredModels !== undefined && {
+          featuredModels: dto.featuredModels,
         }),
-        ...(dto.throttledMessageCount !== undefined && { throttledMessageCount: dto.throttledMessageCount ?? null }),
-        ...(dto.throttledInputTokens !== undefined && { throttledInputTokens: dto.throttledInputTokens ?? null }),
-        ...(dto.throttledOutputTokens !== undefined && { throttledOutputTokens: dto.throttledOutputTokens ?? null }),
-        ...(dto.rollingWindowLimit !== undefined && { rollingWindowLimit: dto.rollingWindowLimit ?? null }),
-        ...(dto.rollingWindowHours !== undefined && { rollingWindowHours: dto.rollingWindowHours }),
+        ...(dto.featuredModelsCount !== undefined && {
+          featuredModelsCount: dto.featuredModelsCount,
+        }),
+        ...(dto.maxInputTokens !== undefined && {
+          maxInputTokens: dto.maxInputTokens,
+        }),
+        ...(dto.outputThrottleSteps !== undefined && {
+          outputThrottleSteps: dto.outputThrottleSteps,
+        }),
+        ...(dto.throttledMessageCount !== undefined && {
+          throttledMessageCount: dto.throttledMessageCount ?? null,
+        }),
+        ...(dto.throttledInputTokens !== undefined && {
+          throttledInputTokens: dto.throttledInputTokens ?? null,
+        }),
+        ...(dto.throttledOutputTokens !== undefined && {
+          throttledOutputTokens: dto.throttledOutputTokens ?? null,
+        }),
+        ...(dto.rollingWindowLimit !== undefined && {
+          rollingWindowLimit: dto.rollingWindowLimit ?? null,
+        }),
+        ...(dto.rollingWindowHours !== undefined && {
+          rollingWindowHours: dto.rollingWindowHours,
+        }),
         ...(dto.contextMd !== undefined && { contextMd: dto.contextMd }),
-        ...(dto.reasoningEffort !== undefined && { reasoningEffort: dto.reasoningEffort ?? null }),
-        ...(dto.fastReasoningEffort !== undefined && { fastReasoningEffort: dto.fastReasoningEffort ?? null }),
-        ...(dto.smartReasoningEffort !== undefined && { smartReasoningEffort: dto.smartReasoningEffort ?? null }),
-        ...(dto.trialMessageThreshold !== undefined && { trialMessageThreshold: dto.trialMessageThreshold ?? null }),
-        ...(dto.trialDailyMessageLimit !== undefined && { trialDailyMessageLimit: dto.trialDailyMessageLimit ?? null }),
+        ...(dto.reasoningEffort !== undefined && {
+          reasoningEffort: dto.reasoningEffort ?? null,
+        }),
+        ...(dto.fastReasoningEffort !== undefined && {
+          fastReasoningEffort: dto.fastReasoningEffort ?? null,
+        }),
+        ...(dto.smartReasoningEffort !== undefined && {
+          smartReasoningEffort: dto.smartReasoningEffort ?? null,
+        }),
+        ...(dto.trialMessageThreshold !== undefined && {
+          trialMessageThreshold: dto.trialMessageThreshold ?? null,
+        }),
+        ...(dto.trialDailyMessageLimit !== undefined && {
+          trialDailyMessageLimit: dto.trialDailyMessageLimit ?? null,
+        }),
         ...(dto.trialThrottledMessageCount !== undefined && {
           trialThrottledMessageCount: dto.trialThrottledMessageCount ?? null,
         }),
@@ -93,8 +119,12 @@ export class PlansService {
         ...(dto.trialRollingWindowHours !== undefined && {
           trialRollingWindowHours: dto.trialRollingWindowHours ?? null,
         }),
-        ...(dto.isPayAsYouGo !== undefined && { isPayAsYouGo: dto.isPayAsYouGo }),
-        ...(dto.payAsYouGoMarkup !== undefined && { payAsYouGoMarkup: dto.payAsYouGoMarkup }),
+        ...(dto.isPayAsYouGo !== undefined && {
+          isPayAsYouGo: dto.isPayAsYouGo,
+        }),
+        ...(dto.payAsYouGoMarkup !== undefined && {
+          payAsYouGoMarkup: dto.payAsYouGoMarkup,
+        }),
         ...(dto.payAsYouGoMinActivationToman !== undefined && {
           payAsYouGoMinActivationToman: dto.payAsYouGoMinActivationToman,
         }),
@@ -102,65 +132,85 @@ export class PlansService {
           payAsYouGoMinTopupToman: dto.payAsYouGoMinTopupToman,
         }),
         ...(dto.payAsYouGoTopupPresets !== undefined && {
-          payAsYouGoTopupPresets: dto.payAsYouGoTopupPresets as Prisma.InputJsonValue,
+          payAsYouGoTopupPresets: dto.payAsYouGoTopupPresets,
         }),
-        ...(dto.defaultImageGenModel !== undefined && { defaultImageGenModel: dto.defaultImageGenModel }),
-        ...(dto.maxImageGenPerDay !== undefined && { maxImageGenPerDay: dto.maxImageGenPerDay }),
-        ...(dto.maxImageGenPerWindow !== undefined && { maxImageGenPerWindow: dto.maxImageGenPerWindow }),
-        ...(dto.imageGenWindowHours !== undefined && { imageGenWindowHours: dto.imageGenWindowHours }),
+        ...(dto.defaultImageGenModel !== undefined && {
+          defaultImageGenModel: dto.defaultImageGenModel,
+        }),
+        ...(dto.maxImageGenPerDay !== undefined && {
+          maxImageGenPerDay: dto.maxImageGenPerDay,
+        }),
+        ...(dto.maxImageGenPerWindow !== undefined && {
+          maxImageGenPerWindow: dto.maxImageGenPerWindow,
+        }),
+        ...(dto.imageGenWindowHours !== undefined && {
+          imageGenWindowHours: dto.imageGenWindowHours,
+        }),
       },
-    })
+    });
   }
 
   async update(id: string, dto: UpdatePlanDto) {
-    await this.findOne(id)
-    const { features, outputThrottleSteps, featuredModels, payAsYouGoTopupPresets, ...rest } = dto
+    await this.findOne(id);
+    const {
+      features,
+      outputThrottleSteps,
+      featuredModels,
+      payAsYouGoTopupPresets,
+      ...rest
+    } = dto;
     const updated = await this.prisma.plan.update({
       where: { id },
       data: {
         ...rest,
-        ...(features !== undefined && { features: features as Prisma.InputJsonValue }),
-        ...(outputThrottleSteps !== undefined && {
-          outputThrottleSteps: outputThrottleSteps as Prisma.InputJsonValue,
+        ...(features !== undefined && {
+          features: features as Prisma.InputJsonValue,
         }),
-        ...(featuredModels !== undefined && { featuredModels: featuredModels as Prisma.InputJsonValue }),
+        ...(outputThrottleSteps !== undefined && {
+          outputThrottleSteps: outputThrottleSteps,
+        }),
+        ...(featuredModels !== undefined && {
+          featuredModels: featuredModels,
+        }),
         ...(payAsYouGoTopupPresets !== undefined && {
-          payAsYouGoTopupPresets: payAsYouGoTopupPresets as Prisma.InputJsonValue,
+          payAsYouGoTopupPresets: payAsYouGoTopupPresets,
         }),
       },
-    })
+    });
     // invalidate Redis plan cache for every subscriber
     const subs = await this.prisma.subscription.findMany({
       where: { planId: id },
       select: { userId: true },
-    })
-    const delTasks: Promise<unknown>[] = subs.map(s => this.redis.del(`plan:${s.userId}`))
+    });
+    const delTasks: Promise<unknown>[] = subs.map((s) =>
+      this.redis.del(`plan:${s.userId}`),
+    );
 
     // free plans (priceMonthly=0) apply to users without subscriptions too —
     // clear every cached plan so they pick up the new limits on next request.
     // scanStream (نه KEYS) — docs/PERFORMANCE-AND-CONCURRENCY.md بخش ۴: KEYS کل فضای کلید
     // Redis را پیمایش می‌کند و در این مدت Redis (تک‌رشته‌ای) به هیچ درخواست دیگری جواب نمی‌دهد
     if (updated.priceMonthly === 0) {
-      const keys = await this.scanKeys('plan:*')
-      keys.forEach(k => delTasks.push(this.redis.del(k)))
+      const keys = await this.scanKeys('plan:*');
+      keys.forEach((k) => delTasks.push(this.redis.del(k)));
     }
 
-    if (delTasks.length) await Promise.all(delTasks)
-    return updated
+    if (delTasks.length) await Promise.all(delTasks);
+    return updated;
   }
 
   private scanKeys(pattern: string): Promise<string[]> {
     return new Promise((resolve, reject) => {
-      const keys: string[] = []
-      const stream = this.redis.scanStream({ match: pattern, count: 100 })
-      stream.on('data', (batch: string[]) => keys.push(...batch))
-      stream.on('end', () => resolve(keys))
-      stream.on('error', reject)
-    })
+      const keys: string[] = [];
+      const stream = this.redis.scanStream({ match: pattern, count: 100 });
+      stream.on('data', (batch: string[]) => keys.push(...batch));
+      stream.on('end', () => resolve(keys));
+      stream.on('error', reject);
+    });
   }
 
   async remove(id: string) {
-    await this.findOne(id)
-    return this.prisma.plan.delete({ where: { id } })
+    await this.findOne(id);
+    return this.prisma.plan.delete({ where: { id } });
   }
 }

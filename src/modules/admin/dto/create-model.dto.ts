@@ -1,44 +1,55 @@
-import { Type } from 'class-transformer'
-import { IsBoolean, IsIn, IsNumber, IsOptional, IsString, Min } from 'class-validator'
+import { Type } from 'class-transformer';
+import {
+  IsBoolean,
+  IsIn,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Min,
+} from 'class-validator';
 
-export const MODEL_TIERS = ['SIMPLE', 'MEDIUM', 'COMPLEX'] as const
-export const TOKENIZER_FAMILIES = ['o200k_base', 'cl100k_base', 'approximate'] as const
-export const MODEL_TYPES = ['CHAT', 'EMBEDDING', 'IMAGE_GEN'] as const
+export const MODEL_TIERS = ['SIMPLE', 'MEDIUM', 'COMPLEX'] as const;
+export const TOKENIZER_FAMILIES = [
+  'o200k_base',
+  'cl100k_base',
+  'approximate',
+] as const;
+export const MODEL_TYPES = ['CHAT', 'EMBEDDING', 'IMAGE_GEN'] as const;
 
 export class CreateModelDto {
   @IsString()
-  name!: string
+  name!: string;
 
   @IsString()
-  displayName!: string
+  displayName!: string;
 
   @IsString()
-  provider!: string
+  provider!: string;
 
   @IsOptional()
   @IsIn(MODEL_TYPES)
-  modelType?: (typeof MODEL_TYPES)[number]
+  modelType?: (typeof MODEL_TYPES)[number];
 
   @Type(() => Number)
   @IsNumber()
   @Min(0)
-  inputPricePerM!: number
+  inputPricePerM!: number;
 
   // برای مدل‌های IMAGE_GEN بی‌ربط است (متن خروجی تولید نمی‌کنند) — اختیاری، پیش‌فرض ۰ (schema)
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
-  outputPricePerM?: number
+  outputPricePerM?: number;
 
   @IsOptional()
   @IsBoolean()
-  supportsVision?: boolean
+  supportsVision?: boolean;
 
   // docs/PRD-chat-images.md بخش ۵.۵
   @IsOptional()
   @IsBoolean()
-  supportsImageGen?: boolean
+  supportsImageGen?: boolean;
 
   // قیمت‌گذاری تولید عکس بر اساس توکن واقعی است — متن ورودی از همون inputPricePerM بالا
   // حساب می‌شود؛ این دو فقط برای توکن‌های عکس (ورودی حالت ویرایش / خروجی) هستند
@@ -46,42 +57,42 @@ export class CreateModelDto {
   @Type(() => Number)
   @IsNumber()
   @Min(0)
-  imageGenInputImagePricePerM?: number
+  imageGenInputImagePricePerM?: number;
 
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
-  imageGenOutputImagePricePerM?: number
+  imageGenOutputImagePricePerM?: number;
 
   @IsOptional()
   @IsString()
-  imageGenQuality?: string
+  imageGenQuality?: string;
 
   @IsOptional()
   @IsString()
-  imageGenSize?: string
+  imageGenSize?: string;
 
   @IsOptional()
   @IsBoolean()
-  isActive?: boolean
+  isActive?: boolean;
 
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
-  sortOrder?: number
+  sortOrder?: number;
 
   @IsOptional()
   @IsIn(MODEL_TIERS)
-  tier?: (typeof MODEL_TIERS)[number]
+  tier?: (typeof MODEL_TIERS)[number];
 
   @IsOptional()
   @IsIn(TOKENIZER_FAMILIES)
-  tokenizerFamily?: (typeof TOKENIZER_FAMILIES)[number]
+  tokenizerFamily?: (typeof TOKENIZER_FAMILIES)[number];
 
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
-  avgCharsPerToken?: number
+  avgCharsPerToken?: number;
 }

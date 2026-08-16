@@ -2,12 +2,12 @@ import {
   Injectable,
   Logger,
   InternalServerErrorException,
-} from '@nestjs/common'
-import { ConfigService } from '@nestjs/config'
-import { fa } from '../i18n/fa'
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { fa } from '../i18n/fa';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const Kavenegar = require('kavenegar')
+const Kavenegar = require('kavenegar');
 
 // خطاهای شبکه/DNS موقتی (نه خطای واقعی کاوه‌نگار) — با یک یا دو تلاش مجدد معمولاً برطرف می‌شوند
 const TRANSIENT_ERROR_CODES = new Set([
@@ -16,68 +16,83 @@ const TRANSIENT_ERROR_CODES = new Set([
   'ETIMEDOUT',
   'ECONNREFUSED',
   'EAI_AGAIN',
-])
+]);
 
 function isTransientNetworkError(response: any): boolean {
-  const code = response?.error?.code ?? response?.error
-  return typeof code === 'string' && TRANSIENT_ERROR_CODES.has(code)
+  const code = response?.error?.code ?? response?.error;
+  return typeof code === 'string' && TRANSIENT_ERROR_CODES.has(code);
 }
 
 function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms))
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 @Injectable()
 export class SmsService {
-  private readonly logger = new Logger(SmsService.name)
-  private readonly api: any
-  private readonly template: string
-  private readonly devMode: boolean
-  private readonly maxRetries = 2
-  private readonly retryDelayMs = 800
+  private readonly logger = new Logger(SmsService.name);
+  private readonly api: any;
+  private readonly template: string;
+  private readonly devMode: boolean;
+  private readonly maxRetries = 2;
+  private readonly retryDelayMs = 800;
 
-  private readonly senderLine: string
+  private readonly senderLine: string;
 
   constructor(private readonly config: ConfigService) {
-    const apiKey = this.config.get<string>('KAVENEGAR_API_KEY', '')
-    this.template = this.config.get<string>('KAVENEGAR_TEMPLATE', 'registerverify')
-    this.senderLine = this.config.get<string>('KAVENEGAR_SENDER_LINE', '')
-    this.devMode = this.config.get<string>('SEND_SMS', 'false') !== 'true'
+    const apiKey = this.config.get<string>('KAVENEGAR_API_KEY', '');
+    this.template = this.config.get<string>(
+      'KAVENEGAR_TEMPLATE',
+      'registerverify',
+    );
+    this.senderLine = this.config.get<string>('KAVENEGAR_SENDER_LINE', '');
+    this.devMode = this.config.get<string>('SEND_SMS', 'false') !== 'true';
 
     if (!this.devMode) {
-      this.api = Kavenegar.KavenegarApi({ apikey: apiKey })
+      this.api = Kavenegar.KavenegarApi({ apikey: apiKey });
     }
   }
 
-  private callVerifyLookup(params: Record<string, unknown>): Promise<{ status: number; response: any }> {
-    return new Promise(resolve => {
-      this.api.VerifyLookup(params, (response: any, status: number) => resolve({ status, response }))
-    })
+  private callVerifyLookup(
+    params: Record<string, unknown>,
+  ): Promise<{ status: number; response: any }> {
+    return new Promise((resolve) => {
+      this.api.VerifyLookup(params, (response: any, status: number) =>
+        resolve({ status, response }),
+      );
+    });
   }
 
-  private callSend(params: Record<string, unknown>): Promise<{ status: number; response: any }> {
-    return new Promise(resolve => {
-      this.api.Send(params, (response: any, status: number) => resolve({ status, response }))
-    })
+  private callSend(
+    params: Record<string, unknown>,
+  ): Promise<{ status: number; response: any }> {
+    return new Promise((resolve) => {
+      this.api.Send(params, (response: any, status: number) =>
+        resolve({ status, response }),
+      );
+    });
   }
 
-  private async sendWithRetry(params: Record<string, unknown>, logLabel: string): Promise<void> {
+  private async sendWithRetry(
+    params: Record<string, unknown>,
+    logLabel: string,
+  ): Promise<void> {
     for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
-      const { status, response } = await this.callVerifyLookup(params)
+      const { status, response } = await this.callVerifyLookup(params);
 
       if (status === 200) {
-        this.logger.log(`${logLabel} sent to ${params['receptor']}`)
-        return
+        this.logger.log(`${logLabel} sent to ${params['receptor']}`);
+        return;
       }
 
-      const canRetry = attempt < this.maxRetries && isTransientNetworkError(response)
+      const canRetry =
+        attempt < this.maxRetries && isTransientNetworkError(response);
       this.logger.error(
         `Kavenegar error — status: ${status}${canRetry ? ` (retrying, attempt ${attempt + 1}/${this.maxRetries})` : ''}`,
         response,
-      )
+      );
 
-      if (!canRetry) throw new InternalServerErrorException(fa.sms.sendFailed)
-      await sleep(this.retryDelayMs * (attempt + 1))
+      if (!canRetry) throw new InternalServerErrorException(fa.sms.sendFailed);
+      await sleep(this.retryDelayMs * (attempt + 1));
     }
   }
 
@@ -85,11 +100,14 @@ export class SmsService {
     if (this.devMode) {
       this.logger.warn(
         `🔑 OTP ══════════════════ ${receptor}  →  ${code} ══════════════════`,
-      )
-      return
+      );
+      return;
     }
 
-    await this.sendWithRetry({ receptor, token: code, template: this.template }, 'OTP')
+    await this.sendWithRetry(
+      { receptor, token: code, template: this.template },
+      'OTP',
+    );
   }
 
   /**
@@ -107,11 +125,14 @@ export class SmsService {
     if (this.devMode) {
       this.logger.warn(
         `📩 SMS (template=${template}) ══ ${receptor} → ${JSON.stringify(tokens)}`,
-      )
-      return
+      );
+      return;
     }
 
-    await this.sendWithRetry({ receptor, template, ...tokens }, `SMS (${template})`)
+    await this.sendWithRetry(
+      { receptor, template, ...tokens },
+      `SMS (${template})`,
+    );
   }
 
   /**
@@ -122,15 +143,19 @@ export class SmsService {
    */
   async sendFreeText(receptor: string, message: string): Promise<void> {
     if (this.devMode) {
-      this.logger.warn(`📩 SMS (free-text) ══ ${receptor} → ${message}`)
-      return
+      this.logger.warn(`📩 SMS (free-text) ══ ${receptor} → ${message}`);
+      return;
     }
 
-    const { status, response } = await this.callSend({ receptor, message, sender: this.senderLine })
+    const { status, response } = await this.callSend({
+      receptor,
+      message,
+      sender: this.senderLine,
+    });
     if (status !== 200) {
-      this.logger.error(`Kavenegar Send error — status: ${status}`, response)
-      throw new InternalServerErrorException(fa.sms.sendFailed)
+      this.logger.error(`Kavenegar Send error — status: ${status}`, response);
+      throw new InternalServerErrorException(fa.sms.sendFailed);
     }
-    this.logger.log(`Free-text SMS sent to ${receptor}`)
+    this.logger.log(`Free-text SMS sent to ${receptor}`);
   }
 }

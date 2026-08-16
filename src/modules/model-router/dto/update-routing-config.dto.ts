@@ -5,34 +5,34 @@ import {
   IsOptional,
   IsString,
   Min,
-} from 'class-validator'
-import { fa } from '../../../i18n/fa'
+} from 'class-validator';
+import { fa } from '../../../i18n/fa';
 
 export class UpdateRoutingConfigDto {
   @IsOptional()
   @IsBoolean({ message: fa.validation.mustBeBoolean })
-  enabled?: boolean
+  enabled?: boolean;
 
   @IsOptional()
   @IsArray({ message: fa.validation.mustBeArray })
   @IsString({ each: true })
-  simpleKeywords?: string[]
+  simpleKeywords?: string[];
 
   @IsOptional()
   @IsArray({ message: fa.validation.mustBeArray })
   @IsString({ each: true })
-  complexKeywords?: string[]
+  complexKeywords?: string[];
 
   @IsOptional()
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(0, { message: fa.validation.numberPositive })
-  complexLenThreshold?: number
+  complexLenThreshold?: number;
 
   @IsOptional()
   @IsBoolean({ message: fa.validation.mustBeBoolean })
-  llmFallbackEnabled?: boolean
+  llmFallbackEnabled?: boolean;
 
   @IsOptional()
   @IsString({ message: fa.validation.required })
-  llmFallbackModel?: string
+  llmFallbackModel?: string;
 }
