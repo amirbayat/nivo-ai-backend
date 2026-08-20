@@ -17,6 +17,7 @@ import { fa } from '../../i18n/fa';
 import {
   CreateModelDto,
   MODEL_TIERS,
+  MODEL_TYPES,
   TOKENIZER_FAMILIES,
 } from './dto/create-model.dto';
 import { UpdateModelDto } from './dto/update-model.dto';
@@ -25,9 +26,15 @@ const MODEL_IMPORT_COLUMNS = [
   'name',
   'displayName',
   'provider',
+  'modelType',
   'inputPricePerM',
   'outputPricePerM',
   'supportsVision',
+  'supportsImageGen',
+  'imageGenInputImagePricePerM',
+  'imageGenOutputImagePricePerM',
+  'imageGenQuality',
+  'imageGenSize',
   'isActive',
   'sortOrder',
   'tier',
@@ -60,9 +67,19 @@ function parseModelRow(raw: Record<string, unknown>) {
     name: cellToString(raw.name),
     displayName: cellToString(raw.displayName),
     provider: cellToString(raw.provider),
+    modelType:
+      (cellToString(raw.modelType)?.toUpperCase() as
+        (typeof MODEL_TYPES)[number] | undefined) ?? undefined,
     inputPricePerM: cellToNumber(raw.inputPricePerM),
     outputPricePerM: cellToNumber(raw.outputPricePerM),
     supportsVision: cellToBoolean(raw.supportsVision, false),
+    supportsImageGen: cellToBoolean(raw.supportsImageGen, false),
+    imageGenInputImagePricePerM: cellToNumber(raw.imageGenInputImagePricePerM),
+    imageGenOutputImagePricePerM: cellToNumber(
+      raw.imageGenOutputImagePricePerM,
+    ),
+    imageGenQuality: cellToString(raw.imageGenQuality),
+    imageGenSize: cellToString(raw.imageGenSize),
     isActive: cellToBoolean(raw.isActive, true),
     sortOrder: cellToNumber(raw.sortOrder) ?? 0,
     tier:

@@ -375,7 +375,7 @@ export class UsageAnalyticsService {
       this.getImageModelNames(),
     ]);
     return rows
-      .map((r) => {
+      .map((r): ModelBreakdownRow => {
         const tokensInput = r._sum.tokensInput ?? 0;
         const tokensOutput = r._sum.tokensOutput ?? 0;
         const costToman = r._sum.costToman ?? 0;
