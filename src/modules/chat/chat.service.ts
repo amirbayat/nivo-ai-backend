@@ -197,6 +197,7 @@ export class ChatService {
         title: true,
         contextSummary: true,
         summarizedUntilCreatedAt: true,
+        projectId: true,
       },
     });
     if (!conversation) throw new NotFoundException(fa.conversations.notFound);
@@ -591,13 +592,27 @@ export class ChatService {
         },
       });
 
-      // ── build context: global + plan context, سپس خلاصه‌ی احتمالی، سپس پیام‌های
+      // ── build context: global + plan context, سپس (اگر این چت زیرمجموعه‌ی یک پروژه باشد)
+      // context ثابت + خلاصه‌ی تجمیعی پروژه، سپس system prompt/خلاصه‌ی خود همین چت، سپس پیام‌های
       // «بعد از آخرین خلاصه‌سازی» (نه یک سقف ثابت پیام) — docs/PRD-chat-context-and-summarization.md بخش ۳/۴
       // (chatConfig بالاتر، قبل از preflight تصاویر، همین‌جا گرفته شده — کش ۶۰ ثانیه‌ای سرویس)
+      const project = conversation.projectId
+        ? await this.prisma.project.findUnique({
+            where: { id: conversation.projectId },
+            select: { contextMd: true, contextSummary: true },
+          })
+        : null;
+
       const systemParts: string[] = [];
       if (chatConfig.globalContextMd)
         systemParts.push(chatConfig.globalContextMd);
       if (plan.contextMd) systemParts.push(plan.contextMd);
+      if (project?.contextMd) systemParts.push(project.contextMd);
+      if (project?.contextSummary) {
+        systemParts.push(
+          `کانتکست تجمیعی این پروژه (از چت‌های قبلی):\n${project.contextSummary}`,
+        );
+      }
       if (conversation.systemPrompt)
         systemParts.push(conversation.systemPrompt);
       if (conversation.contextSummary) {
@@ -839,6 +854,19 @@ export class ChatService {
           chatConfig.summaryMaxTokens,
           apiKey,
         ).catch(() => {});
+
+        // موازی با خلاصه‌سازی خود مکالمه: اگر این چت زیرمجموعه‌ی یک پروژه است، خلاصه‌ی
+        // تجمیعی پروژه هم با همین محتوای تازه به‌روز می‌شود (docs/PRD-chat-context-and-summarization.md)
+        if (conversation.projectId) {
+          this.updateProjectContext(
+            conversation.projectId,
+            project?.contextSummary ?? null,
+            messagesToSummarize,
+            modelId,
+            chatConfig.projectContextMaxChars,
+            apiKey,
+          ).catch(() => {});
+        }
       }
 
       res.write(`data: [DONE]\n\n`);
@@ -1514,5 +1542,59 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
     // بازسازی عنوان بر اساس خلاصه‌ی تازه — بدون قید «اگه از قبل نداشت»، چون قطعاً تا این
     // مرحله عنوان از قبل ساخته شده و می‌خواهیم با تحول مکالمه به‌روز بماند
     await this.generateTitle(conversationId, trimmedSummary, modelId, apiKey);
+  }
+
+  // خلاصه‌ی تجمیعی یک پروژه (نه یک چت خاص) — دقیقاً هم‌الگوی summarizeConversation بالا، با
+  // این تفاوت که ورودی «خلاصه‌ی قبلی پروژه» + محتوای تازه‌ی یکی از چت‌های زیرمجموعه‌اش است،
+  // نه خودِ آن چت. fire-and-forget از streamChat صدا زده می‌شود (docs/PRD-chat-projects.md).
+  private async updateProjectContext(
+    projectId: string,
+    previousSummary: string | null,
+    messages: { role: string; content: string; createdAt: Date }[],
+    modelId: string,
+    maxChars: number,
+    apiKey: string,
+  ): Promise<void> {
+    const transcript = messages
+      .map((m) => `${m.role === 'USER' ? 'کاربر' : 'دستیار'}: ${m.content}`)
+      .join('\n');
+    const input = previousSummary
+      ? `خلاصه‌ی تجمیعی قبلی پروژه:\n${previousSummary}\n\nمحتوای تازه از یکی از چت‌های این پروژه:\n${transcript}`
+      : `محتوای یکی از چت‌های این پروژه:\n${transcript}`;
+
+    const callStart = Date.now();
+    let summary: string;
+    try {
+      summary = await this.generateTextViaStream({
+        modelId,
+        system:
+          'متن زیر خلاصه‌ی تجمیعی قبلی یک پروژه (اگر باشد) و محتوای تازه از یکی از چت‌های آن پروژه است. ' +
+          'یک خلاصه‌ی تجمیعی جدید و فشرده از نکات کلیدی، ترجیحات و زمینه‌ی این پروژه بنویس که برای همه‌ی ' +
+          `چت‌های این پروژه (نه فقط همین یکی) مفید باشد. حداکثر تقریباً ${maxChars} کاراکتر. ` +
+          'فقط خلاصه، بدون مقدمه یا توضیح اضافه.',
+        userContent: input,
+        maxOutputTokens: Math.ceil(maxChars / 2),
+        apiKey,
+      });
+      this.liveStats
+        .recordLiaraCall('summary', true, Date.now() - callStart)
+        .catch(() => {});
+    } catch (err) {
+      this.liveStats
+        .recordLiaraCall('summary', false, Date.now() - callStart)
+        .catch(() => {});
+      throw err;
+    }
+
+    const trimmedSummary = summary.trim().slice(0, maxChars);
+    if (!trimmedSummary) return;
+
+    await this.prisma.project.update({
+      where: { id: projectId },
+      data: {
+        contextSummary: trimmedSummary,
+        contextSummarizedAt: new Date(),
+      },
+    });
   }
 }

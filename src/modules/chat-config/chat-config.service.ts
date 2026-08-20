@@ -10,6 +10,7 @@ export type UpdatableChatConfig = Partial<
     | 'globalContextMd'
     | 'summaryTriggerTokens'
     | 'summaryMaxTokens'
+    | 'projectContextMaxChars'
     | 'maxImagesPerMessage'
     | 'maxImageSizeMb'
     | 'implicitImageGenEnabled'

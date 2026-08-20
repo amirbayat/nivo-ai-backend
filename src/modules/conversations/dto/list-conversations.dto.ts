@@ -13,4 +13,8 @@ export class ListConversationsDto {
   @Min(1, { message: fa.validation.numberPositive })
   @Max(50, { message: fa.validation.stringTooLong })
   limit?: number = 20;
+
+  @IsOptional()
+  @IsString({ message: fa.validation.required })
+  projectId?: string;
 }

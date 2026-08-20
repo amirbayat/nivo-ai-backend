@@ -30,6 +30,12 @@ export class UpdateChatConfigDto {
 
   @IsOptional()
   @IsInt()
+  @Min(500)
+  @Max(20_000)
+  projectContextMaxChars?: number;
+
+  @IsOptional()
+  @IsInt()
   @Min(1)
   @Max(10)
   maxImagesPerMessage?: number;

@@ -18,18 +18,28 @@ export class ConversationsService {
     private readonly storage: StorageService,
   ) {}
 
-  create(userId: string, dto: CreateConversationDto) {
+  async create(userId: string, dto: CreateConversationDto) {
+    if (dto.projectId) await this.assertProjectOwnership(userId, dto.projectId);
     return this.prisma.conversation.create({
       data: { userId, ...dto },
     });
   }
 
+  private async assertProjectOwnership(userId: string, projectId: string) {
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      select: { userId: true },
+    });
+    if (!project) throw new NotFoundException(fa.discovery.projectNotFound);
+    if (project.userId !== userId) throw new ForbiddenException(fa.errors.forbidden);
+  }
+
   async findAll(userId: string, query: ListConversationsDto) {
     const limit = query.limit ?? 20;
-    const { cursor } = query;
+    const { cursor, projectId } = query;
 
     const items = await this.prisma.conversation.findMany({
-      where: { userId, isArchived: false },
+      where: { userId, isArchived: false, ...(projectId ? { projectId } : {}) },
       orderBy: [{ lastMessageAt: 'desc' }, { id: 'desc' }],
       take: limit + 1,
       ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
