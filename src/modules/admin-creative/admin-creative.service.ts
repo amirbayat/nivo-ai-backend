@@ -1,9 +1,10 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
 import { ChatConfigService } from '../chat-config/chat-config.service';
 import {
+  mimeTypeForExt,
   parseChatImageDataUrl,
   validateChatImages,
 } from '../../common/validators/chat-image.validator';
@@ -16,7 +17,11 @@ import { UpdateCreditPackageDto } from './dto/update-credit-package.dto';
 import { ReviewPromptRequestDto } from './dto/review-prompt-request.dto';
 import { CreateCreativeCategoryDto } from './dto/create-creative-category.dto';
 import { UpdateCreativeCategoryDto } from './dto/update-creative-category.dto';
-import { CreativeSegment } from '@prisma/client';
+import {
+  CreativePromptReviewStatus,
+  CreativePromptSourceType,
+  CreativeSegment,
+} from '@prisma/client';
 
 // پنل ادمین برای بخش دیسکاوری/نیوو — بخش ۵.۷ سند فنی. عمداً ماژول جدا از AdminModule موجود
 // (نه اضافه‌شدن به admin.service.ts غول‌پیکر) تا ریسک تغییر روی کد پرکاربرد فعلی صفر باشد؛
@@ -49,9 +54,21 @@ export class AdminCreativeService {
     return { url: `${apiUrl}/api/v1/v2/discovery/example-images/${key}` };
   }
 
-  getPrompts() {
+  // فرانت تب «کاتالوگ» را با sourceType=CURATED و تب «پیشنهادهای کاربران» را با
+  // sourceType=USER_EXTRACTED&reviewStatus=PENDING صدا می‌زند — بدون فیلتر، همان رفتار
+  // قدیمی (کل جدول) حفظ می‌شود، اما این حالت دیگر جایی در فرانت استفاده نمی‌شود چون هر
+  // دو تب صریحاً فیلتر می‌فرستند (پیشنهادهای PENDING نباید در تب کاتالوگ ظاهر شوند)
+  getPrompts(
+    sourceType?: CreativePromptSourceType,
+    reviewStatus?: CreativePromptReviewStatus,
+  ) {
     return this.prisma.creativePrompt.findMany({
+      where: {
+        ...(sourceType ? { sourceType } : {}),
+        ...(reviewStatus ? { reviewStatus } : {}),
+      },
       orderBy: [{ sortOrder: 'asc' }, { createdAt: 'desc' }],
+      include: { submittedBy: { select: { phone: true, name: true } } },
     });
   }
 
@@ -80,6 +97,55 @@ export class AdminCreativeService {
     await this.getPrompt(id);
     await this.prisma.creativePrompt.delete({ where: { id } });
     return { message: 'سبک حذف شد' };
+  }
+
+  // ── بررسی پیشنهادهای «تبدیل عکس به پرامپت» (CreativePrompt.sourceType=USER_EXTRACTED) ──
+  countPendingSubmissions() {
+    return this.prisma.creativePrompt.count({
+      where: {
+        sourceType: CreativePromptSourceType.USER_EXTRACTED,
+        reviewStatus: CreativePromptReviewStatus.PENDING,
+      },
+    });
+  }
+
+  // تایید = ادمین قبلش هر ویرایشی (عنوان/دسته/قالب/تعویض عکس نمونه) را با PATCH prompts/:id
+  // معمولی انجام داده؛ این اکشن فقط انتشار نهایی است — پیش‌نیاز: دسته و عکس نمونه ست شده باشند
+  async approvePrompt(id: string) {
+    const prompt = await this.getPrompt(id);
+    if (!prompt.categoryId || !prompt.exampleImageUrl) {
+      throw new BadRequestException(
+        'قبل از تایید، دسته‌بندی و عکس نمونه را برای این پیشنهاد مشخص کنید',
+      );
+    }
+    return this.prisma.creativePrompt.update({
+      where: { id },
+      data: {
+        isActive: true,
+        reviewStatus: CreativePromptReviewStatus.APPROVED,
+      },
+    });
+  }
+
+  async rejectPrompt(id: string) {
+    await this.getPrompt(id);
+    return this.prisma.creativePrompt.update({
+      where: { id },
+      data: { reviewStatus: CreativePromptReviewStatus.REJECTED },
+    });
+  }
+
+  // عکس اصلی کاربر برای یک پیشنهاد — برخلاف DiscoveryPublicController.getExampleImage این‌جا
+  // isActive فیلتر نمی‌شود چون این مسیر پشت AdminGuard است، نه عمومی
+  async getPromptSourceImage(id: string): Promise<{ buffer: Buffer; mimeType: string }> {
+    const prompt = await this.prisma.creativePrompt.findUnique({
+      where: { id },
+      select: { sourceImageKey: true },
+    });
+    if (!prompt?.sourceImageKey) throw new NotFoundException(fa.errors.notFound);
+    const ext = prompt.sourceImageKey.split('.').pop() ?? 'png';
+    const buffer = await this.storage.downloadImage(prompt.sourceImageKey);
+    return { buffer, mimeType: mimeTypeForExt(ext) };
   }
 
   // ── تنظیمات نیوو (CreditConfig singleton) ───────────────────────────────────

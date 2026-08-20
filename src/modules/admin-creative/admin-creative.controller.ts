@@ -7,8 +7,11 @@ import {
   Patch,
   Post,
   Query,
+  Res,
   UseGuards,
 } from '@nestjs/common';
+import type { Response } from 'express';
+import { CreativePromptReviewStatus, CreativePromptSourceType } from '@prisma/client';
 import { JwtGuard } from '../../common/guards/jwt.guard';
 import { AdminGuard } from '../../common/guards/admin.guard';
 import { AdminCreativeService } from './admin-creative.service';
@@ -28,8 +31,17 @@ export class AdminCreativeController {
   constructor(private readonly adminCreativeService: AdminCreativeService) {}
 
   @Get('prompts')
-  getPrompts() {
-    return this.adminCreativeService.getPrompts();
+  getPrompts(
+    @Query('sourceType') sourceType?: CreativePromptSourceType,
+    @Query('reviewStatus') reviewStatus?: CreativePromptReviewStatus,
+  ) {
+    return this.adminCreativeService.getPrompts(sourceType, reviewStatus);
+  }
+
+  // برای بج تعداد در تب «پیشنهادهای کاربران»
+  @Get('prompts/pending-submissions-count')
+  countPendingSubmissions() {
+    return this.adminCreativeService.countPendingSubmissions();
   }
 
   // آپلود «عکس نمونه» یک سبک — قبل از ساخت/ویرایش پرامپت صدا زده می‌شود؛ URL برگشتی
@@ -57,6 +69,26 @@ export class AdminCreativeController {
   @Delete('prompts/:id')
   deletePrompt(@Param('id') id: string) {
     return this.adminCreativeService.deletePrompt(id);
+  }
+
+  // انتشار نهایی پیشنهاد «تبدیل عکس به پرامپت» — قبلش هر ویرایشی با PATCH prompts/:id معمولی انجام می‌شود
+  @Patch('prompts/:id/approve')
+  approvePrompt(@Param('id') id: string) {
+    return this.adminCreativeService.approvePrompt(id);
+  }
+
+  @Patch('prompts/:id/reject')
+  rejectPrompt(@Param('id') id: string) {
+    return this.adminCreativeService.rejectPrompt(id);
+  }
+
+  // عکس اصلی که کاربر برای این پیشنهاد آپلود کرده — پشت AdminGuard، بدون فیلتر isActive
+  @Get('prompts/:id/source-image')
+  async getPromptSourceImage(@Param('id') id: string, @Res() res: Response) {
+    const { buffer, mimeType } =
+      await this.adminCreativeService.getPromptSourceImage(id);
+    res.setHeader('Content-Type', mimeType);
+    res.send(buffer);
   }
 
   @Get('credit-config')

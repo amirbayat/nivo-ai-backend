@@ -8,10 +8,13 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { generateText } from 'ai';
+import type { UserModelMessage } from 'ai';
 import {
   AiModelType,
   CreativeGenerationStatus,
   CreativeOutputType,
+  CreativePromptReviewStatus,
+  CreativePromptSourceType,
   CreativeSegment,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -179,7 +182,16 @@ export class DiscoveryGenerationService {
     const prompt = await this.prisma.creativePrompt.findUnique({
       where: { id: dto.promptId },
     });
-    if (!prompt || !prompt.isActive)
+    // یک ردیف USER_EXTRACTED هنوز تاییدنشده (isActive=false) فقط برای همون کاربری که آن
+    // را ساخته (submittedByUserId) قابل‌استفاده است — تا زمان بررسی ادمین. اگر رد شده
+    // باشد (REJECTED) حتی برای خودش هم دیگر کار نمی‌کند.
+    const usableByOwner =
+      !!prompt &&
+      !prompt.isActive &&
+      prompt.sourceType === CreativePromptSourceType.USER_EXTRACTED &&
+      prompt.submittedByUserId === userId &&
+      prompt.reviewStatus !== CreativePromptReviewStatus.REJECTED;
+    if (!prompt || (!prompt.isActive && !usableByOwner))
       throw new NotFoundException(fa.discovery.promptNotFound);
     if (prompt.requiresUserImage && !dto.inputImageKeys?.length) {
       throw new BadRequestException(fa.discovery.userImageRequired);
@@ -468,6 +480,7 @@ export class DiscoveryGenerationService {
         outputType: CreativeOutputType.IMAGE,
         inputImageKeys: dto.inputImageKeys ?? undefined,
         outputImageKey,
+        userInput: dto.userInput || null,
         creditCost: prompt.creditCost,
         costToman: costCalc.costToman,
         model: model.name,
@@ -536,11 +549,155 @@ export class DiscoveryGenerationService {
         projectId: dto.projectId ?? null,
         outputType: CreativeOutputType.TEXT,
         outputText: text,
+        userInput: dto.userInput || null,
         creditCost: prompt.creditCost,
         costToman: costCalc.costToman,
         model: modelName,
         status: CreativeGenerationStatus.SUCCEEDED,
       },
     });
+  }
+
+  // قیمت اکشن «تبدیل عکس به پرامپت» — قبل از آپلود/استخراج به کاربر نشان داده می‌شود
+  async getExtractionCost() {
+    const config = await this.credits.getConfig();
+    return { creditCost: config.promptExtractionCreditCost };
+  }
+
+  // «تبدیل عکس به پرامپت» — کاربر عکسی آپلود می‌کند، یک مدل CHAT با supportsVision آن را
+  // تحلیل و یک پرامپت تولید-عکس بازتولید می‌کند. نتیجه هم فوراً به کاربر نشان داده می‌شود
+  // (متن پرامپت + یک CreativePrompt پنهان که خودش بلافاصله می‌تواند با آن تولید کند) و هم
+  // به‌صورت پیشنهاد PENDING برای بررسی/تایید ادمین در مخزن پرامپت‌ها ثبت می‌شود.
+  async extractPromptFromImage(userId: string, imageKey: string) {
+    const creditConfig = await this.credits.getConfig();
+    const walletBalance = await this.pricing.getWalletBalance(userId);
+    const requiredToman =
+      creditConfig.promptExtractionCreditCost * creditConfig.tomanPerCredit;
+    if (walletBalance < requiredToman)
+      throw new BadRequestException(fa.discovery.insufficientCredits);
+
+    // محافظ ساده در برابر انباشت نامحدود پیشنهادهای بررسی‌نشده در جدول اصلی سبک‌ها
+    const pendingCount = await this.prisma.creativePrompt.count({
+      where: {
+        submittedByUserId: userId,
+        sourceType: CreativePromptSourceType.USER_EXTRACTED,
+        reviewStatus: CreativePromptReviewStatus.PENDING,
+      },
+    });
+    if (pendingCount >= 20)
+      throw new BadRequestException(fa.discovery.tooManyPendingExtractions);
+
+    const model = await this.prisma.aiModel.findFirst({
+      where: { isActive: true, modelType: AiModelType.CHAT, supportsVision: true },
+      orderBy: { sortOrder: 'asc' },
+    });
+    if (!model) throw new BadRequestException(fa.discovery.extractionFailed);
+
+    const buffer = await this.storage.downloadImage(imageKey);
+    const ext = imageKey.split('.').pop() ?? 'png';
+    const dataUrl = `data:${mimeTypeForExt(ext)};base64,${buffer.toString('base64')}`;
+
+    const apiKey = await this.resolveApiKey(userId);
+    const provider = createOpenAICompatible({
+      name: 'liara',
+      baseURL: this.config.get<string>('LIARA_AI_BASE_URL')!,
+      apiKey,
+    });
+
+    const visionMessage: UserModelMessage = {
+      role: 'user',
+      content: [
+        { type: 'image', image: dataUrl },
+        {
+          type: 'text',
+          text: 'این تصویر را با دقت تحلیل کن و یک پرامپت دقیق و کامل (فارسی) برای تولید دوباره‌ی تصویری با همین سبک/سوژه/ترکیب‌بندی/نورپردازی/رنگ‌بندی بنویس. فقط و فقط متن پرامپت را برگردان — بدون هیچ مقدمه، توضیح یا علامت‌گذاری اضافه.',
+        },
+      ],
+    };
+
+    let extractedPrompt: string;
+    try {
+      const { text } = await generateText({
+        model: provider(model.name),
+        messages: [visionMessage],
+      });
+      extractedPrompt = text.trim();
+      if (!extractedPrompt) throw new Error('empty extraction result');
+    } catch (err) {
+      this.logger.error(
+        `prompt extraction failed for user=${userId} image=${imageKey}`,
+        err as Error,
+      );
+      throw new BadRequestException(fa.discovery.extractionFailed);
+    }
+
+    // کسر فقط بعد از موفقیت — دقیقاً هم‌قانون generate()
+    const debited = await this.pricing.debitWallet(
+      userId,
+      requiredToman,
+      1,
+      'تبدیل عکس به پرامپت',
+      { feature: 'prompt-extraction' },
+    );
+    if (!debited)
+      this.logger.error(
+        `prompt-extraction debitWallet: insufficient balance race for user=${userId}`,
+      );
+
+    const apiUrl = this.config.get<string>('API_URL', 'http://localhost:3000');
+    const created = await this.prisma.creativePrompt.create({
+      data: {
+        title: 'سبک استخراج‌شده',
+        outputType: CreativeOutputType.IMAGE,
+        segment: CreativeSegment.GENERAL,
+        contextMd: '',
+        userPromptTemplate: extractedPrompt,
+        exampleImageUrl: `${apiUrl}/api/v1/v2/discovery/example-images/${imageKey}`,
+        requiresUserImage: false,
+        creditCost: creditConfig.defaultExtractedPromptCreditCost,
+        isActive: false,
+        sourceType: CreativePromptSourceType.USER_EXTRACTED,
+        submittedByUserId: userId,
+        reviewStatus: CreativePromptReviewStatus.PENDING,
+        sourceImageKey: imageKey,
+      },
+    });
+
+    return {
+      id: created.id,
+      title: created.title,
+      outputType: created.outputType,
+      segment: created.segment,
+      categoryId: created.categoryId,
+      description: created.description,
+      exampleImageUrl: created.exampleImageUrl,
+      aspectRatio: created.aspectRatio,
+      requiresUserImage: created.requiresUserImage,
+      creditCost: created.creditCost,
+      isTrending: created.isTrending,
+      tags: created.tags,
+      sortOrder: created.sortOrder,
+      extractedPrompt,
+    };
+  }
+
+  // تاریخچه‌ی «شخصی‌سازی‌های قبلی» یک پروژه — از dto.userInput واقعاً استفاده‌شده در
+  // تولیدهای قبلی همان پروژه (نه یک جدول جدا؛ چیزی که کاربر واقعاً تولید کرده)
+  async listProjectCustomizations(userId: string, projectId: string) {
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      select: { userId: true },
+    });
+    if (!project || project.userId !== userId)
+      throw new ForbiddenException(fa.errors.forbidden);
+
+    const rows = await this.prisma.creativeGeneration.findMany({
+      where: { projectId, userId, userInput: { not: null } },
+      distinct: ['userInput'],
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+      select: { userInput: true, createdAt: true },
+    });
+    return rows.map((r) => ({ text: r.userInput as string, createdAt: r.createdAt }));
   }
 }

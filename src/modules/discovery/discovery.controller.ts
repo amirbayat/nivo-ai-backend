@@ -18,6 +18,7 @@ import { DiscoveryGenerationService } from './discovery-generation.service';
 import { GenerateCreativeDto } from './dto/generate-creative.dto';
 import { CreatePromptRequestDto } from './dto/create-prompt-request.dto';
 import { UploadDiscoveryImageDto } from './dto/upload-input-image.dto';
+import { ExtractPromptDto } from './dto/extract-prompt.dto';
 
 // v2 — دیسکاوری (کاتالوگ سبک‌های آماده + تولید + گالری + درخواست فیچر)، بخش ۵.۳/۵.۴/۵.۵/۵.۹/۵.۱۰
 @Controller('v2/discovery')
@@ -69,5 +70,27 @@ export class DiscoveryController {
     @Body() dto: CreatePromptRequestDto,
   ) {
     return this.discoveryService.createPromptRequest(user.sub, dto);
+  }
+
+  @Get('prompt-extractions/cost')
+  extractionCost() {
+    return this.discoveryService.getExtractionCost();
+  }
+
+  // «تبدیل عکس به پرامپت» — کارت بزرگ بالای صفحه‌ی استودیو؛ imageKey از upload-image بالا می‌آید
+  @Post('prompt-extractions')
+  extractPrompt(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: ExtractPromptDto,
+  ) {
+    return this.discoveryService.extractPromptFromImage(user.sub, dto.imageKey);
+  }
+
+  @Get('projects/:projectId/customizations')
+  projectCustomizations(
+    @CurrentUser() user: JwtPayload,
+    @Param('projectId') projectId: string,
+  ) {
+    return this.discoveryService.listProjectCustomizations(user.sub, projectId);
   }
 }

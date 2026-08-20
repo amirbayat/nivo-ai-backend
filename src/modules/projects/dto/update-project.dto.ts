@@ -36,4 +36,8 @@ export class UpdateProjectDto {
   @IsOptional()
   @IsBoolean({ message: fa.validation.mustBeBoolean })
   isActive?: boolean;
+
+  @IsOptional()
+  @IsString()
+  pinnedPromptId?: string;
 }

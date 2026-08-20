@@ -25,4 +25,9 @@ export class CreateProjectDto {
   @IsString()
   @MaxLength(40, { message: fa.validation.stringTooLong })
   brandColor?: string;
+
+  // سبک/پرامپت ثابتی که پروژه هر بار با آن تولید می‌کند — باید یک CreativePrompt فعال باشد
+  @IsOptional()
+  @IsString()
+  pinnedPromptId?: string;
 }
