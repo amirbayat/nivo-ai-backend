@@ -151,7 +151,10 @@ export class PaymentsService {
     return this.registry.getEnabled().map((g) => g.toLowerCase());
   }
 
-  // docs/PRD-pay-as-you-go-wallet.md بخش ۵.۱ — شارژ کیف‌پول، بدون planId (Payment.kind='WALLET_TOPUP')
+  // docs/PRD-pay-as-you-go-wallet.md بخش ۵.۱ — شارژ کیف‌پول پلن PAYG قدیمی، بدون planId
+  // (Payment.kind='WALLET_TOPUP') — endpoint قدیمی (`POST /payments/initiate-wallet-topup`)،
+  // دست‌نخورده نگه داشته شده؛ برای خرید نیوو (v2/credits) به‌جایش از initiateCreditTopup
+  // زیر استفاده کن که اصلاً وابسته به Plan نیست.
   async initiateWalletTopup(userId: string, dto: InitiateWalletTopupDto) {
     const paygPlan = await this.prisma.plan.findFirst({
       where: { isPayAsYouGo: true, isActive: true },
@@ -173,15 +176,41 @@ export class PaymentsService {
       );
     }
 
-    const gateway = this.registry.resolve(dto.gateway);
+    return this.createWalletTopupPayment(
+      userId,
+      dto.amountToman,
+      dto.gateway,
+      dto.source,
+    );
+  }
+
+  // خرید نیوو (v2/credits/purchase) — کاملاً مستقل از Plan/isPayAsYouGo؛ حداقل مبلغ خودش را
+  // از حداقل تعداد نیوو هر بسته (CreditPackage.credits) می‌گیرد، نه از یک سقف تومانی جدا
+  // (CreditsService.purchasePackage همین چک را قبل از رسیدن به اینجا انجام می‌دهد).
+  async initiateCreditTopup(
+    userId: string,
+    amountToman: number,
+    gateway?: PaymentProvider,
+    source?: 'app',
+  ) {
+    return this.createWalletTopupPayment(userId, amountToman, gateway, source);
+  }
+
+  private async createWalletTopupPayment(
+    userId: string,
+    amountToman: number,
+    gatewayName?: PaymentProvider,
+    source?: 'app',
+  ) {
+    const gateway = this.registry.resolve(gatewayName);
     const callbackUrl = `${this.config.get('API_URL')}/api/v1/payments/callback/${gateway.name.toLowerCase()}`;
 
     this.logger.log(
-      `initiateWalletTopup: gateway=${gateway.name} amount=${dto.amountToman}`,
+      `walletTopup: gateway=${gateway.name} amount=${amountToman}`,
     );
 
     const { providerRef, paymentUrl } = await gateway.createPayment({
-      amount: dto.amountToman * 10, // مرز تبدیل تومان→ریال، مثل initiate()
+      amount: amountToman * 10, // مرز تبدیل تومان→ریال، مثل initiate()
       description: fa.payment.walletTopupDescription,
       callbackUrl,
     });
@@ -191,10 +220,10 @@ export class PaymentsService {
         userId,
         kind: 'WALLET_TOPUP',
         planId: null,
-        amount: dto.amountToman,
+        amount: amountToman,
         provider: gateway.name,
         providerRef,
-        ...(dto.source === 'app' ? { metadata: { source: 'app' } } : {}),
+        ...(source === 'app' ? { metadata: { source: 'app' } } : {}),
       },
     });
 

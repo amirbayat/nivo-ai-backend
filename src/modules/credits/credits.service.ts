@@ -117,12 +117,14 @@ export class CreditsService {
     if (amountToman <= 0)
       throw new BadRequestException(fa.validation.numberPositive);
 
-    // همان مسیر initiateWalletTopup پلن PAYG — فقط مبلغ از روی بسته‌ی از پیش‌تعریف‌شده
-    // محاسبه شده، نه ورودی آزاد کاربر. بعد از تکمیل پرداخت، همان کد callback موجود
-    // Wallet.balanceToman را افزایش می‌دهد؛ چیزی جدید در مسیر پرداخت لازم نیست.
-    return this.payments.initiateWalletTopup(userId, {
+    // initiateCreditTopup — مستقل از Plan/isPayAsYouGo (برخلاف initiateWalletTopup قدیمی)؛
+    // حداقل مبلغ خودش همین بالاتر با pkg.credits چک شده، نه یک سقف تومانی جدا از Plan.
+    // بعد از تکمیل پرداخت، همان کد callback موجود Wallet.balanceToman را افزایش می‌دهد؛
+    // چیزی جدید در مسیر پرداخت لازم نیست.
+    return this.payments.initiateCreditTopup(
+      userId,
       amountToman,
-      ...(dto.gateway ? { gateway: dto.gateway } : {}),
-    });
+      dto.gateway,
+    );
   }
 }
