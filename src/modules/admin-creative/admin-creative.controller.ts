@@ -14,6 +14,7 @@ import type { Response } from 'express';
 import { CreativePromptReviewStatus, CreativePromptSourceType } from '@prisma/client';
 import { JwtGuard } from '../../common/guards/jwt.guard';
 import { AdminGuard } from '../../common/guards/admin.guard';
+import { parseDateRange } from '../usage-analytics/usage-analytics.service';
 import { AdminCreativeService } from './admin-creative.service';
 import { CreateCreativePromptDto } from './dto/create-creative-prompt.dto';
 import { UpdateCreativePromptDto } from './dto/update-creative-prompt.dto';
@@ -145,6 +146,12 @@ export class AdminCreativeController {
   @Delete('categories/:id')
   deleteCategory(@Param('id') id: string) {
     return this.adminCreativeService.deleteCategory(id);
+  }
+
+  // گزارش نیوو (فروخته/مصرف‌شده/margin) — docs/PRD-admin-credit-reports.md فاز ۱
+  @Get('credits-report')
+  getCreditsReport(@Query('from') from?: string, @Query('to') to?: string) {
+    return this.adminCreativeService.getCreditsReport(parseDateRange(from, to));
   }
 
   @Get('prompt-requests')

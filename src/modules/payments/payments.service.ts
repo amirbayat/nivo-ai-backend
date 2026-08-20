@@ -192,8 +192,17 @@ export class PaymentsService {
     amountToman: number,
     gateway?: PaymentProvider,
     source?: 'app',
+    packageId?: string,
+    credits?: number,
   ) {
-    return this.createWalletTopupPayment(userId, amountToman, gateway, source);
+    return this.createWalletTopupPayment(
+      userId,
+      amountToman,
+      gateway,
+      source,
+      packageId,
+      credits,
+    );
   }
 
   private async createWalletTopupPayment(
@@ -201,6 +210,8 @@ export class PaymentsService {
     amountToman: number,
     gatewayName?: PaymentProvider,
     source?: 'app',
+    packageId?: string,
+    credits?: number,
   ) {
     const gateway = this.registry.resolve(gatewayName);
     const callbackUrl = `${this.config.get('API_URL')}/api/v1/payments/callback/${gateway.name.toLowerCase()}`;
@@ -223,6 +234,7 @@ export class PaymentsService {
         amount: amountToman,
         provider: gateway.name,
         providerRef,
+        ...(packageId ? { packageId, credits } : {}),
         ...(source === 'app' ? { metadata: { source: 'app' } } : {}),
       },
     });

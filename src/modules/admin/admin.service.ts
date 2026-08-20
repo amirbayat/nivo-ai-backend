@@ -137,6 +137,11 @@ export class AdminService {
       activeUsers,
       revenueAll,
       revenueMrr,
+      // docs/PRD-admin-credit-reports.md فاز ۲ — درآمد خرید بسته‌ی نیوو این ماه، جدا از mrr
+      // قدیمی (که کل Payment.amount را بدون تفکیک نوع جمع می‌زند). بعد از قطع کامل پلن ماهانه
+      // (docs/PRD-discovery-and-credits.md بخش ۲.۲)، mrr مفهوم اشتراک ماهانه را دیگر نمایندگی
+      // نمی‌کند — creditRevenueToman جایگزین معنادار برای «درآمد ماهانه» است.
+      creditRevenueMrr,
       totalConversations,
       todayConversations,
       exchangeRate,
@@ -155,6 +160,14 @@ export class AdminService {
         where: { status: 'COMPLETED', createdAt: { gte: startOfMonth } },
         _sum: { amount: true },
       }),
+      this.prisma.payment.aggregate({
+        where: {
+          status: 'COMPLETED',
+          packageId: { not: null },
+          createdAt: { gte: startOfMonth },
+        },
+        _sum: { amount: true },
+      }),
       this.prisma.conversation.count(),
       this.prisma.conversation.count({
         where: { createdAt: { gte: startOfToday } },
@@ -167,6 +180,7 @@ export class AdminService {
       activeUsers,
       totalRevenue: revenueAll._sum.amount ?? 0,
       mrr: revenueMrr._sum.amount ?? 0,
+      creditRevenueToman: creditRevenueMrr._sum.amount ?? 0,
       totalConversations,
       todayConversations,
       exchangeRate,
@@ -234,34 +248,52 @@ export class AdminService {
     }, startOfMonth);
 
     const userIds = users.map((u) => u.id);
-    const [usageRows, messageRows] = await Promise.all([
-      this.prisma.dailyUsage.findMany({
-        where: { userId: { in: userIds }, date: { gte: earliestWindowStart } },
-        select: {
-          userId: true,
-          date: true,
-          costToman: true,
-          costUsdMicros: true,
-        },
-      }),
-      // برای تفکیک مصرف متن/عکس نیاز به سطح پیام داریم — DailyUsage این تفکیک را
-      // نگه نمی‌دارد (فقط جمع کل روزانه)
-      this.prisma.message.findMany({
-        where: {
-          userId: { in: userIds },
-          role: 'ASSISTANT',
-          model: { not: null },
-          createdAt: { gte: earliestWindowStart },
-        },
-        select: {
-          userId: true,
-          model: true,
-          costToman: true,
-          costUsdMicros: true,
-          createdAt: true,
-        },
-      }),
-    ]);
+    const [usageRows, messageRows, creditDebitRows, creditConfig] =
+      await Promise.all([
+        this.prisma.dailyUsage.findMany({
+          where: { userId: { in: userIds }, date: { gte: earliestWindowStart } },
+          select: {
+            userId: true,
+            date: true,
+            costToman: true,
+            costUsdMicros: true,
+          },
+        }),
+        // برای تفکیک مصرف متن/عکس نیاز به سطح پیام داریم — DailyUsage این تفکیک را
+        // نگه نمی‌دارد (فقط جمع کل روزانه)
+        this.prisma.message.findMany({
+          where: {
+            userId: { in: userIds },
+            role: 'ASSISTANT',
+            model: { not: null },
+            createdAt: { gte: earliestWindowStart },
+          },
+          select: {
+            userId: true,
+            model: true,
+            costToman: true,
+            costUsdMicros: true,
+            createdAt: true,
+          },
+        }),
+        // docs/PRD-admin-credit-reports.md فاز ۴ — مصرف نیوو (کیف‌پول) هر کاربر؛ برای کاربر
+        // فقط‌نیوویی (بدون پلن ماهانه‌ی پولی) معیار heavy/moderate/light پایین‌تر (که مبتنی بر
+        // priceMonthly است) بی‌معنی می‌شود — این مقدار موازی، مستقل از آن، کنارش گزارش می‌شود
+        this.prisma.walletTransaction.findMany({
+          where: {
+            type: 'DEBIT',
+            createdAt: { gte: earliestWindowStart },
+            wallet: { userId: { in: userIds } },
+          },
+          select: {
+            amountToman: true,
+            createdAt: true,
+            wallet: { select: { userId: true } },
+          },
+        }),
+        this.prisma.creditConfig.findUnique({ where: { id: 'singleton' } }),
+      ]);
+    const tomanPerCredit = creditConfig?.tomanPerCredit ?? 1200;
 
     const enriched = users.map((u) => {
       const windowStart = windowStartFor(u);
@@ -295,6 +327,16 @@ export class AdminService {
       const aiCostImageUsdThisMonth =
         imageRows.reduce((sum, r) => sum + r.costUsdMicros, 0) / 1_000_000;
 
+      // docs/PRD-admin-credit-reports.md فاز ۴ — مصرف نیوو مستقل از پنجره/بودجه‌ی پلن ماهانه
+      const creditConsumedTomanThisMonth = creditDebitRows
+        .filter(
+          (r) => r.wallet.userId === u.id && r.createdAt >= windowStart,
+        )
+        .reduce((sum, r) => sum + r.amountToman, 0);
+      const creditConsumedCreditsThisMonth = Math.floor(
+        creditConsumedTomanThisMonth / tomanPerCredit,
+      );
+
       const priceMonthly = u.subscription?.plan.priceMonthly ?? 0;
       const monthlyBudget = Math.floor(priceMonthly * this.aiShare);
 
@@ -327,6 +369,11 @@ export class AdminService {
       );
       const ratio = expectedByNow > 0 ? aiCost / expectedByNow : 0;
 
+      // این دسته‌بندی فقط برای کاربران با پلن ماهانه‌ی پولی/PAYG معنادار است (بر مبنای
+      // priceMonthly/expectedByNow) — برای کاربر فقط‌نیوویی (priceMonthly=۰، بدون بودجه‌ی
+      // تعریف‌شده) monthlyBudget همیشه صفر است و این کاربر همیشه در بهترین حالت «light»
+      // می‌افتد، فارغ از میزان واقعی مصرف نیوویش. برای آن دسته، creditConsumedTomanThisMonth/
+      // creditConsumedCreditsThisMonth بالا معیار موازی و واقعی مصرف است (docs/PRD-admin-credit-reports.md فاز ۴).
       let category: 'heavy' | 'moderate' | 'light' | 'inactive' = 'inactive';
       if (aiCost > 0) {
         if (ratio >= 1.5) category = 'heavy';
@@ -354,6 +401,8 @@ export class AdminService {
         aiCostImageUsdThisMonth,
         expectedByNow,
         category,
+        creditConsumedTomanThisMonth,
+        creditConsumedCreditsThisMonth,
       };
     });
 
@@ -389,33 +438,46 @@ export class AdminService {
     const now = new Date();
     const thirtyDaysAgo = new Date(now.getTime() - 29 * 86_400_000);
 
-    const [walletTransactions, payments, dailyUsage, modelBreakdown] =
-      await Promise.all([
-        user.wallet
-          ? this.prisma.walletTransaction.findMany({
-              where: { walletId: user.wallet.id },
-              orderBy: { createdAt: 'desc' },
-              take: 50,
-            })
-          : [],
-        this.prisma.payment.findMany({
-          where: { userId },
-          include: { plan: { select: { name: true } } },
-          orderBy: { createdAt: 'desc' },
-          take: 20,
-        }),
-        this.prisma.dailyUsage.findMany({
-          where: { userId },
-          orderBy: { date: 'desc' },
-          take: 30,
-        }),
-        // تفکیک مصرف متن/عکس ۳۰ روز اخیر — همون منطق modelType که در صفحه‌ی
-        // «آنالیز مصرف» استفاده می‌شود، اینجا برای یک کاربر خاص
-        this.usageAnalytics.getModelBreakdown(
-          { from: thirtyDaysAgo, to: now },
-          userId,
-        ),
-      ]);
+    const [
+      walletTransactions,
+      payments,
+      dailyUsage,
+      modelBreakdown,
+      creativeGenerations,
+    ] = await Promise.all([
+      user.wallet
+        ? this.prisma.walletTransaction.findMany({
+            where: { walletId: user.wallet.id },
+            orderBy: { createdAt: 'desc' },
+            take: 50,
+          })
+        : [],
+      this.prisma.payment.findMany({
+        where: { userId },
+        include: { plan: { select: { name: true } } },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+      }),
+      this.prisma.dailyUsage.findMany({
+        where: { userId },
+        orderBy: { date: 'desc' },
+        take: 30,
+      }),
+      // تفکیک مصرف متن/عکس ۳۰ روز اخیر — همون منطق modelType که در صفحه‌ی
+      // «آنالیز مصرف» استفاده می‌شود، اینجا برای یک کاربر خاص
+      this.usageAnalytics.getModelBreakdown(
+        { from: thirtyDaysAgo, to: now },
+        userId,
+      ),
+      // docs/PRD-admin-credit-reports.md فاز ۳ — تاریخچه‌ی مصرف دیسکاوری/کریتیو کاربر؛ قبلاً
+      // این صفحه فقط کیف‌پول/چت را می‌دید، هیچ ردی از تولیدهای نیوویی نبود
+      this.prisma.creativeGeneration.findMany({
+        where: { userId },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+        include: { prompt: { select: { title: true, outputType: true } } },
+      }),
+    ]);
 
     const sumTypeUsage = (rows: typeof modelBreakdown) => ({
       messages: rows.reduce((s, r) => s + r.messages, 0),
@@ -433,6 +495,7 @@ export class AdminService {
       walletTransactions,
       payments,
       dailyUsage,
+      creativeGenerations,
       textUsage: sumTypeUsage(
         modelBreakdown.filter((m) => m.modelType === 'TEXT'),
       ),
@@ -500,27 +563,37 @@ export class AdminService {
     since.setDate(since.getDate() - days);
     since.setHours(0, 0, 0, 0);
 
-    const [costRows, revenueRows, liaraRows] = await Promise.all([
-      this.prisma.dailyUsage.groupBy({
-        by: ['date'],
-        where: { date: { gte: since } },
-        _sum: { costToman: true, costUsdMicros: true },
-        orderBy: { date: 'asc' },
-      }),
-      this.prisma.$queryRaw<Array<{ day: Date; revenue: bigint }>>`
+    const [costRows, revenueRows, liaraRows, discoveryCostRows] =
+      await Promise.all([
+        this.prisma.dailyUsage.groupBy({
+          by: ['date'],
+          where: { date: { gte: since } },
+          _sum: { costToman: true, costUsdMicros: true },
+          orderBy: { date: 'asc' },
+        }),
+        this.prisma.$queryRaw<Array<{ day: Date; revenue: bigint }>>`
         SELECT DATE_TRUNC('day', "createdAt") AS day, SUM(amount)::bigint AS revenue
         FROM payments
         WHERE status = 'COMPLETED' AND "createdAt" >= ${since}
         GROUP BY DATE_TRUNC('day', "createdAt")
         ORDER BY day ASC
       `,
-      this.prisma.liaraUsageSnapshot.groupBy({
-        by: ['date'],
-        where: { date: { gte: since } },
-        _sum: { realCostToman: true },
-        orderBy: { date: 'asc' },
-      }),
-    ]);
+        this.prisma.liaraUsageSnapshot.groupBy({
+          by: ['date'],
+          where: { date: { gte: since } },
+          _sum: { realCostToman: true },
+          orderBy: { date: 'asc' },
+        }),
+        // docs/PRD-admin-credit-reports.md فاز ۲ — هزینه‌ی روزانه‌ی دیسکاوری/کریتیو، قبلاً در
+        // این نمودار اصلاً دیده نمی‌شد (فقط DailyUsage چت جمع زده می‌شد)
+        this.prisma.$queryRaw<Array<{ day: Date; cost: bigint }>>`
+        SELECT DATE_TRUNC('day', "createdAt") AS day, SUM("costToman")::bigint AS cost
+        FROM creative_generations
+        WHERE status = 'SUCCEEDED' AND "createdAt" >= ${since}
+        GROUP BY DATE_TRUNC('day', "createdAt")
+        ORDER BY day ASC
+      `,
+      ]);
 
     const revenueMap = new Map(
       revenueRows.map((r) => [
@@ -535,13 +608,36 @@ export class AdminService {
         r._sum.realCostToman ?? 0,
       ]),
     );
+    const discoveryCostMap = new Map(
+      discoveryCostRows.map((r) => [
+        r.day.toISOString().slice(0, 10),
+        Number(r.cost),
+      ]),
+    );
+    const chatCostMap = new Map(
+      costRows.map((r) => [
+        r.date.toISOString().slice(0, 10),
+        { costToman: r._sum.costToman ?? 0, costUsdMicros: r._sum.costUsdMicros ?? 0 },
+      ]),
+    );
 
-    return costRows.map((r) => {
-      const date = r.date.toISOString().slice(0, 10);
+    // قبلاً این نمودار فقط روزهایی را نشان می‌داد که DailyUsage (چت) رکورد داشت — یک روز با
+    // فقط مصرف دیسکاوری/کریتیو (بدون هیچ پیام چت) اصلاً در نمودار ظاهر نمی‌شد. اتحاد تاریخ‌ها
+    // از هر دو منبع این را برطرف می‌کند.
+    const allDates = Array.from(
+      new Set([...chatCostMap.keys(), ...discoveryCostMap.keys()]),
+    ).sort();
+
+    return allDates.map((date) => {
+      const chat = chatCostMap.get(date);
+      const chatCostToman = chat?.costToman ?? 0;
+      const discoveryCostToman = discoveryCostMap.get(date) ?? 0;
       return {
         date,
-        aiCostToman: r._sum.costToman ?? 0,
-        aiCostUsd: (r._sum.costUsdMicros ?? 0) / 1_000_000,
+        aiCostToman: chatCostToman + discoveryCostToman, // حالا شامل چت + دیسکاوری/کریتیو
+        chatAiCostToman: chatCostToman,
+        discoveryAiCostToman: discoveryCostToman,
+        aiCostUsd: (chat?.costUsdMicros ?? 0) / 1_000_000,
         revenueToman: revenueMap.get(date) ?? 0,
         liaraCostToman: liaraMap.get(date) ?? null,
       };
@@ -552,7 +648,7 @@ export class AdminService {
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-    const [revenueRow, costRow] = await Promise.all([
+    const [revenueRow, costRow, discoveryCostRow] = await Promise.all([
       this.prisma.payment.aggregate({
         where: { status: 'COMPLETED', createdAt: { gte: startOfMonth } },
         _sum: { amount: true },
@@ -561,10 +657,18 @@ export class AdminService {
         where: { date: { gte: startOfMonth } },
         _sum: { costToman: true, costUsdMicros: true },
       }),
+      // docs/PRD-admin-credit-reports.md فاز ۲ — قبل از این، هزینه‌ی دیسکاوری/کریتیو (تصویر و
+      // متن نیوویی) اصلاً در این alert دیده نمی‌شد و فقط هزینه‌ی چت (DailyUsage) حساب می‌شد
+      this.prisma.creativeGeneration.aggregate({
+        where: { status: 'SUCCEEDED', createdAt: { gte: startOfMonth } },
+        _sum: { costToman: true },
+      }),
     ]);
 
     const monthlyRevenue = revenueRow._sum.amount ?? 0;
-    const monthlyAiCost = costRow._sum.costToman ?? 0;
+    const monthlyChatAiCost = costRow._sum.costToman ?? 0;
+    const monthlyDiscoveryAiCost = discoveryCostRow._sum.costToman ?? 0;
+    const monthlyAiCost = monthlyChatAiCost + monthlyDiscoveryAiCost;
     const monthlyAiCostUsd = (costRow._sum.costUsdMicros ?? 0) / 1_000_000;
     const ratio = monthlyRevenue > 0 ? monthlyAiCost / monthlyRevenue : 0;
 
@@ -586,7 +690,9 @@ export class AdminService {
 
     return {
       monthlyRevenueToman: monthlyRevenue,
-      monthlyAiCostToman: monthlyAiCost,
+      monthlyAiCostToman: monthlyAiCost, // حالا شامل هزینه‌ی چت + دیسکاوری/کریتیو است
+      monthlyChatAiCostToman: monthlyChatAiCost,
+      monthlyDiscoveryAiCostToman: monthlyDiscoveryAiCost,
       monthlyAiCostUsd,
       aiCostRatio: Math.round(ratio * 1000) / 10,
       alertLevel,
@@ -679,13 +785,25 @@ export class AdminService {
   }
 
   async getRevenueStats() {
+    // docs/PRD-admin-credit-reports.md فاز ۲ — قبلاً «revenue» یک عدد کلی از سه چیز متفاوت
+    // بود (اشتراک ماهانه، شارژ دستی PAYG قدیمی، خرید بسته‌ی نیوو). حالا با packageId
+    // (migration دستی 20260821b) تفکیک خرید بسته‌ی نیوو ممکن شده — creditRevenue/subscriptionRevenue
+    // فیلدهای جدید کنار «revenue» کلی قدیمی (که دست‌نخورده می‌ماند) اضافه شده‌اند.
     const rows = await this.prisma.$queryRaw<
-      Array<{ month: string; revenue: bigint; count: bigint }>
+      Array<{
+        month: string;
+        revenue: bigint;
+        count: bigint;
+        creditRevenue: bigint;
+        subscriptionRevenue: bigint;
+      }>
     >`
       SELECT
         TO_CHAR(DATE_TRUNC('month', "createdAt"), 'YYYY-MM') AS month,
         SUM(amount)::bigint AS revenue,
-        COUNT(*)::bigint AS count
+        COUNT(*)::bigint AS count,
+        COALESCE(SUM(amount) FILTER (WHERE "packageId" IS NOT NULL), 0)::bigint AS "creditRevenue",
+        COALESCE(SUM(amount) FILTER (WHERE kind = 'SUBSCRIPTION'), 0)::bigint AS "subscriptionRevenue"
       FROM payments
       WHERE status = 'COMPLETED'
         AND "createdAt" >= NOW() - INTERVAL '12 months'
@@ -697,6 +815,8 @@ export class AdminService {
       month: r.month,
       revenue: Number(r.revenue),
       count: Number(r.count),
+      creditRevenue: Number(r.creditRevenue),
+      subscriptionRevenue: Number(r.subscriptionRevenue),
     }));
   }
 

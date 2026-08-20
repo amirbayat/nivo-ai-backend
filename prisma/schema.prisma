@@ -251,11 +251,21 @@ model Payment {
   refId          String?
   metadata       Json?
   discountCodeId String? // docs/PRD-growth-traction-features.md بخش ۵.۲
+  // docs/PRD-admin-credit-reports.md بخش ۲ — فقط وقتی این Payment (kind=WALLET_TOPUP) از خرید
+  // بسته‌ی نیوو (credits.service.ts purchasePackage) آمده؛ null یعنی شارژ دستی PAYG قدیمی یا
+  // SUBSCRIPTION. عمداً kind شکسته نشده (ریسک روی چک‌های موجود kind==='WALLET_TOPUP')، فقط این
+  // فیلد برای تفکیک در گزارش‌های ادمین اضافه شده — صفر تغییر رفتار پرداخت/کیف‌پول.
+  packageId      String?
+  // تعداد نیووی خریداری‌شده در همین Payment (snapshot لحظه‌ی خرید) — چون برای بسته‌ی
+  // isCustomAmount مقدار از amount/tomanPerCredit قابل بازمحاسبه‌ی دقیق نیست (config می‌تواند
+  // بعداً تغییر کند)؛ فقط همراه packageId پر می‌شود.
+  credits        Int?
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
 
   user         User                    @relation(fields: [userId], references: [id])
   plan         Plan?                   @relation(fields: [planId], references: [id])
+  package      CreditPackage?          @relation(fields: [packageId], references: [id])
   discountCode DiscountCode?           @relation(fields: [discountCodeId], references: [id])
   invoice      Invoice?
   redemption   DiscountCodeRedemption?
@@ -506,6 +516,8 @@ model CreditPackage {
   isActive        Boolean  @default(true)
   sortOrder       Int      @default(0)
   createdAt       DateTime @default(now())
+
+  payments Payment[] // docs/PRD-admin-credit-reports.md بخش ۲ — برای گزارش «نیوو فروخته‌شده به تفکیک بسته»
 
   @@map("credit_packages")
 }

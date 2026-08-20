@@ -120,11 +120,15 @@ export class CreditsService {
     // initiateCreditTopup — مستقل از Plan/isPayAsYouGo (برخلاف initiateWalletTopup قدیمی)؛
     // حداقل مبلغ خودش همین بالاتر با pkg.credits چک شده، نه یک سقف تومانی جدا از Plan.
     // بعد از تکمیل پرداخت، همان کد callback موجود Wallet.balanceToman را افزایش می‌دهد؛
-    // چیزی جدید در مسیر پرداخت لازم نیست.
+    // چیزی جدید در مسیر پرداخت لازم نیست. packageId/effectiveCredits فقط برای گزارش‌های ادمین
+    // پاس داده می‌شوند (docs/PRD-admin-credit-reports.md بخش ۲) — روی رفتار پرداخت/کیف‌پول اثری ندارند.
     return this.payments.initiateCreditTopup(
       userId,
       amountToman,
       dto.gateway,
+      undefined,
+      pkg.id,
+      effectiveCredits,
     );
   }
 }

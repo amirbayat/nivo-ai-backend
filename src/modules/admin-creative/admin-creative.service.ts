@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
 import { ChatConfigService } from '../chat-config/chat-config.service';
+import { DateRange } from '../usage-analytics/usage-analytics.service';
 import {
   mimeTypeForExt,
   parseChatImageDataUrl,
@@ -239,5 +240,120 @@ export class AdminCreativeService {
       where: { id },
       data: dto,
     });
+  }
+
+  // ── گزارش نیوو (فروخته‌شده/مصرف‌شده/margin) — docs/PRD-admin-credit-reports.md فاز ۱ ──
+  // نیوو فروخته‌شده از Payment.packageId/credits می‌آید (فقط بعد از migration دستی
+  // 20260821b قابل‌اعتماد است — رکوردهای قدیمی‌تر همه null هستند و در byPackage دیده نمی‌شوند).
+  // نیوو مصرف‌شده از CreativeGeneration موفق می‌آید. «موجودی معلق» یک SUM آنی روی کل Wallet است
+  // (نه وابسته به بازه‌ی زمانی) — یک aggregate ساده، نیازی به snapshot شبانه نبود.
+  async getCreditsReport(range: DateRange) {
+    const [
+      soldRows,
+      soldTotals,
+      consumedRows,
+      consumedTotals,
+      walletSum,
+      config,
+      packages,
+      prompts,
+    ] = await Promise.all([
+      this.prisma.payment.groupBy({
+        by: ['packageId'],
+        where: {
+          packageId: { not: null },
+          status: 'COMPLETED',
+          createdAt: { gte: range.from, lte: range.to },
+        },
+        _sum: { credits: true, amount: true },
+        _count: { id: true },
+      }),
+      this.prisma.payment.aggregate({
+        where: {
+          packageId: { not: null },
+          status: 'COMPLETED',
+          createdAt: { gte: range.from, lte: range.to },
+        },
+        _sum: { credits: true, amount: true },
+        _count: { id: true },
+      }),
+      this.prisma.creativeGeneration.groupBy({
+        by: ['promptId'],
+        where: {
+          status: 'SUCCEEDED',
+          createdAt: { gte: range.from, lte: range.to },
+        },
+        _sum: { creditCost: true, costToman: true },
+        _count: { id: true },
+      }),
+      this.prisma.creativeGeneration.aggregate({
+        where: {
+          status: 'SUCCEEDED',
+          createdAt: { gte: range.from, lte: range.to },
+        },
+        _sum: { creditCost: true, costToman: true },
+        _count: { id: true },
+      }),
+      this.prisma.wallet.aggregate({ _sum: { balanceToman: true } }),
+      this.getCreditConfig(),
+      this.prisma.creditPackage.findMany({
+        select: { id: true, isCustomAmount: true },
+      }),
+      this.prisma.creativePrompt.findMany({ select: { id: true, title: true } }),
+    ]);
+
+    const packageById = new Map(packages.map((p) => [p.id, p]));
+    const promptById = new Map(prompts.map((p) => [p.id, p.title]));
+
+    const sold = {
+      totalTransactions: soldTotals._count.id,
+      totalCredits: soldTotals._sum.credits ?? 0,
+      totalToman: soldTotals._sum.amount ?? 0,
+      byPackage: soldRows
+        .map((r) => ({
+          packageId: r.packageId as string,
+          isCustomAmount:
+            packageById.get(r.packageId as string)?.isCustomAmount ?? false,
+          transactions: r._count.id,
+          credits: r._sum.credits ?? 0,
+          toman: r._sum.amount ?? 0,
+        }))
+        .sort((a, b) => b.toman - a.toman),
+    };
+
+    const consumed = {
+      totalGenerations: consumedTotals._count.id,
+      totalCreditCost: consumedTotals._sum.creditCost ?? 0,
+      totalCostToman: consumedTotals._sum.costToman ?? 0,
+      byPrompt: consumedRows
+        .map((r) => ({
+          promptId: r.promptId,
+          title: promptById.get(r.promptId) ?? '—',
+          generations: r._count.id,
+          creditCost: r._sum.creditCost ?? 0,
+          costToman: r._sum.costToman ?? 0,
+        }))
+        .sort((a, b) => b.generations - a.generations),
+    };
+
+    const outstandingBalanceToman = walletSum._sum.balanceToman ?? 0;
+
+    return {
+      range: { from: range.from, to: range.to },
+      sold,
+      consumed,
+      outstanding: {
+        balanceToman: outstandingBalanceToman,
+        credits: Math.floor(outstandingBalanceToman / config.tomanPerCredit),
+      },
+      // margin تقریبی است: درآمد فروش بسته و هزینه‌ی واقعی مصرف در یک بازه‌ی یکسان مقایسه
+      // می‌شوند، نه به‌ازای همان نیوو (دقیقاً همان تقریبی که admin.service.ts getPricingAlert
+      // برای چت به‌کار می‌برد)
+      margin: {
+        revenueToman: sold.totalToman,
+        costToman: consumed.totalCostToman,
+        marginToman: sold.totalToman - consumed.totalCostToman,
+      },
+    };
   }
 }
