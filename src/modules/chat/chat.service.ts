@@ -69,6 +69,10 @@ const AUTO_MODE_SENTINELS = [
 // usage.inputTokens/outputTokens for the model that ends up running.
 const PRE_ROUTING_REFERENCE_MODEL = 'openai/gpt-4o-mini';
 
+// تیتر مکالمه یک تولید کوتاه و کم‌ریسک است — همیشه با ارزان‌ترین مدل ساخته می‌شود، صرف‌نظر از
+// این‌که Router برای پاسخ اصلی همین پیام چه مدلی انتخاب کرده
+const TITLE_GENERATION_MODEL = 'openai/gpt-5-nano';
+
 // همان union که 'ai' برای LanguageModelCallOptions.reasoning می‌خواهد — به‌صورت type export
 // شده نیست، پس اینجا تکرارش می‌کنیم. مقدار Plan.reasoningEffort/PlanRoutingStep.reasoningEffort
 // در DTO ادمین با @IsIn به همین مقادیر محدود شده، پس این cast امن است.
@@ -840,7 +844,7 @@ export class ChatService {
         const title = await this.generateTitle(
           conversationId,
           fullContent,
-          modelId,
+          TITLE_GENERATION_MODEL,
           apiKey,
         );
         if (title) {
