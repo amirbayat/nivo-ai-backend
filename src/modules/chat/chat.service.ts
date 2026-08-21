@@ -342,7 +342,14 @@ export class ChatService {
     //   }
     // }
 
-    const allowed = plan.allowedModels;
+    // [DISABLED ۱۴۰۵/۰۵/۳۰ — تصمیم محصول: هیچ پلنی دیگر به allowedModels محدود نمی‌شود؛
+    // انتخاب مدل فقط بر اساس موجودی کیف‌پول (برای PAYG، پایین‌تر) محدود می‌شود]
+    const allowed = (
+      await this.prisma.aiModel.findMany({
+        where: { isActive: true, modelType: 'CHAT' },
+        select: { name: true },
+      })
+    ).map((m) => m.name);
     if (allowed.length === 0)
       throw new ForbiddenException(fa.chat.modelNotAllowed);
 
@@ -1159,27 +1166,24 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
       },
     });
 
-    // isPayAsYouGo یعنی بدون محدودیت پلن — فقط بر اساس موجودی کیف‌پول (پایین‌تر) محدود می‌شود،
-    // نه plan.allowedModels که مخصوص پلن‌های اشتراکی قدیمی است
+    // [DISABLED ۱۴۰۵/۰۵/۳۰ — تصمیم محصول: هیچ پلنی دیگر به allowedModels محدود نمی‌شود؛
+    // انتخاب مدل فقط بر اساس موجودی کیف‌پول (برای PAYG، پایین‌تر) محدود می‌شود]
     const requestedModel =
       dto.model && !AUTO_MODE_SENTINELS.includes(dto.model)
         ? resolveModelId(dto.model)
         : undefined;
-    const explicitModelRecord =
-      requestedModel &&
-      (plan.isPayAsYouGo || plan.allowedModels.includes(requestedModel))
-        ? await this.prisma.aiModel.findFirst({
-            where: {
-              name: requestedModel,
-              isActive: true,
-              supportsImageGen: true,
-            },
-          })
-        : null;
+    const explicitModelRecord = requestedModel
+      ? await this.prisma.aiModel.findFirst({
+          where: {
+            name: requestedModel,
+            isActive: true,
+            supportsImageGen: true,
+          },
+        })
+      : null;
 
     const candidates = await this.prisma.aiModel.findMany({
       where: {
-        ...(plan.isPayAsYouGo ? {} : { name: { in: plan.allowedModels } }),
         supportsImageGen: true,
         isActive: true,
       },
