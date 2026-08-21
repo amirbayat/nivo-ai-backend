@@ -195,27 +195,42 @@ export class ModelRouterService {
       };
     }
 
-    if (input.selectionMode === 'cost_optimized') {
+    const picked = this.pickBySelectionMode(
+      candidates,
+      input.selectionMode === 'cost_optimized' ? 'cost_optimized' : 'best_answer',
+    );
+    return {
+      modelId: picked.name,
+      tier: picked.tier,
+      method:
+        input.selectionMode === 'cost_optimized'
+          ? 'payg_cost_optimized'
+          : 'payg_best_answer',
+      confidence: 1,
+      overriddenManualModel: null,
+      reasoningEffort: input.reasoningEffort ?? null,
+    };
+  }
+
+  // docs/PRD-model-selection-modes.md — سیاست دو حالت خودکار، مشترک بین همه‌ی مصرف‌کننده‌ها
+  // (چت PAYG، استخراج پرامپت از عکس، ...). یک‌جا نگه‌داشتنش یعنی این‌ها هرگز از هم واگرا نمی‌شوند.
+  pickBySelectionMode(
+    candidates: AiModel[],
+    selectionMode: 'cost_optimized' | 'best_answer',
+  ): AiModel {
+    if (selectionMode === 'cost_optimized') {
       // ارزان‌ترین مدلِ توانا — مجموع قیمت ورودی+خروجی به ازای هر میلیون توکن، صعودی
-      const cheapest = [...candidates].sort(
+      return [...candidates].sort(
         (a, b) =>
           a.inputPricePerM +
           a.outputPricePerM -
           (b.inputPricePerM + b.outputPricePerM),
       )[0];
-      return {
-        modelId: cheapest.name,
-        tier: cheapest.tier,
-        method: 'payg_cost_optimized',
-        confidence: 1,
-        overriddenManualModel: null,
-        reasoningEffort: input.reasoningEffort ?? null,
-      };
     }
 
-    // پیش‌فرض این پلن، و صریحاً برای selectionMode==='best_answer': قوی‌ترین مدل مجاز صرف‌نظر از
-    // قیمت — بالاترین tier، و در صورت تساوی tier، گران‌ترین (proxy برای باکیفیت‌تر در همان سطح)
-    const best = [...candidates].sort((a, b) => {
+    // 'best_answer': قوی‌ترین مدل مجاز صرف‌نظر از قیمت — بالاترین tier، و در صورت تساوی tier،
+    // گران‌ترین (proxy برای باکیفیت‌تر در همان سطح)
+    return [...candidates].sort((a, b) => {
       const tierDiff = TIER_RANK[b.tier] - TIER_RANK[a.tier];
       if (tierDiff !== 0) return tierDiff;
       return (
@@ -224,14 +239,6 @@ export class ModelRouterService {
         (a.inputPricePerM + a.outputPricePerM)
       );
     })[0];
-    return {
-      modelId: best.name,
-      tier: best.tier,
-      method: 'payg_best_answer',
-      confidence: 1,
-      overriddenManualModel: null,
-      reasoningEffort: input.reasoningEffort ?? null,
-    };
   }
 
   private routeSimple(

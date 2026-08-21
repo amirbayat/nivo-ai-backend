@@ -9,6 +9,7 @@ import { LiaraModule } from '../liara/liara.module';
 import { ImageGenerationModule } from '../../common/services/image-generation.module';
 import { CreditsModule } from '../credits/credits.module';
 import { AnonChatModule } from '../anon-chat/anon-chat.module';
+import { ModelRouterModule } from '../model-router/model-router.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { AnonChatModule } from '../anon-chat/anon-chat.module';
     ImageGenerationModule,
     CreditsModule,
     AnonChatModule,
+    ModelRouterModule,
   ],
   controllers: [DiscoveryController, DiscoveryPublicController],
   providers: [DiscoveryGenerationService, DiscoveryAnonService],

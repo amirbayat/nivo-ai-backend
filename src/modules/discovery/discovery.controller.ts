@@ -72,9 +72,11 @@ export class DiscoveryController {
     return this.discoveryService.createPromptRequest(user.sub, dto);
   }
 
-  @Get('prompt-extractions/cost')
-  extractionCost() {
-    return this.discoveryService.getExtractionCost();
+  // مدل‌های vision-capable قابل‌انتخاب برای «تبدیل عکس به پرامپت» + هزینه‌ی تخمینی هرکدام
+  // و دو حالت خودکار (بهترین نتیجه/مصرف بهینه) — انتخابگر مدل فرانت از این استفاده می‌کند
+  @Get('prompt-extractions/models')
+  extractionModels() {
+    return this.discoveryService.getExtractionModelOptions();
   }
 
   // «تبدیل عکس به پرامپت» — کارت بزرگ بالای صفحه‌ی استودیو؛ imageKey از upload-image بالا می‌آید
@@ -83,7 +85,7 @@ export class DiscoveryController {
     @CurrentUser() user: JwtPayload,
     @Body() dto: ExtractPromptDto,
   ) {
-    return this.discoveryService.extractPromptFromImage(user.sub, dto.imageKey);
+    return this.discoveryService.extractPromptFromImage(user.sub, dto);
   }
 
   @Get('projects/:projectId/customizations')
