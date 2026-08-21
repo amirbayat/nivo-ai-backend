@@ -52,6 +52,13 @@ export class DiscoveryPublicController {
     });
   }
 
+  // یک آیتم کاتالوگ با id — برای دیپ‌لینک عمومی (مثلاً nivoai.ir/studio?id=...) که کاربر مهمان
+  // هم باید بتواند قبل از لاگین آن را ببیند (StudioLinkPage فرانت)
+  @Get('catalog/:id')
+  catalogItem(@Param('id') id: string) {
+    return this.discoveryService.getCatalogItem(id);
+  }
+
   @Get('categories')
   categories() {
     return this.discoveryService.listCategories();

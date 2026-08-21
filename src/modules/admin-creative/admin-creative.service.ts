@@ -6,6 +6,7 @@ import { ChatConfigService } from '../chat-config/chat-config.service';
 import { DateRange } from '../usage-analytics/usage-analytics.service';
 import {
   mimeTypeForExt,
+  normalizeHeicDataUrl,
   parseChatImageDataUrl,
   validateChatImages,
 } from '../../common/validators/chat-image.validator';
@@ -41,7 +42,8 @@ export class AdminCreativeService {
   // (ChatConfig ادمین) رو رعایت می‌کند تا مسیر اعتبارسنجی دوباره نوشته نشود؛ URL برگشتی از
   // مسیر عمومی DiscoveryPublicController سرو می‌شود (نه presigned URL مستقیم MinIO) تا
   // endpoint MinIO داخلی هیچ‌وقت به فرانت لو نرود.
-  async uploadExampleImage(dataUrl: string): Promise<{ url: string }> {
+  async uploadExampleImage(rawDataUrl: string): Promise<{ url: string }> {
+    const dataUrl = await normalizeHeicDataUrl(rawDataUrl);
     const chatConfig = await this.chatConfig.getConfig();
     validateChatImages([dataUrl], {
       maxCount: 1,

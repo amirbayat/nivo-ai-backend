@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import heicConvert from 'heic-convert';
 import { fa } from '../../i18n/fa';
 
 // docs/PRD-chat-images.md بخش ۵.۱ — تا الان StreamMessageDto.images فقط طول آرایه را
@@ -34,6 +35,77 @@ function matchesMagicBytes(buffer: Buffer, ext: string): boolean {
 export interface ParsedChatImage {
   ext: string;
   buffer: Buffer;
+}
+
+// عکس‌های آیفون (چه گرفته‌شده با دوربین، چه انتخاب‌شده از گالری با فرمت اصلی/HEIC) به‌جای
+// image/jpeg با data:image/heic یا data:image/heif می‌رسند — DATA_URL_RE بالا اصلاً این
+// mimeها را قبول نمی‌کند (نه توی چت، نه دیسکاوری، نه آپلود عکس نمونه‌ی ادمین) و کاربر با
+// «فرمت غیرمجاز» رد می‌شود، حتی قبل از اینکه به gpt-image برسد. به‌جای اضافه‌کردن heic به
+// فرمت‌های مجاز provider (که خودش HEIC نمی‌پذیرد)، همینجا قبل از اعتبارسنجی به JPEG تبدیلش می‌کنیم.
+const HEIC_DATA_URL_RE =
+  /^data:image\/hei[cf](?:-sequence)?;base64,([A-Za-z0-9+/]+={0,2})$/i;
+
+// تشخیص HEIC از خودِ بایت‌ها (ftyp box استاندارد ISOBMFF) — مستقل از mime اعلام‌شده‌ی data
+// URL، چون بعضی مرورگرها/سیستم‌عامل‌ها HEIC را با mime نادرست (مثل application/octet-stream)
+// می‌فرستند
+const HEIC_FTYP_BRANDS = new Set([
+  'heic',
+  'heix',
+  'hevc',
+  'hevx',
+  'heim',
+  'heis',
+  'hevm',
+  'hevs',
+  'mif1',
+  'msf1',
+]);
+
+function isHeicBuffer(buffer: Buffer): boolean {
+  if (buffer.length < 12) return false;
+  if (buffer.toString('ascii', 4, 8) !== 'ftyp') return false;
+  return HEIC_FTYP_BRANDS.has(buffer.toString('ascii', 8, 12).toLowerCase());
+}
+
+// اگر یک data URL واقعاً HEIC/HEIF باشد (چه با mime درست، چه فقط از روی بایت‌ها تشخیص‌داده‌شده)
+// همین‌جا به JPEG تبدیلش می‌کنیم و یک data:image/jpeg;base64,... تازه برمی‌گردانیم؛ در غیر این
+// صورت دقیقاً همان ورودی بدون تغییر برمی‌گردد — باید همیشه *قبل از* validateChatImages صدا زده شود
+export async function normalizeHeicDataUrl(dataUrl: string): Promise<string> {
+  const heicMatch = HEIC_DATA_URL_RE.exec(dataUrl);
+  const genericMatch = /^data:[^;]+;base64,([A-Za-z0-9+/]+={0,2})$/.exec(
+    dataUrl,
+  );
+  const base64 = heicMatch?.[1] ?? genericMatch?.[1];
+  if (!base64) return dataUrl;
+
+  let buffer: Buffer;
+  try {
+    buffer = Buffer.from(base64, 'base64');
+  } catch {
+    return dataUrl;
+  }
+  if (!heicMatch && !isHeicBuffer(buffer)) return dataUrl;
+
+  try {
+    const converted = await heicConvert({
+      buffer,
+      format: 'JPEG',
+      quality: 0.92,
+    });
+    return `data:image/jpeg;base64,${Buffer.from(converted).toString('base64')}`;
+  } catch {
+    // اگر تبدیل شکست بخورد (مثلاً فایل خراب/جعلی)، ورودی اصلی را برمی‌گردانیم — validateChatImages
+    // پایین‌دست همان‌طور که تا الان بود «فرمت غیرمجاز» می‌دهد، به‌جای اینکه اینجا کرش کند
+    return dataUrl;
+  }
+}
+
+// همون normalizeHeicDataUrl ولی برای آرایه‌ی عکس‌ها (dto.images چت) — ورودی‌های غیر-HEIC
+// دست‌نخورده برمی‌گردند، فقط HEICها تبدیل می‌شوند
+export async function normalizeHeicDataUrls(
+  dataUrls: string[],
+): Promise<string[]> {
+  return Promise.all(dataUrls.map((d) => normalizeHeicDataUrl(d)));
 }
 
 const EXT_MIME_TYPES: Record<string, string> = {

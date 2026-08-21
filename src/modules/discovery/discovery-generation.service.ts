@@ -35,6 +35,7 @@ import { GenerateAnonCreativeDto } from './dto/generate-anon-creative.dto';
 import { fa } from '../../i18n/fa';
 import {
   mimeTypeForExt,
+  normalizeHeicDataUrl,
   parseChatImageDataUrl,
   validateChatImages,
 } from '../../common/validators/chat-image.validator';
@@ -56,6 +57,26 @@ const AUTO_MODE_SENTINELS = [OPTIMAL_MODE, COST_OPTIMIZED_MODE, BEST_ANSWER_MODE
 // تازه‌استخراج‌شده preferredModel‌شان صراحتاً همین است تا صرف‌نظر از استخر AiModel نوع
 // IMAGE_GEN (که مدل‌های دیگری هم برای تولید عکس چت معمولی دارد)، قطعی همین مدل استفاده شود
 const STUDIO_IMAGE_GEN_MODEL = 'openai/gpt-image-2';
+
+// contextMd/userPromptTemplate/preferredModel عمداً برای کاربر نمایش داده نمی‌شوند — این‌ها
+// «دستور پشت‌صحنه‌»ی ادمین هستند، دقیقاً مثل Plan.contextMd که در v1 هم به فرانت لو نمی‌رود.
+// بین listCatalog و getCatalogItem (تک‌آیتمی، برای دیپ‌لینک) مشترک است تا شکل خروجی واگرا نشود
+const CATALOG_ITEM_SELECT = {
+  id: true,
+  title: true,
+  outputType: true,
+  segment: true,
+  categoryId: true,
+  description: true,
+  exampleImageUrl: true,
+  aspectRatio: true,
+  requiresUserImage: true,
+  creditCost: true,
+  isTrending: true,
+  tags: true,
+  sortOrder: true,
+  sourceImageKey: true,
+} as const;
 
 // موتور تولید دیسکاوری — بخش ۵.۴ سند فنی. هم عکس هم متن از یک مسیر مشترک رد می‌شوند:
 // انتخاب سبک → مونتاژ context (ChatConfig سراسری → Project اختیاری → CreativePrompt) →
@@ -103,24 +124,7 @@ export class DiscoveryGenerationService {
           ...(params.categoryId ? { categoryId: params.categoryId } : {}),
         },
         orderBy,
-        // contextMd/userPromptTemplate/preferredModel عمداً برای کاربر نمایش داده نمی‌شوند — این‌ها
-        // «دستور پشت‌صحنه‌»ی ادمین هستند، دقیقاً مثل Plan.contextMd که در v1 هم به فرانت لو نمی‌رود
-        select: {
-          id: true,
-          title: true,
-          outputType: true,
-          segment: true,
-          categoryId: true,
-          description: true,
-          exampleImageUrl: true,
-          aspectRatio: true,
-          requiresUserImage: true,
-          creditCost: true,
-          isTrending: true,
-          tags: true,
-          sortOrder: true,
-          sourceImageKey: true,
-        },
+        select: CATALOG_ITEM_SELECT,
       }),
     ]);
     return prompts.map(({ sourceImageKey, ...p }) => ({
@@ -128,6 +132,26 @@ export class DiscoveryGenerationService {
       hasSourceImage: !!sourceImageKey,
       sourceImageAccuracyCreditCost: creditConfig.sourceImageAccuracyCreditCost,
     }));
+  }
+
+  // یک آیتم کاتالوگ با id — برای دیپ‌لینک عمومی (مثلاً nivoai.ir/studio?id=...) که کاربر را
+  // مستقیم به چت با همین سبک از پیش‌انتخاب‌شده می‌برد؛ فقط سبک‌های فعال/منتشرشده (isActive)،
+  // دقیقاً هم‌محدودیت listCatalog — سبک استخراج‌شده‌ی درحال‌بررسی از این مسیر لو نمی‌رود
+  async getCatalogItem(id: string) {
+    const [creditConfig, prompt] = await Promise.all([
+      this.credits.getConfig(),
+      this.prisma.creativePrompt.findFirst({
+        where: { id, isActive: true },
+        select: CATALOG_ITEM_SELECT,
+      }),
+    ]);
+    if (!prompt) throw new NotFoundException(fa.discovery.promptNotFound);
+    const { sourceImageKey, ...p } = prompt;
+    return {
+      ...p,
+      hasSourceImage: !!sourceImageKey,
+      sourceImageAccuracyCreditCost: creditConfig.sourceImageAccuracyCreditCost,
+    };
   }
 
   // درخت دسته‌بندی فعال — برای سایدبار استودیوی محتوا در فرانت
@@ -192,7 +216,10 @@ export class DiscoveryGenerationService {
   // آپلود تک‌عکس ورودی کاربر برای سبک‌های requiresUserImage=true — قبل از generate صدا زده
   // می‌شود؛ همون محدودیت‌های فرمت/حجم/magic-bytes چت (ChatConfig ادمین) رو رعایت می‌کند تا یک
   // مسیر اعتبارسنجی دوباره (با ریسک واگرایی) نوشته نشود
-  async uploadInputImage(dataUrl: string): Promise<{ key: string }> {
+  async uploadInputImage(rawDataUrl: string): Promise<{ key: string }> {
+    // عکس‌های آیفون (HEIC/HEIF) قبل از هر اعتبارسنجی به JPEG تبدیل می‌شوند — وگرنه با «فرمت
+    // غیرمجاز» رد می‌شدند، چون گیت‌وی تولید عکس هم HEIC را نمی‌پذیرد
+    const dataUrl = await normalizeHeicDataUrl(rawDataUrl);
     const chatConfig = await this.chatConfig.getConfig();
     validateChatImages([dataUrl], {
       maxCount: 1,

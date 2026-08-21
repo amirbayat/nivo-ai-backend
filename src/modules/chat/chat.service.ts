@@ -45,6 +45,7 @@ import { StreamMessageDto } from './dto/stream-message.dto';
 import {
   validateChatImages,
   parseChatImageDataUrl,
+  normalizeHeicDataUrls,
 } from '../../common/validators/chat-image.validator';
 import {
   detectImageGenIntent,
@@ -367,6 +368,14 @@ export class ChatService {
     // implicitImageGenEnabled همین‌جا لازم است — کش ۶۰ ثانیه‌ای درون‌حافظه‌ای، هزینه‌ی اضافه ندارد
     const chatConfig = await this.chatConfigService.getConfig();
 
+    // عکس‌های آیفون (HEIC/HEIF) قبل از هر شاخه‌ای (تولید/ویرایش عکس یا چت معمولی) به JPEG
+    // تبدیل می‌شوند — باید همین‌جا (قبل از شاخه‌ی handleImageGeneration چند خط پایین‌تر) باشد،
+    // نه فقط کنار validateChatImages پایین‌تر، چون آن مسیر برای تولید/ویرایش صریح عکس اصلاً
+    // اجرا نمی‌شود (return زودتر)
+    if (dto.images?.length) {
+      dto.images = await normalizeHeicDataUrls(dto.images);
+    }
+
     // docs/PRD-chat-images.md بخش ۵.۵ — تولید عکس مسیر کاملاً جدایی است: نه Router (طبقه‌بندی
     // SIMPLE/MEDIUM/COMPLEX بی‌معنی است)، نه vision-preflight، نه سهمیه‌ی توکنی خروجی. مدل یا
     // صراحتاً انتخاب شده (toggle فرانت) یا از روی نیت پیام (LLM classifier) تشخیص داده می‌شود.
@@ -462,6 +471,8 @@ export class ChatService {
     // روی dto.images نبود؛ سقف‌ها هم از تنظیمات ادمین (ChatConfig) خوانده می‌شوند، نه ثابت در کد.
     // (chatConfig بالاتر گرفته شده)
     if (dto.images?.length) {
+      // dto.images بالاتر (کنار چک explicitImageToggle/imageIntent) از HEIC/HEIF نرمال شده — اینجا
+      // فقط همان اعتبارسنجی فرمت/حجم/magic-bytes همیشگی است
       validateChatImages(dto.images, {
         maxCount: chatConfig.maxImagesPerMessage,
         maxSizeMb: chatConfig.maxImageSizeMb,
