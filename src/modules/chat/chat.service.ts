@@ -221,16 +221,14 @@ export class ChatService {
     // ── چهار چک مستقل زیر قبلاً یکی‌یکی (متوالی) اجرا می‌شدند؛ هیچ‌کدام به نتیجه‌ی
     // بقیه نیاز ندارد، پس با Promise.all موازی می‌شوند (docs/PERFORMANCE-AND-CONCURRENCY.md
     // بخش ۱) — ترتیب throw کردن خطاها بعد از این، دقیقاً مثل قبل حفظ شده (فقط fetch موازی شد)
-    const [manualLimitRaw, todayCount, waitlistLimit, rollingWindow] =
-      await Promise.all([
-        this.redis.get(`manual_limit:${userId}`),
-        this.tokenService.getTodayRequestCount(userId),
-        this.campaignService.getWaitingDailyLimit(userId),
-        this.tokenService.getRollingWindowStatus(userId, {
-          rollingWindowLimit: effectiveRollingLimit,
-          rollingWindowHours: effectiveRollingHours ?? plan.rollingWindowHours,
-        }),
-      ]);
+    // getRollingWindowStatus دیگر فراخوانی نمی‌شود — همراه با غیرفعال‌سازی چک پنجره‌ی
+    // لغزان پایین‌تر، fetch آن هم حذف شد (effectiveRollingLimit/Hours هنوز برای ثبت
+    // مصرف در ZSET پایین‌تر لازم هستند، دست‌نخورده ماندند)
+    const [manualLimitRaw, todayCount, waitlistLimit] = await Promise.all([
+      this.redis.get(`manual_limit:${userId}`),
+      this.tokenService.getTodayRequestCount(userId),
+      this.campaignService.getWaitingDailyLimit(userId),
+    ]);
 
     // ── manual limit set by admin ──────────────────────────────────────────
     if (manualLimitRaw) {
@@ -258,57 +256,61 @@ export class ChatService {
     }
 
     // ── three-zone daily message limit ────────────────────────────────────
+    // [DISABLED ۱۴۰۵/۰۵/۳۰ — تصمیم محصول: در مدل اعتباری (نیوو) دیگر سهمیه‌ی روزانه/ساعتی
+    // جدا از موجودی اعتبار وجود ندارد؛ تنها محدودکننده‌ی واقعی، «گیت مصرف PAYG» با موجودی
+    // کیف‌پول پایین‌تر در همین متد است. بقیه‌ی متغیرها (N/M/messageStage) دست‌نخورده مانده‌اند
+    // چون هنوز برای رویداد SSE «stage» پایین‌تر خوانده می‌شوند.]
     const N = effectiveN; // normal zone ceiling (null = unlimited)
     const M = effectiveM ?? 0; // throttled zone size
 
-    let messageStage: 'normal' | 'throttled' = 'normal';
+    const messageStage: 'normal' | 'throttled' = 'normal';
 
-    if (N !== null) {
-      if (todayCount >= N + M) {
-        // ── BLOCKED ────────────────────────────────────────────────────────
-        this.usageAnalytics
-          .logLimitHit(userId, 'DAILY_MESSAGE_BLOCKED')
-          .catch(() => {});
-        throw new HttpException(
-          {
-            message: fa.chat.dailyBlocked,
-            planTier: plan.planTier,
-            stage: 'blocked',
-          },
-          429,
-        );
-      }
-      if (todayCount >= N) {
-        // ── THROTTLED ──────────────────────────────────────────────────────
-        messageStage = 'throttled';
-      }
-    }
+    // if (N !== null) {
+    //   if (todayCount >= N + M) {
+    //     // ── BLOCKED ────────────────────────────────────────────────────────
+    //     this.usageAnalytics
+    //       .logLimitHit(userId, 'DAILY_MESSAGE_BLOCKED')
+    //       .catch(() => {});
+    //     throw new HttpException(
+    //       {
+    //         message: fa.chat.dailyBlocked,
+    //         planTier: plan.planTier,
+    //         stage: 'blocked',
+    //       },
+    //       429,
+    //     );
+    //   }
+    //   if (todayCount >= N) {
+    //     // ── THROTTLED ──────────────────────────────────────────────────────
+    //     messageStage = 'throttled';
+    //   }
+    // }
 
     // ── پنجره‌ی لغزان (rolling window) — بخش ۸ PRD-global-budget-gateway.md ──
-    // مکمل سقف روزانه‌ی بالا، نه جایگزین آن — هر دو باید هم‌زمان رعایت شوند.
-    // null یعنی این پلن اصلاً محدودیت پنجره‌ای ندارد.
-    if (rollingWindow.blocked) {
-      this.usageAnalytics
-        .logLimitHit(userId, 'ROLLING_WINDOW_BLOCKED')
-        .catch(() => {});
-      throw new HttpException(
-        {
-          message: fa.chat.rollingWindowBlocked(
-            effectiveRollingHours ?? plan.rollingWindowHours,
-          ),
-          stage: 'rolling_window_blocked',
-          planTier: plan.planTier,
-          resetAt: rollingWindow.resetAt,
-        },
-        429,
-      );
-    }
+    // [DISABLED ۱۴۰۵/۰۵/۳۰ — همراه با سهمیه‌ی روزانه‌ی بالا، طبق تصمیم محصول غیرفعال شد]
+    // if (rollingWindow.blocked) {
+    //   this.usageAnalytics
+    //     .logLimitHit(userId, 'ROLLING_WINDOW_BLOCKED')
+    //     .catch(() => {});
+    //   throw new HttpException(
+    //     {
+    //       message: fa.chat.rollingWindowBlocked(
+    //         effectiveRollingHours ?? plan.rollingWindowHours,
+    //       ),
+    //       stage: 'rolling_window_blocked',
+    //       planTier: plan.planTier,
+    //       resetAt: rollingWindow.resetAt,
+    //     },
+    //     429,
+    //   );
+    // }
 
     // ── input token limit (adjusted for throttled zone) ───────────────────
-    let effectiveInputLimit = this.tokenService.resolveInputLimit(plan);
-    if (messageStage === 'throttled' && plan.throttledInputTokens) {
-      effectiveInputLimit = plan.throttledInputTokens;
-    }
+    const effectiveInputLimit = this.tokenService.resolveInputLimit(plan);
+    // messageStage همیشه 'normal' است (بالاتر غیرفعال شد)، پس throttledInputTokens دیگر اعمال نمی‌شود
+    // if (messageStage === 'throttled' && plan.throttledInputTokens) {
+    //   effectiveInputLimit = plan.throttledInputTokens;
+    // }
     const estimatedInput = await this.tokenEstimator.estimateTokens(
       dto.content,
       PRE_ROUTING_REFERENCE_MODEL,
@@ -319,26 +321,26 @@ export class ChatService {
     }
 
     // ── budget check + usage percentage (برای مسیریابی استپی Router) ────────
-    // در دوره‌ی آزمایشی، بودجه‌ی روزانه هم مثل سقف‌های تعداد پیام نادیده گرفته می‌شود.
-    // docs/PRD-pay-as-you-go-wallet.md — پلن PAYG اصلاً بودجه‌ی درصدی priceMonthly ندارد؛
-    // گیت واقعی مصرف این پلن چند خط پایین‌تر (بعد از مشخص‌شدن مدل) با موجودی کیف‌پول است.
-    let usagePct: number;
-    if (inTrial || plan.isPayAsYouGo) {
-      usagePct = 0;
-    } else {
-      try {
-        ({ usagePct } = await this.pricingService.assertBudget(
-          userId,
-          plan.priceMonthly,
-          plan.planTier,
-        ));
-      } catch (err) {
-        this.usageAnalytics
-          .logLimitHit(userId, 'BUDGET_EXCEEDED')
-          .catch(() => {});
-        throw err;
-      }
-    }
+    // [DISABLED ۱۴۰۵/۰۵/۳۰ — تصمیم محصول: در مدل اعتباری (نیوو) دیگر بودجه‌ی درصدی ماهانه
+    // کاربر را بلاک نمی‌کند؛ تنها محدودکننده‌ی واقعی، گیت مصرف PAYG با موجودی کیف‌پول است.
+    // usagePct همیشه ۰ می‌ماند (یعنی Router همان مسیر «بودجه‌ی تازه» قبلی را می‌بیند).]
+    const usagePct = 0;
+    // if (inTrial || plan.isPayAsYouGo) {
+    //   usagePct = 0;
+    // } else {
+    //   try {
+    //     ({ usagePct } = await this.pricingService.assertBudget(
+    //       userId,
+    //       plan.priceMonthly,
+    //       plan.planTier,
+    //     ));
+    //   } catch (err) {
+    //     this.usageAnalytics
+    //       .logLimitHit(userId, 'BUDGET_EXCEEDED')
+    //       .catch(() => {});
+    //     throw err;
+    //   }
+    // }
 
     const allowed = plan.allowedModels;
     if (allowed.length === 0)
@@ -473,23 +475,24 @@ export class ChatService {
       dto.content,
       modelId,
     );
-    // docs/PRD-pay-as-you-go-wallet.md — PAYG سقف توکن رایگان/ماهانه ندارد؛ همان bypass موجود
-    // برای دوره‌ی آزمایشی اینجا هم استفاده می‌شود (checkQuota با bypass=true چیزی نمی‌سنجد)
+    // [DISABLED ۱۴۰۵/۰۵/۳۰ — سهمیه‌ی توکن روزانه/ماهانه‌ی قدیمی (dailyFreeTokens/monthlyTotalTokens)
+    // طبق تصمیم محصول دیگر کاربر را بلاک نمی‌کند؛ bypass همیشه true شد (قبلاً فقط
+    // inTrial || plan.isPayAsYouGo بود). checkQuota با bypass=true چیزی نمی‌سنجد و throw نمی‌کند.]
     const quota = await this.tokenService.checkQuota(
       userId,
       plan,
       estimatedForQuota,
-      inTrial || plan.isPayAsYouGo,
+      true,
     );
     const throttledMax = this.tokenService.resolveOutputThrottle(
       plan.outputThrottleSteps,
       todayCount,
     );
-    let maxOut = Math.min(quota.remaining, throttledMax);
-    // further restrict output if in throttled zone
-    if (messageStage === 'throttled' && plan.throttledOutputTokens) {
-      maxOut = Math.min(maxOut, plan.throttledOutputTokens);
-    }
+    const maxOut = Math.min(quota.remaining, throttledMax);
+    // messageStage همیشه 'normal' است (بالاتر غیرفعال شد)، پس throttledOutputTokens دیگر اعمال نمی‌شود
+    // if (messageStage === 'throttled' && plan.throttledOutputTokens) {
+    //   maxOut = Math.min(maxOut, plan.throttledOutputTokens);
+    // }
 
     // ── گیت مصرف PAYG — بدون بودجه‌ی درصدی، فقط موجودی واقعی کیف‌پول ────────
     // docs/PRD-pay-as-you-go-wallet.md بخش ۵.۲ — تخمین بدبینانه (فرض مصرف کامل maxOut خروجی)
