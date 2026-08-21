@@ -826,6 +826,43 @@ export class DiscoveryGenerationService {
     };
   }
 
+  // تاریخچه‌ی «تبدیل عکس به پرامپت»های خود کاربر — شامل PENDING/APPROVED/REJECTED، جدیدترین
+  // اول، تا بتواند بعداً هم دوباره از یک استخراج قدیمی استفاده کند (همون CreativePrompt قابل‌استفاده
+  // می‌ماند مگر REJECTED شده باشد — دقیقاً همون قانون usableByOwner در generate())
+  async listMyExtractions(userId: string) {
+    const prompts = await this.prisma.creativePrompt.findMany({
+      where: {
+        submittedByUserId: userId,
+        sourceType: CreativePromptSourceType.USER_EXTRACTED,
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+
+    return prompts.map((p) => ({
+      id: p.id,
+      title: p.title,
+      outputType: p.outputType,
+      segment: p.segment,
+      categoryId: p.categoryId,
+      description: p.description,
+      // مثل extractPromptFromImage — قبل از تایید ادمین فقط از مسیر احراز-هویت‌شده قابل‌مشاهده است
+      exampleImageUrl: p.sourceImageKey
+        ? `/v2/discovery/images/${p.sourceImageKey}`
+        : p.exampleImageUrl,
+      aspectRatio: p.aspectRatio,
+      requiresUserImage: p.requiresUserImage,
+      creditCost: p.creditCost,
+      isTrending: p.isTrending,
+      tags: p.tags,
+      sortOrder: p.sortOrder,
+      extractedPrompt: p.userPromptTemplate,
+      reviewStatus: p.reviewStatus,
+      isActive: p.isActive,
+      createdAt: p.createdAt,
+    }));
+  }
+
   // تاریخچه‌ی «شخصی‌سازی‌های قبلی» یک پروژه — از dto.userInput واقعاً استفاده‌شده در
   // تولیدهای قبلی همان پروژه (نه یک جدول جدا؛ چیزی که کاربر واقعاً تولید کرده)
   async listProjectCustomizations(userId: string, projectId: string) {

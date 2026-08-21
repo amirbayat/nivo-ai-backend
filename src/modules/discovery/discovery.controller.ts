@@ -88,6 +88,12 @@ export class DiscoveryController {
     return this.discoveryService.extractPromptFromImage(user.sub, dto);
   }
 
+  // تاریخچه‌ی استخراج‌های قبلی خود کاربر — برای استفاده‌ی دوباره از یک پرامپت قبلاً استخراج‌شده
+  @Get('prompt-extractions/history')
+  extractionHistory(@CurrentUser() user: JwtPayload) {
+    return this.discoveryService.listMyExtractions(user.sub);
+  }
+
   @Get('projects/:projectId/customizations')
   projectCustomizations(
     @CurrentUser() user: JwtPayload,
