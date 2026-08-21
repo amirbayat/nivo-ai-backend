@@ -44,4 +44,11 @@ export class UpdateCreditConfigDto {
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(0, { message: fa.validation.numberPositive })
   extractionPremiumCreditCost?: number;
+
+  // نیوو اضافه‌ای که سوییچ کاربر «استفاده از عکس اصلی» (تولید از سبک‌های استخراج‌شده) کسر می‌کند
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: fa.validation.mustBeNumber })
+  @Min(0, { message: fa.validation.numberPositive })
+  sourceImageAccuracyCreditCost?: number;
 }

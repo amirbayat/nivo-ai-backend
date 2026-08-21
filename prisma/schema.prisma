@@ -505,6 +505,10 @@ model CreditConfig {
   extractionEconomicalCreditCost   Int      @default(5)
   extractionPremiumModel           String? // نام AiModel برای حالت «بهترین» (best_answer)
   extractionPremiumCreditCost      Int      @default(15)
+  // سوییچ کاربر «استفاده از عکس اصلی» موقع تولید از یک سبک استخراج‌شده — عکس مبدأ (sourceImageKey)
+  // به‌عنوان تصویر پایه‌ی ادیت هم به مدل داده می‌شود، نه فقط متن پرامپت؛ این نیوو اضافه به
+  // creditCost همان سبک اضافه می‌شود (فقط وقتی سوییچ روشن باشد)
+  sourceImageAccuracyCreditCost    Int      @default(5)
   updatedAt                        DateTime @updatedAt
 
   @@map("credit_config")

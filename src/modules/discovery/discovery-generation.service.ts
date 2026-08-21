@@ -112,8 +112,14 @@ export class DiscoveryGenerationService {
         isTrending: true,
         tags: true,
         sortOrder: true,
+        sourceImageKey: true,
       },
-    });
+    }).then((prompts) =>
+      prompts.map(({ sourceImageKey, ...p }) => ({
+        ...p,
+        hasSourceImage: !!sourceImageKey,
+      })),
+    );
   }
 
   // درخت دسته‌بندی فعال — برای سایدبار استودیوی محتوا در فرانت
@@ -252,10 +258,16 @@ export class DiscoveryGenerationService {
         throw new ForbiddenException(fa.errors.forbidden);
     }
 
-    // پیش‌بررسی موجودی — قبل از صرف هزینه‌ی واقعی تولید (preflight)؛ کسر واقعی فقط بعد از موفقیت است
+    // پیش‌بررسی موجودی — قبل از صرف هزینه‌ی واقعی تولید (preflight)؛ کسر واقعی فقط بعد از موفقیت است.
+    // سوییچ «استفاده از عکس اصلی» فقط وقتی واقعاً اثر دارد که سبک عکس مبدأ داشته باشد (سبک‌های
+    // استخراج‌شده) — وگرنه نادیده گرفته می‌شود و نیوو اضافه‌ای کسر نمی‌شود
     const creditConfig = await this.credits.getConfig();
     const walletBalance = await this.pricing.getWalletBalance(userId);
-    const requiredToman = prompt.creditCost * creditConfig.tomanPerCredit;
+    const useSourceImage = !!dto.useSourceImage && !!prompt.sourceImageKey;
+    const totalCreditCost = useSourceImage
+      ? prompt.creditCost + creditConfig.sourceImageAccuracyCreditCost
+      : prompt.creditCost;
+    const requiredToman = totalCreditCost * creditConfig.tomanPerCredit;
     if (walletBalance < requiredToman)
       throw new BadRequestException(fa.discovery.insufficientCredits);
 
@@ -277,6 +289,8 @@ export class DiscoveryGenerationService {
           systemPrompt,
           finalUserPrompt,
           requiredToman,
+          totalCreditCost,
+          useSourceImage,
         );
       }
       return await this.generateTextOutput(
@@ -299,7 +313,7 @@ export class DiscoveryGenerationService {
           projectId: dto.projectId ?? null,
           conversationId: dto.conversationId ?? null,
           outputType: prompt.outputType,
-          creditCost: prompt.creditCost,
+          creditCost: totalCreditCost,
           costToman: 0,
           status: CreativeGenerationStatus.FAILED,
           failureReason: (err as Error).message?.slice(0, 500) ?? 'unknown',
@@ -485,11 +499,14 @@ export class DiscoveryGenerationService {
       creditCost: number;
       preferredModel: string | null;
       aspectRatio: string | null;
+      sourceImageKey: string | null;
     },
     dto: GenerateCreativeDto,
     systemPrompt: string,
     finalUserPrompt: string,
     requiredToman: number,
+    totalCreditCost: number,
+    useSourceImage: boolean,
   ) {
     const model = await this.resolveModel(
       prompt.preferredModel,
@@ -506,10 +523,24 @@ export class DiscoveryGenerationService {
         )
       : [];
 
+    // سوییچ «استفاده از عکس اصلی» — عکس مبدأ همون سبک استخراج‌شده رو هم به‌عنوان تصویر پایه‌ی
+    // ادیت به مدل می‌دیم (نه فقط متن پرامپت) تا ترکیب‌بندی/نور/رنگ دقیق‌تر بازتولید بشه. وقتی
+    // این تنها تصویر ورودیه (کاربر خودش عکسی نداده)، preserveFace/دستور حفظ چهره اعمال نمی‌شه —
+    // این عکس صرفاً مرجع ترکیب‌بندیه، نه چهره‌ی یک سوژه‌ی مشخص که باید حفظ بشه
+    const usingSourceImageOnly =
+      useSourceImage && !!prompt.sourceImageKey && !inputImageBuffers.length;
+    if (useSourceImage && prompt.sourceImageKey) {
+      inputImageBuffers.push(
+        await this.storage.downloadImage(prompt.sourceImageKey),
+      );
+    }
+
     const fullPrompt = [
       systemPrompt,
       finalUserPrompt,
-      inputImageBuffers.length && dto.preserveFace !== false
+      inputImageBuffers.length &&
+      !usingSourceImageOnly &&
+      dto.preserveFace !== false
         ? FACE_PRESERVATION_INSTRUCTION
         : null,
     ]
@@ -565,7 +596,7 @@ export class DiscoveryGenerationService {
         inputImageKeys: dto.inputImageKeys ?? undefined,
         outputImageKey,
         userInput: dto.userInput || null,
-        creditCost: prompt.creditCost,
+        creditCost: totalCreditCost,
         costToman: costCalc.costToman,
         model: model.name,
         status: CreativeGenerationStatus.SUCCEEDED,
@@ -913,6 +944,7 @@ export class DiscoveryGenerationService {
       isTrending: created.isTrending,
       tags: created.tags,
       sortOrder: created.sortOrder,
+      hasSourceImage: true,
       extractedPrompt,
       usedModel: { name: model.name, displayName: model.displayName },
     };
@@ -948,6 +980,7 @@ export class DiscoveryGenerationService {
       isTrending: p.isTrending,
       tags: p.tags,
       sortOrder: p.sortOrder,
+      hasSourceImage: !!p.sourceImageKey,
       extractedPrompt: p.userPromptTemplate,
       reviewStatus: p.reviewStatus,
       isActive: p.isActive,

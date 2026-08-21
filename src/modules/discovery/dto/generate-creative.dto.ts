@@ -49,4 +49,11 @@ export class GenerateCreativeDto {
   @IsOptional()
   @IsString()
   model?: string;
+
+  // سوییچ «استفاده از عکس اصلی» — فقط برای سبک‌های استخراج‌شده (CreativePrompt.sourceImageKey
+  // غیر-null) اثر دارد؛ عکس مبدأ هم به‌عنوان تصویر پایه‌ی ادیت به مدل داده می‌شود (نتیجه‌ی
+  // دقیق‌تر) و creditConfig.sourceImageAccuracyCreditCost اضافه به creditCost سبک کسر می‌شود
+  @IsOptional()
+  @IsBoolean({ message: fa.validation.mustBeBoolean })
+  useSourceImage?: boolean;
 }
