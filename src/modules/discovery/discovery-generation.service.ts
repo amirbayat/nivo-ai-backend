@@ -52,6 +52,11 @@ const COST_OPTIMIZED_MODE = 'cost_optimized';
 const BEST_ANSWER_MODE = 'best_answer';
 const AUTO_MODE_SENTINELS = [OPTIMAL_MODE, COST_OPTIMIZED_MODE, BEST_ANSWER_MODE];
 
+// تصمیم محصول (۱۴۰۵/۰۶) — فعلاً تولید عکس استودیو فقط با همین مدل انجام می‌شود؛ سبک‌های
+// تازه‌استخراج‌شده preferredModel‌شان صراحتاً همین است تا صرف‌نظر از استخر AiModel نوع
+// IMAGE_GEN (که مدل‌های دیگری هم برای تولید عکس چت معمولی دارد)، قطعی همین مدل استفاده شود
+const STUDIO_IMAGE_GEN_MODEL = 'openai/gpt-image-2';
+
 // موتور تولید دیسکاوری — بخش ۵.۴ سند فنی. هم عکس هم متن از یک مسیر مشترک رد می‌شوند:
 // انتخاب سبک → مونتاژ context (ChatConfig سراسری → Project اختیاری → CreativePrompt) →
 // تولید → کسر نیوو *فقط بعد از موفقیت* (بخش ۳ — تولید fail‌شده نیوو کسر نمی‌کند).
@@ -920,6 +925,7 @@ export class DiscoveryGenerationService {
         exampleImageUrl: `${apiUrl}/api/v1/v2/discovery/example-images/${imageKey}`,
         requiresUserImage: false,
         creditCost: creditConfig.defaultExtractedPromptCreditCost,
+        preferredModel: STUDIO_IMAGE_GEN_MODEL,
         isActive: false,
         sourceType: CreativePromptSourceType.USER_EXTRACTED,
         submittedByUserId: userId,
