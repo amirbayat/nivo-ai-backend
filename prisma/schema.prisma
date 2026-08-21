@@ -501,7 +501,7 @@ model CreditConfig {
   // دو حالت خودکار «تبدیل عکس به پرامپت» (docs/PRD-model-selection-modes.md) — هرکدام یک AiModel.name
   // ثابت + قیمت ثابت به نیوو که ادمین تعیین می‌کند. اگر مدل هنوز انتخاب نشده (null) یا دیگر بین
   // مدل‌های vision-capable فعال نباشد، به انتخاب خودکار قدیمی (ارزان‌ترین/بهترین کل استخر) fallback می‌شود.
-  extractionEconomicalModel        String? // نام AiModel برای حالت «بهینه» (cost_optimized) — پیش‌فرض فرانت
+  extractionEconomicalModel        String?  @default("openai/gpt-5.4-mini") // نام AiModel برای حالت «بهینه» (cost_optimized) — پیش‌فرض فرانت
   extractionEconomicalCreditCost   Int      @default(5)
   extractionPremiumModel           String? // نام AiModel برای حالت «بهترین» (best_answer)
   extractionPremiumCreditCost      Int      @default(15)

@@ -29,6 +29,9 @@ const MODELS = [
   { name: 'deepseek/deepseek-chat-v3.1', displayName: 'DeepSeek V3.1', provider: 'deepseek', inputPricePerM: 0.21, outputPricePerM: 0.79, supportsVision: false, sortOrder: 21, tier: 'MEDIUM' as const, tokenizerFamily: 'approximate', avgCharsPerToken: 4 },
   { name: 'deepseek/deepseek-v4-pro', displayName: 'DeepSeek V4 Pro', provider: 'deepseek', inputPricePerM: 0.43, outputPricePerM: 0.87, supportsVision: false, sortOrder: 22, tier: 'MEDIUM' as const, tokenizerFamily: 'approximate', avgCharsPerToken: 4 },
   { name: 'deepseek/deepseek-r1-distill-llama-70b', displayName: 'R1 Distill Llama 70B', provider: 'deepseek', inputPricePerM: 0.8, outputPricePerM: 0.8, supportsVision: false, sortOrder: 23, tier: 'MEDIUM' as const, tokenizerFamily: 'approximate', avgCharsPerToken: 4 },
+  // sortOrder: 0 یعنی این مدل دیفالت تولید عکس استودیو است (discovery-generation.service.ts resolveModel —
+  // پایین‌ترین sortOrder بین IMAGE_GEN های فعال، وقتی سبک preferredModel ندارد و کاربر هم مدلی انتخاب نکرده)
+  { name: 'openai/gpt-image-2', displayName: 'GPT Image 2', provider: 'openai', modelType: 'IMAGE_GEN' as const, inputPricePerM: 0, outputPricePerM: 0, supportsVision: false, sortOrder: 0, tier: 'MEDIUM' as const, tokenizerFamily: 'approximate', avgCharsPerToken: 4 },
 ]
 
 async function main() {
