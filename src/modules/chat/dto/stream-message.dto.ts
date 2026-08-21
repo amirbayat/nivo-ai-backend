@@ -36,4 +36,10 @@ export class StreamMessageDto {
   @IsOptional()
   @IsBoolean({ message: fa.validation.mustBeBoolean })
   generateImage?: boolean;
+
+  // سوییچ «تغییر ندادن چهره» (فرانت: MessageInput.tsx) — فقط وقتی همراه با ویرایش عکس
+  // پیوست‌شده (images غیرخالی) معنا دارد؛ پیش‌فرض روشن، یعنی نبودش هم یعنی true
+  @IsOptional()
+  @IsBoolean({ message: fa.validation.mustBeBoolean })
+  preserveFace?: boolean;
 }

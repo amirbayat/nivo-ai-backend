@@ -19,6 +19,12 @@ export class ImageApiError extends Error {
   }
 }
 
+// سوییچ «چهره را تغییر نده» — هم توی چت معمولی (ویرایش عکس پیوست‌شده) هم توی سبک‌های
+// استودیوی محتوا (discovery-generation.service.ts) استفاده می‌شود؛ فقط وقتی عکس ورودی
+// داریم (editImage) معنا دارد — پیش‌فرض روشن (caller باید preserveFace !== false چک کند)
+export const FACE_PRESERVATION_INSTRUCTION =
+  'نکته‌ی بسیار مهم: چهره‌ی فرد(های) داخل عکس ورودی را دقیقاً حفظ کن — نسبت‌های صورت، فرم چشم/ابرو/بینی/لب/فک و رنگ پوست باید عیناً مطابق عکس اصلی کاربر بماند و تغییر نکند. فقط پس‌زمینه/لباس/سبک/نورپردازی را طبق درخواست تغییر بده، نه چهره.';
+
 @Injectable()
 export class ImageGenerationService {
   private readonly logger = new Logger(ImageGenerationService.name);

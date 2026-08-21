@@ -13,7 +13,7 @@ export class ExtractPromptDto {
   modelId?: string;
 
   // فقط وقتی modelId خالی است اثر دارد — دو حالت خودکار «مصرف بهینه»/«بهترین نتیجه»
-  // (docs/PRD-model-selection-modes.md) — پیش‌فرض 'best_answer'
+  // (docs/PRD-model-selection-modes.md) — پیش‌فرض 'cost_optimized'
   @IsOptional()
   @IsIn(['cost_optimized', 'best_answer'])
   selectionMode?: 'cost_optimized' | 'best_answer';

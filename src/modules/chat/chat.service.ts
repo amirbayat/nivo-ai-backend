@@ -9,7 +9,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
-import { streamText, generateObject, APICallError } from 'ai';
+import { streamText, generateText, generateObject, APICallError } from 'ai';
 import type { ModelMessage, UserModelMessage } from 'ai';
 import { ModelTier, Prisma, type AiModel } from '@prisma/client';
 import { z } from 'zod';
@@ -37,6 +37,7 @@ import { StorageService } from '../../storage/storage.service';
 import {
   ImageGenerationService,
   ImageApiError,
+  FACE_PRESERVATION_INSTRUCTION,
 } from '../../common/services/image-generation.service';
 import { fa } from '../../i18n/fa';
 import type { Response } from 'express';
@@ -397,6 +398,7 @@ export class ChatService {
         plan,
         isEditIntent,
         apiKey,
+        conversation.title,
       );
     }
 
@@ -1099,7 +1101,13 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
     plan: PlanLimits,
     isEditIntent: boolean,
     apiKey: string,
+    conversationTitle: string | null,
   ): Promise<void> {
+    // برخلاف چت متنی (که streamChat جداگانه پیام کاربر را قبل از این متد ذخیره می‌کند)، اینجا
+    // خودمان چند خط پایین‌تر پیام کاربر را می‌سازیم — پس شمارش پیام‌های موجود *قبل* از آن ساخت،
+    // دقیقاً معادل «recentMessages.length === 1» در مسیر متنی است (fa.chat.untitled تا اینجا)
+    const isFirstMessage =
+      (await this.prisma.message.count({ where: { conversationId } })) === 0;
     // انتخاب دستی (toggle صریح با یک مدل مشخص) اگر معتبر و supportsImageGen باشد همچنان در
     // اولویت است — راه فرار برای انتخاب دقیق. وگرنه (حالت پیش‌فرض/تشخیص ضمنی)، خودمان از روی
     // متن پیام تشخیص می‌دهیم این عکس چقدر باید پیچیده/باکیفیت باشد و بین ردیف‌های موجود
@@ -1275,6 +1283,14 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
           ? await this.resolveLastConversationImages(conversationId)
           : [];
 
+      // سوییچ «تغییر ندادن چهره» (MessageInput.tsx) — فقط وقتی واقعاً عکس ورودی داریم معنا
+      // دارد؛ پیش‌فرض روشن (نبودن preserveFace هم یعنی true)، مثل مسیر مشابه در
+      // discovery-generation.service.ts
+      const promptWithFaceInstruction =
+        inputImageBuffers.length && dto.preserveFace !== false
+          ? `${dto.content}\n\n${FACE_PRESERVATION_INSTRUCTION}`
+          : dto.content;
+
       // پیش‌نمایش تدریجی واقعی (نه صرفاً یک انیمیشن تزئینی) — provider تا ۲ نسخه‌ی جزئی و
       // واضح‌ترشونده قبل از تصویر نهایی برمی‌گرداند؛ همون لحظه به فرانت هم می‌فرستیمش
       const onPartial = (base64: string) => {
@@ -1295,7 +1311,7 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
           result = inputImageBuffers.length
             ? await this.imageGen.editImage({
                 modelId: candidate.name,
-                prompt: dto.content,
+                prompt: promptWithFaceInstruction,
                 images: inputImageBuffers,
                 apiKey,
                 size: candidate.imageGenSize ?? undefined,
@@ -1412,6 +1428,20 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
       res.write(
         `data: ${JSON.stringify({ info: 'image-generated', image: dataUrl, messageId: assistantMessage.id })}\n\n`,
       );
+
+      // فقط برای اولین پیام مکالمه — دقیقاً هم‌قاعده‌ی مسیر متنی (خط ۸۳۸ بالاتر)، با این تفاوت
+      // که عنوان از تحلیل خودِ عکس تولیدشده می‌آید، نه از متن درخواست کاربر
+      if (!conversationTitle && isFirstMessage) {
+        const title = await this.generateImageBasedTitle(
+          conversationId,
+          result.base64,
+          apiKey,
+        );
+        if (title) {
+          res.write(`data: ${JSON.stringify({ info: 'title', title })}\n\n`);
+        }
+      }
+
       res.write('data: [DONE]\n\n');
     } catch (err) {
       this.liveStats
@@ -1492,6 +1522,62 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
           err instanceof Error ? err.stack : undefined,
         );
       }
+      return null;
+    }
+  }
+
+  // معادل generateTitle بالا، برای مکالماتی که با تولید عکس شروع می‌شوند — چون هیچ متنی که
+  // توصیف‌کننده‌ی محتوای واقعی مکالمه باشد وجود ندارد (dto.content می‌تواند خیلی کوتاه/کلی باشد،
+  // مثل «یه عکس گربه بساز»)، عنوان را از تحلیل خودِ عکس تولیدشده می‌سازیم، نه از متن درخواست.
+  private async generateImageBasedTitle(
+    conversationId: string,
+    imageBase64: string,
+    apiKey: string,
+  ): Promise<string | null> {
+    try {
+      const candidates = await this.prisma.aiModel.findMany({
+        where: { isActive: true, modelType: 'CHAT', supportsVision: true },
+        orderBy: { sortOrder: 'asc' },
+      });
+      if (!candidates.length) return null;
+      const model = this.modelRouter.pickBySelectionMode(
+        candidates,
+        'cost_optimized',
+      );
+      const provider = createOpenAICompatible({
+        name: 'liara',
+        baseURL: this.config.get<string>('LIARA_AI_BASE_URL')!,
+        apiKey,
+      });
+      const visionMessage: UserModelMessage = {
+        role: 'user',
+        content: [
+          { type: 'image', image: `data:image/png;base64,${imageBase64}` },
+          {
+            type: 'text',
+            text:
+              'این عکس همین الان توسط هوش مصنوعی برای کاربر تولید شده. بر اساس محتوای همین عکس ' +
+              '(نه هیچ متن دیگری)، یک عنوان کوتاه فارسی (حداکثر ۵ کلمه) برای این مکالمه بنویس. ' +
+              'فقط عنوان، بدون توضیح یا نقل‌قول.',
+          },
+        ],
+      };
+      const result = await generateText({
+        model: provider(model.name),
+        messages: [visionMessage],
+      });
+      const title = result.text.trim().replace(/^["'«»\n]+|["'«»\n]+$/g, '');
+      if (!title) return null;
+      await this.prisma.conversation.update({
+        where: { id: conversationId },
+        data: { title },
+      });
+      return title;
+    } catch (err) {
+      this.logger.error(
+        `generateImageBasedTitle failed (conversation=${conversationId}): ${err instanceof Error ? err.message : String(err)}`,
+        err instanceof Error ? err.stack : undefined,
+      );
       return null;
     }
   }

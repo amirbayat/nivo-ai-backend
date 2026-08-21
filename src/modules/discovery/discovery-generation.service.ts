@@ -23,7 +23,10 @@ import { PricingService } from '../usage/pricing.service';
 import { ChatConfigService } from '../chat-config/chat-config.service';
 import { LiaraKeyProvisioningService } from '../liara/liara-key-provisioning.service';
 import { StorageService } from '../../storage/storage.service';
-import { ImageGenerationService } from '../../common/services/image-generation.service';
+import {
+  ImageGenerationService,
+  FACE_PRESERVATION_INSTRUCTION,
+} from '../../common/services/image-generation.service';
 import { CreditsService } from '../credits/credits.service';
 import { ModelRouterService } from '../model-router/model-router.service';
 import { ExtractPromptDto } from './dto/extract-prompt.dto';
@@ -41,11 +44,6 @@ import {
 // پرامپت خروجی به‌عنوان سقف محافظه‌کارانه
 const EXTRACTION_WORST_CASE_INPUT_TOKENS = 2000;
 const EXTRACTION_WORST_CASE_OUTPUT_TOKENS = 500;
-
-// سوییچ «چهره را تغییر نده» در تنظیمات آیتم استودیو — فقط وقتی عکس ورودی داریم (editImage) معنا
-// دارد؛ پیش‌فرض روشن است (dto.preserveFace !== false در فراخوانی)
-const FACE_PRESERVATION_INSTRUCTION =
-  'نکته‌ی بسیار مهم: چهره‌ی فرد(های) داخل عکس ورودی را دقیقاً حفظ کن — نسبت‌های صورت، فرم چشم/ابرو/بینی/لب/فک و رنگ پوست باید عیناً مطابق عکس اصلی کاربر بماند و تغییر نکند. فقط پس‌زمینه/لباس/سبک/نورپردازی را طبق درخواست تغییر بده، نه چهره.';
 
 // همون سنتینل‌های انتخاب مدل هدر چت (chat.service.ts) — دراپ‌داون یکی از این‌ها یا یک نام
 // مدل واقعی را در dto.model می‌فرستد
@@ -149,8 +147,17 @@ export class DiscoveryGenerationService {
     userId: string,
     key: string,
   ): Promise<{ buffer: Buffer; mimeType: string }> {
+    // خروجی تولیدشده یا همون عکس ورودی‌ای که خود کاربر برای ویرایش فرستاده بود (inputImageKeys) —
+    // هر دو باید از این مسیر قابل‌سرو باشند تا هم در گالری هم در تاریخچه‌ی مکالمه، عکس ورودی
+    // کاربر (نه فقط نتیجه‌ی هوش مصنوعی) قابل‌نمایش بماند
     const generation = await this.prisma.creativeGeneration.findFirst({
-      where: { outputImageKey: key, userId },
+      where: {
+        userId,
+        OR: [
+          { outputImageKey: key },
+          { inputImageKeys: { array_contains: key } },
+        ],
+      },
       select: { id: true },
     });
     // عکس منبع «تبدیل عکس به پرامپت» — قبل از تایید ادمین (isActive=false) از این مسیر
@@ -672,25 +679,39 @@ export class DiscoveryGenerationService {
       })),
     );
 
-    const bestAnswer = this.modelRouter.pickBySelectionMode(
-      candidates,
-      'best_answer',
-    );
-    const costOptimized = this.modelRouter.pickBySelectionMode(
-      candidates,
-      'cost_optimized',
-    );
+    // اگر ادمین برای این تایر یک مدل ثابت انتخاب کرده و آن مدل هنوز بین vision-capable فعال‌هاست،
+    // دقیقاً همان مدل + قیمت ثابتش نشان داده می‌شود؛ وگرنه (تنظیم‌نشده) fallback به انتخاب دینامیک
+    // قدیمی (ارزان‌ترین/بهترین کل استخر با تخمین قیمت بر اساس usage واقعی)
+    const premiumModel = creditConfig.extractionPremiumModel
+      ? candidates.find((c) => c.name === creditConfig.extractionPremiumModel)
+      : undefined;
+    const economicalModel = creditConfig.extractionEconomicalModel
+      ? candidates.find(
+          (c) => c.name === creditConfig.extractionEconomicalModel,
+        )
+      : undefined;
+
+    const bestAnswer =
+      premiumModel ??
+      this.modelRouter.pickBySelectionMode(candidates, 'best_answer');
+    const costOptimized =
+      economicalModel ??
+      this.modelRouter.pickBySelectionMode(candidates, 'cost_optimized');
 
     return {
       models,
       auto: {
         bestAnswer: {
           modelId: bestAnswer.name,
-          estimatedCreditCost: await estimateCredits(bestAnswer),
+          estimatedCreditCost: premiumModel
+            ? creditConfig.extractionPremiumCreditCost
+            : await estimateCredits(bestAnswer),
         },
         costOptimized: {
           modelId: costOptimized.name,
-          estimatedCreditCost: await estimateCredits(costOptimized),
+          estimatedCreditCost: economicalModel
+            ? creditConfig.extractionEconomicalCreditCost
+            : await estimateCredits(costOptimized),
         },
       },
     };
@@ -719,30 +740,55 @@ export class DiscoveryGenerationService {
     if (!candidates.length)
       throw new BadRequestException(fa.discovery.extractionFailed);
 
+    // اگر مدل صراحتاً انتخاب نشده (حالت خودکار)، این دو تایر یک مدل ثابت + یک قیمت ثابت (به نیوو)
+    // دارند که ادمین در تنظیمات کردیت مشخص می‌کند (نه دیگر یک انتخاب دینامیک از کل استخر مدل‌ها).
+    // fixedCreditCost غیر-null یعنی هزینه‌ی این درخواست دقیقاً همین عدد است، نه بر اساس usage واقعی.
+    const selectionMode = dto.selectionMode ?? COST_OPTIMIZED_MODE;
     let model: AiModel;
+    let fixedCreditCost: number | null = null;
     if (dto.modelId) {
       const found = candidates.find((c) => c.name === dto.modelId);
       if (!found)
         throw new BadRequestException(fa.discovery.invalidExtractionModel);
       model = found;
     } else {
-      model = this.modelRouter.pickBySelectionMode(
-        candidates,
-        dto.selectionMode ?? 'best_answer',
-      );
+      const tierModelName =
+        selectionMode === COST_OPTIMIZED_MODE
+          ? creditConfig.extractionEconomicalModel
+          : creditConfig.extractionPremiumModel;
+      const tierCreditCost =
+        selectionMode === COST_OPTIMIZED_MODE
+          ? creditConfig.extractionEconomicalCreditCost
+          : creditConfig.extractionPremiumCreditCost;
+      const tierModel = tierModelName
+        ? candidates.find((c) => c.name === tierModelName)
+        : undefined;
+      if (tierModel) {
+        model = tierModel;
+        fixedCreditCost = tierCreditCost;
+      } else {
+        // ادمین هنوز مدل این تایر را تنظیم نکرده (یا مدل دیگر فعال/vision-capable نیست) —
+        // بازگشت به انتخاب خودکار قدیمی از کل استخر، با قیمت‌گذاری بر اساس usage واقعی
+        model = this.modelRouter.pickBySelectionMode(candidates, selectionMode);
+      }
     }
 
-    // پیش‌چک موجودی با بدترین‌حالت (الگوی chat.service.ts) — قبل از هر تماس واقعی به provider
-    const worstCase = await this.pricing.calcCost(
-      EXTRACTION_WORST_CASE_INPUT_TOKENS,
-      EXTRACTION_WORST_CASE_OUTPUT_TOKENS,
-      model.name,
-    );
+    // پیش‌چک موجودی — برای تایرهای قیمت‌ثابت دقیقاً همان عدد قطعی، وگرنه بدترین‌حالت (الگوی
+    // chat.service.ts) قبل از هر تماس واقعی به provider
+    const precheckToman =
+      fixedCreditCost != null
+        ? fixedCreditCost * creditConfig.tomanPerCredit
+        : Math.ceil(
+            (
+              await this.pricing.calcCost(
+                EXTRACTION_WORST_CASE_INPUT_TOKENS,
+                EXTRACTION_WORST_CASE_OUTPUT_TOKENS,
+                model.name,
+              )
+            ).costToman * creditConfig.purchaseMarkup,
+          );
     const walletBalance = await this.pricing.getWalletBalance(userId);
-    if (
-      walletBalance <
-      Math.ceil(worstCase.costToman * creditConfig.purchaseMarkup)
-    )
+    if (walletBalance < precheckToman)
       throw new BadRequestException(fa.discovery.insufficientCredits);
 
     // محافظ ساده در برابر انباشت نامحدود پیشنهادهای بررسی‌نشده در جدول اصلی سبک‌ها
@@ -773,7 +819,7 @@ export class DiscoveryGenerationService {
         { type: 'image', image: dataUrl },
         {
           type: 'text',
-          text: 'Analyze this image carefully and write a precise, complete image-generation prompt IN ENGLISH that would reproduce an image with the same style/subject/composition/lighting/color-palette. Return ONLY the prompt text itself — no preamble, no explanation, no extra formatting.',
+          text: 'Analyze this image carefully and write a precise, complete image-generation prompt IN ENGLISH that would reproduce an image with the same style/composition/pose/lighting/color-palette/clothing/background. Do NOT describe the face, race/ethnicity, gender, age, or any other physical/facial features of the people in the image — the face will be swapped in separately, so describing it would conflict with that. Refer to people only in neutral, non-physical terms (e.g. "a person", "a child"), and focus entirely on non-facial elements: pose, framing, outfit, setting, lighting, and overall style. Return ONLY the prompt text itself — no preamble, no explanation, no extra formatting.',
         },
       ],
     };
@@ -796,26 +842,35 @@ export class DiscoveryGenerationService {
       throw new BadRequestException(fa.discovery.extractionFailed);
     }
 
-    // کسر فقط بعد از موفقیت، بر اساس usage واقعیِ همان مدل — دقیقاً هم‌سیاست چت PAYG
-    // (chat.service.ts) — نه یک نرخ ثابت. کف قیمت فعلی (promptExtractionCreditCost) هم
-    // به‌عنوان حداقل هزینه‌ی هر درخواست حفظ می‌شود.
-    const real = await this.pricing.calcCost(
-      usage.inputTokens ?? 0,
-      usage.outputTokens ?? 0,
-      model.name,
-    );
-    const floorToman =
-      creditConfig.promptExtractionCreditCost * creditConfig.tomanPerCredit;
-    const finalToman = Math.max(real.costToman, floorToman);
+    // کسر فقط بعد از موفقیت. تایرهای خودکار (fixedCreditCost) دقیقاً همان عدد ثابتی که ادمین
+    // تعیین کرده کسر می‌شوند (markup=1، مثل CreativePrompt.creditCost در generate() بالاتر) —
+    // در غیر این صورت (حالت دستی یا fallback) بر اساس usage واقعیِ مدل، هم‌سیاست چت PAYG، با کف
+    // قیمت promptExtractionCreditCost.
+    let finalToman: number;
+    let debitMarkup: number;
+    if (fixedCreditCost != null) {
+      finalToman = fixedCreditCost * creditConfig.tomanPerCredit;
+      debitMarkup = 1;
+    } else {
+      const real = await this.pricing.calcCost(
+        usage.inputTokens ?? 0,
+        usage.outputTokens ?? 0,
+        model.name,
+      );
+      const floorToman =
+        creditConfig.promptExtractionCreditCost * creditConfig.tomanPerCredit;
+      finalToman = Math.max(real.costToman, floorToman);
+      debitMarkup = creditConfig.purchaseMarkup;
+    }
     const debited = await this.pricing.debitWallet(
       userId,
       finalToman,
-      creditConfig.purchaseMarkup,
+      debitMarkup,
       'تبدیل عکس به پرامپت',
       {
         feature: 'prompt-extraction',
         modelId: model.name,
-        selectionMode: dto.modelId ? 'manual' : (dto.selectionMode ?? 'best_answer'),
+        selectionMode: dto.modelId ? 'manual' : selectionMode,
       },
     );
     if (!debited)
