@@ -96,8 +96,9 @@ export class PricingService {
     const outputUsdCost = (outputTokens * price.outputPricePerM) / 1_000_000;
     const usdCost = inputUsdCost + outputUsdCost;
     const rate = await this.exchangeRate.getUsdtToman();
+    const costToman = Math.ceil(usdCost * rate);
     return {
-      costToman: Math.ceil(usdCost * rate),
+      costToman,
       costUsdMicros: Math.round(usdCost * 1_000_000),
       costInputUsdMicros: Math.round(inputUsdCost * 1_000_000),
       costOutputUsdMicros: Math.round(outputUsdCost * 1_000_000),
@@ -140,8 +141,9 @@ export class PricingService {
       1_000_000;
     const usdCost = textInputUsd + imageInputUsd + imageOutputUsd;
     const rate = await this.exchangeRate.getUsdtToman();
+    const costToman = Math.ceil(usdCost * rate);
     return {
-      costToman: Math.ceil(usdCost * rate),
+      costToman,
       costUsdMicros: Math.round(usdCost * 1_000_000),
       costInputUsdMicros: Math.round(
         (textInputUsd + imageInputUsd) * 1_000_000,

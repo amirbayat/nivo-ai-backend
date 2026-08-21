@@ -300,6 +300,12 @@ export class AuthService {
     let signupBonusCredits: number | null = null;
     if (isNewUser) {
       signupBonusCredits = await this.grantSignupCredits(user.id);
+      // بدون این، کاربر هیچ Subscription‌ای ندارد و به fallback هاردکد غیر-PAYG می‌افتد
+      // (token.service.ts: getCachedPlan) — یعنی انتخاب دستی مدل override می‌شود و کسر نیوو
+      // انجام نمی‌شود. شکست این کار هرگز نباید ثبت‌نام را fail کند (همان الگوی defensive بالا)
+      await this.attachPayAsYouGoPlan(user.id).catch((err) =>
+        this.logger.error(`attachPayAsYouGoPlan failed for user=${user.id}`, err),
+      );
     }
 
     const tokens = await this.issueTokens(user.id, user.phone, user.role);
@@ -356,6 +362,44 @@ export class AuthService {
       );
       return null;
     }
+  }
+
+  // تنها پلن واقعی سیستم الان همان پلن Pay-As-You-Go است (بدون سهمیه‌ی جدا) — همان الگوی
+  // AdminService.changeUserPlan (admin.service.ts). اگر هیچ پلن isPayAsYouGo فعالی در دیتابیس
+  // نبود، بی‌صدا رد می‌شویم (کاربر به fallback هاردکد token.service.ts می‌افتد، نه کرش)
+  private async attachPayAsYouGoPlan(userId: string): Promise<void> {
+    const paygPlan = await this.prisma.plan.findFirst({
+      where: { isPayAsYouGo: true, isActive: true },
+    });
+    if (!paygPlan) {
+      this.logger.warn(
+        `no active isPayAsYouGo plan found — user=${userId} signed up without a plan`,
+      );
+      return;
+    }
+    const now = new Date();
+    const periodEnd = new Date(
+      now.getFullYear(),
+      now.getMonth() + 1,
+      now.getDate(),
+    );
+    await this.prisma.subscription.upsert({
+      where: { userId },
+      create: {
+        userId,
+        planId: paygPlan.id,
+        periodStart: now,
+        periodEnd,
+        status: 'ACTIVE',
+      },
+      update: {
+        planId: paygPlan.id,
+        periodStart: now,
+        periodEnd,
+        status: 'ACTIVE',
+        cancelAtPeriodEnd: false,
+      },
+    });
   }
 
   async refresh(rawToken: string) {
