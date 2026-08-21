@@ -42,6 +42,11 @@ import {
 const EXTRACTION_WORST_CASE_INPUT_TOKENS = 2000;
 const EXTRACTION_WORST_CASE_OUTPUT_TOKENS = 500;
 
+// سوییچ «چهره را تغییر نده» در تنظیمات آیتم استودیو — فقط وقتی عکس ورودی داریم (editImage) معنا
+// دارد؛ پیش‌فرض روشن است (dto.preserveFace !== false در فراخوانی)
+const FACE_PRESERVATION_INSTRUCTION =
+  'نکته‌ی بسیار مهم: چهره‌ی فرد(های) داخل عکس ورودی را دقیقاً حفظ کن — نسبت‌های صورت، فرم چشم/ابرو/بینی/لب/فک و رنگ پوست باید عیناً مطابق عکس اصلی کاربر بماند و تغییر نکند. فقط پس‌زمینه/لباس/سبک/نورپردازی را طبق درخواست تغییر بده، نه چهره.';
+
 // همون سنتینل‌های انتخاب مدل هدر چت (chat.service.ts) — دراپ‌داون یکی از این‌ها یا یک نام
 // مدل واقعی را در dto.model می‌فرستد
 const OPTIMAL_MODE = 'optimal';
@@ -231,6 +236,15 @@ export class DiscoveryGenerationService {
         throw new ForbiddenException(fa.errors.forbidden);
     }
 
+    if (dto.conversationId) {
+      const conversation = await this.prisma.conversation.findUnique({
+        where: { id: dto.conversationId },
+        select: { userId: true },
+      });
+      if (!conversation || conversation.userId !== userId)
+        throw new ForbiddenException(fa.errors.forbidden);
+    }
+
     // پیش‌بررسی موجودی — قبل از صرف هزینه‌ی واقعی تولید (preflight)؛ کسر واقعی فقط بعد از موفقیت است
     const creditConfig = await this.credits.getConfig();
     const walletBalance = await this.pricing.getWalletBalance(userId);
@@ -276,6 +290,7 @@ export class DiscoveryGenerationService {
           userId,
           promptId: prompt.id,
           projectId: dto.projectId ?? null,
+          conversationId: dto.conversationId ?? null,
           outputType: prompt.outputType,
           creditCost: prompt.creditCost,
           costToman: 0,
@@ -321,12 +336,22 @@ export class DiscoveryGenerationService {
         if (!model)
           throw new BadRequestException(fa.discovery.generationFailed);
 
-        const fullPrompt = `${systemPrompt}\n\n${finalUserPrompt}`.trim();
         const inputImageBuffers = dto.inputImageKeys?.length
           ? await Promise.all(
               dto.inputImageKeys.map((key) => this.storage.downloadImage(key)),
             )
           : [];
+
+        const fullPrompt = [
+          systemPrompt,
+          finalUserPrompt,
+          inputImageBuffers.length && dto.preserveFace !== false
+            ? FACE_PRESERVATION_INSTRUCTION
+            : null,
+        ]
+          .filter(Boolean)
+          .join('\n\n')
+          .trim();
 
         const result = inputImageBuffers.length
           ? await this.imageGen.editImage({
@@ -467,13 +492,23 @@ export class DiscoveryGenerationService {
     if (!model) throw new BadRequestException(fa.discovery.generationFailed);
 
     const apiKey = await this.resolveApiKey(userId);
-    const fullPrompt = `${systemPrompt}\n\n${finalUserPrompt}`.trim();
 
     const inputImageBuffers = dto.inputImageKeys?.length
       ? await Promise.all(
           dto.inputImageKeys.map((key) => this.storage.downloadImage(key)),
         )
       : [];
+
+    const fullPrompt = [
+      systemPrompt,
+      finalUserPrompt,
+      inputImageBuffers.length && dto.preserveFace !== false
+        ? FACE_PRESERVATION_INSTRUCTION
+        : null,
+    ]
+      .filter(Boolean)
+      .join('\n\n')
+      .trim();
 
     const result = inputImageBuffers.length
       ? await this.imageGen.editImage({
@@ -518,6 +553,7 @@ export class DiscoveryGenerationService {
         userId,
         promptId: prompt.id,
         projectId: dto.projectId ?? null,
+        conversationId: dto.conversationId ?? null,
         outputType: CreativeOutputType.IMAGE,
         inputImageKeys: dto.inputImageKeys ?? undefined,
         outputImageKey,
@@ -589,6 +625,7 @@ export class DiscoveryGenerationService {
         userId,
         promptId: prompt.id,
         projectId: dto.projectId ?? null,
+        conversationId: dto.conversationId ?? null,
         outputType: CreativeOutputType.TEXT,
         outputText: text,
         userInput: dto.userInput || null,
@@ -861,6 +898,27 @@ export class DiscoveryGenerationService {
       isActive: p.isActive,
       createdAt: p.createdAt,
     }));
+  }
+
+  // اسم‌گذاری/تغییر اسم یک پرامپت استخراج‌شده‌ی خودِ کاربر — فقط مالک همان استخراج
+  // (submittedByUserId) می‌تواند تغییرش دهد؛ برای سبک‌های CURATED کاتالوگ اصلاً اجازه نمی‌دهیم
+  async renameExtraction(userId: string, id: string, title: string) {
+    const prompt = await this.prisma.creativePrompt.findUnique({
+      where: { id },
+      select: { sourceType: true, submittedByUserId: true },
+    });
+    if (
+      !prompt ||
+      prompt.sourceType !== CreativePromptSourceType.USER_EXTRACTED ||
+      prompt.submittedByUserId !== userId
+    )
+      throw new NotFoundException(fa.discovery.promptNotFound);
+
+    return this.prisma.creativePrompt.update({
+      where: { id },
+      data: { title },
+      select: { id: true, title: true },
+    });
   }
 
   // تاریخچه‌ی «شخصی‌سازی‌های قبلی» یک پروژه — از dto.userInput واقعاً استفاده‌شده در

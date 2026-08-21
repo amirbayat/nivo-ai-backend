@@ -1,5 +1,6 @@
 import {
   IsArray,
+  IsBoolean,
   IsOptional,
   IsString,
   IsUUID,
@@ -16,6 +17,12 @@ export class GenerateCreativeDto {
   @IsUUID(undefined, { message: fa.validation.required })
   projectId?: string;
 
+  // اگر داخل یک مکالمه‌ی چت خاص تولید می‌شود (نه صفحه‌ی مستقل پروژه) — برای اینکه این تولید
+  // در تاریخچه‌ی همون مکالمه هم (نه فقط گالری) نشان داده شود
+  @IsOptional()
+  @IsUUID(undefined, { message: fa.validation.required })
+  conversationId?: string;
+
   // ورودی متنی کاربر که داخل CreativePrompt.userPromptTemplate جای‌گذاری می‌شود
   // (مثلاً موضوع کپشن، یا توضیح سبک دلخواه روی یک قالب کاور)
   @IsOptional()
@@ -29,6 +36,12 @@ export class GenerateCreativeDto {
   @IsArray({ message: fa.validation.mustBeArray })
   @IsString({ each: true })
   inputImageKeys?: string[];
+
+  // سوییچ «چهره را تغییر نده» — پیش‌فرض روشن (اگر نیامده باشد هم true فرض می‌شود، فقط
+  // false صریح آن را غیرفعال می‌کند)؛ فقط وقتی عکس ورودی داریم اثر دارد (ویرایش، نه تولید از صفر)
+  @IsOptional()
+  @IsBoolean({ message: fa.validation.mustBeBoolean })
+  preserveFace?: boolean;
 
   // انتخاب مدل از دراپ‌داون هدر چت — نام مدل واقعی یا یکی از سنتینل‌های خودکار
   // ('cost_optimized' | 'best_answer' | 'optimal'). فقط وقتی prompt.preferredModel خالی

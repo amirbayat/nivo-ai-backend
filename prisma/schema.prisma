@@ -196,9 +196,10 @@ model Conversation {
   // پیام‌های «بعد از آخرین خلاصه‌سازی» (docs/PRD-chat-context-and-summarization.md بخش ۳.۱)
   summarizedUntilCreatedAt DateTime?
 
-  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  project  Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
-  messages Message[]
+  user                User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project             Project?             @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  messages            Message[]
+  creativeGenerations CreativeGeneration[]
 
   @@index([userId, lastMessageAt(sort: Desc)])
   @@index([projectId, lastMessageAt(sort: Desc)])
@@ -621,6 +622,8 @@ model CreativeGeneration {
   userId         String
   promptId       String
   projectId      String? // اختیاری — اگر کاربر موقع تولید یک پروژه انتخاب کرده باشد
+  conversationId String? // اختیاری — اگر این تولید داخل یک مکالمه‌ی چت خاص انجام شده (تا در
+  // تاریخچه‌ی همون مکالمه هم نشان داده شود، نه فقط گالری/پروژه)
   outputType     CreativeOutputType
   inputImageKeys Json? // string[] کلید MinIO عکس(های) ورودی کاربر
   outputImageKey String?
@@ -633,12 +636,14 @@ model CreativeGeneration {
   failureReason  String?
   createdAt      DateTime                 @default(now())
 
-  user    User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  prompt  CreativePrompt @relation(fields: [promptId], references: [id])
-  project Project?       @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  prompt       CreativePrompt @relation(fields: [promptId], references: [id])
+  project      Project?      @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
 
   @@index([userId, createdAt])
   @@index([projectId, createdAt]) // برای فیلتر گالری بر اساس پروژه
+  @@index([conversationId, createdAt]) // برای ادغام با تاریخچه‌ی پیام‌های همون مکالمه
   @@map("creative_generations")
 }
 

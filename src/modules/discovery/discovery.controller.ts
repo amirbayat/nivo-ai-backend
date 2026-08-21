@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Param,
+  Patch,
   Post,
   Query,
   Res,
@@ -19,6 +20,7 @@ import { GenerateCreativeDto } from './dto/generate-creative.dto';
 import { CreatePromptRequestDto } from './dto/create-prompt-request.dto';
 import { UploadDiscoveryImageDto } from './dto/upload-input-image.dto';
 import { ExtractPromptDto } from './dto/extract-prompt.dto';
+import { RenameExtractionDto } from './dto/rename-extraction.dto';
 
 // v2 — دیسکاوری (کاتالوگ سبک‌های آماده + تولید + گالری + درخواست فیچر)، بخش ۵.۳/۵.۴/۵.۵/۵.۹/۵.۱۰
 @Controller('v2/discovery')
@@ -92,6 +94,16 @@ export class DiscoveryController {
   @Get('prompt-extractions/history')
   extractionHistory(@CurrentUser() user: JwtPayload) {
     return this.discoveryService.listMyExtractions(user.sub);
+  }
+
+  // اسم‌گذاری/تغییر اسم یک پرامپت استخراج‌شده‌ی خودِ کاربر
+  @Patch('prompt-extractions/:id')
+  renameExtraction(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: RenameExtractionDto,
+  ) {
+    return this.discoveryService.renameExtraction(user.sub, id, dto.title);
   }
 
   @Get('projects/:projectId/customizations')

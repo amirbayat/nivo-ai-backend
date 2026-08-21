@@ -1,5 +1,6 @@
 import {
   IsArray,
+  IsBoolean,
   IsOptional,
   IsString,
   IsUUID,
@@ -22,4 +23,9 @@ export class GenerateAnonCreativeDto {
   @IsArray({ message: fa.validation.mustBeArray })
   @IsString({ each: true })
   inputImageKeys?: string[];
+
+  // مثل GenerateCreativeDto.preserveFace — پیش‌فرض روشن
+  @IsOptional()
+  @IsBoolean({ message: fa.validation.mustBeBoolean })
+  preserveFace?: boolean;
 }
