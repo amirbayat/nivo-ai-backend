@@ -1159,12 +1159,15 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
       },
     });
 
+    // isPayAsYouGo یعنی بدون محدودیت پلن — فقط بر اساس موجودی کیف‌پول (پایین‌تر) محدود می‌شود،
+    // نه plan.allowedModels که مخصوص پلن‌های اشتراکی قدیمی است
     const requestedModel =
       dto.model && !AUTO_MODE_SENTINELS.includes(dto.model)
         ? resolveModelId(dto.model)
         : undefined;
     const explicitModelRecord =
-      requestedModel && plan.allowedModels.includes(requestedModel)
+      requestedModel &&
+      (plan.isPayAsYouGo || plan.allowedModels.includes(requestedModel))
         ? await this.prisma.aiModel.findFirst({
             where: {
               name: requestedModel,
@@ -1176,7 +1179,7 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
 
     const candidates = await this.prisma.aiModel.findMany({
       where: {
-        name: { in: plan.allowedModels },
+        ...(plan.isPayAsYouGo ? {} : { name: { in: plan.allowedModels } }),
         supportsImageGen: true,
         isActive: true,
       },

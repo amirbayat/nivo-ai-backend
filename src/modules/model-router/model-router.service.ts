@@ -174,9 +174,10 @@ export class ModelRouterService {
       };
     }
 
+    // isPayAsYouGo یعنی بدون محدودیت پلن — کل کاتالوگ فعال، فقط بعداً با موجودی کیف‌پول
+    // محدود می‌شود (نه اینجا با plan.allowedModels که مخصوص پلن‌های اشتراکی قدیمی است)
     const candidates = await this.prisma.aiModel.findMany({
       where: {
-        name: { in: input.allowedModels },
         isActive: true,
         modelType: 'CHAT',
         ...(input.hasImages ? { supportsVision: true } : {}),

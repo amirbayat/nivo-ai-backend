@@ -42,6 +42,13 @@ import {
 const EXTRACTION_WORST_CASE_INPUT_TOKENS = 2000;
 const EXTRACTION_WORST_CASE_OUTPUT_TOKENS = 500;
 
+// همون سنتینل‌های انتخاب مدل هدر چت (chat.service.ts) — دراپ‌داون یکی از این‌ها یا یک نام
+// مدل واقعی را در dto.model می‌فرستد
+const OPTIMAL_MODE = 'optimal';
+const COST_OPTIMIZED_MODE = 'cost_optimized';
+const BEST_ANSWER_MODE = 'best_answer';
+const AUTO_MODE_SENTINELS = [OPTIMAL_MODE, COST_OPTIMIZED_MODE, BEST_ANSWER_MODE];
+
 // موتور تولید دیسکاوری — بخش ۵.۴ سند فنی. هم عکس هم متن از یک مسیر مشترک رد می‌شوند:
 // انتخاب سبک → مونتاژ context (ChatConfig سراسری → Project اختیاری → CreativePrompt) →
 // تولید → کسر نیوو *فقط بعد از موفقیت* (بخش ۳ — تولید fail‌شده نیوو کسر نمی‌کند).
@@ -141,7 +148,15 @@ export class DiscoveryGenerationService {
       where: { outputImageKey: key, userId },
       select: { id: true },
     });
-    if (!generation) throw new NotFoundException(fa.errors.notFound);
+    // عکس منبع «تبدیل عکس به پرامپت» — قبل از تایید ادمین (isActive=false) از این مسیر
+    // احراز-هویت‌شده سرو می‌شود (نه روت عمومی example-images)، فقط برای همان کاربری که آپلودش کرده
+    const ownedSourceImage = generation
+      ? true
+      : await this.prisma.creativePrompt.findFirst({
+          where: { sourceImageKey: key, submittedByUserId: userId },
+          select: { id: true },
+        });
+    if (!ownedSourceImage) throw new NotFoundException(fa.errors.notFound);
 
     const ext = key.split('.').pop() ?? 'png';
     const buffer = await this.storage.downloadImage(key);
@@ -383,9 +398,12 @@ export class DiscoveryGenerationService {
       : `${template}\n${userInput}`;
   }
 
+  // userModel: انتخاب دراپ‌داون هدر چت (نام مدل واقعی یا سنتینل خودکار) — فقط وقتی preferredModel
+  // (کیوریشن ادمین روی این سبک) خالی باشد اثر دارد. دقیقاً حالت سبک‌های تازه‌استخراج‌شده‌ی خود کاربر.
   private async resolveModel(
     preferredModel: string | null,
     outputType: CreativeOutputType,
+    userModel?: string,
   ) {
     if (preferredModel) {
       const m = await this.prisma.aiModel.findUnique({
@@ -393,16 +411,28 @@ export class DiscoveryGenerationService {
       });
       if (m && m.isActive) return m;
     }
-    return this.prisma.aiModel.findFirst({
-      where: {
-        isActive: true,
-        modelType:
-          outputType === CreativeOutputType.IMAGE
-            ? AiModelType.IMAGE_GEN
-            : AiModelType.CHAT,
-      },
+
+    const modelType =
+      outputType === CreativeOutputType.IMAGE
+        ? AiModelType.IMAGE_GEN
+        : AiModelType.CHAT;
+    const candidates = await this.prisma.aiModel.findMany({
+      where: { isActive: true, modelType },
       orderBy: { sortOrder: 'asc' },
     });
+    if (!candidates.length) return null;
+    if (!userModel) return candidates[0];
+
+    const requested = AUTO_MODE_SENTINELS.includes(userModel)
+      ? null
+      : userModel;
+    if (requested) {
+      const found = candidates.find((c) => c.name === requested);
+      if (found) return found;
+    }
+    const selectionMode =
+      userModel === COST_OPTIMIZED_MODE ? 'cost_optimized' : 'best_answer';
+    return this.modelRouter.pickBySelectionMode(candidates, selectionMode);
   }
 
   private async resolveApiKey(userId: string): Promise<string> {
@@ -432,6 +462,7 @@ export class DiscoveryGenerationService {
     const model = await this.resolveModel(
       prompt.preferredModel,
       CreativeOutputType.IMAGE,
+      dto.model,
     );
     if (!model) throw new BadRequestException(fa.discovery.generationFailed);
 
@@ -510,6 +541,7 @@ export class DiscoveryGenerationService {
     const model = await this.resolveModel(
       prompt.preferredModel,
       CreativeOutputType.TEXT,
+      dto.model,
     );
     const modelName =
       model?.name ??
@@ -780,7 +812,9 @@ export class DiscoveryGenerationService {
       segment: created.segment,
       categoryId: created.categoryId,
       description: created.description,
-      exampleImageUrl: created.exampleImageUrl,
+      // قبل از تایید ادمین (isActive=false) روت عمومی example-images این عکس را سرو نمی‌کند —
+      // اینجا مسیر احراز-هویت‌شده‌ی getImage را برمی‌گردانیم (فقط خود کاربر به آن دسترسی دارد)
+      exampleImageUrl: `/v2/discovery/images/${imageKey}`,
       aspectRatio: created.aspectRatio,
       requiresUserImage: created.requiresUserImage,
       creditCost: created.creditCost,

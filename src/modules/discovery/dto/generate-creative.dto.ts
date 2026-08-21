@@ -23,9 +23,17 @@ export class GenerateCreativeDto {
   @MaxLength(2000, { message: fa.validation.stringTooLong })
   userInput?: string;
 
-  // کلیدهای MinIO عکس(های) از‌قبل‌آپلودشده‌ی کاربر — فقط برای سبک‌های requiresUserImage=true
+  // کلیدهای MinIO عکس(های) از‌قبل‌آپلودشده‌ی کاربر — الزامی فقط برای سبک‌های requiresUserImage=true،
+  // برای بقیه‌ی سبک‌های outputType=IMAGE اختیاری است (اگر بیاید، edit/ترکیب به‌جای تولید از صفر)
   @IsOptional()
   @IsArray({ message: fa.validation.mustBeArray })
   @IsString({ each: true })
   inputImageKeys?: string[];
+
+  // انتخاب مدل از دراپ‌داون هدر چت — نام مدل واقعی یا یکی از سنتینل‌های خودکار
+  // ('cost_optimized' | 'best_answer' | 'optimal'). فقط وقتی prompt.preferredModel خالی
+  // باشد اثر دارد — کیوریشن ادمین همیشه اولویت دارد.
+  @IsOptional()
+  @IsString()
+  model?: string;
 }
