@@ -92,39 +92,42 @@ export class DiscoveryGenerationService {
             ? [{ creditCost: 'desc' as const }]
             : [{ sortOrder: 'asc' as const }, { createdAt: 'desc' as const }];
 
-    return this.prisma.creativePrompt.findMany({
-      where: {
-        isActive: true,
-        ...(params.outputType ? { outputType: params.outputType } : {}),
-        ...(params.segment ? { segment: params.segment } : {}),
-        ...(params.trending ? { isTrending: true } : {}),
-        ...(params.categoryId ? { categoryId: params.categoryId } : {}),
-      },
-      orderBy,
-      // contextMd/userPromptTemplate/preferredModel عمداً برای کاربر نمایش داده نمی‌شوند — این‌ها
-      // «دستور پشت‌صحنه‌»ی ادمین هستند، دقیقاً مثل Plan.contextMd که در v1 هم به فرانت لو نمی‌رود
-      select: {
-        id: true,
-        title: true,
-        outputType: true,
-        segment: true,
-        categoryId: true,
-        description: true,
-        exampleImageUrl: true,
-        aspectRatio: true,
-        requiresUserImage: true,
-        creditCost: true,
-        isTrending: true,
-        tags: true,
-        sortOrder: true,
-        sourceImageKey: true,
-      },
-    }).then((prompts) =>
-      prompts.map(({ sourceImageKey, ...p }) => ({
-        ...p,
-        hasSourceImage: !!sourceImageKey,
-      })),
-    );
+    const [creditConfig, prompts] = await Promise.all([
+      this.credits.getConfig(),
+      this.prisma.creativePrompt.findMany({
+        where: {
+          isActive: true,
+          ...(params.outputType ? { outputType: params.outputType } : {}),
+          ...(params.segment ? { segment: params.segment } : {}),
+          ...(params.trending ? { isTrending: true } : {}),
+          ...(params.categoryId ? { categoryId: params.categoryId } : {}),
+        },
+        orderBy,
+        // contextMd/userPromptTemplate/preferredModel عمداً برای کاربر نمایش داده نمی‌شوند — این‌ها
+        // «دستور پشت‌صحنه‌»ی ادمین هستند، دقیقاً مثل Plan.contextMd که در v1 هم به فرانت لو نمی‌رود
+        select: {
+          id: true,
+          title: true,
+          outputType: true,
+          segment: true,
+          categoryId: true,
+          description: true,
+          exampleImageUrl: true,
+          aspectRatio: true,
+          requiresUserImage: true,
+          creditCost: true,
+          isTrending: true,
+          tags: true,
+          sortOrder: true,
+          sourceImageKey: true,
+        },
+      }),
+    ]);
+    return prompts.map(({ sourceImageKey, ...p }) => ({
+      ...p,
+      hasSourceImage: !!sourceImageKey,
+      sourceImageAccuracyCreditCost: creditConfig.sourceImageAccuracyCreditCost,
+    }));
   }
 
   // درخت دسته‌بندی فعال — برای سایدبار استودیوی محتوا در فرانت
@@ -951,6 +954,7 @@ export class DiscoveryGenerationService {
       tags: created.tags,
       sortOrder: created.sortOrder,
       hasSourceImage: true,
+      sourceImageAccuracyCreditCost: creditConfig.sourceImageAccuracyCreditCost,
       extractedPrompt,
       usedModel: { name: model.name, displayName: model.displayName },
     };
@@ -960,14 +964,17 @@ export class DiscoveryGenerationService {
   // اول، تا بتواند بعداً هم دوباره از یک استخراج قدیمی استفاده کند (همون CreativePrompt قابل‌استفاده
   // می‌ماند مگر REJECTED شده باشد — دقیقاً همون قانون usableByOwner در generate())
   async listMyExtractions(userId: string) {
-    const prompts = await this.prisma.creativePrompt.findMany({
-      where: {
-        submittedByUserId: userId,
-        sourceType: CreativePromptSourceType.USER_EXTRACTED,
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 50,
-    });
+    const [creditConfig, prompts] = await Promise.all([
+      this.credits.getConfig(),
+      this.prisma.creativePrompt.findMany({
+        where: {
+          submittedByUserId: userId,
+          sourceType: CreativePromptSourceType.USER_EXTRACTED,
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+      }),
+    ]);
 
     return prompts.map((p) => ({
       id: p.id,
@@ -987,6 +994,7 @@ export class DiscoveryGenerationService {
       tags: p.tags,
       sortOrder: p.sortOrder,
       hasSourceImage: !!p.sourceImageKey,
+      sourceImageAccuracyCreditCost: creditConfig.sourceImageAccuracyCreditCost,
       extractedPrompt: p.userPromptTemplate,
       reviewStatus: p.reviewStatus,
       isActive: p.isActive,
