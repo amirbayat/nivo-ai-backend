@@ -14,10 +14,20 @@ export class StreamMessageDto {
   @MaxLength(10_000, { message: fa.validation.stringTooLong })
   content: string;
 
+  // مدل متنی/چت — همان انتخاب بالای چت (مثلاً 'cost_optimized'). فقط برای مسیر چت معمولی
+  // (Router متنی) و vision استفاده می‌شود؛ برای تولید/ویرایش عکس از `imageModel` استفاده کن
   @IsOptional()
   @IsString({ message: fa.validation.required })
   @MaxLength(50, { message: fa.validation.stringTooLong })
   model?: string;
+
+  // مدل تولید/ویرایش عکس — جدا از `model`. همیشه از فرانت فرستاده می‌شود (پین‌شده در صفحه‌ی
+  // «انتخاب مدل» یا خالی = پیش‌فرض پلن)؛ فقط وقتی بک‌اند (explicit toggle یا classifyImageIntent)
+  // تشخیص دهد این پیام باید عکس تولید/ویرایش کند استفاده می‌شود
+  @IsOptional()
+  @IsString({ message: fa.validation.required })
+  @MaxLength(50, { message: fa.validation.stringTooLong })
+  imageModel?: string;
 
   // دراپ‌دون «سریع/هوشمند» کنار ارسال پیام — فقط روی reasoning effort اثر می‌گذارد، نه انتخاب
   // مدل (که همچنان دست ModelRouterService است). خالی = رفتار قبلی (reasoningEffort پیش‌فرض پلن/استپ بودجه‌ای)
@@ -32,7 +42,8 @@ export class StreamMessageDto {
   images?: string[];
 
   // docs/PRD-chat-images.md بخش ۵.۵ — حالت صریح تولید عکس؛ content همان prompt تولید است.
-  // وقتی true است، model باید یک مدل supportsImageGen مشخص باشد (نه یکی از سنتینل‌های خودکار 'optimal'/'cost_optimized'/'best_answer')
+  // وقتی true است، imageModel (یا در غیاب آن، model) باید یک مدل supportsImageGen مشخص باشد
+  // (نه یکی از سنتینل‌های خودکار 'optimal'/'cost_optimized'/'best_answer')
   @IsOptional()
   @IsBoolean({ message: fa.validation.mustBeBoolean })
   generateImage?: boolean;

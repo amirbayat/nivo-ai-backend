@@ -1176,9 +1176,13 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
 
     // [DISABLED ۱۴۰۵/۰۵/۳۰ — تصمیم محصول: هیچ پلنی دیگر به allowedModels محدود نمی‌شود؛
     // انتخاب مدل فقط بر اساس موجودی کیف‌پول (برای PAYG، پایین‌تر) محدود می‌شود]
+    // imageModel (فیلد جدا برای مدل عکس) در اولویت است — dto.model مدل متنی بالای چت است
+    // (مثلاً cost_optimized) و هیچ‌وقت supportsImageGen ندارد؛ fallback به dto.model فقط برای
+    // سازگاری با کلاینت‌های قدیمی/toggle صریحی که هنوز فقط model می‌فرستند
+    const requestedModelRaw = dto.imageModel ?? dto.model;
     const requestedModel =
-      dto.model && !AUTO_MODE_SENTINELS.includes(dto.model)
-        ? resolveModelId(dto.model)
+      requestedModelRaw && !AUTO_MODE_SENTINELS.includes(requestedModelRaw)
+        ? resolveModelId(requestedModelRaw)
         : undefined;
     const explicitModelRecord = requestedModel
       ? await this.prisma.aiModel.findFirst({
