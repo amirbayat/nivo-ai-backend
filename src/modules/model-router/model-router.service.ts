@@ -89,6 +89,11 @@ const TIER_RANK: Record<ModelTier, number> = {
   COMPLEX: 2,
 };
 
+// تصمیم محصول (۱۴۰۵/۰۶) — حالت «مصرف بهینه» (متنی) فقط بین همین دو مدل انتخاب می‌کند، نه
+// ارزان‌ترین کل کاتالوگ. اگر هیچ‌کدام در استخر کاندیدها نبودند (مثلاً غیرفعال شده‌اند)،
+// pickBySelectionMode به رفتار قدیمی (ارزان‌ترین کل کاندیدها) fallback می‌کند
+const COST_OPTIMIZED_MODEL_NAMES = ['openai/gpt-5.4-nano', 'openai/gpt-5.4-mini'];
+
 @Injectable()
 export class ModelRouterService {
   private readonly logger = new Logger(ModelRouterService.name);
@@ -196,15 +201,15 @@ export class ModelRouterService {
       };
     }
 
-    const picked = this.pickBySelectionMode(
-      candidates,
-      input.selectionMode === 'cost_optimized' ? 'cost_optimized' : 'best_answer',
-    );
+    // پیش‌فرض وقتی هیچ selectionMode مشخصی نرسیده (نه انتخاب دستی، نه سنتینل صریح) — مصرف بهینه
+    const effectiveMode =
+      input.selectionMode === 'best_answer' ? 'best_answer' : 'cost_optimized';
+    const picked = this.pickBySelectionMode(candidates, effectiveMode);
     return {
       modelId: picked.name,
       tier: picked.tier,
       method:
-        input.selectionMode === 'cost_optimized'
+        effectiveMode === 'cost_optimized'
           ? 'payg_cost_optimized'
           : 'payg_best_answer',
       confidence: 1,
@@ -220,8 +225,12 @@ export class ModelRouterService {
     selectionMode: 'cost_optimized' | 'best_answer',
   ): AiModel {
     if (selectionMode === 'cost_optimized') {
-      // ارزان‌ترین مدلِ توانا — مجموع قیمت ورودی+خروجی به ازای هر میلیون توکن، صعودی
-      return [...candidates].sort(
+      const preferred = candidates.filter((c) =>
+        COST_OPTIMIZED_MODEL_NAMES.includes(c.name),
+      );
+      const pool = preferred.length ? preferred : candidates;
+      // ارزان‌ترین مدلِ توانا (در استخر بالا) — مجموع قیمت ورودی+خروجی به ازای هر میلیون توکن، صعودی
+      return [...pool].sort(
         (a, b) =>
           a.inputPricePerM +
           a.outputPricePerM -
