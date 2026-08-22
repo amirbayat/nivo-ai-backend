@@ -81,6 +81,8 @@ export class DiscoveryPublicController {
     const ext = key.split('.').pop() ?? 'png';
     const buffer = await this.storage.downloadImage(key);
     res.setHeader('Content-Type', mimeTypeForExt(ext));
+    // عکس نمونه‌ی یک سبک است، بین همه‌ی کاربران مشترک — کش عمومی و طولانی امن است
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
     res.send(buffer);
   }
 

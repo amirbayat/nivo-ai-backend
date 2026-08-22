@@ -9,6 +9,7 @@ import {
   Res,
   UseGuards,
 } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 import type { Response } from 'express';
 import { JwtGuard } from '../../common/guards/jwt.guard';
 import {
@@ -39,7 +40,12 @@ export class DiscoveryController {
   }
 
   // فرانت با axios (هدر Authorization واقعی) + responseType:'blob' صدا می‌زند —
-  // useAuthedImageUrl موجود در فرانت را عیناً برای این مسیر هم استفاده می‌کنیم
+  // useAuthedImageUrl موجود در فرانت را عیناً برای این مسیر هم استفاده می‌کنیم.
+  // SkipThrottle + Cache-Control immutable: دقیقاً همون دلیل conversations.controller.ts —
+  // صفحه‌ی گالری هر آیتم را (خروجی + عکس ورودی) جدا فچ می‌کند، پس چند ده درخواست همزمان
+  // معمول است؛ نباید این‌ها سقف سراسری چت/API را پر کنند، و چون key یک UUID immutable است
+  // کش دائمی مرورگر امن است
+  @SkipThrottle()
   @Get('images/:key')
   async getImage(
     @CurrentUser() user: JwtPayload,
@@ -51,6 +57,7 @@ export class DiscoveryController {
       key,
     );
     res.setHeader('Content-Type', mimeType);
+    res.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
     res.send(buffer);
   }
 

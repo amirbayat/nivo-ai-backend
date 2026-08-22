@@ -11,6 +11,7 @@ import {
   Res,
   UseGuards,
 } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 import type { Response } from 'express';
 import { JwtGuard } from '../../common/guards/jwt.guard';
 import {
@@ -48,7 +49,12 @@ export class ConversationsController {
 
   // فرانت این مسیر را با axios (هدر Authorization واقعی) و responseType:'blob' صدا می‌زند —
   // نه با <img src="...">‌ خام، چون تگ img نمی‌تواند هدر بفرستد؛ همین یعنی برخلاف presigned
-  // URL قبلی، این لینک بدون توکن واقعی کاربر برای کس دیگری قابل استفاده نیست
+  // URL قبلی، این لینک بدون توکن واقعی کاربر برای کس دیگری قابل استفاده نیست.
+  // SkipThrottle: یک گالری با چند ده عکس یعنی چند ده درخواست همزمان به همین مسیر — این‌ها
+  // را نباید با سقف سراسری چت/API (rate-limit.module.ts) اشتراک گذاشت وگرنه لود گالری به
+  // تنهایی کاربر را throttle می‌کند؛ چون filename یک UUID تصادفی و immutable است، هیچ افشای
+  // اطلاعاتی هم از حذف محدودیت اینجا نیست (مالکیت هنوز در getImage چک می‌شود).
+  @SkipThrottle()
   @Get(':id/images/:filename')
   async getImage(
     @CurrentUser() user: JwtPayload,
@@ -62,6 +68,9 @@ export class ConversationsController {
       user.sub,
     );
     res.setHeader('Content-Type', mimeType);
+    // filename یک کلید تصادفی UUID است (storage.service.ts uploadImage) — محتوایش هیچ‌وقت
+    // عوض نمی‌شود، پس مرورگر می‌تواند برای همیشه کش کند و از فچ دوباره در بار بعدی صرف‌نظر کند
+    res.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
     res.send(buffer);
   }
 

@@ -9,6 +9,7 @@ import {
   Res,
   UseGuards,
 } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 import type { Response } from 'express';
 import { JwtGuard } from '../../common/guards/jwt.guard';
 import {
@@ -46,7 +47,10 @@ export class NivoCalController {
   }
 
   // پشت JwtGuard + چک مالکیت (nivoCalService.getImage) — دقیقاً همون الگوی امنیتی چت‌ایمیج/
-  // دیسکاوری: کلید MinIO هیچ‌وقت مستقیم/presigned به فرانت داده نمی‌شود
+  // دیسکاوری: کلید MinIO هیچ‌وقت مستقیم/presigned به فرانت داده نمی‌شود.
+  // SkipThrottle + Cache-Control immutable: دقیقاً همون دلیل conversations.controller.ts
+  // (getImage) — کلید UUID و immutable است، نباید سقف سراسری چت را با لود گالری/تاریخچه اشتراک بگذارد
+  @SkipThrottle()
   @Get('images/:key')
   async getImage(
     @Param('key') key: string,
@@ -58,6 +62,7 @@ export class NivoCalController {
       key,
     );
     res.setHeader('Content-Type', mimeType);
+    res.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
     res.send(buffer);
   }
 
