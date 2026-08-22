@@ -53,6 +53,8 @@ model User {
   creativePromptRequests    CreativePromptRequest[]
   creativePromptSubmissions CreativePrompt[]           @relation("CreativePromptSubmittedBy")
   foodLogs                  FoodLog[]
+  nutritionProfile          NutritionProfile?
+  weightLogs                WeightLog[]
 
   @@map("users")
 }
@@ -1510,4 +1512,65 @@ model FoodLog {
 
   @@index([userId, createdAt])
   @@map("food_logs")
+}
+
+enum Gender {
+  MALE
+  FEMALE
+}
+
+// چهار سطح، منطبق بر docs/PRD-nivo-cal.md بخش ۳.۲ (ضرایب TDEE استاندارد
+// ۱.۲ / ۱.۳۷۵ / ۱.۵۵ / ۱.۷۲۵) و چهار کارت طراحی‌شده در ویزارد آنبوردینگ
+enum ActivityLevel {
+  SEDENTARY
+  LIGHT
+  ACTIVE
+  VERY_ACTIVE
+}
+
+enum NutritionGoal {
+  LOSE_WEIGHT
+  MAINTAIN
+  GAIN_WEIGHT
+}
+
+// docs/PRD-nivo-cal.md فاز ۲ — پروفایل تغذیه. dailyCalorieTarget/proteinTargetG/carbsTargetG/
+// fatTargetG خروجی قطعی فرمول Mifflin-St Jeor (تابع خالص در nivo-cal.service.ts) هستند، نه
+// حدس مدل — این‌جا فقط cache می‌شوند تا هر بار re-compute نشوند. وزن روی این مدل نگه داشته
+// نمی‌شود (نه یک عدد ثابت)؛ تاریخچه‌ی وزن در WeightLog جداگانه است تا نمودار روند ممکن باشد.
+model NutritionProfile {
+  id            String        @id @default(uuid())
+  userId        String        @unique
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  gender        Gender
+  age           Int
+  heightCm      Int
+  activityLevel ActivityLevel
+  goal          NutritionGoal
+  goalPaceLevel Int // 1=ملایم, 2=متوسط, 3=سریع — فقط برای LOSE_WEIGHT/GAIN_WEIGHT معنا دارد
+
+  dailyCalorieTarget Int
+  proteinTargetG     Int
+  carbsTargetG       Int
+  fatTargetG         Int
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("nutrition_profiles")
+}
+
+// docs/PRD-nivo-cal.md فاز ۲ — یک رکورد به‌ازای هر ثبت وزن (آنبوردینگ اولیه + ثبت‌های
+// دوره‌ای بعدی از داشبورد)؛ منبع نمودار روند وزن و «وزن فعلی» (آخرین رکورد)
+model WeightLog {
+  id       String   @id @default(uuid())
+  userId   String
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  weightKg Float
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@map("weight_logs")
 }

@@ -231,5 +231,7 @@ export const fa = {
     scanFailed: 'تحلیل عکس ناموفق بود — اعتبار شما کسر نشد، دوباره امتحان کنید',
     scanDebitDescription: 'اسکن کالری Nivo Cal',
     logNotFound: 'این اسکن یافت نشد',
+    profileNotFound: 'هنوز پروفایل تغذیه نساختی',
+    profileAlreadyExists: 'پروفایل تغذیه‌ات قبلاً ساخته شده — می‌تونی ویرایشش کنی',
   },
 } as const;

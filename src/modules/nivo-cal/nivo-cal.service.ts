@@ -22,6 +22,8 @@ import {
   parseChatImageDataUrl,
   validateChatImages,
 } from '../../common/validators/chat-image.validator';
+import { CreateNutritionProfileDto } from './dto/create-nutrition-profile.dto';
+import { computeNutritionTargets } from './nivo-cal-targets';
 
 // تصمیم محصول (docs/PRD-nivo-cal.md بخش ۲.۲) — فاز ۱ عمداً یک مدل ثابت دارد، نه انتخاب
 // دستی/خودکار بین چند تایر مثل «تبدیل عکس به پرامپت» — سادگی تجربه‌ی کاربر روی این فیچر
@@ -261,5 +263,252 @@ export class NivoCalService {
     const ext = key.split('.').pop() ?? 'jpeg';
     const buffer = await this.storage.downloadImage(key);
     return { buffer, mimeType: mimeTypeForExt(ext) };
+  }
+
+  // برای اسکن‌های اشتباهی/تستی — چک مالکیت قبل از حذف، همون الگوی getImage بالا. حذف تصویر
+  // از MinIO best-effort است؛ اگر شکست بخورد رکورد دیتابیس همچنان حذف‌شده می‌ماند (چیزی که
+  // کاربر واقعاً می‌بیند)، فقط لاگ می‌شود
+  async deleteLog(userId: string, id: string) {
+    const log = await this.prisma.foodLog.findFirst({ where: { id, userId } });
+    if (!log) throw new NotFoundException(fa.nivoCal.logNotFound);
+
+    await this.prisma.foodLog.delete({ where: { id } });
+
+    try {
+      await this.storage.deleteObject(log.imageStorageKey);
+    } catch (err) {
+      this.logger.warn(
+        `nivo-cal deleteLog: failed to remove image ${log.imageStorageKey}: ${(err as Error).message}`,
+      );
+    }
+
+    return { success: true };
+  }
+
+  // docs/PRD-nivo-cal.md فاز ۲ — weightKg فقط برای اولین رکورد WeightLog استفاده می‌شود،
+  // روی خود پروفایل ذخیره نمی‌شود (بخش ۴.۲). upsert چون کاربر باید بتواند بعداً پروفایلش
+  // را ویرایش کند (مثلاً سطح فعالیت یا هدفش عوض شود) بدون رکورد تکراری.
+  async createOrUpdateProfile(userId: string, dto: CreateNutritionProfileDto) {
+    const goalPaceLevel = dto.goalPaceLevel ?? 2;
+    const targets = computeNutritionTargets({
+      gender: dto.gender,
+      age: dto.age,
+      heightCm: dto.heightCm,
+      weightKg: dto.weightKg,
+      activityLevel: dto.activityLevel,
+      goal: dto.goal,
+      goalPaceLevel,
+    });
+
+    const data = {
+      gender: dto.gender,
+      age: dto.age,
+      heightCm: dto.heightCm,
+      activityLevel: dto.activityLevel,
+      goal: dto.goal,
+      goalPaceLevel,
+      ...targets,
+    };
+
+    const profile = await this.prisma.nutritionProfile.upsert({
+      where: { userId },
+      create: { userId, ...data },
+      update: data,
+    });
+
+    await this.prisma.weightLog.create({
+      data: { userId, weightKg: dto.weightKg },
+    });
+
+    return profile;
+  }
+
+  async getProfile(userId: string) {
+    return this.prisma.nutritionProfile.findUnique({ where: { userId } });
+  }
+
+  async logWeight(userId: string, weightKg: number) {
+    const previous = await this.prisma.weightLog.findFirst({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+    });
+    const entry = await this.prisma.weightLog.create({
+      data: { userId, weightKg },
+    });
+    const deltaKg = previous
+      ? Math.round((weightKg - previous.weightKg) * 10) / 10
+      : null;
+    return {
+      id: entry.id,
+      weightKg: entry.weightKg,
+      createdAt: entry.createdAt,
+      deltaKg,
+    };
+  }
+
+  async getWeightHistory(userId: string, days = 30) {
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    const logs = await this.prisma.weightLog.findMany({
+      where: { userId, createdAt: { gte: since } },
+      orderBy: { createdAt: 'asc' },
+    });
+    const first = logs[0];
+    const last = logs[logs.length - 1];
+    const deltaKg =
+      first && last && first.id !== last.id
+        ? Math.round((last.weightKg - first.weightKg) * 10) / 10
+        : 0;
+    return {
+      points: logs.map((l) => ({ date: l.createdAt, weightKg: l.weightKg })),
+      deltaKg,
+      periodDays: days,
+    };
+  }
+
+  // استریک — تعداد روزهای متوالی که کاربر حداقل یک اسکن ثبت کرده، تا امروز (یا تا دیروز
+  // اگر امروز هنوز اسکنی نداشته — استریک تا پایان امروز هنوز نشکسته است)
+  private async computeStreak(userId: string): Promise<number> {
+    const since = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
+    const logs = await this.prisma.foodLog.findMany({
+      where: { userId, createdAt: { gte: since } },
+      select: { createdAt: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    const days = new Set(logs.map((l) => l.createdAt.toDateString()));
+
+    const cursor = new Date();
+    cursor.setHours(0, 0, 0, 0);
+    if (!days.has(cursor.toDateString())) {
+      cursor.setDate(cursor.getDate() - 1);
+    }
+    let streak = 0;
+    while (days.has(cursor.toDateString())) {
+      streak += 1;
+      cursor.setDate(cursor.getDate() - 1);
+    }
+    return streak;
+  }
+
+  async getDailySummary(userId: string) {
+    const profile = await this.prisma.nutritionProfile.findUnique({
+      where: { userId },
+    });
+    if (!profile) throw new NotFoundException(fa.nivoCal.profileNotFound);
+
+    const now = new Date();
+    const startOfDay = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+    );
+    const endOfDay = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000);
+
+    const todaysLogs = await this.prisma.foodLog.findMany({
+      where: { userId, createdAt: { gte: startOfDay, lt: endOfDay } },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    const consumed = todaysLogs.reduce(
+      (acc, log) => {
+        const result = log.resultJson as unknown as NivoCalResult;
+        if (!result.isFood) return acc;
+        acc.calories += log.totalCalories;
+        for (const item of result.items) {
+          acc.proteinG += item.proteinG;
+          acc.carbsG += item.carbsG;
+          acc.fatG += item.fatG;
+        }
+        return acc;
+      },
+      { calories: 0, proteinG: 0, carbsG: 0, fatG: 0 },
+    );
+
+    const meals = todaysLogs.map((log) => ({
+      id: log.id,
+      imageUrl: `/nivo-cal/images/${log.imageStorageKey}`,
+      createdAt: log.createdAt,
+      ...(log.resultJson as unknown as NivoCalResult),
+    }));
+
+    const [weightTrend, streakDays, weeklyAdherence] = await Promise.all([
+      this.getWeightHistory(userId, 30),
+      this.computeStreak(userId),
+      this.getWeeklyAdherence(userId, profile.dailyCalorieTarget),
+    ]);
+
+    return {
+      profile,
+      consumed,
+      remainingCalories: profile.dailyCalorieTarget - consumed.calories,
+      meals,
+      weightTrend,
+      streakDays,
+      weeklyAdherence,
+    };
+  }
+
+  // «رعایت هفتگی» — هر روز از ۷ روز اخیر: هدف ثابت (پروفایل فعلی) در برابر کالری واقعاً
+  // مصرف‌شده. روزهایی که اصلاً هیچ اسکنی نداشته‌اند noData هستند، نه under — چون صفر کالری
+  // واقعی و «کاربر اصلاً از اپ استفاده نکرده» با این داده قابل تشخیص از هم نیستند، و نمایش
+  // چنین روزی به‌عنوان «موفق» (سبز) گمراه‌کننده است
+  private async getWeeklyAdherence(userId: string, dailyCalorieTarget: number) {
+    const DAYS = 7;
+    const now = new Date();
+    const startOfToday = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+    );
+    const since = new Date(
+      startOfToday.getTime() - (DAYS - 1) * 24 * 60 * 60 * 1000,
+    );
+
+    const logs = await this.prisma.foodLog.findMany({
+      where: { userId, createdAt: { gte: since } },
+      select: { createdAt: true, totalCalories: true, resultJson: true },
+    });
+
+    const dayKey = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+    const consumedByDay = new Map<string, number>();
+    const hasLogByDay = new Set<string>();
+    for (const log of logs) {
+      const key = dayKey(log.createdAt);
+      hasLogByDay.add(key);
+      const result = log.resultJson as unknown as NivoCalResult;
+      if (!result.isFood) continue;
+      consumedByDay.set(key, (consumedByDay.get(key) ?? 0) + log.totalCalories);
+    }
+
+    const days: Array<{
+      date: string;
+      consumedCalories: number;
+      targetCalories: number;
+      status: 'under' | 'onTarget' | 'over' | 'noData';
+    }> = [];
+
+    for (let i = DAYS - 1; i >= 0; i--) {
+      const d = new Date(startOfToday.getTime() - i * 24 * 60 * 60 * 1000);
+      const key = dayKey(d);
+      const consumedCalories = consumedByDay.get(key) ?? 0;
+
+      let status: 'under' | 'onTarget' | 'over' | 'noData';
+      if (!hasLogByDay.has(key)) {
+        status = 'noData';
+      } else {
+        const diff = consumedCalories - dailyCalorieTarget;
+        status = diff > 30 ? 'over' : diff < -30 ? 'under' : 'onTarget';
+      }
+
+      days.push({
+        date: key,
+        consumedCalories,
+        targetCalories: dailyCalorieTarget,
+        status,
+      });
+    }
+
+    return days;
   }
 }
