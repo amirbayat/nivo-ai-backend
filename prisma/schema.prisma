@@ -52,6 +52,7 @@ model User {
   projects                  Project[]
   creativePromptRequests    CreativePromptRequest[]
   creativePromptSubmissions CreativePrompt[]           @relation("CreativePromptSubmittedBy")
+  foodLogs                  FoodLog[]
 
   @@map("users")
 }
@@ -509,6 +510,10 @@ model CreditConfig {
   // به‌عنوان تصویر پایه‌ی ادیت هم به مدل داده می‌شود، نه فقط متن پرامپت؛ این نیوو اضافه به
   // creditCost همان سبک اضافه می‌شود (فقط وقتی سوییچ روشن باشد)
   sourceImageAccuracyCreditCost    Int      @default(4)
+  // docs/PRD-nivo-cal.md — قیمت ثابت هر اسکن کالری‌سنج تصویری (فاز ۱)؛ برخلاف «تبدیل عکس به
+  // پرامپت» عمداً فقط یک مدل ثابت (openai/gpt-5.4-mini) و یک قیمت ثابت دارد، نه دو تایر
+  // انتخابی، چون فاز ۱ باید «خیلی ساده» باشد — هیچ انتخاب مدلی جلوی کاربر نیست
+  nivoCalScanCreditCost            Int      @default(1)
   updatedAt                        DateTime @updatedAt
 
   @@map("credit_config")
@@ -1483,4 +1488,26 @@ enum AnonFunnelEventType {
   SIGNUP_COMPLETED
   FIRST_MESSAGE_AFTER_SIGNUP
   FIRST_PURCHASE
+}
+
+// docs/PRD-nivo-cal.md فاز ۱ — یک اسکن عکس غذا. resultJson همان خروجی کامل و
+// اعتبارسنجی‌شده‌ی generateObject است (بایگانی کامل برای دیباگ/بهبود پرامپت بعداً)؛
+// totalCalories/healthScore denormalized می‌شوند تا SUM/فیلتر روزانه (فاز ۲) بدون
+// parse کردن JSON ممکن باشد — دقیقاً همان الگوی Message.costToman
+model FoodLog {
+  id              String   @id @default(uuid())
+  userId          String
+  imageStorageKey String
+  note            String?
+  resultJson      Json
+  totalCalories   Int
+  healthScore     String
+  modelUsed       String
+  costToman       Int      @default(0)
+  createdAt       DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("food_logs")
 }

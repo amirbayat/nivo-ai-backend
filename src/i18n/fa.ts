@@ -215,7 +215,8 @@ export const fa = {
       'شما قبلاً از تولید رایگان مهمان استفاده کرده‌اید — برای ادامه ثبت‌نام کنید',
     extractionFailed:
       'تبدیل عکس به پرامپت ناموفق بود — اعتبار شما کسر نشد، دوباره امتحان کنید',
-    invalidExtractionModel: 'مدل انتخاب‌شده در دسترس نیست — لطفاً مدل دیگری انتخاب کنید',
+    invalidExtractionModel:
+      'مدل انتخاب‌شده در دسترس نیست — لطفاً مدل دیگری انتخاب کنید',
     tooManyPendingExtractions:
       'شما تعداد زیادی پیشنهاد در انتظار بررسی دارید — تا زمان بررسی توسط تیم صبر کنید',
     pinnedPromptMustBeActive:
@@ -223,5 +224,12 @@ export const fa = {
   },
   credits: {
     signupBonusDescription: 'شارژ اولیه‌ی رایگان خوش‌آمدگویی',
+  },
+  // docs/PRD-nivo-cal.md فاز ۱ — اسکن سریع کالری از روی عکس غذا
+  nivoCal: {
+    insufficientCredits: 'اعتبار نیوو کافی نیست — لطفاً شارژ کنید',
+    scanFailed: 'تحلیل عکس ناموفق بود — اعتبار شما کسر نشد، دوباره امتحان کنید',
+    scanDebitDescription: 'اسکن کالری Nivo Cal',
+    logNotFound: 'این اسکن یافت نشد',
   },
 } as const;
