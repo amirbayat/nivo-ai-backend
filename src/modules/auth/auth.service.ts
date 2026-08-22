@@ -30,6 +30,12 @@ const TEST_PHONE = '09001111111';
 const TEST_OTP_CODE = '123654';
 const TEST_USER_NAME = 'تست';
 
+// پاداش معرف به ازای هر دوستی که با لینکش ثبت‌نام می‌کند (نه پرداخت) — عدد ثابت طبق درخواست
+// محصول، برخلاف freeSignupCredits که از CreditConfig می‌آید. مسیر قدیمی pardakht-محور
+// (PaymentsService.issueReferralRewards، فقط برای Payment.kind=SUBSCRIPTION) در مدل فعلی
+// (فقط خرید نیوو با WALLET_TOPUP) اصلاً صدا زده نمی‌شود — این پاداش جای آن را می‌گیرد
+const REFERRAL_SIGNUP_REWARD_CREDITS = 40;
+
 const PLAN_SUMMARY_SELECT = {
   name: true,
   priceMonthly: true,
@@ -306,6 +312,16 @@ export class AuthService {
       await this.attachPayAsYouGoPlan(user.id).catch((err) =>
         this.logger.error(`attachPayAsYouGoPlan failed for user=${user.id}`, err),
       );
+      // پاداش معرف — همین‌جا (نه موقع پرداخت) چون پاداش الان روی «ثبت‌نام دوست» است، نه خریدش
+      if (referredByUserId) {
+        await this.rewardReferrerForSignup(referredByUserId, user.id).catch(
+          (err) =>
+            this.logger.error(
+              `rewardReferrerForSignup failed for referrer=${referredByUserId} referred=${user.id}`,
+              err,
+            ),
+        );
+      }
     }
 
     const tokens = await this.issueTokens(user.id, user.phone, user.role);
@@ -362,6 +378,42 @@ export class AuthService {
       );
       return null;
     }
+  }
+
+  // به ازای هر دوستی که با لینک معرف ثبت‌نام می‌کند (نه پرداخت)، REFERRAL_SIGNUP_REWARD_CREDITS
+  // نیوو به کیف‌پول معرف اضافه می‌شود — همون الگوی دقیق grantSignupCredits/completeWalletTopup
+  // (wallet.upsert + WalletTransaction نوع CREDIT). caller با catch دفاعی صدا می‌زند، پس شکست
+  // این عملیات هرگز ثبت‌نام دوستِ تازه‌وارد را fail نمی‌کند
+  private async rewardReferrerForSignup(
+    referrerUserId: string,
+    referredUserId: string,
+  ): Promise<void> {
+    const config = await this.prisma.creditConfig.upsert({
+      where: { id: 'singleton' },
+      create: { id: 'singleton' },
+      update: {},
+    });
+    const amountToman = REFERRAL_SIGNUP_REWARD_CREDITS * config.tomanPerCredit;
+    await this.prisma.$transaction(async (tx) => {
+      const wallet = await tx.wallet.upsert({
+        where: { userId: referrerUserId },
+        create: { userId: referrerUserId, balanceToman: amountToman },
+        update: { balanceToman: { increment: amountToman } },
+      });
+      await tx.walletTransaction.create({
+        data: {
+          walletId: wallet.id,
+          type: 'CREDIT',
+          amountToman,
+          description: fa.credits.referralSignupRewardDescription,
+          metadata: {
+            reason: 'referral_signup_reward',
+            credits: REFERRAL_SIGNUP_REWARD_CREDITS,
+            referredUserId,
+          },
+        },
+      });
+    });
   }
 
   // تنها پلن واقعی سیستم الان همان پلن Pay-As-You-Go است (بدون سهمیه‌ی جدا) — همان الگوی

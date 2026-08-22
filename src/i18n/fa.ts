@@ -224,6 +224,7 @@ export const fa = {
   },
   credits: {
     signupBonusDescription: 'شارژ اولیه‌ی رایگان خوش‌آمدگویی',
+    referralSignupRewardDescription: 'پاداش معرفی دوست (ثبت‌نام با لینک شما)',
   },
   // docs/PRD-nivo-cal.md فاز ۱ — اسکن سریع کالری از روی عکس غذا
   nivoCal: {
