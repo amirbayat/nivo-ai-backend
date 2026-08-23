@@ -71,4 +71,22 @@ export class StorageService implements OnModuleInit {
   isStorageKey(value: string): boolean {
     return !value.startsWith('data:');
   }
+
+  async statObject(key: string) {
+    return this.client.statObject(this.bucket, key);
+  }
+
+  // برخلاف downloadImage (کل بافر را در حافظه می‌گیرد، مناسب عکس‌های سبک)، اینجا استریم خام
+  // MinIO برگردانده می‌شود — برای فایل حجیمی مثل ویدیوی آموزشی nivo-cal، هم حافظه‌ی سرور پر
+  // نمی‌شود هم می‌شود مستقیم pipe کرد به Response برای پخش تدریجی/Range request
+  async getObjectStream(key: string, range?: { start: number; end: number }) {
+    return range
+      ? this.client.getPartialObject(
+          this.bucket,
+          key,
+          range.start,
+          range.end - range.start + 1,
+        )
+      : this.client.getObject(this.bucket, key);
+  }
 }

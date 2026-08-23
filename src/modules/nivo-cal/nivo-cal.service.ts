@@ -203,12 +203,14 @@ export class NivoCalService {
       })),
     };
 
-    // بدون پیشوند پوشه (برخلاف چت که conversationId را پیشوند می‌کند) — کلید در یک پارامتر
-    // مسیر تخت («images/:key») سرو می‌شود؛ اگر پیشوند اضافه شود، اسلش داخل کلید با روتینگ
-    // Nest/Express جفت نمی‌شود. الگوی uploadInputImage در discovery-generation.service.ts هم دقیقاً همین است.
+    // نیوو کال کاربر را با پوشه‌ی مجازی nivo-cal/{userId} پیشوند می‌کند (دقیقاً هم‌الگوی
+    // conversationId در چت) — کلید هرگز به‌صورت تخت در ریشه‌ی باکت نمی‌نشیند. مسیر سرو کردن
+    // (@Get('images/*key') در nivo-cal.controller.ts) از wildcard استفاده می‌کند تا اسلش داخل
+    // کلید را هم بگیرد.
     const imageStorageKey = await this.storage.uploadImage(
       parsed.buffer,
       parsed.ext,
+      `nivo-cal/${userId}`,
     );
 
     // قیمت ثابت (markup=1 مثل تایرهای ثابت «تبدیل عکس به پرامپت») — کسر فقط بعد از موفقیت

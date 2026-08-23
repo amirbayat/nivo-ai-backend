@@ -49,17 +49,20 @@ export class NivoCalController {
   // پشت JwtGuard + چک مالکیت (nivoCalService.getImage) — دقیقاً همون الگوی امنیتی چت‌ایمیج/
   // دیسکاوری: کلید MinIO هیچ‌وقت مستقیم/presigned به فرانت داده نمی‌شود.
   // SkipThrottle + Cache-Control immutable: دقیقاً همون دلیل conversations.controller.ts
-  // (getImage) — کلید UUID و immutable است، نباید سقف سراسری چت را با لود گالری/تاریخچه اشتراک بگذارد
+  // (getImage) — کلید UUID و immutable است، نباید سقف سراسری چت را با لود گالری/تاریخچه اشتراک بگذارد.
+  // wildcard («*key») چون کلید حالا nivo-cal/{userId}/{uuid}.ext است (چند سگمنت با اسلش) —
+  // Express 5/path-to-regexp v8 یک «:key» ساده فقط یک سگمنت را می‌گیرد؛ با «*key»،
+  // req.params.key آرایه‌ی سگمنت‌هاست. کلیدهای تخت قدیمی (بدون پوشه) هم همچنان کار می‌کنند.
   @SkipThrottle()
-  @Get('images/:key')
+  @Get('images/*key')
   async getImage(
-    @Param('key') key: string,
+    @Param('key') key: string[],
     @CurrentUser() user: JwtPayload,
     @Res() res: Response,
   ) {
     const { buffer, mimeType } = await this.nivoCalService.getImage(
       user.sub,
-      key,
+      key.join('/'),
     );
     res.setHeader('Content-Type', mimeType);
     res.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
