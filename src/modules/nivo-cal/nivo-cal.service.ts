@@ -30,6 +30,8 @@ import { computeNutritionTargets } from './nivo-cal-targets';
 // بر انعطاف مدل ارجحیت دارد. این مدل هم‌اکنون هم extractionEconomicalModel پیش‌فرض
 // (vision-capable) کاتالوگ است، پس نیازی به migration جدید روی AiModel نیست.
 const NIVO_CAL_MODEL = 'openai/gpt-5.4-mini';
+// اگر مدل اصلی جواب نداد (خطا/تایم‌اوت)، یک تلاش دوم با این مدل قبل از شکست نهایی انجام می‌شود
+const NIVO_CAL_FALLBACK_MODEL = 'openai/gpt-5-mini';
 
 const EXTRACTION_TIMEOUT_MS = 15_000;
 
@@ -152,6 +154,7 @@ export class NivoCalService {
 
     let result: NivoCalResult;
     let usage: { inputTokens?: number; outputTokens?: number } = {};
+    let modelUsed = NIVO_CAL_MODEL;
     try {
       const generated = await generateObject({
         model: provider(NIVO_CAL_MODEL),
@@ -162,11 +165,27 @@ export class NivoCalService {
       });
       result = generated.object;
       usage = generated.usage;
-    } catch (err) {
-      this.logger.error(
-        `nivo-cal scan failed for user=${userId}: ${(err as Error).message}`,
+    } catch (primaryErr) {
+      this.logger.warn(
+        `nivo-cal scan: primary model (${NIVO_CAL_MODEL}) failed for user=${userId}, falling back to ${NIVO_CAL_FALLBACK_MODEL}: ${(primaryErr as Error).message}`,
       );
-      throw new BadRequestException(fa.nivoCal.scanFailed);
+      try {
+        const generated = await generateObject({
+          model: provider(NIVO_CAL_FALLBACK_MODEL),
+          schema: NivoCalResultSchema,
+          system: SYSTEM_PROMPT,
+          messages: [visionMessage],
+          abortSignal: AbortSignal.timeout(EXTRACTION_TIMEOUT_MS),
+        });
+        result = generated.object;
+        usage = generated.usage;
+        modelUsed = NIVO_CAL_FALLBACK_MODEL;
+      } catch (fallbackErr) {
+        this.logger.error(
+          `nivo-cal scan failed for user=${userId} on both models: ${(fallbackErr as Error).message}`,
+        );
+        throw new BadRequestException(fa.nivoCal.scanFailed);
+      }
     }
 
     // گرد کردن اعداد سمت بک‌اند، بعد از دریافت نتیجه — فرانت هرگز عدد خام مدل را نمی‌بیند
@@ -199,7 +218,7 @@ export class NivoCalService {
       finalToman,
       1,
       fa.nivoCal.scanDebitDescription,
-      { feature: 'nivo-cal-scan', modelId: NIVO_CAL_MODEL },
+      { feature: 'nivo-cal-scan', modelId: modelUsed },
     );
     if (!debited) {
       this.logger.error(
@@ -210,7 +229,7 @@ export class NivoCalService {
       const { costToman, costUsdMicros } = await this.pricing.calcCost(
         usage.inputTokens ?? 0,
         usage.outputTokens ?? 0,
-        NIVO_CAL_MODEL,
+        modelUsed,
       );
       this.pricing.trackCost(userId, costToman, costUsdMicros).catch(() => {});
     }
@@ -223,7 +242,7 @@ export class NivoCalService {
         resultJson: roundedResult,
         totalCalories: roundedResult.totalCalories,
         healthScore: roundedResult.healthScore,
-        modelUsed: NIVO_CAL_MODEL,
+        modelUsed,
         costToman: finalToman,
       },
     });
