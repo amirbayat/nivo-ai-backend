@@ -32,4 +32,10 @@ export class PurchaseCreditPackageDto {
   @IsOptional()
   @IsString()
   returnUrl?: string;
+
+  // اپ موبایل نیوو کال بعد از پرداخت باید دکمه‌ی «بازگشت به اپ» را در صفحه‌ی returnUrl ببیند —
+  // همان مکانیزم PaymentsService.withSourceParam که برای اپ اصلی نیوو ساخته شده بود
+  @IsOptional()
+  @IsIn(['app'])
+  source?: 'app';
 }
