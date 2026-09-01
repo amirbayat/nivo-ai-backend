@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
+import { CreditPackageScope } from '@prisma/client';
 import { JwtGuard } from '../../common/guards/jwt.guard';
 import {
   CurrentUser,
@@ -20,8 +21,11 @@ export class CreditsController {
 
   // برای کارت «مبلغ دلخواه» — قیمت زنده (debounce شده توی فرانت) هر تعداد نیوو دلخواه
   @Get('quote')
-  quote(@Query('credits') credits: string) {
-    return this.creditsService.quoteCustomPrice(Number(credits));
+  quote(
+    @Query('credits') credits: string,
+    @Query('scope') scope?: CreditPackageScope,
+  ) {
+    return this.creditsService.quoteCustomPrice(Number(credits), scope);
   }
 
   @Post('purchase')

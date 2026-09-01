@@ -1,4 +1,5 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Query } from '@nestjs/common';
+import { CreditPackageScope } from '@prisma/client';
 import { CreditsService } from './credits.service';
 
 // مسیر عمومی (بدون JwtGuard) — دقیقاً هم‌الگوی discovery-public.controller.ts: لیست بسته‌های
@@ -8,8 +9,10 @@ import { CreditsService } from './credits.service';
 export class CreditsPublicController {
   constructor(private readonly creditsService: CreditsService) {}
 
+  // بدون ?scope رفتار فعلی (بسته‌های GENERAL) دقیقاً حفظ می‌شود — صفر تغییر رفتار برای
+  // فرانت اصلی (nivo-ai-frontend). فقط نیوو کال (وب/اپ) با scope=NIVO_CAL این پارامتر رو می‌فرسته.
   @Get('packages')
-  listPackages() {
-    return this.creditsService.listPackages();
+  listPackages(@Query('scope') scope?: CreditPackageScope) {
+    return this.creditsService.listPackages(scope);
   }
 }

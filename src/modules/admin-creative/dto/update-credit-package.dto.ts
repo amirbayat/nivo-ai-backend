@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
-import { IsBoolean, IsInt, IsOptional, Min } from 'class-validator';
+import { IsBoolean, IsEnum, IsInt, IsOptional, Min } from 'class-validator';
+import { CreditPackageScope } from '@prisma/client';
 import { fa } from '../../../i18n/fa';
 
 export class UpdateCreditPackageDto {
@@ -36,4 +37,8 @@ export class UpdateCreditPackageDto {
   @Type(() => Number)
   @IsInt()
   sortOrder?: number;
+
+  @IsOptional()
+  @IsEnum(CreditPackageScope, { message: fa.validation.required })
+  scope?: CreditPackageScope;
 }

@@ -523,18 +523,27 @@ model CreditConfig {
 
 // بسته‌های خرید — قیمت نهایی در لحظه‌ی نمایش/خرید محاسبه می‌شود:
 // credits × tomanPerCredit × purchaseMarkup × (1 - discountPercent/100)
+// docs/PRD-nivo-cal-standalone-app.md بخش ۶ — GENERAL همون بسته‌های فعلی (پیش‌فرض، توی همه‌جا
+// نمایش داده می‌شن)؛ NIVO_CAL فقط توی اپ/PWA نیوو کال دیده می‌شه (GET /v2/credits/packages?scope=NIVO_CAL).
+// کیف‌پول همچنان کاملاً مشترکه — این فیلد فقط روی نمایش/قیمت‌گذاری بسته اثر داره، نه مکانیزم اعتبار.
+enum CreditPackageScope {
+  GENERAL
+  NIVO_CAL
+}
+
 model CreditPackage {
-  id              String   @id @default(uuid())
+  id              String             @id @default(uuid())
   credits         Int // برای بسته‌های ثابت: تعداد دقیق نیوو. برای isCustomAmount=true: حداقل مجاز (کاربر خودش عدد را وارد می‌کند)
-  discountPercent Int      @default(0) // تخفیف پلکانی روی بسته‌های بزرگ‌تر (بعد از اعمال purchaseMarkup)
-  isPopular       Boolean  @default(false)
-  isBestValue     Boolean  @default(false)
+  discountPercent Int                @default(0) // تخفیف پلکانی روی بسته‌های بزرگ‌تر (بعد از اعمال purchaseMarkup)
+  isPopular       Boolean            @default(false)
+  isBestValue     Boolean            @default(false)
   // کارت «مبلغ دلخواه» — کاربر عددی بالاتر از credits (حداقل) وارد می‌کند؛ حداکثر یک ردیف
   // isCustomAmount=true فعال معنا دارد (برای بسته‌های بزرگ‌تر از سقف بسته‌های ثابت، مثلاً >۱۵۰۰)
-  isCustomAmount  Boolean  @default(false)
-  isActive        Boolean  @default(true)
-  sortOrder       Int      @default(0)
-  createdAt       DateTime @default(now())
+  isCustomAmount  Boolean            @default(false)
+  isActive        Boolean            @default(true)
+  sortOrder       Int                @default(0)
+  scope           CreditPackageScope @default(GENERAL)
+  createdAt       DateTime           @default(now())
 
   payments Payment[] // docs/PRD-admin-credit-reports.md بخش ۲ — برای گزارش «نیوو فروخته‌شده به تفکیک بسته»
 

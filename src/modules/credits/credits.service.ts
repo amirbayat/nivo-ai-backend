@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { CreditPackageScope } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PricingService } from '../usage/pricing.service';
 import { PaymentsService } from '../payments/payments.service';
@@ -42,11 +43,13 @@ export class CreditsService {
     };
   }
 
-  async listPackages() {
+  // scope خالی یعنی GENERAL — رفتار فعلی nivo-ai-frontend (که هیچ‌وقت scope نمی‌فرسته) عیناً
+  // حفظ می‌شود؛ فقط نیوو کال با scope=NIVO_CAL بسته‌های اختصاصی خودش رو می‌بینه، نه برعکس.
+  async listPackages(scope: CreditPackageScope = 'GENERAL') {
     const [config, packages] = await Promise.all([
       this.getConfig(),
       this.prisma.creditPackage.findMany({
-        where: { isActive: true },
+        where: { isActive: true, scope },
         orderBy: { sortOrder: 'asc' },
       }),
     ]);
@@ -63,13 +66,16 @@ export class CreditsService {
   // برای کارت «مبلغ دلخواه» — همون فرمول computePackagePrice زیر رو با discountPercent بسته‌ی
   // isCustomAmount واقعی حساب می‌کنه، تا فرانت (با debounce) قیمت زنده نشون بده بدون این‌که
   // purchaseMarkup/فرمول قیمت‌گذاری رو خودش duplicate کنه (docs/PRD-discovery-and-credits.md)
-  async quoteCustomPrice(credits: number): Promise<{ priceToman: number }> {
+  async quoteCustomPrice(
+    credits: number,
+    scope: CreditPackageScope = 'GENERAL',
+  ): Promise<{ priceToman: number }> {
     const safeCredits =
       Number.isFinite(credits) && credits > 0 ? Math.floor(credits) : 0;
     const [config, customPkg] = await Promise.all([
       this.getConfig(),
       this.prisma.creditPackage.findFirst({
-        where: { isCustomAmount: true, isActive: true },
+        where: { isCustomAmount: true, isActive: true, scope },
       }),
     ]);
     const priceToman = this.computePackagePrice(
