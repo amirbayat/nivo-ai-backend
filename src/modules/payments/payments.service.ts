@@ -25,6 +25,11 @@ const SUBSCRIPTION_DAYS = 30;
 // (periodEnd غیر nullable) بدون تغییر بماند، یک تاریخ خیلی دور به‌جای «بدون انقضا» گذاشته می‌شود
 const PAY_AS_YOU_GO_PERIOD_END = new Date('2099-12-31T00:00:00.000Z');
 
+// docs/PRD-nivo-cal-credits-ui.md بخش ۴.۱ — اپ‌هایی که روی دامنه‌ی جدا از نیوو اصلی اجرا
+// می‌شوند (نه کوکی/localStorage مشترک) باید بعد از پرداخت به دامنه‌ی خودشان برگردند، نه
+// APP_URL سراسری. whitelist ثابت (نه یک URL دلخواه از کلاینت) برای جلوگیری از open-redirect.
+const ALLOWED_RETURN_ORIGINS = ['https://cal.nivoai.ir', 'http://localhost:5180'];
+
 @Injectable()
 export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
@@ -194,6 +199,7 @@ export class PaymentsService {
     source?: 'app',
     packageId?: string,
     credits?: number,
+    returnUrl?: string,
   ) {
     return this.createWalletTopupPayment(
       userId,
@@ -202,6 +208,7 @@ export class PaymentsService {
       source,
       packageId,
       credits,
+      returnUrl,
     );
   }
 
@@ -212,6 +219,7 @@ export class PaymentsService {
     source?: 'app',
     packageId?: string,
     credits?: number,
+    returnUrl?: string,
   ) {
     const gateway = this.registry.resolve(gatewayName);
     const callbackUrl = `${this.config.get('API_URL')}/api/v1/payments/callback/${gateway.name.toLowerCase()}`;
@@ -226,6 +234,13 @@ export class PaymentsService {
       callbackUrl,
     });
 
+    const metadata: Prisma.InputJsonObject = {
+      ...(source === 'app' ? { source: 'app' } : {}),
+      ...(returnUrl && ALLOWED_RETURN_ORIGINS.includes(returnUrl)
+        ? { returnUrl }
+        : {}),
+    };
+
     await this.prisma.payment.create({
       data: {
         userId,
@@ -235,7 +250,7 @@ export class PaymentsService {
         provider: gateway.name,
         providerRef,
         ...(packageId ? { packageId, credits } : {}),
-        ...(source === 'app' ? { metadata: { source: 'app' } } : {}),
+        ...(Object.keys(metadata).length ? { metadata } : {}),
       },
     });
 
@@ -285,13 +300,29 @@ export class PaymentsService {
     return isFromApp ? `${url}&source=app` : url;
   }
 
+  // اگر payment.metadata.returnUrl یکی از دامنه‌های مجاز (ALLOWED_RETURN_ORIGINS) باشد، به‌جای
+  // APP_URL سراسری برمی‌گردیم — برای اپ/فرانتی که خارج از دامنه‌ی اصلی نیوو اجرا می‌شود.
+  private resolveReturnBaseUrl(
+    metadata: Prisma.JsonValue | null | undefined,
+  ): string {
+    if (
+      metadata &&
+      typeof metadata === 'object' &&
+      !Array.isArray(metadata) &&
+      typeof (metadata as Record<string, unknown>).returnUrl === 'string'
+    ) {
+      const candidate = (metadata as Record<string, unknown>)
+        .returnUrl as string;
+      if (ALLOWED_RETURN_ORIGINS.includes(candidate)) return candidate;
+    }
+    return this.config.get<string>('APP_URL')!;
+  }
+
   private async verify(
     gateway: PaymentGateway,
     providerRef: string,
     callbackSuccess: boolean,
   ) {
-    const appUrl = this.config.get<string>('APP_URL');
-
     if (!callbackSuccess) {
       const payment = await this.prisma.payment.findUnique({
         where: { providerRef },
@@ -307,7 +338,7 @@ export class PaymentsService {
       );
       return {
         redirect: this.withSourceParam(
-          `${appUrl}/payment?status=failed`,
+          `${this.resolveReturnBaseUrl(payment?.metadata)}/payment?status=failed`,
           payment?.metadata,
         ),
       };
@@ -337,7 +368,7 @@ export class PaymentsService {
       );
       return {
         redirect: this.withSourceParam(
-          `${appUrl}/payment?status=success&refId=${payment.refId}&invoiceId=${invoice?.id ?? ''}`,
+          `${this.resolveReturnBaseUrl(payment.metadata)}/payment?status=success&refId=${payment.refId}&invoiceId=${invoice?.id ?? ''}`,
           payment.metadata,
         ),
       };
@@ -364,14 +395,18 @@ export class PaymentsService {
       );
       return {
         redirect: this.withSourceParam(
-          `${appUrl}/payment?status=failed`,
+          `${this.resolveReturnBaseUrl(payment.metadata)}/payment?status=failed`,
           payment.metadata,
         ),
       };
     }
 
     if (payment.kind === 'WALLET_TOPUP') {
-      return this.completeWalletTopup(payment, refId!, appUrl);
+      return this.completeWalletTopup(
+        payment,
+        refId!,
+        this.resolveReturnBaseUrl(payment.metadata),
+      );
     }
     // از این‌جا به بعد فقط مسیر SUBSCRIPTION است — payment.plan طبق ساخت (بخش initiate بالا) همیشه ست است.
     // یک binding محلی جدید (نه فقط تصحیح در بلاک بالا) چون narrowing روی payment.plan داخل کلوژرِ
@@ -494,7 +529,7 @@ export class PaymentsService {
 
     return {
       redirect: this.withSourceParam(
-        `${appUrl}/payment?status=success&refId=${refId}&invoiceId=${invoice.id}`,
+        `${this.resolveReturnBaseUrl(payment.metadata)}/payment?status=success&refId=${refId}&invoiceId=${invoice.id}`,
         payment.metadata,
       ),
     };

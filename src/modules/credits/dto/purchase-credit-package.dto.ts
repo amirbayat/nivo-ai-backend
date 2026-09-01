@@ -1,5 +1,5 @@
 import { Transform, Type } from 'class-transformer';
-import { IsIn, IsInt, IsOptional, IsUUID, Min } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, IsUUID, Min } from 'class-validator';
 import { PaymentProvider } from '@prisma/client';
 import { fa } from '../../../i18n/fa';
 import { PAYMENT_GATEWAY_NAMES } from '../../payments/gateways/payment-gateway.interface';
@@ -24,4 +24,12 @@ export class PurchaseCreditPackageDto {
   )
   @IsIn(PAYMENT_GATEWAY_NAMES, { message: fa.payment.gatewayNotEnabled })
   gateway?: PaymentProvider;
+
+  // برای اپ/فرانتی که روی دامنه‌ی جدا از نیوو اصلی اجرا می‌شود (مثل نیوو کال) — origin ای که
+  // کاربر باید بعد از پرداخت به آن برگردد، به‌جای APP_URL سراسری. فقط اگر در whitelist
+  // ثابت PaymentsService (ALLOWED_RETURN_ORIGINS) باشد اعمال می‌شود؛ در غیر این صورت نادیده
+  // گرفته می‌شود و رفتار فعلی (برگشت به APP_URL) بدون تغییر باقی می‌ماند — جلوگیری از open-redirect.
+  @IsOptional()
+  @IsString()
+  returnUrl?: string;
 }
