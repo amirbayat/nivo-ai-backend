@@ -11,6 +11,7 @@ import * as XLSX from 'xlsx';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RedisService } from '../../redis/redis.service';
 import { ExchangeRateService } from '../../exchange-rate/exchange-rate.service';
+import { AiProviderService } from '../../common/services/ai-provider.service';
 import { PricingService } from '../usage/pricing.service';
 import { UsageAnalyticsService } from '../usage-analytics/usage-analytics.service';
 import { fa } from '../../i18n/fa';
@@ -141,6 +142,7 @@ export class AdminService {
     private readonly redis: RedisService,
     private readonly config: ConfigService,
     private readonly exchangeRate: ExchangeRateService,
+    private readonly aiProvider: AiProviderService,
     private readonly pricingService: PricingService,
     private readonly usageAnalytics: UsageAnalyticsService,
   ) {
@@ -211,6 +213,9 @@ export class AdminService {
       totalConversations,
       todayConversations,
       exchangeRate,
+      // docs/EXECUTION-PLAN.md قدم ۷ — نشانگر provider فعلی؛ همون env که همه‌جای بک‌اند تصمیم
+      // provider را می‌گیرد (AiProviderService)، نه یک منبع جدا که ممکنه دیرگ‌ه‌ازپیش‌شود
+      aiProvider: this.aiProvider.name,
     };
   }
 
@@ -278,7 +283,10 @@ export class AdminService {
     const [usageRows, messageRows, creditDebitRows, creditConfig] =
       await Promise.all([
         this.prisma.dailyUsage.findMany({
-          where: { userId: { in: userIds }, date: { gte: earliestWindowStart } },
+          where: {
+            userId: { in: userIds },
+            date: { gte: earliestWindowStart },
+          },
           select: {
             userId: true,
             date: true,
@@ -356,9 +364,7 @@ export class AdminService {
 
       // docs/PRD-admin-credit-reports.md فاز ۴ — مصرف نیوو مستقل از پنجره/بودجه‌ی پلن ماهانه
       const creditConsumedTomanThisMonth = creditDebitRows
-        .filter(
-          (r) => r.wallet.userId === u.id && r.createdAt >= windowStart,
-        )
+        .filter((r) => r.wallet.userId === u.id && r.createdAt >= windowStart)
         .reduce((sum, r) => sum + r.amountToman, 0);
       const creditConsumedCreditsThisMonth = Math.floor(
         creditConsumedTomanThisMonth / tomanPerCredit,
@@ -590,37 +596,51 @@ export class AdminService {
     since.setDate(since.getDate() - days);
     since.setHours(0, 0, 0, 0);
 
-    const [costRows, revenueRows, liaraRows, discoveryCostRows] =
-      await Promise.all([
-        this.prisma.dailyUsage.groupBy({
-          by: ['date'],
-          where: { date: { gte: since } },
-          _sum: { costToman: true, costUsdMicros: true },
-          orderBy: { date: 'asc' },
-        }),
-        this.prisma.$queryRaw<Array<{ day: Date; revenue: bigint }>>`
+    const [
+      costRows,
+      revenueRows,
+      liaraRows,
+      discoveryCostRows,
+      openrouterRows,
+    ] = await Promise.all([
+      this.prisma.dailyUsage.groupBy({
+        by: ['date'],
+        where: { date: { gte: since } },
+        _sum: { costToman: true, costUsdMicros: true },
+        orderBy: { date: 'asc' },
+      }),
+      this.prisma.$queryRaw<Array<{ day: Date; revenue: bigint }>>`
         SELECT DATE_TRUNC('day', "createdAt") AS day, SUM(amount)::bigint AS revenue
         FROM payments
         WHERE status = 'COMPLETED' AND "createdAt" >= ${since}
         GROUP BY DATE_TRUNC('day', "createdAt")
         ORDER BY day ASC
       `,
-        this.prisma.liaraUsageSnapshot.groupBy({
-          by: ['date'],
-          where: { date: { gte: since } },
-          _sum: { realCostToman: true },
-          orderBy: { date: 'asc' },
-        }),
-        // docs/PRD-admin-credit-reports.md فاز ۲ — هزینه‌ی روزانه‌ی دیسکاوری/کریتیو، قبلاً در
-        // این نمودار اصلاً دیده نمی‌شد (فقط DailyUsage چت جمع زده می‌شد)
-        this.prisma.$queryRaw<Array<{ day: Date; cost: bigint }>>`
+      this.prisma.liaraUsageSnapshot.groupBy({
+        by: ['date'],
+        where: { date: { gte: since } },
+        _sum: { realCostToman: true },
+        orderBy: { date: 'asc' },
+      }),
+      // docs/PRD-admin-credit-reports.md فاز ۲ — هزینه‌ی روزانه‌ی دیسکاوری/کریتیو، قبلاً در
+      // این نمودار اصلاً دیده نمی‌شد (فقط DailyUsage چت جمع زده می‌شد)
+      this.prisma.$queryRaw<Array<{ day: Date; cost: bigint }>>`
         SELECT DATE_TRUNC('day', "createdAt") AS day, SUM("costToman")::bigint AS cost
         FROM creative_generations
         WHERE status = 'SUCCEEDED' AND "createdAt" >= ${since}
         GROUP BY DATE_TRUNC('day', "createdAt")
         ORDER BY day ASC
       `,
-      ]);
+      // معادل liaraRows بالا برای OpenRouter — از Message (per-request) نه اسنپ‌شات جدا، پس
+      // raw query لازم است (groupBy معمولی روی تاریخ کامل createdAt، نه روز، کار می‌کرد)
+      this.prisma.$queryRaw<Array<{ day: Date; cost: bigint }>>`
+        SELECT DATE_TRUNC('day', "createdAt") AS day, SUM("openrouterRealCostToman")::bigint AS cost
+        FROM messages
+        WHERE role = 'ASSISTANT' AND "openrouterRealCostToman" IS NOT NULL AND "createdAt" >= ${since}
+        GROUP BY DATE_TRUNC('day', "createdAt")
+        ORDER BY day ASC
+      `,
+    ]);
 
     const revenueMap = new Map(
       revenueRows.map((r) => [
@@ -641,10 +661,20 @@ export class AdminService {
         Number(r.cost),
       ]),
     );
+    // نبود رکورد یعنی هنوز پیامی روی OpenRouter با cost واقعی نداشتیم — null نه صفر (مثل liaraMap)
+    const openrouterMap = new Map(
+      openrouterRows.map((r) => [
+        r.day.toISOString().slice(0, 10),
+        Number(r.cost),
+      ]),
+    );
     const chatCostMap = new Map(
       costRows.map((r) => [
         r.date.toISOString().slice(0, 10),
-        { costToman: r._sum.costToman ?? 0, costUsdMicros: r._sum.costUsdMicros ?? 0 },
+        {
+          costToman: r._sum.costToman ?? 0,
+          costUsdMicros: r._sum.costUsdMicros ?? 0,
+        },
       ]),
     );
 
@@ -667,6 +697,7 @@ export class AdminService {
         aiCostUsd: (chat?.costUsdMicros ?? 0) / 1_000_000,
         revenueToman: revenueMap.get(date) ?? 0,
         liaraCostToman: liaraMap.get(date) ?? null,
+        openrouterCostToman: openrouterMap.get(date) ?? null,
       };
     });
   }

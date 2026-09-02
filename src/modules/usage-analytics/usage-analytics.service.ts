@@ -138,6 +138,11 @@ export interface UserUsageRow {
   liaraRealCostToman: number | null;
   liaraRequestCount: number;
   liaraMatchPct: number | null;
+  // معادل بالا برای OpenRouter — از Message.openrouterRealCostToman (per-request)، نه اسنپ‌شات
+  // جدا؛ همون قرارداد null/۰: null یعنی این کاربر پیام OpenRouter با cost واقعی نداشته
+  openrouterRealCostToman: number | null;
+  openrouterRequestCount: number;
+  openrouterMatchPct: number | null;
 }
 
 /**
@@ -167,30 +172,45 @@ export class UsageAnalyticsService {
   }
 
   private async computeOverview(range: DateRange) {
-    const [usage, revenue, modelBreakdown, liaraUsage] = await Promise.all([
-      this.prisma.dailyUsage.aggregate({
-        where: { date: { gte: range.from, lte: range.to } },
-        _sum: {
-          freeTokensUsed: true,
-          paidTokensUsed: true,
-          requestsCount: true,
-          costToman: true,
-          costUsdMicros: true,
-        },
-      }),
-      this.prisma.payment.aggregate({
-        where: {
-          status: 'COMPLETED',
-          createdAt: { gte: range.from, lte: range.to },
-        },
-        _sum: { amount: true },
-      }),
-      this.getModelBreakdown(range),
-      this.prisma.liaraUsageSnapshot.aggregate({
-        where: { date: { gte: range.from, lte: range.to } },
-        _sum: { realCostToman: true },
-      }),
-    ]);
+    const [usage, revenue, modelBreakdown, liaraUsage, openrouterUsage] =
+      await Promise.all([
+        this.prisma.dailyUsage.aggregate({
+          where: { date: { gte: range.from, lte: range.to } },
+          _sum: {
+            freeTokensUsed: true,
+            paidTokensUsed: true,
+            requestsCount: true,
+            costToman: true,
+            costUsdMicros: true,
+          },
+        }),
+        this.prisma.payment.aggregate({
+          where: {
+            status: 'COMPLETED',
+            createdAt: { gte: range.from, lte: range.to },
+          },
+          _sum: { amount: true },
+        }),
+        this.getModelBreakdown(range),
+        this.prisma.liaraUsageSnapshot.aggregate({
+          where: { date: { gte: range.from, lte: range.to } },
+          _sum: { realCostToman: true },
+        }),
+        // بر خلاف liaraUsage بالا (اسنپ‌شات روزانه‌ی جدا)، این مستقیم روی Message است چون
+        // openrouterRealCostToman همون‌جا در لحظه‌ی ساخت پیام پر می‌شود — per-request، نه رول‌آپ.
+        // costToman هم همین‌جا (نه از usage._sum بالا) خوانده می‌شود چون match% باید فقط
+        // زیرمجموعه‌ی پیام‌های واقعاً OpenRouter را با تخمین همون پیام‌ها مقایسه کند — بازه‌ای که
+        // provider وسطش عوض شده باشد، مقایسه‌ی کل بازه را نامعتبر می‌کرد
+        this.prisma.message.aggregate({
+          where: {
+            role: 'ASSISTANT',
+            createdAt: { gte: range.from, lte: range.to },
+            openrouterRealCostToman: { not: null },
+          },
+          _sum: { openrouterRealCostToman: true, costToman: true },
+          _count: { id: true },
+        }),
+      ]);
 
     const totalTokens =
       (usage._sum.freeTokensUsed ?? 0) + (usage._sum.paidTokensUsed ?? 0);
@@ -245,6 +265,19 @@ export class UsageAnalyticsService {
     const liaraMatchPct =
       liaraRealCostToman > 0 ? (costToman / liaraRealCostToman) * 100 : null;
 
+    // معادل بالا برای OpenRouter — تخمین داخلی هم از همین زیرمجموعه‌ی پیام‌های OpenRouter
+    // خوانده شده (openrouterUsage._sum.costToman)، نه از usage._sum کل بازه، وگرنه بازه‌ای که
+    // provider وسطش سوییچ شده match% را نامعتبر می‌کرد
+    const openrouterRealCostToman =
+      openrouterUsage._sum.openrouterRealCostToman ?? 0;
+    const openrouterEstimatedCostTomanForMatch =
+      openrouterUsage._sum.costToman ?? 0;
+    const openrouterMatchPct =
+      openrouterRealCostToman > 0
+        ? (openrouterEstimatedCostTomanForMatch / openrouterRealCostToman) * 100
+        : null;
+    const openrouterRequestCount = openrouterUsage._count.id;
+
     return {
       totalTokens,
       totalMessages,
@@ -285,6 +318,9 @@ export class UsageAnalyticsService {
       image: summarizeModelTypeBreakdown(imageBreakdown),
       liaraRealCostToman,
       liaraMatchPct,
+      openrouterRealCostToman,
+      openrouterRequestCount,
+      openrouterMatchPct,
     };
   }
 
@@ -505,6 +541,7 @@ export class UsageAnalyticsService {
       segments,
       imageModelNames,
       liaraUsageRows,
+      openrouterUsageRows,
     ] = await Promise.all([
       this.prisma.message.groupBy({
         by: ['userId', 'model'],
@@ -536,6 +573,19 @@ export class UsageAnalyticsService {
         where: { date: { gte: range.from, lte: range.to } },
         _sum: { realCostToman: true, requestCount: true },
       }),
+      // معادل بالا برای OpenRouter — مستقیم از Message (per-request)، نه اسنپ‌شات جدا؛
+      // costToman هم همین‌جا محدود به همون زیرمجموعه‌ی پیام‌های OpenRouter این کاربر است
+      this.prisma.message.groupBy({
+        by: ['userId'],
+        where: {
+          role: 'ASSISTANT',
+          userId: { not: null },
+          createdAt: { gte: range.from, lte: range.to },
+          openrouterRealCostToman: { not: null },
+        },
+        _sum: { openrouterRealCostToman: true, costToman: true },
+        _count: { id: true },
+      }),
     ]);
     const liaraByUser = new Map(
       liaraUsageRows.map((r) => [
@@ -543,6 +593,16 @@ export class UsageAnalyticsService {
         {
           realCostToman: r._sum.realCostToman ?? 0,
           requestCount: r._sum.requestCount ?? 0,
+        },
+      ]),
+    );
+    const openrouterByUser = new Map(
+      openrouterUsageRows.map((r) => [
+        r.userId as string,
+        {
+          realCostToman: r._sum.openrouterRealCostToman ?? 0,
+          estimatedCostToman: r._sum.costToman ?? 0,
+          requestCount: r._count.id,
         },
       ]),
     );
@@ -601,7 +661,11 @@ export class UsageAnalyticsService {
     // یونیون با کاربرهایی که فقط در LiaraUsageSnapshot داده دارند (نادر، ولی ممکن است — مثلاً
     // پیامی در بازه ثبت نشده ولی کلید اختصاصی‌شان جایی دیگر مصرف داشته)
     const userIds = Array.from(
-      new Set([...byUser.keys(), ...liaraByUser.keys()]),
+      new Set([
+        ...byUser.keys(),
+        ...liaraByUser.keys(),
+        ...openrouterByUser.keys(),
+      ]),
     );
     const users = userIds.length
       ? await this.prisma.user.findMany({
@@ -639,6 +703,7 @@ export class UsageAnalyticsService {
       );
       const user = userMap.get(userId);
       const liara = liaraByUser.get(userId);
+      const openrouter = openrouterByUser.get(userId);
       return {
         userId,
         phone: user?.phone ?? null,
@@ -661,6 +726,15 @@ export class UsageAnalyticsService {
         liaraMatchPct:
           liara && liara.realCostToman > 0
             ? (agg.costToman / liara.realCostToman) * 100
+            : null,
+        openrouterRealCostToman: openrouter ? openrouter.realCostToman : null,
+        openrouterRequestCount: openrouter?.requestCount ?? 0,
+        // agg.costToman کل بازه است (شامل پیام‌های لیارا هم اگر provider وسط بازه سوییچ شده)؛
+        // برای مقایسه‌ی درست، تخمین همون زیرمجموعه‌ی OpenRouter (openrouter.estimatedCostToman)
+        // استفاده می‌شود، نه agg.costToman کل
+        openrouterMatchPct:
+          openrouter && openrouter.realCostToman > 0
+            ? (openrouter.estimatedCostToman / openrouter.realCostToman) * 100
             : null,
       };
     });

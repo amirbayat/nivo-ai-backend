@@ -785,6 +785,12 @@ export class ChatService {
         typeof openrouterCostUsd === 'number'
           ? Math.round(openrouterCostUsd * 1_000_000)
           : null;
+      // با نرخ همون لحظه (مثل costToman بالا) — نه بازمحاسبه‌ی بعدی در آنالیز با نرخ روز
+      const openrouterRealCostToman =
+        openrouterCostUsd != null
+          ? (await this.pricingService.calcFlatCostToman(openrouterCostUsd))
+              .costToman
+          : null;
 
       const assistantMessage = await this.prisma.message.create({
         data: {
@@ -798,6 +804,7 @@ export class ChatService {
           costUsdMicros,
           costInputUsdMicros,
           openrouterRealCostUsdMicros,
+          openrouterRealCostToman,
           costOutputUsdMicros,
           model: modelId,
         },
@@ -1397,6 +1404,15 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
         costInputUsdMicros,
         costOutputUsdMicros,
       } = await this.pricingService.calcImageGenCost(result.usage, modelRecord);
+      // با نرخ همون لحظه (مثل بالا) — نه بازمحاسبه‌ی بعدی در آنالیز با نرخ روز
+      const openrouterRealCostToman =
+        result.usage.realCostUsdMicros != null
+          ? (
+              await this.pricingService.calcFlatCostToman(
+                result.usage.realCostUsdMicros / 1_000_000,
+              )
+            ).costToman
+          : null;
       const buffer = Buffer.from(result.base64, 'base64');
 
       let imageKey: string | null = null;
@@ -1430,6 +1446,7 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
           costInputUsdMicros,
           costOutputUsdMicros,
           openrouterRealCostUsdMicros: result.usage.realCostUsdMicros,
+          openrouterRealCostToman,
           model: modelId,
         },
       });

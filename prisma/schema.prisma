@@ -225,6 +225,9 @@ model Message {
   // docs/EXECUTION-PLAN.md قدم ۴ — usage.cost واقعی OpenRouter (دلار × ۱e6)، در کنار تخمین
   // داخلی بالا نه جایگزینش؛ null یعنی روی لیارا بوده یا provider این‌بار cost برنگردانده
   openrouterRealCostUsdMicros Int?
+  // تبدیل‌شده به تومان با نرخ همون لحظه (مثل costToman) — نه بازمحاسبه‌ی بعدی در آنالیز با
+  // نرخ فعلی، که رشد/افت نرخ ارز را با «واقعی‌تر شدن match%» قاطی می‌کند
+  openrouterRealCostToman Int?
   model               String?
   topicId             String?
   createdAt           DateTime    @default(now())
