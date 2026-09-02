@@ -1454,9 +1454,11 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
       await Promise.all([
         this.pricingService.trackCost(userId, costToman, costUsdMicros),
         this.tokenService.recordImageGenRequest(userId),
+        // docs/PRD-openrouter-migration.md §۱۴.۲/۱۴.۶ — شمارنده‌ی denormalized برای سقف
+        // توصیه‌ای استودیوی عکس + فیلتر «فقط گفتگوهای عکس»، بدون JOIN گران روی Message
         this.prisma.conversation.update({
           where: { id: conversationId },
-          data: { lastMessageAt: new Date() },
+          data: { lastMessageAt: new Date(), imageGenCount: { increment: 1 } },
         }),
       ]);
 

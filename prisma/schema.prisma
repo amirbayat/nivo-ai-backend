@@ -198,6 +198,9 @@ model Conversation {
   // پیام‌های تا این timestamp قبلاً توی contextSummary خلاصه شده‌اند — برای واکشی فقط
   // پیام‌های «بعد از آخرین خلاصه‌سازی» (docs/PRD-chat-context-and-summarization.md بخش ۳.۱)
   summarizedUntilCreatedAt DateTime?
+  // docs/PRD-openrouter-migration.md §۱۴.۲/۱۴.۶ — شمارنده‌ی denormalized تعداد عکس تولیدشده‌ی
+  // موفق در این گفتگو؛ برای سقف توصیه‌ای استودیوی عکس + فیلتر «فقط گفتگوهای عکس» بدون JOIN گران
+  imageGenCount Int @default(0)
 
   user                User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
   project             Project?             @relation(fields: [projectId], references: [id], onDelete: SetNull)

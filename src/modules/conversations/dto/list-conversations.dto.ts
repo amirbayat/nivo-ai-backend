@@ -1,5 +1,12 @@
-import { Type } from 'class-transformer';
-import { IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import {
+  IsBoolean,
+  IsInt,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+} from 'class-validator';
 import { fa } from '../../../i18n/fa';
 
 export class ListConversationsDto {
@@ -17,4 +24,11 @@ export class ListConversationsDto {
   @IsOptional()
   @IsString({ message: fa.validation.required })
   projectId?: string;
+
+  // docs/PRD-openrouter-migration.md §۱۴.۵ بند ۳ — تاریخچه‌ی استودیوی عکس (ImageStudioHistory):
+  // فیلتر روی همون Conversation.imageGenCount موجود، نه یک entity/endpoint جدا
+  @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
+  @IsBoolean({ message: fa.validation.required })
+  imageGenOnly?: boolean;
 }

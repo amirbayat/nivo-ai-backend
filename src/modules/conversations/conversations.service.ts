@@ -10,10 +10,7 @@ import { CreateConversationDto } from './dto/create-conversation.dto';
 import { UpdateConversationDto } from './dto/update-conversation.dto';
 import { ListConversationsDto } from './dto/list-conversations.dto';
 import { mimeTypeForExt } from '../../common/validators/chat-image.validator';
-import {
-  CreativeGenerationStatus,
-  CreativeOutputType,
-} from '@prisma/client';
+import { CreativeGenerationStatus, CreativeOutputType } from '@prisma/client';
 
 @Injectable()
 export class ConversationsService {
@@ -35,15 +32,23 @@ export class ConversationsService {
       select: { userId: true },
     });
     if (!project) throw new NotFoundException(fa.discovery.projectNotFound);
-    if (project.userId !== userId) throw new ForbiddenException(fa.errors.forbidden);
+    if (project.userId !== userId)
+      throw new ForbiddenException(fa.errors.forbidden);
   }
 
   async findAll(userId: string, query: ListConversationsDto) {
     const limit = query.limit ?? 20;
-    const { cursor, projectId } = query;
+    const { cursor, projectId, imageGenOnly } = query;
 
     const items = await this.prisma.conversation.findMany({
-      where: { userId, isArchived: false, ...(projectId ? { projectId } : {}) },
+      where: {
+        userId,
+        isArchived: false,
+        ...(projectId ? { projectId } : {}),
+        // docs/PRD-openrouter-migration.md §۱۴.۵ بند ۳ — ImageStudioHistory همین لیست را با
+        // این فیلتر می‌خواهد، نه یک endpoint جدا
+        ...(imageGenOnly ? { imageGenCount: { gt: 0 } } : {}),
+      },
       orderBy: [{ lastMessageAt: 'desc' }, { id: 'desc' }],
       take: limit + 1,
       ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
@@ -54,6 +59,7 @@ export class ConversationsService {
         totalTokens: true,
         lastMessageAt: true,
         createdAt: true,
+        imageGenCount: true,
       },
     });
 
@@ -99,22 +105,20 @@ export class ConversationsService {
     // نوشته نمی‌شود (creative_generations یک جدول کاملاً مجزاست)، پس اینجا هر تولید را به دو
     // پیام مصنوعی (کاربر + نتیجه) تبدیل می‌کنیم و بر اساس createdAt با پیام‌های واقعی ادغام
     // می‌کنیم — دقیقاً همون چیزی که فرانت موقع تولید زنده (virtualMessages) نشان می‌دهد
-    const creativeGenerations = await this.prisma.creativeGeneration.findMany(
-      {
-        where: { conversationId: id },
-        orderBy: { createdAt: 'asc' },
-        select: {
-          id: true,
-          outputType: true,
-          inputImageKeys: true,
-          outputImageKey: true,
-          outputText: true,
-          userInput: true,
-          status: true,
-          createdAt: true,
-        },
+    const creativeGenerations = await this.prisma.creativeGeneration.findMany({
+      where: { conversationId: id },
+      orderBy: { createdAt: 'asc' },
+      select: {
+        id: true,
+        outputType: true,
+        inputImageKeys: true,
+        outputImageKey: true,
+        outputText: true,
+        userInput: true,
+        status: true,
+        createdAt: true,
       },
-    );
+    });
     const creativeMessages = creativeGenerations.flatMap((gen) => {
       const inputImages = (gen.inputImageKeys as string[] | null)?.map(
         (key) => `/v2/discovery/images/${key}`,
@@ -136,7 +140,7 @@ export class ConversationsService {
         conversationId: id,
         role: 'ASSISTANT' as const,
         content: succeeded
-          ? gen.outputText ?? ''
+          ? (gen.outputText ?? '')
           : fa.discovery.generationFailed,
         images:
           succeeded &&

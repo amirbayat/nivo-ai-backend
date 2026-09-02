@@ -89,10 +89,14 @@ const TIER_RANK: Record<ModelTier, number> = {
   COMPLEX: 2,
 };
 
-// تصمیم محصول (۱۴۰۵/۰۶) — حالت «مصرف بهینه» (متنی) فقط بین همین دو مدل انتخاب می‌کند، نه
+// تصمیم محصول (۱۴۰۵/۰۶) — حالت «مصرف بهینه» (متنی) فقط بین همین مدل(ها) انتخاب می‌کند، نه
 // ارزان‌ترین کل کاتالوگ. اگر هیچ‌کدام در استخر کاندیدها نبودند (مثلاً غیرفعال شده‌اند)،
-// pickBySelectionMode به رفتار قدیمی (ارزان‌ترین کل کاندیدها) fallback می‌کند
-const COST_OPTIMIZED_MODEL_NAMES = ['openai/gpt-5.4-nano', 'openai/gpt-5.4-mini'];
+// pickBySelectionMode به رفتار قدیمی (ارزان‌ترین کل کاندیدها) fallback می‌کند.
+// docs/PRD-openrouter-migration.md §۱۳.۵/۱۴.۹ — قبلاً بین nano/mini بسته به قیمت انتخاب
+// می‌شد (nano ارزان‌تر همیشه برنده بود)؛ طبق تصمیم صریح کاربر، پیش‌فرض کاربر جدید حالا ثابت
+// روی gpt-5.4-mini است (تجربه‌ی یکنواخت‌تر، با پذیرفتن هزینه‌ی کمی بالاتر) — nano دیگر در این
+// استخر خودکار انتخاب نمی‌شود مگر کاربر صریح خودش انتخابش کند
+const COST_OPTIMIZED_MODEL_NAMES = ['openai/gpt-5.4-mini'];
 
 @Injectable()
 export class ModelRouterService {
