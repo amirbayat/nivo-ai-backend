@@ -855,7 +855,9 @@ export class ChatService {
         this.pricingService
           .debitWallet(
             userId,
-            costToman,
+            // هزینه‌ی واقعی OpenRouter (اگر برگشت) جایگزین تخمین توکن‌محور می‌شود؛ روی لیارا
+            // که این متادیتا همیشه null است، همان تخمین (costToman) به‌عنوان fallback می‌ماند
+            openrouterRealCostToman ?? costToman,
             plan.payAsYouGoMarkup ?? 1.3,
             fa.payAsYouGo.messageDebitDescription,
             {
@@ -1466,7 +1468,9 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
         this.pricingService
           .debitWallet(
             userId,
-            costToman,
+            // هزینه‌ی واقعی OpenRouter (اگر برگشت) جایگزین تخمین توکن‌محور می‌شود؛ روی لیارا
+            // که این متادیتا همیشه null است، همان تخمین (costToman) به‌عنوان fallback می‌ماند
+            openrouterRealCostToman ?? costToman,
             plan.payAsYouGoMarkup ?? 1.3,
             fa.payAsYouGo.messageDebitDescription,
             {

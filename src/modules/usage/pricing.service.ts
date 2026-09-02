@@ -329,6 +329,9 @@ export class PricingService {
     return amount;
   }
 
+  // مبلغ نهایی به بالا رو به نزدیک‌ترین «نیوو» کامل گرد می‌شود (نه فقط تومان) — یعنی حتی
+  // ۰.۱ نیوو اضافه هم یک نیوو کامل حساب می‌شود. برای صداگذاری‌های از پیش نیوو-محور (markup=1،
+  // costToman از قبل مضرب دقیق tomanPerCredit است) این عملاً no-op است
   async debitWallet(
     userId: string,
     costToman: number,
@@ -336,7 +339,13 @@ export class PricingService {
     description: string,
     metadata?: Record<string, unknown>,
   ): Promise<boolean> {
-    const walletCost = Math.ceil(costToman * markup);
+    const { tomanPerCredit } = await this.prisma.creditConfig.upsert({
+      where: { id: 'singleton' },
+      create: { id: 'singleton' },
+      update: {},
+    });
+    const walletCost =
+      Math.ceil((costToman * markup) / tomanPerCredit) * tomanPerCredit;
     const wallet = await this.prisma.wallet.findUnique({ where: { userId } });
     if (!wallet || wallet.balanceToman < walletCost) return false;
 
