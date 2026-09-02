@@ -477,6 +477,7 @@ export class AdminService {
       dailyUsage,
       modelBreakdown,
       creativeGenerations,
+      messages,
     ] = await Promise.all([
       user.wallet
         ? this.prisma.walletTransaction.findMany({
@@ -510,7 +511,52 @@ export class AdminService {
         take: 20,
         include: { prompt: { select: { title: true, outputType: true } } },
       }),
+      // هزینه‌ی per-message — نرخ دلار همون لحظه از costToman/costUsdMicros قابل استخراج است
+      // (هر دو با یک نرخ محاسبه شده‌اند)؛ openrouterRealCost* فقط وقتی provider=OPENROUTER
+      // بوده پر می‌شود، برای مقایسه‌ی تخمین داخلی با هزینه‌ی واقعی گزارش‌شده توسط OpenRouter
+      this.prisma.message.findMany({
+        where: { userId, role: 'ASSISTANT' },
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+        select: {
+          id: true,
+          createdAt: true,
+          model: true,
+          costToman: true,
+          costUsdMicros: true,
+          openrouterRealCostUsdMicros: true,
+          openrouterRealCostToman: true,
+        },
+      }),
     ]);
+
+    // تراکنش‌های DEBIT ناشی از چت، metadata.messageId دارند (chat.service.ts) — برای نمایش
+    // هزینه‌ی واقعی OpenRouter/نرخ دلار همون لحظه کنار هر تراکنش، به همون پیام join می‌زنیم.
+    // تراکنش‌های دیگر (بازگشت وجه، شارژ، دیسکاوری/کریتیو) پیوند پیامی ندارند و message=null می‌مانند.
+    const linkedMessageIds = walletTransactions
+      .map((t) => (t.metadata as { messageId?: string } | null)?.messageId)
+      .filter((id): id is string => Boolean(id));
+    const linkedMessages = linkedMessageIds.length
+      ? await this.prisma.message.findMany({
+          where: { id: { in: linkedMessageIds } },
+          select: {
+            id: true,
+            model: true,
+            costToman: true,
+            costUsdMicros: true,
+            openrouterRealCostUsdMicros: true,
+            openrouterRealCostToman: true,
+          },
+        })
+      : [];
+    const linkedMessageById = new Map(linkedMessages.map((m) => [m.id, m]));
+    const walletTransactionsWithMessage = walletTransactions.map((t) => ({
+      ...t,
+      message:
+        linkedMessageById.get(
+          (t.metadata as { messageId?: string } | null)?.messageId ?? '',
+        ) ?? null,
+    }));
 
     const sumTypeUsage = (rows: typeof modelBreakdown) => ({
       messages: rows.reduce((s, r) => s + r.messages, 0),
@@ -525,10 +571,11 @@ export class AdminService {
     return {
       user,
       walletBalanceToman: user.wallet?.balanceToman ?? 0,
-      walletTransactions,
+      walletTransactions: walletTransactionsWithMessage,
       payments,
       dailyUsage,
       creativeGenerations,
+      messages,
       textUsage: sumTypeUsage(
         modelBreakdown.filter((m) => m.modelType === 'TEXT'),
       ),
