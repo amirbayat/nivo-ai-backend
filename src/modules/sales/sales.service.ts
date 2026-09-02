@@ -1,6 +1,5 @@
 import { Injectable, HttpException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { generateText } from 'ai';
 import type { SalesBotConfig } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -8,6 +7,7 @@ import { RedisService } from '../../redis/redis.service';
 import { PricingService } from '../usage/pricing.service';
 import { SalesConfigService } from './sales-config.service';
 import { SalesKbService } from './sales-kb.service';
+import { AiProviderService } from '../../common/services/ai-provider.service';
 import type {
   SalesChatDto,
   SaveLeadDto,
@@ -43,12 +43,9 @@ export class SalesService {
     private readonly salesConfig: SalesConfigService,
     private readonly salesKb: SalesKbService,
     private readonly pricingService: PricingService,
+    private readonly aiProvider: AiProviderService,
   ) {
-    this.provider = createOpenAICompatible({
-      name: 'liara',
-      baseURL: this.config.get<string>('LIARA_AI_BASE_URL')!,
-      apiKey: this.config.get<string>('LIARA_API_KEY')!,
-    });
+    this.provider = this.aiProvider.buildClient();
   }
 
   async chat(

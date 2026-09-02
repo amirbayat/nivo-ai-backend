@@ -1,11 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { embed, cosineSimilarity } from 'ai';
 import type { SalesKbKind } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PricingService } from '../usage/pricing.service';
 import { SalesConfigService } from './sales-config.service';
+import { AiProviderService } from '../../common/services/ai-provider.service';
 
 // docs/PRD-sales-kb-rag-and-plan-context.md بخش الف.۶-الف.۷ —
 // بدون pgvector: با مقیاس چند صد نمونه، مقایسه‌ی برداری در حافظه‌ی خود پردازش
@@ -68,12 +68,9 @@ export class SalesKbService {
     private readonly config: ConfigService,
     private readonly salesConfig: SalesConfigService,
     private readonly pricing: PricingService,
+    private readonly aiProvider: AiProviderService,
   ) {
-    this.provider = createOpenAICompatible({
-      name: 'liara',
-      baseURL: this.config.get<string>('LIARA_AI_BASE_URL')!,
-      apiKey: this.config.get<string>('LIARA_API_KEY')!,
-    });
+    this.provider = this.aiProvider.buildClient();
   }
 
   /** برای sales.service.ts — روی هر پیام کاربر صدا زده می‌شود. */

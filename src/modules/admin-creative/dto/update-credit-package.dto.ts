@@ -1,5 +1,13 @@
-import { Type } from 'class-transformer';
-import { IsBoolean, IsEnum, IsInt, IsOptional, Min } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import {
+  IsBoolean,
+  IsEnum,
+  IsInt,
+  IsOptional,
+  IsString,
+  Min,
+  ValidateIf,
+} from 'class-validator';
 import { CreditPackageScope } from '@prisma/client';
 import { fa } from '../../../i18n/fa';
 
@@ -41,4 +49,14 @@ export class UpdateCreditPackageDto {
   @IsOptional()
   @IsEnum(CreditPackageScope, { message: fa.validation.required })
   scope?: CreditPackageScope;
+
+  // شناسه‌ی SKU کافه‌بازار — رشته‌ی خالی یعنی «پاک کردن» (null در دیتابیس، نه یک‌رشته‌ی خالی
+  // یکتا که با بسته‌ی دیگری تصادم unique constraint بدهد)
+  @IsOptional()
+  @Transform(({ value }) =>
+    typeof value === 'string' && value.trim() === '' ? null : value,
+  )
+  @ValidateIf((_, value) => value !== null)
+  @IsString({ message: fa.validation.required })
+  bazaarSku?: string | null;
 }

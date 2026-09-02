@@ -317,6 +317,10 @@ enum PaymentProvider {
   ZARINPAL
   VANDAR
   ZIBAL
+  // پرداخت درون‌برنامه‌ای کافه‌بازار (Poolakey) — فقط اپ اندروید نیوو کال؛ برخلاف سه‌ی بالا از
+  // PaymentGatewayRegistry/createPayment redirect عبور نمی‌کند (خرید کاملاً سمت کلاینت با SDK
+  // بازار انجام می‌شود، بک‌اند فقط purchaseToken را در برابر API بازار اعتبارسنجی می‌کند)
+  BAZAAR
 }
 
 model RefreshToken {
@@ -543,6 +547,10 @@ model CreditPackage {
   isActive        Boolean            @default(true)
   sortOrder       Int                @default(0)
   scope           CreditPackageScope @default(GENERAL)
+  // شناسه‌ی محصول (SKU) متناظر این بسته در پیشخان کافه‌بازار — فقط بسته‌های ثابت (isCustomAmount=false)
+  // می‌توانند این را داشته باشند (بازار SKU با قیمت ثابت می‌خواهد، نه مبلغ آزاد). null یعنی این
+  // بسته از طریق کافه‌بازار قابل‌خرید نیست (docs/PRD-nivo-cal-credits-ui.md بخش ۴).
+  bazaarSku       String?            @unique
   createdAt       DateTime           @default(now())
 
   payments Payment[] // docs/PRD-admin-credit-reports.md بخش ۲ — برای گزارش «نیوو فروخته‌شده به تفکیک بسته»

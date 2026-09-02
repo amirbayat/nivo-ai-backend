@@ -5,6 +5,7 @@ import { PaymentGatewayRegistry } from './gateways/payment-gateway.registry';
 import { ZarinpalGateway } from './gateways/zarinpal.gateway';
 import { VandarGateway } from './gateways/vandar.gateway';
 import { ZibalGateway } from './gateways/zibal.gateway';
+import { BazaarIabService } from './bazaar/bazaar-iab.service';
 import { UsageModule } from '../usage/usage.module';
 import { GrowthModule } from '../growth/growth.module';
 import { AdminNotificationsModule } from '../admin-notifications/admin-notifications.module';
@@ -18,6 +19,7 @@ import { AdminNotificationsModule } from '../admin-notifications/admin-notificat
     ZarinpalGateway,
     VandarGateway,
     ZibalGateway,
+    BazaarIabService,
   ],
   // exports شد چون CreditsModule جدید (نیوو) برای استفاده‌ی مجدد از initiateWalletTopup به این سرویس نیاز دارد
   exports: [PaymentsService],

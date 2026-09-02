@@ -11,6 +11,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   ZARINPAL: 'زرین‌پال',
   VANDAR: 'وندار',
   ZIBAL: 'زیبال',
+  BAZAAR: 'کافه‌بازار',
 };
 
 function toman(amountToman: number): string {

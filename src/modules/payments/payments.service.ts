@@ -5,18 +5,19 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { PaymentProvider, DiscountSource } from '@prisma/client';
+import { Prisma, PaymentProvider, DiscountSource } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { TokenService } from '../usage/token.service';
 import { DiscountCodeService } from '../growth/discount-code.service';
 import { GrowthConfigService } from '../growth/growth-config.service';
 import { PaymentGatewayRegistry } from './gateways/payment-gateway.registry';
 import { PaymentGateway } from './gateways/payment-gateway.interface';
+import { BazaarIabService } from './bazaar/bazaar-iab.service';
 import { AdminNotificationsService } from '../admin-notifications/admin-notifications.service';
 import { fa } from '../../i18n/fa';
 import { InitiatePaymentDto } from './dto/initiate-payment.dto';
 import { InitiateWalletTopupDto } from './dto/initiate-wallet-topup.dto';
-import type { Payment, Plan, Prisma, User } from '@prisma/client';
+import type { CreditPackage, Payment, Plan, User } from '@prisma/client';
 
 const SUBSCRIPTION_DAYS = 30;
 
@@ -42,6 +43,7 @@ export class PaymentsService {
     private readonly growthConfigService: GrowthConfigService,
     private readonly config: ConfigService,
     private readonly adminNotifications: AdminNotificationsService,
+    private readonly bazaarIab: BazaarIabService,
   ) {}
 
   async initiate(userId: string, dto: InitiatePaymentDto) {
@@ -255,6 +257,77 @@ export class PaymentsService {
     });
 
     return { paymentUrl, providerRef };
+  }
+
+  // خرید نیوو از طریق پرداخت درون‌برنامه‌ای کافه‌بازار (فقط اپ اندروید نیوو کال، docs/PRD-nivo-cal-credits-ui.md
+  // بخش ۴) — برخلاف initiateCreditTopup بالا، اینجا هیچ paymentUrl/redirect ای وجود ندارد: خرید از
+  // قبل سمت کلاینت (SDK پولکی) کامل شده و purchaseToken آن به ما رسیده؛ کاری که این متد می‌کند
+  // «تایید» است نه «شروع» — دقیقاً هم‌نقش verify() بالا، ولی بدون callback query.
+  // اعتماد صفر به گزارش موفقیت کلاینت: purchaseToken همیشه با bazaarIab.validatePurchase در برابر
+  // API خودِ بازار چک می‌شود، فقط بعد از آن کیف‌پول شارژ می‌شود.
+  async confirmBazaarPurchase(
+    userId: string,
+    pkg: CreditPackage,
+    amountToman: number,
+    purchaseToken: string,
+  ): Promise<void> {
+    // Idempotency لایه‌ی اول — اگر این purchaseToken قبلاً ثبت شده (تلاش دوباره‌ی موبایل بعد از
+    // timeout شبکه، یا تلاش برای مصرف دوباره‌ی یک خرید)، بدون خطا و بدون شارژ دوباره برمی‌گردیم.
+    const existing = await this.prisma.payment.findUnique({
+      where: { providerRef: purchaseToken },
+    });
+    if (existing) {
+      if (existing.userId !== userId) {
+        throw new BadRequestException(fa.payment.bazaarInvalidPurchase);
+      }
+      this.logger.log(
+        `confirmBazaarPurchase: purchaseToken already processed (paymentId=${existing.id}) — idempotent no-op`,
+      );
+      return;
+    }
+
+    const { valid } = await this.bazaarIab.validatePurchase(
+      pkg.bazaarSku!,
+      purchaseToken,
+    );
+    if (!valid) {
+      this.logger.warn(
+        `confirmBazaarPurchase: bazaar rejected purchaseToken for productId=${pkg.bazaarSku} user=${userId}`,
+      );
+      throw new BadRequestException(fa.payment.bazaarInvalidPurchase);
+    }
+
+    let payment: Payment & { user: User };
+    try {
+      payment = await this.prisma.payment.create({
+        data: {
+          userId,
+          kind: 'WALLET_TOPUP',
+          planId: null,
+          amount: amountToman,
+          provider: 'BAZAAR',
+          providerRef: purchaseToken,
+          packageId: pkg.id,
+          credits: pkg.credits,
+          metadata: { productId: pkg.bazaarSku },
+        },
+        include: { user: true },
+      });
+    } catch (err) {
+      // Idempotency لایه‌ی دوم — race: دو درخواست هم‌زمان با یک purchaseToken از چک بالا رد شده باشند
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002'
+      ) {
+        this.logger.log(
+          `confirmBazaarPurchase: concurrent duplicate purchaseToken — idempotent no-op`,
+        );
+        return;
+      }
+      throw err;
+    }
+
+    await this.completeWalletTopup(payment, purchaseToken, '');
   }
 
   // برای دکمه‌ی «اعمال» کد تخفیف در صفحه‌ی قیمت‌گذاری — فقط اعتبارسنجی می‌کند، هیچ‌چیزی

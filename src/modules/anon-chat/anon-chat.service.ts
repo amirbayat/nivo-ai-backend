@@ -204,7 +204,7 @@ export class AnonChatService {
       content: m.content,
     }));
 
-    const apiKey = this.config.get<string>('LIARA_API_KEY')!;
+    const apiKey = this.aiProvider.sharedApiKey;
 
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');

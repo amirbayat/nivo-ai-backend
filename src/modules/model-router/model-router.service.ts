@@ -1,6 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { generateObject } from 'ai';
 import { z } from 'zod';
 import { ModelTier, type AiModel } from '@prisma/client';
@@ -8,6 +7,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { RedisService } from '../../redis/redis.service';
 import { PricingService } from '../usage/pricing.service';
 import { LiveStatsService } from '../live-stats/live-stats.service';
+import { AiProviderService } from '../../common/services/ai-provider.service';
 
 const CONFIG_CACHE_KEY = 'model_routing_config:cache';
 const CONFIG_CACHE_TTL = 60; // ثانیه
@@ -105,12 +105,9 @@ export class ModelRouterService {
     private readonly config: ConfigService,
     private readonly pricingService: PricingService,
     private readonly liveStats: LiveStatsService,
+    private readonly aiProvider: AiProviderService,
   ) {
-    this.provider = createOpenAICompatible({
-      name: 'liara',
-      baseURL: this.config.get<string>('LIARA_AI_BASE_URL')!,
-      apiKey: this.config.get<string>('LIARA_API_KEY')!,
-    });
+    this.provider = this.aiProvider.buildClient();
   }
 
   async route(input: RouteInput): Promise<RouteResult> {

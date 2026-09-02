@@ -68,6 +68,9 @@ export const fa = {
     gatewayError: 'خطا در اتصال به درگاه پرداخت',
     gatewayRequired: 'انتخاب درگاه پرداخت الزامی است',
     gatewayNotEnabled: 'این درگاه پرداخت فعال نیست',
+    bazaarInvalidPurchase:
+      'این خرید در کافه‌بازار تأیید نشد. اگر مبلغی کسر شده تا ۷۲ ساعت برگشت می‌خورد',
+    bazaarPackageNotSupported: 'این بسته از طریق کافه‌بازار قابل خرید نیست',
   },
   payAsYouGo: {
     notConfigured: 'پلن Pay-as-you-go در حال حاضر تنظیم نشده است',
@@ -233,6 +236,7 @@ export const fa = {
     scanDebitDescription: 'اسکن کالری Nivo Cal',
     logNotFound: 'این اسکن یافت نشد',
     profileNotFound: 'هنوز پروفایل تغذیه نساختی',
-    profileAlreadyExists: 'پروفایل تغذیه‌ات قبلاً ساخته شده — می‌تونی ویرایشش کنی',
+    profileAlreadyExists:
+      'پروفایل تغذیه‌ات قبلاً ساخته شده — می‌تونی ویرایشش کنی',
   },
 } as const;

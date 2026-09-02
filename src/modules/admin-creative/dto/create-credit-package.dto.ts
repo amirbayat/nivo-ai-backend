@@ -1,5 +1,12 @@
-import { Type } from 'class-transformer';
-import { IsBoolean, IsEnum, IsInt, IsOptional, Min } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import {
+  IsBoolean,
+  IsEnum,
+  IsInt,
+  IsOptional,
+  IsString,
+  Min,
+} from 'class-validator';
 import { CreditPackageScope } from '@prisma/client';
 import { fa } from '../../../i18n/fa';
 
@@ -40,4 +47,14 @@ export class CreateCreditPackageDto {
   @IsOptional()
   @IsEnum(CreditPackageScope, { message: fa.validation.required })
   scope?: CreditPackageScope;
+
+  // شناسه‌ی محصول (SKU) این بسته در پیشخان کافه‌بازار — فقط برای بسته‌های ثابت
+  // (isCustomAmount=false) معنا دارد؛ باید از قبل در پیشخان بازار ساخته شده باشد
+  // (docs/PRD-nivo-cal-credits-ui.md بخش ۴)
+  @IsOptional()
+  @Transform(({ value }) =>
+    typeof value === 'string' && value.trim() === '' ? undefined : value,
+  )
+  @IsString({ message: fa.validation.required })
+  bazaarSku?: string;
 }

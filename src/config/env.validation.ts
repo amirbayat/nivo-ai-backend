@@ -1,5 +1,6 @@
 import { plainToInstance } from 'class-transformer';
 import {
+  IsIn,
   IsInt,
   IsOptional,
   IsString,
@@ -19,6 +20,17 @@ class EnvironmentVariables {
 
   @IsUrl({ require_tld: false }) LIARA_AI_BASE_URL: string;
   @IsString() LIARA_API_KEY: string;
+
+  // docs/PRD-openrouter-migration.md §۶.۱ + docs/EXECUTION-PLAN.md قدم ۱ — سوییچ provider.
+  // عمداً همه اختیاری با default امن: بدون ست‌کردن هیچ‌کدام، AI_PROVIDER معادل «liara» فرض
+  // می‌شود و رفتار فعلی پروداکشن دست‌نخورده می‌ماند. برگشت به لیارا از هر لحظه = همین یک متغیر.
+  @IsOptional() @IsIn(['liara', 'openrouter']) AI_PROVIDER?: string;
+  @IsOptional() @IsString() OPENROUTER_API_KEY?: string;
+  @IsOptional()
+  @IsUrl({ require_tld: false })
+  OPENROUTER_BASE_URL?: string;
+  @IsOptional() @IsString() OPENROUTER_SITE_URL?: string;
+  @IsOptional() @IsString() OPENROUTER_APP_NAME?: string;
 
   // docs/PRD-liara-usage-reconciliation.md — رصد مصرف واقعی هر کاربر با کلید اختصاصی روی لیارا.
   // عمداً اختیاری: بدون این‌ها provisioning fail می‌شود و chat بی‌صدا روی LIARA_API_KEY مشترک

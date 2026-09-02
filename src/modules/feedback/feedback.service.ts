@@ -3,8 +3,8 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { CreateFeedbackDto } from './dto/create-feedback.dto';
 import { fa } from '../../i18n/fa';
 import { ConfigService } from '@nestjs/config';
-import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { generateText } from 'ai';
+import { AiProviderService } from '../../common/services/ai-provider.service';
 
 @Injectable()
 export class FeedbackService {
@@ -13,12 +13,9 @@ export class FeedbackService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
+    private readonly aiProvider: AiProviderService,
   ) {
-    this.provider = createOpenAICompatible({
-      name: 'liara',
-      baseURL: this.config.get<string>('LIARA_AI_BASE_URL')!,
-      apiKey: this.config.get<string>('LIARA_API_KEY')!,
-    });
+    this.provider = this.aiProvider.buildClient();
   }
 
   async create(userId: string | null, dto: CreateFeedbackDto) {

@@ -12,7 +12,9 @@ import { ZibalGateway } from './zibal.gateway';
 
 @Injectable()
 export class PaymentGatewayRegistry implements OnModuleInit {
-  private readonly gateways: Record<PaymentProvider, PaymentGateway>;
+  // Partial چون BAZAAR (کافه‌بازار) هیچ‌وقت از این رجیستری resolve نمی‌شود — خرید سمت کلاینت
+  // (SDK پولکی) انجام می‌شود، نه createPayment/redirect (PaymentsService.confirmBazaarPurchase)
+  private readonly gateways: Partial<Record<PaymentProvider, PaymentGateway>>;
   private enabled: PaymentProvider[] = [];
 
   constructor(
@@ -68,14 +70,17 @@ export class PaymentGatewayRegistry implements OnModuleInit {
 
   /** اگر فقط یک درگاه فعال باشد، همیشه همان برگردانده می‌شود (requested نادیده گرفته می‌شود) */
   resolve(requested?: PaymentProvider): PaymentGateway {
-    if (this.enabled.length === 1) return this.gateways[this.enabled[0]];
+    if (this.enabled.length === 1) return this.byName(this.enabled[0]);
     if (!requested) throw new BadRequestException(fa.payment.gatewayRequired);
     if (!this.enabled.includes(requested))
       throw new BadRequestException(fa.payment.gatewayNotEnabled);
-    return this.gateways[requested];
+    return this.byName(requested);
   }
 
   byName(name: PaymentProvider): PaymentGateway {
-    return this.gateways[name];
+    const gateway = this.gateways[name];
+    // نباید هیچ‌وقت اتفاق بیفتد — enabled فقط از PAYMENT_GATEWAY_NAMES پر می‌شود (BAZAAR در آن نیست)
+    if (!gateway) throw new Error(`درگاه پرداخت "${name}" ثبت نشده است`);
+    return gateway;
   }
 }

@@ -8,6 +8,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { PricingService } from '../usage/pricing.service';
 import { PaymentsService } from '../payments/payments.service';
 import { PurchaseCreditPackageDto } from './dto/purchase-credit-package.dto';
+import { ConfirmBazaarPurchaseDto } from './dto/confirm-bazaar-purchase.dto';
 import { fa } from '../../i18n/fa';
 
 // «نیوو» یک ارز/جدول جدید نیست — واحد نمایشی روی همان Wallet.balanceToman موجود است
@@ -137,5 +138,34 @@ export class CreditsService {
       effectiveCredits,
       dto.returnUrl,
     );
+  }
+
+  // تایید یک خرید که سمت کلاینت (اپ اندروید نیوو کال، SDK پولکی کافه‌بازار) از قبل کامل شده —
+  // فقط بسته‌های ثابت با bazaarSku ست‌شده (docs/PRD-nivo-cal-credits-ui.md بخش ۴). برخلاف
+  // purchasePackage بالا، هیچ paymentUrl/redirect ای برنمی‌گرداند؛ فقط بالانس تازه را.
+  async confirmBazaarPurchase(userId: string, dto: ConfirmBazaarPurchaseDto) {
+    const config = await this.getConfig();
+    const pkg = await this.prisma.creditPackage.findUnique({
+      where: { id: dto.packageId },
+    });
+    if (!pkg || !pkg.isActive) throw new NotFoundException(fa.errors.notFound);
+    if (pkg.isCustomAmount || !pkg.bazaarSku) {
+      throw new BadRequestException(fa.payment.bazaarPackageNotSupported);
+    }
+
+    const amountToman = this.computePackagePrice(
+      pkg.credits,
+      pkg.discountPercent,
+      config,
+    );
+
+    await this.payments.confirmBazaarPurchase(
+      userId,
+      pkg,
+      amountToman,
+      dto.purchaseToken,
+    );
+
+    return this.getBalance(userId);
   }
 }

@@ -7,6 +7,7 @@ import {
 } from '../../common/decorators/current-user.decorator';
 import { CreditsService } from './credits.service';
 import { PurchaseCreditPackageDto } from './dto/purchase-credit-package.dto';
+import { ConfirmBazaarPurchaseDto } from './dto/confirm-bazaar-purchase.dto';
 
 // v2 — endpoint های جدید نیوو، مستقل از plan.isPayAsYouGo (بخش ۵.۲ سند فنی)
 @Controller('v2/credits')
@@ -34,5 +35,14 @@ export class CreditsController {
     @Body() dto: PurchaseCreditPackageDto,
   ) {
     return this.creditsService.purchasePackage(user.sub, dto);
+  }
+
+  // تایید خرید انجام‌شده از طریق پرداخت درون‌برنامه‌ای کافه‌بازار (اپ اندروید نیوو کال)
+  @Post('purchase/bazaar/confirm')
+  confirmBazaarPurchase(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: ConfirmBazaarPurchaseDto,
+  ) {
+    return this.creditsService.confirmBazaarPurchase(user.sub, dto);
   }
 }
