@@ -6,7 +6,6 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { generateText } from 'ai';
 import type { UserModelMessage } from 'ai';
 import {
@@ -29,6 +28,7 @@ import {
 } from '../../common/services/image-generation.service';
 import { CreditsService } from '../credits/credits.service';
 import { ModelRouterService } from '../model-router/model-router.service';
+import { AiProviderService } from '../../common/services/ai-provider.service';
 import { ExtractPromptDto } from './dto/extract-prompt.dto';
 import { GenerateCreativeDto } from './dto/generate-creative.dto';
 import { GenerateAnonCreativeDto } from './dto/generate-anon-creative.dto';
@@ -95,6 +95,7 @@ export class DiscoveryGenerationService {
     private readonly imageGen: ImageGenerationService,
     private readonly credits: CreditsService,
     private readonly modelRouter: ModelRouterService,
+    private readonly aiProvider: AiProviderService,
   ) {}
 
   async listCatalog(params: {
@@ -440,11 +441,7 @@ export class DiscoveryGenerationService {
         model?.name ??
         this.config.get<string>('SUMMARY_MODEL') ??
         'openai/gpt-4o-mini';
-      const provider = createOpenAICompatible({
-        name: 'liara',
-        baseURL: this.config.get<string>('LIARA_AI_BASE_URL')!,
-        apiKey,
-      });
+      const provider = this.aiProvider.buildClient(apiKey);
 
       const { text } = await generateText({
         model: provider(modelName),
@@ -516,14 +513,18 @@ export class DiscoveryGenerationService {
     return this.modelRouter.pickBySelectionMode(candidates, selectionMode);
   }
 
+  // OpenRouter هنوز کلید اختصاصی-به‌ازای-کاربر ندارد (docs/PRD-openrouter-migration.md §۵.۱)
   private async resolveApiKey(userId: string): Promise<string> {
+    if (!this.aiProvider.supportsPerUserKeys) {
+      return this.aiProvider.sharedApiKey;
+    }
     try {
       return await this.liaraKeyProvisioning.getApiKeyForUser(userId);
     } catch (err) {
       this.logger.warn(
         `Liara per-user key unavailable for user=${userId}, falling back to shared key: ${(err as Error).message}`,
       );
-      return this.config.get<string>('LIARA_API_KEY')!;
+      return this.aiProvider.sharedApiKey;
     }
   }
 
@@ -657,11 +658,7 @@ export class DiscoveryGenerationService {
       this.config.get<string>('SUMMARY_MODEL') ??
       'openai/gpt-4o-mini';
     const apiKey = await this.resolveApiKey(userId);
-    const provider = createOpenAICompatible({
-      name: 'liara',
-      baseURL: this.config.get<string>('LIARA_AI_BASE_URL')!,
-      apiKey,
-    });
+    const provider = this.aiProvider.buildClient(apiKey);
 
     const { text, usage } = await generateText({
       model: provider(modelName),
@@ -873,11 +870,7 @@ export class DiscoveryGenerationService {
     const dataUrl = `data:${mimeTypeForExt(ext)};base64,${buffer.toString('base64')}`;
 
     const apiKey = await this.resolveApiKey(userId);
-    const provider = createOpenAICompatible({
-      name: 'liara',
-      baseURL: this.config.get<string>('LIARA_AI_BASE_URL')!,
-      apiKey,
-    });
+    const provider = this.aiProvider.buildClient(apiKey);
 
     const visionMessage: UserModelMessage = {
       role: 'user',

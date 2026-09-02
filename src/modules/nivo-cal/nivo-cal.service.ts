@@ -5,7 +5,6 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { generateObject } from 'ai';
 import type { UserModelMessage } from 'ai';
 import { z } from 'zod';
@@ -15,6 +14,7 @@ import { ChatConfigService } from '../chat-config/chat-config.service';
 import { CreditsService } from '../credits/credits.service';
 import { LiaraKeyProvisioningService } from '../liara/liara-key-provisioning.service';
 import { StorageService } from '../../storage/storage.service';
+import { AiProviderService } from '../../common/services/ai-provider.service';
 import { fa } from '../../i18n/fa';
 import {
   mimeTypeForExt,
@@ -92,16 +92,21 @@ export class NivoCalService {
     private readonly credits: CreditsService,
     private readonly liaraKeyProvisioning: LiaraKeyProvisioningService,
     private readonly storage: StorageService,
+    private readonly aiProvider: AiProviderService,
   ) {}
 
+  // OpenRouter هنوز کلید اختصاصی-به‌ازای-کاربر ندارد (docs/PRD-openrouter-migration.md §۵.۱)
   private async resolveApiKey(userId: string): Promise<string> {
+    if (!this.aiProvider.supportsPerUserKeys) {
+      return this.aiProvider.sharedApiKey;
+    }
     try {
       return await this.liaraKeyProvisioning.getApiKeyForUser(userId);
     } catch (err) {
       this.logger.warn(
         `Liara per-user key unavailable for user=${userId}, falling back to shared key: ${(err as Error).message}`,
       );
-      return this.config.get<string>('LIARA_API_KEY')!;
+      return this.aiProvider.sharedApiKey;
     }
   }
 
@@ -132,10 +137,7 @@ export class NivoCalService {
     // به‌جای صرفاً یک دستور متنی «JSON برگردون»؛ بدون این، @ai-sdk/openai-compatible به‌طور پیش‌فرض
     // false فرض می‌کند و generateObject گاهی «response did not match schema» می‌دهد چون هیچ
     // تضمین سمت سرور برای پیروی از schema وجود ندارد. مستقل از provider مشترک model-router.service.ts.
-    const provider = createOpenAICompatible({
-      name: 'liara',
-      baseURL: this.config.get<string>('LIARA_AI_BASE_URL')!,
-      apiKey,
+    const provider = this.aiProvider.buildClient(apiKey, {
       supportsStructuredOutputs: true,
     });
 

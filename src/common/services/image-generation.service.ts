@@ -1,11 +1,18 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { AiProviderService } from './ai-provider.service';
 
 // استخراج‌شده از chat.service.ts (بخش تولید عکس در چت) تا هم چت هم ماژول جدید Discovery
 // (نیوو/عکس-متن آماده) از یک پیاده‌سازی مشترک استفاده کنند، نه دو کپی جدا. این سرویس فقط به
-// ConfigService (برای LIARA_AI_BASE_URL) وابسته است — هیچ Prisma/Wallet/plan-ای اینجا نیست،
-// عمداً: تصمیم کسر اعتبار/هزینه در لایه‌ی بالاتر (ChatService یا DiscoveryGenerationService)
-// گرفته می‌شود، نه اینجا.
+// ConfigService/AiProviderService وابسته است — هیچ Prisma/Wallet/plan-ای اینجا نیست، عمداً:
+// تصمیم کسر اعتبار/هزینه در لایه‌ی بالاتر (ChatService یا DiscoveryGenerationService) گرفته
+// می‌شود، نه اینجا.
+//
+// نکته‌ی مهم درباره‌ی OpenRouter (docs/EXECUTION-PLAN.md قدم ۵، جدا از قدم ۱): بر خلاف چت/متن،
+// endpoint تولید عکس OpenRouter مسیر متفاوتی دارد (`/images` نه `/images/generations`/`/images/edits`
+// لیارا) — یعنی سوییچ AI_PROVIDER به‌تنهایی برای عکس کافی نیست، باید فرمت درخواست/پاسخ هم در
+// قدم ۵ بازنویسی شود. تا آن قدم، callImagesApi عمداً روی OpenRouter خطای صریح می‌دهد تا به‌جای
+// شکست خاموش/۴۰۴، مشکل زود و واضح معلوم شود.
 
 // برای تشخیص «رد شدن به‌خاطر سیاست محتوا» از یک خطای معمولی/گذرا — کاربر باید بفهمه باید
 // توصیفش رو عوض کنه، نه صرفاً دوباره امتحان کنه
@@ -29,7 +36,10 @@ export const FACE_PRESERVATION_INSTRUCTION =
 export class ImageGenerationService {
   private readonly logger = new Logger(ImageGenerationService.name);
 
-  constructor(private readonly config: ConfigService) {}
+  constructor(
+    private readonly config: ConfigService,
+    private readonly aiProvider: AiProviderService,
+  ) {}
 
   // تولید از صفر — بدون عکس ورودی (docs: /v1/images/generations). partial_images یعنی provider
   // تا ۲ پیش‌نمایش تدریجی (هر بار واضح‌تر) قبل از تصویر نهایی برمی‌گرداند — دقیقاً همون افکت
@@ -108,7 +118,14 @@ export class ImageGenerationService {
       outputTokens: number;
     };
   }> {
-    const baseUrl = this.config.get<string>('LIARA_AI_BASE_URL')!;
+    if (this.aiProvider.isOpenRouter) {
+      // docs/EXECUTION-PLAN.md قدم ۵ — مهاجرت واقعی تولید عکس (endpoint/فرمت متفاوت OpenRouter)
+      // هنوز انجام نشده؛ به‌جای fetch به مسیر غلط (۴۰۴ خاموش)، همین‌جا صریح fail می‌شود.
+      throw new Error(
+        'تولید عکس روی OpenRouter هنوز مهاجرت نشده (قدم ۵ نقشه‌ی اجرا) — فعلاً فقط با AI_PROVIDER=liara کار می‌کند.',
+      );
+    }
+    const baseUrl = this.aiProvider.baseURL;
     const isFormData = body instanceof FormData;
     // بعضی مدل‌ها (تأیید شده برای gpt-image-1-mini روی گیت‌وی ما) اصلاً stream/partial_images
     // را قبول نمی‌کنند و با خطا رد می‌کنند — این پرچم اجازه می‌دهد بدون stream دوباره تلاش کنیم

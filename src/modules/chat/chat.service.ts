@@ -8,7 +8,6 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
-import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { streamText, generateText, generateObject, APICallError } from 'ai';
 import type { ModelMessage, UserModelMessage } from 'ai';
 import { ModelTier, Prisma, type AiModel } from '@prisma/client';
@@ -51,6 +50,7 @@ import {
   detectImageGenIntent,
   detectImageEditIntent,
 } from './image-gen-intent';
+import { AiProviderService } from '../../common/services/ai-provider.service';
 
 const OPTIMAL_MODE = 'optimal'; // legacy — مقداری که قبل از این تغییر توی localStorage/DB ذخیره شده بود، معادل «بهترین پاسخ» فعلی
 // docs/PRD-model-selection-modes.md — دو حالت خودکار جدید که جایگزین OPTIMAL_MODE قدیمی شدند
@@ -114,29 +114,31 @@ export class ChatService {
     private readonly config: ConfigService,
     private readonly liaraKeyProvisioning: LiaraKeyProvisioningService,
     private readonly imageGen: ImageGenerationService,
+    private readonly aiProvider: AiProviderService,
   ) {}
 
   // docs/PRD-liara-usage-reconciliation.md — هر کاربر کلید اختصاصی خودش را روی لیارا می‌گیرد
   // (لازی، فقط اولین‌بار ساخته می‌شود) تا مصرف واقعی‌اش در لاگ‌های لیارا قابل تفکیک باشد.
   // روی هر خطا (envهای مدیریتی ست نشده، لیارا در دسترس نیست، ...) بی‌صدا به کلید مشترک
   // پلتفرم fallback می‌کند — این مسیر هرگز نباید تجربه‌ی چت کاربر را بشکند.
+  // OpenRouter هنوز کلید اختصاصی-به‌ازای-کاربر ندارد (docs/PRD-openrouter-migration.md §۵.۱) —
+  // وقتی provider فعال OpenRouter است، اصلاً provisioning لیارا امتحان نمی‌شود.
   private async resolveUserApiKey(userId: string): Promise<string> {
+    if (!this.aiProvider.supportsPerUserKeys) {
+      return this.aiProvider.sharedApiKey;
+    }
     try {
       return await this.liaraKeyProvisioning.getApiKeyForUser(userId);
     } catch (err) {
       this.logger.warn(
         `Liara per-user key unavailable for user=${userId}, falling back to shared key: ${(err as Error).message}`,
       );
-      return this.config.get<string>('LIARA_API_KEY')!;
+      return this.aiProvider.sharedApiKey;
     }
   }
 
   private buildProvider(apiKey: string) {
-    return createOpenAICompatible({
-      name: 'liara',
-      baseURL: this.config.get<string>('LIARA_AI_BASE_URL')!,
-      apiKey,
-    });
+    return this.aiProvider.buildClient(apiKey);
   }
 
   // برای درخواست‌های کوچک/یک‌باره‌ی داخلی (عنوان‌سازی، خلاصه‌سازی) به‌جای generateText.
@@ -1563,11 +1565,7 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
         candidates,
         'cost_optimized',
       );
-      const provider = createOpenAICompatible({
-        name: 'liara',
-        baseURL: this.config.get<string>('LIARA_AI_BASE_URL')!,
-        apiKey,
-      });
+      const provider = this.buildProvider(apiKey);
       const visionMessage: UserModelMessage = {
         role: 'user',
         content: [

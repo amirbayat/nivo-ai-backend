@@ -831,6 +831,12 @@ model AiModel {
   tier                         ModelTier   @default(MEDIUM)
   createdAt                    DateTime    @default(now())
 
+  // docs/PRD-openrouter-migration.md §۱۳.۴/۱۴.۶ — صفحه‌ی انتخاب مدل بازطراحی‌شده: توضیح کوتاه
+  // کاربرد مدل (متن آزاد، ادمین از فرم موجود ModelsPage پر می‌کند) + برچسب‌های فیلتر
+  // ("trending"/"popular"/...، دلخواه، هیچ enum ثابتی نیست تا بدون تغییر کد قابل‌گسترش بماند)
+  description String?
+  badges      String[] @default([])
+
   // شمارش دقیق توکن — برای مدل‌های OpenAI-family یک tokenizer واقعی داریم؛
   // برای بقیه‌ی پروایدرها (Claude، Grok، ...) که tokenizer آفلاین ندارند،
   // یک نسبت کاراکتر/توکن قابل‌کالیبره در ادمین استفاده می‌شود.

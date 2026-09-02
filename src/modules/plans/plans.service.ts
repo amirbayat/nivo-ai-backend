@@ -44,6 +44,12 @@ export class PlansService {
         supportsVision: true,
         supportsImageGen: true,
         sortOrder: true,
+        // docs/PRD-openrouter-migration.md §۱۳.۴/۱۴.۴ — صفحه‌ی انتخاب مدل بازطراحی‌شده: توضیح
+        // کوتاه + برچسب برای فیلتر (ترند/محبوب/...) + قیمت خام برای فیلتر ارزان/گران سمت فرانت
+        description: true,
+        badges: true,
+        inputPricePerM: true,
+        outputPricePerM: true,
       },
     });
   }

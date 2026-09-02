@@ -7,7 +7,6 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { streamText } from 'ai';
 import type { ModelMessage } from 'ai';
 import type { AnonymousConversation } from '@prisma/client';
@@ -25,6 +24,7 @@ import { AnonChatConfigService } from './anon-chat-config.service';
 import { AnonIdentityService, type AnonContext } from './anon-identity.service';
 import { AnonFunnelEventService } from './anon-funnel-event.service';
 import type { AnonStreamMessageDto } from './dto/anon-stream-message.dto';
+import { AiProviderService } from '../../common/services/ai-provider.service';
 
 // Iran Standard Time = UTC+3:30 — عمداً از token.service.ts وارد نشده (nه export شده، نه
 // می‌خواهیم آن فایل production را برای یک ثابت لمس کنیم)؛ همان محاسبه، تکرار شده.
@@ -50,14 +50,11 @@ export class AnonChatService {
     private readonly configService: AnonChatConfigService,
     private readonly identityService: AnonIdentityService,
     private readonly funnelEvents: AnonFunnelEventService,
+    private readonly aiProvider: AiProviderService,
   ) {}
 
   private buildProvider(apiKey: string) {
-    return createOpenAICompatible({
-      name: 'liara',
-      baseURL: this.config.get<string>('LIARA_AI_BASE_URL')!,
-      apiKey,
-    });
+    return this.aiProvider.buildClient(apiKey);
   }
 
   // وضعیت فعلی identity نسبت به سقف‌ها — بدون throw، برای GET /anon-chat/status
