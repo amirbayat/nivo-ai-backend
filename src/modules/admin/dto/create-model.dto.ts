@@ -10,6 +10,8 @@ import {
 } from 'class-validator';
 
 export const MODEL_TIERS = ['SIMPLE', 'MEDIUM', 'COMPLEX'] as const;
+// docs/PRD-openrouter-migration.md §۶.۳ — کدام پلتفرم(های) inference این name را می‌شناسد
+export const AI_PLATFORMS = ['LIARA', 'OPENROUTER'] as const;
 export const TOKENIZER_FAMILIES = [
   'o200k_base',
   'cl100k_base',
@@ -106,4 +108,9 @@ export class CreateModelDto {
   @IsArray()
   @IsString({ each: true })
   badges?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @IsIn(AI_PLATFORMS, { each: true })
+  platform?: (typeof AI_PLATFORMS)[number][];
 }

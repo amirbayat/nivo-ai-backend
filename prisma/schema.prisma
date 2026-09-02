@@ -805,6 +805,15 @@ enum AiModelType {
   IMAGE_GEN
 }
 
+// شناسه‌ی مدل بین لیارا و OpenRouter لزوماً یکسان نیست (docs/PRD-openrouter-migration.md §۶.۳) —
+// این آرایه مشخص می‌کند این ردیف دقیقاً روی کدام پلتفرم(ها) با همین name معتبر است. وقتی
+// AiProviderService.platform فعلی (بر اساس AI_PROVIDER) در این آرایه نباشد، ردیف برای کاربر
+// نهایی نامرئی می‌ماند (حتی اگر isActive=true باشد) — چون فراخوانی آن روی پلتفرم فعال ۴۰۴ می‌شود.
+enum AiPlatform {
+  LIARA
+  OPENROUTER
+}
+
 model AiModel {
   id                           String      @id @default(uuid())
   name                         String      @unique
@@ -836,6 +845,10 @@ model AiModel {
   // ("trending"/"popular"/...، دلخواه، هیچ enum ثابتی نیست تا بدون تغییر کد قابل‌گسترش بماند)
   description String?
   badges      String[] @default([])
+
+  // پیش‌فرض [LIARA] تا هیچ ردیف موجودی رفتار فعلی‌اش عوض نشود — مدل‌های تایید‌شده روی
+  // OpenRouter هم (کاتالوگ import‌شده‌ی جدا) صراحتاً باید platform‌شان ست شود
+  platform AiPlatform[] @default([LIARA])
 
   // شمارش دقیق توکن — برای مدل‌های OpenAI-family یک tokenizer واقعی داریم؛
   // برای بقیه‌ی پروایدرها (Claude، Grok، ...) که tokenizer آفلاین ندارند،

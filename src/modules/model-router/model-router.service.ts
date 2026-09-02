@@ -139,6 +139,7 @@ export class ModelRouterService {
         name: { in: input.allowedModels },
         isActive: true,
         modelType: 'CHAT', // مدل‌های embedding و IMAGE_GEN (که اصلاً قابلیت تولید متن ندارند) هرگز نباید برای پاسخ چت معمولی انتخاب شوند
+        platform: { has: this.aiProvider.platform },
         ...(input.hasImages ? { supportsVision: true } : {}),
       },
       orderBy: { sortOrder: 'asc' },
@@ -182,6 +183,7 @@ export class ModelRouterService {
       where: {
         isActive: true,
         modelType: 'CHAT',
+        platform: { has: this.aiProvider.platform },
         ...(input.hasImages ? { supportsVision: true } : {}),
       },
     });

@@ -15,6 +15,7 @@ import { PricingService } from '../usage/pricing.service';
 import { UsageAnalyticsService } from '../usage-analytics/usage-analytics.service';
 import { fa } from '../../i18n/fa';
 import {
+  AI_PLATFORMS,
   CreateModelDto,
   MODEL_TIERS,
   MODEL_TYPES,
@@ -40,6 +41,9 @@ const MODEL_IMPORT_COLUMNS = [
   'tier',
   'tokenizerFamily',
   'avgCharsPerToken',
+  'description',
+  'badges',
+  'platform',
 ] as const;
 
 function cellToString(value: unknown): string | undefined {
@@ -60,6 +64,26 @@ function cellToBoolean(value: unknown, fallback: boolean): boolean {
   if (['true', '1', 'yes', 'بله', 'فعال'].includes(s)) return true;
   if (['false', '0', 'no', 'خیر', 'غیرفعال'].includes(s)) return false;
   return fallback;
+}
+
+// در اکسل badges به‌صورت رشته‌ی جدا‌شده با کاما وارد می‌شود (مثل "trending,popular")
+function cellToStringArray(value: unknown): string[] | undefined {
+  const s = cellToString(value);
+  if (s === undefined) return undefined;
+  return s
+    .split(/[,،]/)
+    .map((b) => b.trim())
+    .filter(Boolean);
+}
+
+// platform هم مثل badges با کاما جدا می‌شود (مثل "LIARA,OPENROUTER")، ولی فقط مقادیر معتبر
+// enum را نگه می‌داریم — بقیه validate در CreateModelDto رد می‌شود
+function cellToPlatformArray(
+  value: unknown,
+): (typeof AI_PLATFORMS)[number][] | undefined {
+  const arr = cellToStringArray(value);
+  if (arr === undefined) return undefined;
+  return arr.map((p) => p.toUpperCase()) as (typeof AI_PLATFORMS)[number][];
 }
 
 function parseModelRow(raw: Record<string, unknown>) {
@@ -88,6 +112,9 @@ function parseModelRow(raw: Record<string, unknown>) {
     tokenizerFamily: cellToString(raw.tokenizerFamily) as
       (typeof TOKENIZER_FAMILIES)[number] | undefined,
     avgCharsPerToken: cellToNumber(raw.avgCharsPerToken),
+    description: cellToString(raw.description),
+    badges: cellToStringArray(raw.badges),
+    platform: cellToPlatformArray(raw.platform),
   };
 }
 

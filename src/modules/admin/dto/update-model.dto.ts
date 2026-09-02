@@ -9,6 +9,7 @@ import {
   Min,
 } from 'class-validator';
 import {
+  AI_PLATFORMS,
   MODEL_TIERS,
   MODEL_TYPES,
   TOKENIZER_FAMILIES,
@@ -104,4 +105,9 @@ export class UpdateModelDto {
   @IsArray()
   @IsString({ each: true })
   badges?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @IsIn(AI_PLATFORMS, { each: true })
+  platform?: (typeof AI_PLATFORMS)[number][];
 }

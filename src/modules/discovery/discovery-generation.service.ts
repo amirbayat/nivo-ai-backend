@@ -55,8 +55,17 @@ const AUTO_MODE_SENTINELS = [OPTIMAL_MODE, COST_OPTIMIZED_MODE, BEST_ANSWER_MODE
 
 // تصمیم محصول (۱۴۰۵/۰۶) — فعلاً تولید عکس استودیو فقط با همین مدل انجام می‌شود؛ سبک‌های
 // تازه‌استخراج‌شده preferredModel‌شان صراحتاً همین است تا صرف‌نظر از استخر AiModel نوع
-// IMAGE_GEN (که مدل‌های دیگری هم برای تولید عکس چت معمولی دارد)، قطعی همین مدل استفاده شود
-const STUDIO_IMAGE_GEN_MODEL = 'openai/gpt-image-2';
+// IMAGE_GEN (که مدل‌های دیگری هم برای تولید عکس چت معمولی دارد)، قطعی همین مدل استفاده شود.
+// شناسه‌ی این مدل بین لیارا و OpenRouter یکسان نیست (docs/PRD-openrouter-migration.md §۶.۳) —
+// لیارا مدل IMAGE_GEN اختصاصی gpt-image-2 دارد؛ روی OpenRouter معادل مستقیمی وجود ندارد
+// (کاتالوگ زنده‌ی OpenRouter، بررسی‌شده ۱۴۰۵-۰۶-۱۲، اصلاً مدل IMAGE_GEN خالص ندارد — عکس فقط از
+// طریق مدل‌های چندوجهی modelType=CHAT با supportsImageGen=true تولید می‌شود)، پس نزدیک‌ترین
+// جایگزین هم‌خانواده (OpenAI) انتخاب شده؛ اگر بعد از فاز ۳ (مهاجرت عکس) مدل بهتری تایید شد،
+// همین یک خط باید عوض شود.
+const STUDIO_IMAGE_GEN_MODEL: Record<'LIARA' | 'OPENROUTER', string> = {
+  LIARA: 'openai/gpt-image-2',
+  OPENROUTER: 'openai/gpt-5-image',
+};
 
 // contextMd/userPromptTemplate/preferredModel عمداً برای کاربر نمایش داده نمی‌شوند — این‌ها
 // «دستور پشت‌صحنه‌»ی ادمین هستند، دقیقاً مثل Plan.contextMd که در v1 هم به فرانت لو نمی‌رود.
@@ -487,7 +496,12 @@ export class DiscoveryGenerationService {
       const m = await this.prisma.aiModel.findUnique({
         where: { name: preferredModel },
       });
-      if (m && m.isActive) return m;
+      if (
+        m &&
+        m.isActive &&
+        m.platform.includes(this.aiProvider.platform)
+      )
+        return m;
     }
 
     const modelType =
@@ -495,7 +509,11 @@ export class DiscoveryGenerationService {
         ? AiModelType.IMAGE_GEN
         : AiModelType.CHAT;
     const candidates = await this.prisma.aiModel.findMany({
-      where: { isActive: true, modelType },
+      where: {
+        isActive: true,
+        modelType,
+        platform: { has: this.aiProvider.platform },
+      },
       orderBy: { sortOrder: 'asc' },
     });
     if (!candidates.length) return null;
@@ -782,7 +800,12 @@ export class DiscoveryGenerationService {
 
   private async getVisionModelCandidates(): Promise<AiModel[]> {
     return this.prisma.aiModel.findMany({
-      where: { isActive: true, modelType: AiModelType.CHAT, supportsVision: true },
+      where: {
+        isActive: true,
+        modelType: AiModelType.CHAT,
+        supportsVision: true,
+        platform: { has: this.aiProvider.platform },
+      },
       orderBy: { sortOrder: 'asc' },
     });
   }
@@ -948,7 +971,7 @@ export class DiscoveryGenerationService {
         exampleImageUrl: `${apiUrl}/api/v1/v2/discovery/example-images/${imageKey}`,
         requiresUserImage: false,
         creditCost: creditConfig.defaultExtractedPromptCreditCost,
-        preferredModel: STUDIO_IMAGE_GEN_MODEL,
+        preferredModel: STUDIO_IMAGE_GEN_MODEL[this.aiProvider.platform],
         isActive: false,
         sourceType: CreativePromptSourceType.USER_EXTRACTED,
         submittedByUserId: userId,

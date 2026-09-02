@@ -23,6 +23,14 @@ export class AiProviderService {
     return this.name === 'openrouter';
   }
 
+  // مقدار enum AiPlatform روی AiModel.platform — کوئری‌های انتخاب مدل برای کاربر نهایی
+  // (chat.service.ts, model-router.service.ts, discovery-generation.service.ts,
+  // plans.service.ts) باید همیشه با این فیلتر شوند تا ردیف‌هایی که روی provider فعلی
+  // معتبر نیستند (شناسه‌شان بین لیارا/OpenRouter فرق دارد) هرگز انتخاب نشوند
+  get platform(): 'LIARA' | 'OPENROUTER' {
+    return this.isOpenRouter ? 'OPENROUTER' : 'LIARA';
+  }
+
   get baseURL(): string {
     return this.isOpenRouter
       ? (this.config.get<string>('OPENROUTER_BASE_URL') ??

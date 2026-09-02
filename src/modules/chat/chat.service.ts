@@ -354,7 +354,11 @@ export class ChatService {
     // انتخاب مدل فقط بر اساس موجودی کیف‌پول (برای PAYG، پایین‌تر) محدود می‌شود]
     const allowed = (
       await this.prisma.aiModel.findMany({
-        where: { isActive: true, modelType: 'CHAT' },
+        where: {
+          isActive: true,
+          modelType: 'CHAT',
+          platform: { has: this.aiProvider.platform },
+        },
         select: { name: true },
       })
     ).map((m) => m.name);
@@ -485,7 +489,11 @@ export class ChatService {
       // (modelRecord=null) و این چک بی‌اثر می‌ماند — Router خودش تضمین می‌کند مدل انتخابی از vision
       // پشتیبانی کند (بخش hasImages بالا).
       const modelRecord = await this.prisma.aiModel.findFirst({
-        where: { name: rawModelChoice, isActive: true },
+        where: {
+          name: rawModelChoice,
+          isActive: true,
+          platform: { has: this.aiProvider.platform },
+        },
         select: { supportsVision: true },
       });
       if (modelRecord && !modelRecord.supportsVision) {
@@ -1207,6 +1215,7 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
             name: requestedModel,
             isActive: true,
             supportsImageGen: true,
+            platform: { has: this.aiProvider.platform },
           },
         })
       : null;
@@ -1215,6 +1224,7 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
       where: {
         supportsImageGen: true,
         isActive: true,
+        platform: { has: this.aiProvider.platform },
       },
       orderBy: { sortOrder: 'asc' },
     });
@@ -1557,7 +1567,12 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
   ): Promise<string | null> {
     try {
       const candidates = await this.prisma.aiModel.findMany({
-        where: { isActive: true, modelType: 'CHAT', supportsVision: true },
+        where: {
+          isActive: true,
+          modelType: 'CHAT',
+          supportsVision: true,
+          platform: { has: this.aiProvider.platform },
+        },
         orderBy: { sortOrder: 'asc' },
       });
       if (!candidates.length) return null;

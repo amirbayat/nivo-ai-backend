@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RedisService } from '../../redis/redis.service';
+import { AiProviderService } from '../../common/services/ai-provider.service';
 import { fa } from '../../i18n/fa';
 import { CreatePlanDto } from './dto/create-plan.dto';
 import { UpdatePlanDto } from './dto/update-plan.dto';
@@ -11,6 +12,7 @@ export class PlansService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
+    private readonly aiProvider: AiProviderService,
   ) {}
 
   findAll() {
@@ -33,7 +35,13 @@ export class PlansService {
   // مسیریاب مدل (model-router.service.ts) جدا و همچنان فقط modelType:'CHAT' فیلتر می‌کند.
   findModelCatalog() {
     return this.prisma.aiModel.findMany({
-      where: { isActive: true, modelType: { in: ['CHAT', 'IMAGE_GEN'] } },
+      where: {
+        isActive: true,
+        modelType: { in: ['CHAT', 'IMAGE_GEN'] },
+        // فقط مدل‌هایی که روی provider فعلی (لیارا/OpenRouter) واقعاً معتبرند — طبق
+        // docs/PRD-openrouter-migration.md §۶.۳
+        platform: { has: this.aiProvider.platform },
+      },
       orderBy: { sortOrder: 'asc' },
       select: {
         name: true,
