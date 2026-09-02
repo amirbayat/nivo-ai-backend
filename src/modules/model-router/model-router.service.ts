@@ -203,7 +203,13 @@ export class ModelRouterService {
     // پیش‌فرض وقتی هیچ selectionMode مشخصی نرسیده (نه انتخاب دستی، نه سنتینل صریح) — مصرف بهینه
     const effectiveMode =
       input.selectionMode === 'best_answer' ? 'best_answer' : 'cost_optimized';
-    const picked = this.pickBySelectionMode(candidates, effectiveMode);
+    // simpleModel (فیلد «مدل ساده» پلن، از صفحه‌ی «مسیریابی مدل‌ها» در ادمین) دیفالت متنی
+    // مصرف‌بهینه را هم override می‌کند — قبلاً فقط routeSimple (مسیر تیری قدیمی) این را می‌خواند
+    const picked = this.pickBySelectionMode(
+      candidates,
+      effectiveMode,
+      input.simpleModel,
+    );
     return {
       modelId: picked.name,
       tier: picked.tier,
@@ -222,8 +228,15 @@ export class ModelRouterService {
   pickBySelectionMode(
     candidates: AiModel[],
     selectionMode: 'cost_optimized' | 'best_answer',
+    preferredModelName?: string | null,
   ): AiModel {
     if (selectionMode === 'cost_optimized') {
+      // مدل ادمین‌انتخاب‌شده (وقتی بین کاندیدهای معتبر همین درخواست هم هست — مثلاً وقتی
+      // hasImages باعث فیلتر supportsVision شده) روی استخر هاردکد پیش‌فرض ارجحیت دارد
+      if (preferredModelName) {
+        const exact = candidates.find((c) => c.name === preferredModelName);
+        if (exact) return exact;
+      }
       const preferred = candidates.filter((c) =>
         COST_OPTIMIZED_MODEL_NAMES.includes(c.name),
       );
