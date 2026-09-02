@@ -50,7 +50,10 @@ import {
   detectImageGenIntent,
   detectImageEditIntent,
 } from './image-gen-intent';
-import { AiProviderService } from '../../common/services/ai-provider.service';
+import {
+  AiProviderService,
+  OPENROUTER_METADATA_KEY,
+} from '../../common/services/ai-provider.service';
 
 const OPTIMAL_MODE = 'optimal'; // legacy — مقداری که قبل از این تغییر توی localStorage/DB ذخیره شده بود، معادل «بهترین پاسخ» فعلی
 // docs/PRD-model-selection-modes.md — دو حالت خودکار جدید که جایگزین OPTIMAL_MODE قدیمی شدند
@@ -772,6 +775,16 @@ export class ChatService {
         usage.outputTokens ?? 0,
         modelId,
       );
+      // docs/EXECUTION-PLAN.md قدم ۴ — usage.cost واقعی OpenRouter، در کنار تخمین بالا (نه
+      // جایگزینش)؛ روی لیارا این متادیتا اصلاً برنمی‌گردد، پس همیشه null می‌ماند
+      const providerMetadata = await result.providerMetadata;
+      const openrouterCostUsd = providerMetadata?.[OPENROUTER_METADATA_KEY]?.[
+        'cost'
+      ] as number | undefined;
+      const openrouterRealCostUsdMicros =
+        typeof openrouterCostUsd === 'number'
+          ? Math.round(openrouterCostUsd * 1_000_000)
+          : null;
 
       const assistantMessage = await this.prisma.message.create({
         data: {
@@ -784,6 +797,7 @@ export class ChatService {
           costToman,
           costUsdMicros,
           costInputUsdMicros,
+          openrouterRealCostUsdMicros,
           costOutputUsdMicros,
           model: modelId,
         },
@@ -1415,6 +1429,7 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
           costUsdMicros,
           costInputUsdMicros,
           costOutputUsdMicros,
+          openrouterRealCostUsdMicros: result.usage.realCostUsdMicros,
           model: modelId,
         },
       });

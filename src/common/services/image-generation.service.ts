@@ -8,11 +8,13 @@ import { AiProviderService } from './ai-provider.service';
 // تصمیم کسر اعتبار/هزینه در لایه‌ی بالاتر (ChatService یا DiscoveryGenerationService) گرفته
 // می‌شود، نه اینجا.
 //
-// نکته‌ی مهم درباره‌ی OpenRouter (docs/EXECUTION-PLAN.md قدم ۵، جدا از قدم ۱): بر خلاف چت/متن،
-// endpoint تولید عکس OpenRouter مسیر متفاوتی دارد (`/images` نه `/images/generations`/`/images/edits`
-// لیارا) — یعنی سوییچ AI_PROVIDER به‌تنهایی برای عکس کافی نیست، باید فرمت درخواست/پاسخ هم در
-// قدم ۵ بازنویسی شود. تا آن قدم، callImagesApi عمداً روی OpenRouter خطای صریح می‌دهد تا به‌جای
-// شکست خاموش/۴۰۴، مشکل زود و واضح معلوم شود.
+// نکته‌ی مهم درباره‌ی OpenRouter (docs/EXECUTION-PLAN.md قدم ۵): بر خلاف چت/متن، OpenRouter تولید
+// عکس را برای خانواده‌ی مدل‌های چندوجهی (Gemini/GPT-image که الان در کاتالوگ هستند) از طریق همان
+// `/chat/completions` با `modalities: ['image','text']` انجام می‌دهد، نه یک endpoint اختصاصی
+// `/images/generations` مثل لیارا (تایید شده از داک/نمونه‌کد رسمی OpenRouter برای
+// google/gemini-*-image، ۱۴۰۵-۰۶-۱۲). عکس خروجی در `choices[0].message.images[].image_url.url`
+// (data URL) برمی‌گردد. به همین دلیل مسیر OpenRouter پیاده‌سازی کاملاً جدایی دارد
+// (callOpenRouterImageChat) و partial_images/streaming (فقط قابلیت لیارا/gpt-image) را ندارد.
 
 // برای تشخیص «رد شدن به‌خاطر سیاست محتوا» از یک خطای معمولی/گذرا — کاربر باید بفهمه باید
 // توصیفش رو عوض کنه، نه صرفاً دوباره امتحان کنه
@@ -52,6 +54,13 @@ export class ImageGenerationService {
     quality?: string;
     onPartial?: (base64: string) => void;
   }) {
+    if (this.aiProvider.isOpenRouter) {
+      return this.callOpenRouterImageChat(
+        params.modelId,
+        params.prompt,
+        params.apiKey,
+      );
+    }
     return this.callImagesApi(
       '/images/generations',
       {
@@ -78,6 +87,14 @@ export class ImageGenerationService {
     quality?: string;
     onPartial?: (base64: string) => void;
   }) {
+    if (this.aiProvider.isOpenRouter) {
+      return this.callOpenRouterImageChat(
+        params.modelId,
+        params.prompt,
+        params.apiKey,
+        params.images,
+      );
+    }
     const form = new FormData();
     form.append('model', params.modelId);
     form.append('prompt', params.prompt);
@@ -116,15 +133,10 @@ export class ImageGenerationService {
       textInputTokens: number;
       imageInputTokens: number;
       outputTokens: number;
+      // قدم ۴ — لیارا اصلاً این را ندارد، همیشه null
+      realCostUsdMicros: number | null;
     };
   }> {
-    if (this.aiProvider.isOpenRouter) {
-      // docs/EXECUTION-PLAN.md قدم ۵ — مهاجرت واقعی تولید عکس (endpoint/فرمت متفاوت OpenRouter)
-      // هنوز انجام نشده؛ به‌جای fetch به مسیر غلط (۴۰۴ خاموش)، همین‌جا صریح fail می‌شود.
-      throw new Error(
-        'تولید عکس روی OpenRouter هنوز مهاجرت نشده (قدم ۵ نقشه‌ی اجرا) — فعلاً فقط با AI_PROVIDER=liara کار می‌کند.',
-      );
-    }
     const baseUrl = this.aiProvider.baseURL;
     const isFormData = body instanceof FormData;
     // بعضی مدل‌ها (تأیید شده برای gpt-image-1-mini روی گیت‌وی ما) اصلاً stream/partial_images
@@ -232,6 +244,7 @@ export class ImageGenerationService {
           textInputTokens: json.usage?.input_tokens_details?.text_tokens ?? 0,
           imageInputTokens: json.usage?.input_tokens_details?.image_tokens ?? 0,
           outputTokens: json.usage?.output_tokens ?? 0,
+          realCostUsdMicros: null,
         },
       };
     }
@@ -247,7 +260,12 @@ export class ImageGenerationService {
     const decoder = new TextDecoder();
     let buffer = '';
     let finalBase64: string | null = null;
-    let usage = { textInputTokens: 0, imageInputTokens: 0, outputTokens: 0 };
+    let usage = {
+      textInputTokens: 0,
+      imageInputTokens: 0,
+      outputTokens: 0,
+      realCostUsdMicros: null as number | null,
+    };
 
     while (true) {
       const { done, value } = await reader.read();
@@ -285,6 +303,7 @@ export class ImageGenerationService {
               imageInputTokens:
                 evt.usage?.input_tokens_details?.image_tokens ?? 0,
               outputTokens: evt.usage?.output_tokens ?? 0,
+              realCostUsdMicros: null,
             };
           }
         } catch {
@@ -298,5 +317,131 @@ export class ImageGenerationService {
         `Liara images API ${path} streaming ended without a completed image`,
       );
     return { base64: finalBase64, usage };
+  }
+
+  // مسیر OpenRouter — همون توضیح بالای فایل: از /chat/completions با modalities:['image','text']
+  // استفاده می‌کند، نه یک endpoint عکس جدا. onPartial/streaming پشتیبانی نمی‌شود (قابلیت
+  // اختصاصی لیارا/gpt-image family بود)، پس پیش‌نمایش تدریجی روی OpenRouter عمداً غیرفعال است.
+  private async callOpenRouterImageChat(
+    modelId: string,
+    prompt: string,
+    apiKey: string,
+    inputImages?: Buffer[],
+  ): Promise<{
+    base64: string;
+    usage: {
+      textInputTokens: number;
+      imageInputTokens: number;
+      outputTokens: number;
+      realCostUsdMicros: number | null;
+    };
+  }> {
+    const content: Array<Record<string, unknown>> = [
+      { type: 'text', text: prompt },
+    ];
+    for (const buf of inputImages ?? []) {
+      content.push({
+        type: 'image_url',
+        image_url: { url: `data:image/png;base64,${buf.toString('base64')}` },
+      });
+    }
+
+    const body = {
+      model: modelId,
+      modalities: ['image', 'text'],
+      messages: [{ role: 'user', content }],
+      usage: { include: true },
+    };
+
+    const doFetch = () =>
+      fetch(`${this.aiProvider.baseURL}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          ...(this.aiProvider.extraHeaders ?? {}),
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(120_000),
+      });
+
+    let res: Awaited<ReturnType<typeof doFetch>>;
+    try {
+      res = await doFetch();
+      if (!res.ok && res.status >= 500) {
+        this.logger.warn(
+          `OpenRouter chat/completions (image) returned ${res.status}, retrying once`,
+        );
+        res = await doFetch();
+      }
+    } catch (err) {
+      this.logger.warn(
+        `OpenRouter chat/completions (image) network error, retrying once: ${(err as Error).message}`,
+      );
+      res = await doFetch();
+    }
+
+    const text = await res.text();
+    type OpenRouterImageChatResponse = {
+      choices?: Array<{
+        message?: {
+          content?: string | null;
+          images?: Array<{ image_url?: { url?: string } }>;
+        };
+      }>;
+      usage?: {
+        prompt_tokens?: number;
+        completion_tokens?: number;
+        cost?: number;
+      };
+      error?: { code?: string | number; type?: string; message?: string };
+    };
+    let json: OpenRouterImageChatResponse;
+    try {
+      json = JSON.parse(text) as OpenRouterImageChatResponse;
+    } catch {
+      throw new Error(
+        `OpenRouter chat/completions (image) returned non-JSON response: ${text.slice(0, 300)}`,
+      );
+    }
+
+    if (!res.ok || json.error) {
+      const code = json.error?.code ?? json.error?.type ?? null;
+      const message = json.error?.message ?? text.slice(0, 300);
+      const isPolicyViolation = /moderation|policy|safety/i.test(
+        `${code ?? ''} ${message}`,
+      );
+      throw new ImageApiError(
+        message,
+        code == null ? null : String(code),
+        isPolicyViolation,
+      );
+    }
+
+    const imageUrl = json.choices?.[0]?.message?.images?.[0]?.image_url?.url;
+    if (!imageUrl)
+      throw new Error(
+        'OpenRouter chat/completions (image): no image returned in message.images — model may have refused or is not image-capable',
+      );
+    const base64 = imageUrl.replace(/^data:image\/\w+;base64,/, '');
+
+    return {
+      base64,
+      usage: {
+        // OpenRouter چت‌کامپلیشن‌ها usage را per-modality تفکیک نمی‌کنند (بر خلاف لیارا) — تا
+        // تفکیک دقیق‌تر لازم بشه، همه‌ی ورودی زیر textInputTokens حساب می‌شود؛
+        // imageInputTokens=0 یعنی هزینه‌ی عکس ورودی در حالت edit موقتاً دست‌کم گرفته می‌شود، نه
+        // بیش‌برآورد — عمداً محافظه‌کارانه به نفع کاربر. realCostUsdMicros واقعی جبرانش می‌کند
+        // چون از کل هزینه‌ی دلاری واقعی provider (usage.cost، تست‌شده روی API واقعی) می‌آید،
+        // نه از این تخمین توکنی
+        textInputTokens: json.usage?.prompt_tokens ?? 0,
+        imageInputTokens: 0,
+        outputTokens: json.usage?.completion_tokens ?? 0,
+        realCostUsdMicros:
+          typeof json.usage?.cost === 'number'
+            ? Math.round(json.usage.cost * 1_000_000)
+            : null,
+      },
+    };
   }
 }

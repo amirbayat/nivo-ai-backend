@@ -222,6 +222,9 @@ model Message {
   costUsdMicros       Int         @default(0)
   costInputUsdMicros  Int         @default(0) // سهم توکن ورودی از costUsdMicros — برای میانگین وزنی قیمت ورودی/خروجی در آنالیز (بدون بازمحاسبه با قیمت فعلی مدل)
   costOutputUsdMicros Int         @default(0)
+  // docs/EXECUTION-PLAN.md قدم ۴ — usage.cost واقعی OpenRouter (دلار × ۱e6)، در کنار تخمین
+  // داخلی بالا نه جایگزینش؛ null یعنی روی لیارا بوده یا provider این‌بار cost برنگردانده
+  openrouterRealCostUsdMicros Int?
   model               String?
   topicId             String?
   createdAt           DateTime    @default(now())
