@@ -31,7 +31,16 @@ const MODELS = [
   { name: 'deepseek/deepseek-r1-distill-llama-70b', displayName: 'R1 Distill Llama 70B', provider: 'deepseek', inputPricePerM: 0.8, outputPricePerM: 0.8, supportsVision: false, sortOrder: 23, tier: 'MEDIUM' as const, tokenizerFamily: 'approximate', avgCharsPerToken: 4 },
   // sortOrder: 0 یعنی این مدل دیفالت تولید عکس استودیو است (discovery-generation.service.ts resolveModel —
   // پایین‌ترین sortOrder بین IMAGE_GEN های فعال، وقتی سبک preferredModel ندارد و کاربر هم مدلی انتخاب نکرده)
-  { name: 'openai/gpt-image-2', displayName: 'GPT Image 2', provider: 'openai', modelType: 'IMAGE_GEN' as const, inputPricePerM: 0, outputPricePerM: 0, supportsVision: false, sortOrder: 0, tier: 'MEDIUM' as const, tokenizerFamily: 'approximate', avgCharsPerToken: 4 },
+  { name: 'openai/gpt-image-2', displayName: 'GPT Image 2', provider: 'openai', modelType: 'IMAGE_GEN' as const, inputPricePerM: 0, outputPricePerM: 0, supportsVision: false, supportsImageGen: true, platform: ['OPENROUTER' as const], sortOrder: 0, tier: 'MEDIUM' as const, tokenizerFamily: 'approximate', avgCharsPerToken: 4 },
+  // این چهار مدل + gpt-image-2 بالا، ۵ مدل تولید عکس چت‌محور هستند — tier تعیین می‌کند
+  // classifyImagePrompt/rankImageModelCandidates (chat.service.ts) کدام را برای چه سطحی از
+  // پیچیدگی درخواست انتخاب کند: SIMPLE=سریع/ارزان، MEDIUM=معمولی، COMPLEX=فوتورئالیستیک/جزئیات‌دار.
+  // قیمت واقعی (imageGenFlatPriceUsd/Unit یا per-token) عمداً اینجا صفر است — باید از پنل ادمین
+  // با نرخ واقعی OpenRouter پر شود (docs/PRD-image-gen-pricing-and-credit-fix.md)
+  { name: 'google/gemini-3.1-flash-lite-image', displayName: 'Gemini 3.1 Flash Lite Image', provider: 'google', modelType: 'IMAGE_GEN' as const, inputPricePerM: 0, outputPricePerM: 0, supportsVision: false, supportsImageGen: true, platform: ['OPENROUTER' as const], sortOrder: 24, tier: 'SIMPLE' as const, tokenizerFamily: 'approximate', avgCharsPerToken: 4 },
+  { name: 'google/gemini-2.5-flash-image', displayName: 'Gemini 2.5 Flash Image', provider: 'google', modelType: 'IMAGE_GEN' as const, inputPricePerM: 0, outputPricePerM: 0, supportsVision: false, supportsImageGen: true, platform: ['OPENROUTER' as const], sortOrder: 25, tier: 'MEDIUM' as const, tokenizerFamily: 'approximate', avgCharsPerToken: 4 },
+  { name: 'openai/gpt-5-image-mini', displayName: 'GPT-5 Image Mini', provider: 'openai', modelType: 'IMAGE_GEN' as const, inputPricePerM: 0, outputPricePerM: 0, supportsVision: false, supportsImageGen: true, platform: ['OPENROUTER' as const], sortOrder: 26, tier: 'MEDIUM' as const, tokenizerFamily: 'approximate', avgCharsPerToken: 4 },
+  { name: 'openai/gpt-5.4-image-2', displayName: 'GPT-5.4 Image 2', provider: 'openai', modelType: 'IMAGE_GEN' as const, inputPricePerM: 0, outputPricePerM: 0, supportsVision: false, supportsImageGen: true, platform: ['OPENROUTER' as const], sortOrder: 27, tier: 'COMPLEX' as const, tokenizerFamily: 'approximate', avgCharsPerToken: 4 },
 ]
 
 async function main() {
