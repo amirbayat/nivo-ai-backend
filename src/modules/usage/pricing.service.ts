@@ -367,9 +367,11 @@ export class PricingService {
     return amount;
   }
 
-  // مبلغ نهایی به بالا رو به نزدیک‌ترین «نیوو» کامل گرد می‌شود (نه فقط تومان) — یعنی حتی
-  // ۰.۱ نیوو اضافه هم یک نیوو کامل حساب می‌شود. برای صداگذاری‌های از پیش نیوو-محور (markup=1،
-  // costToman از قبل مضرب دقیق tomanPerCredit است) این عملاً no-op است.
+  // مبلغ نهایی برای مصرف‌های کم به‌جای پرش مستقیم به یک نیووی کامل، پله‌پله گرد می‌شود:
+  // مصرف < ۰.۲ نیوو → ۰.۲ نیوو کسر می‌شود؛ بین ۰.۲ تا ۰.۵ → ۰.۵ نیوو؛ بین ۰.۵ تا ۰.۸ → ۰.۸ نیوو؛
+  // و از ۰.۸ به بالا به همان روش قدیم (گرد به بالا به نزدیک‌ترین نیووی کامل) کسر می‌شود. برای
+  // صداگذاری‌های از پیش نیوو-محور (markup=1، costToman از قبل مضرب دقیق tomanPerCredit است)
+  // مقدار همیشه در بازه‌ی «۰.۸ به بالا» می‌افتد، پس این عملاً no-op است.
   //
   // docs/PRD-image-gen-pricing-and-credit-fix.md §۱۴ — تصمیم صریح کاربر: این تابع دیگر به‌خاطر
   // موجودی ناکافی رد نمی‌کند (مثل قبل که false برمی‌گرداند و چیزی کم نمی‌شد). گیت واقعی preflight
@@ -387,8 +389,20 @@ export class PricingService {
       create: { id: 'singleton' },
       update: {},
     });
-    const walletCost =
-      Math.ceil((costToman * markup) / tomanPerCredit) * tomanPerCredit;
+    const rawCredit = (costToman * markup) / tomanPerCredit;
+    let roundedCredit: number;
+    if (rawCredit <= 0) {
+      roundedCredit = 0;
+    } else if (rawCredit < 0.2) {
+      roundedCredit = 0.2;
+    } else if (rawCredit < 0.5) {
+      roundedCredit = 0.5;
+    } else if (rawCredit < 0.8) {
+      roundedCredit = 0.8;
+    } else {
+      roundedCredit = Math.ceil(rawCredit);
+    }
+    const walletCost = Math.round(roundedCredit * tomanPerCredit);
     const wallet = await this.prisma.wallet.findUnique({ where: { userId } });
     if (!wallet) return false;
 
