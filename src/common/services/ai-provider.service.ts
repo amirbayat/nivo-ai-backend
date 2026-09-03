@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import type { MetadataExtractor } from '@ai-sdk/openai-compatible';
-import { ProxyAgent } from 'undici';
+import { ProxyAgent, fetch as undiciFetch } from 'undici';
 
 export type AiProviderName = 'liara' | 'openrouter';
 
@@ -138,14 +138,21 @@ export class AiProviderService {
   // fetch سفارشی که caller های OpenRouter (هم AI SDK از طریق buildClient، هم fetch خام در
   // image-generation.service.ts) باید به‌جایِ global fetch استفاده کنند؛ undefined یعنی
   // OPENROUTER_PROXY_URL ست نشده و باید global fetch معمولی استفاده شود.
+  //
+  // عمداً از globalThis.fetch با آپشن dispatcher استفاده نمی‌شود: Node (اینجا v22) یک نسخه‌ی
+  // داخلی/vendored از undici را برای global fetch باندل می‌کند (مثلاً v6.x) که با نسخه‌ی
+  // نصب‌شده‌ی جدامون در package.json (v8.x، برای ProxyAgent) فرق دارد. دو نسخه‌ی undici
+  // اینترفیس داخلی Handler ناسازگار دارند، پس دادن dispatcher نسخه‌ی جدید به fetch نسخه‌ی
+  // قدیمی همان خطای «invalid onRequestStart method» را می‌دهد. راه‌حل: fetch را هم از همان
+  // پکیج undici که ProxyAgent را ساخته می‌گیریم (نه globalThis.fetch)، تا نسخه‌ها یکی باشند.
   get fetch(): typeof globalThis.fetch | undefined {
     const dispatcher = this.proxyDispatcher;
     if (!dispatcher) return undefined;
     return ((input: Parameters<typeof fetch>[0], init?: RequestInit) =>
-      globalThis.fetch(input, {
-        ...init,
+      undiciFetch(input as string, {
+        ...(init as Record<string, unknown>),
         dispatcher,
-      } as RequestInit)) as typeof globalThis.fetch;
+      })) as unknown as typeof globalThis.fetch;
   }
 
   // apiKey اختیاری برای caller هایی که کلید اختصاصی خودشان را resolve کرده‌اند (مثل
