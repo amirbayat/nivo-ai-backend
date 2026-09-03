@@ -202,6 +202,7 @@ export class PaymentsService {
     packageId?: string,
     credits?: number,
     returnUrl?: string,
+    tomanPerCreditSnapshot?: number,
   ) {
     return this.createWalletTopupPayment(
       userId,
@@ -211,6 +212,7 @@ export class PaymentsService {
       packageId,
       credits,
       returnUrl,
+      tomanPerCreditSnapshot,
     );
   }
 
@@ -222,6 +224,7 @@ export class PaymentsService {
     packageId?: string,
     credits?: number,
     returnUrl?: string,
+    tomanPerCreditSnapshot?: number,
   ) {
     const gateway = this.registry.resolve(gatewayName);
     const callbackUrl = `${this.config.get('API_URL')}/api/v1/payments/callback/${gateway.name.toLowerCase()}`;
@@ -240,6 +243,11 @@ export class PaymentsService {
       ...(source === 'app' ? { source: 'app' } : {}),
       ...(returnUrl && ALLOWED_RETURN_ORIGINS.includes(returnUrl)
         ? { returnUrl }
+        : {}),
+      // snapshot لحظه‌ی خرید — تا اگر tomanPerCredit تا لحظه‌ی تکمیل پرداخت در ادمین عوض شود،
+      // شارژ کیف‌پول همچنان با همان نرخی حساب شود که قیمت این پرداخت با آن محاسبه شده بود
+      ...(packageId && tomanPerCreditSnapshot != null
+        ? { tomanPerCreditSnapshot }
         : {}),
     };
 
@@ -270,6 +278,7 @@ export class PaymentsService {
     pkg: CreditPackage,
     amountToman: number,
     purchaseToken: string,
+    tomanPerCreditSnapshot: number,
   ): Promise<void> {
     // Idempotency لایه‌ی اول — اگر این purchaseToken قبلاً ثبت شده (تلاش دوباره‌ی موبایل بعد از
     // timeout شبکه، یا تلاش برای مصرف دوباره‌ی یک خرید)، بدون خطا و بدون شارژ دوباره برمی‌گردیم.
@@ -309,7 +318,7 @@ export class PaymentsService {
           providerRef: purchaseToken,
           packageId: pkg.id,
           credits: pkg.credits,
-          metadata: { productId: pkg.bazaarSku },
+          metadata: { productId: pkg.bazaarSku, tomanPerCreditSnapshot },
         },
         include: { user: true },
       });
@@ -608,6 +617,25 @@ export class PaymentsService {
     };
   }
 
+  // برای payment.credits غیر null، مبلغی که باید به کیف‌پول اضافه شود را از snapshot نرخ
+  // tomanPerCredit لحظه‌ی خرید (متادیتای پرداخت — createWalletTopupPayment/confirmBazaarPurchase)
+  // حساب می‌کند، نه از payment.amount؛ اگر snapshot نبود (پرداخت‌های قدیمی‌تر از این تغییر)،
+  // برای عدم‌شکست به مبلغ پرداختی fallback می‌کند.
+  private resolveWalletCreditToman(payment: Payment): number {
+    if (payment.credits == null) return payment.amount;
+    const metadata = payment.metadata;
+    const snapshot =
+      metadata &&
+      typeof metadata === 'object' &&
+      !Array.isArray(metadata) &&
+      typeof (metadata as Record<string, unknown>).tomanPerCreditSnapshot ===
+        'number'
+        ? ((metadata as Record<string, unknown>)
+            .tomanPerCreditSnapshot as number)
+        : null;
+    return snapshot != null ? payment.credits * snapshot : payment.amount;
+  }
+
   // docs/PRD-pay-as-you-go-wallet.md بخش ۵.۱ — شارژ موفق: کیف‌پول credit می‌شود، و فقط اگر این
   // اولین شارژ موفق کاربر بوده باشد، اشتراکش به پلن PAYG سوییچ/فعال می‌شود
   private async completeWalletTopup(
@@ -623,6 +651,11 @@ export class PaymentsService {
       },
     });
     const isFirstTopup = priorTopups === 0;
+    // خرید بسته‌ی نیوو (payment.credits ست شده): کیف‌پول باید دقیقاً معادل تعداد نیووی روی برچسب
+    // بسته شارژ شود (credits × tomanPerCredit لحظه‌ی خرید)، نه معادل مبلغ نقدی پرداختی — وگرنه
+    // تخفیف بسته باعث می‌شود کاربر کمتر از نیووی وعده‌داده‌شده بگیرد. شارژ کیف‌پول دستی/قدیمی
+    // (بدون بسته، payment.credits=null) همچنان دقیقاً معادل مبلغ پرداختی شارژ می‌شود.
+    const creditToman = this.resolveWalletCreditToman(payment);
 
     const invoice = await this.prisma.$transaction(async (tx) => {
       await tx.payment.update({
@@ -632,14 +665,14 @@ export class PaymentsService {
 
       const wallet = await tx.wallet.upsert({
         where: { userId: payment.userId },
-        create: { userId: payment.userId, balanceToman: payment.amount },
-        update: { balanceToman: { increment: payment.amount } },
+        create: { userId: payment.userId, balanceToman: creditToman },
+        update: { balanceToman: { increment: creditToman } },
       });
       await tx.walletTransaction.create({
         data: {
           walletId: wallet.id,
           type: 'CREDIT',
-          amountToman: payment.amount,
+          amountToman: creditToman,
           description: fa.payment.walletTopupDescription,
           metadata: { paymentId: payment.id },
         },

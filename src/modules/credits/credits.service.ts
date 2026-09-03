@@ -87,14 +87,15 @@ export class CreditsService {
     return { priceToman };
   }
 
-  // قیمت نهایی بسته: credits × tomanPerCredit × purchaseMarkup × (1 - discountPercent/100)
-  // ضریب ۱.۳ اینجا (لحظه‌ی خرید) اعمال می‌شود، نه لحظه‌ی مصرف — چون هزینه‌ی هر سبک از قبل ثابت است
+  // قیمت نهایی بسته: credits × tomanPerCredit × (1 - discountPercent/100) — بدون مارک‌آپ.
+  // هر نیوو دقیقاً tomanPerCredit تومان است؛ مارک‌آپ فقط لحظه‌ی مصرف (debitWallet) اعمال می‌شود،
+  // نه این‌جا — چون کیف‌پول بعد از خرید باید دقیقاً معادل همان تعداد نیووی روی برچسب بسته شارژ شود.
   private computePackagePrice(
     credits: number,
     discountPercent: number,
-    config: { tomanPerCredit: number; purchaseMarkup: number },
+    config: { tomanPerCredit: number },
   ): number {
-    const base = credits * config.tomanPerCredit * config.purchaseMarkup;
+    const base = credits * config.tomanPerCredit;
     return Math.round(base * (1 - discountPercent / 100));
   }
 
@@ -137,6 +138,7 @@ export class CreditsService {
       pkg.id,
       effectiveCredits,
       dto.returnUrl,
+      config.tomanPerCredit,
     );
   }
 
@@ -164,6 +166,7 @@ export class CreditsService {
       pkg,
       amountToman,
       dto.purchaseToken,
+      config.tomanPerCredit,
     );
 
     return this.getBalance(userId);

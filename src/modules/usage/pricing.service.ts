@@ -367,11 +367,10 @@ export class PricingService {
     return amount;
   }
 
-  // مبلغ نهایی برای مصرف‌های کم به‌جای پرش مستقیم به یک نیووی کامل، پله‌پله گرد می‌شود:
-  // مصرف < ۰.۲ نیوو → ۰.۲ نیوو کسر می‌شود؛ بین ۰.۲ تا ۰.۵ → ۰.۵ نیوو؛ بین ۰.۵ تا ۰.۸ → ۰.۸ نیوو؛
-  // و از ۰.۸ به بالا به همان روش قدیم (گرد به بالا به نزدیک‌ترین نیووی کامل) کسر می‌شود. برای
-  // صداگذاری‌های از پیش نیوو-محور (markup=1، costToman از قبل مضرب دقیق tomanPerCredit است)
-  // مقدار همیشه در بازه‌ی «۰.۸ به بالا» می‌افتد، پس این عملاً no-op است.
+  // مبلغ نهایی طبق پله‌های قابل‌تنظیم CreditConfig.roundingSteps گرد می‌شود: مصرف خام کمتر از
+  // اولین پله → همان پله؛ بین دو پله → پله‌ی بعدی؛ بالاتر از آخرین پله (یا وقتی پله‌ای تعریف
+  // نشده) → گرد به بالا به نزدیک‌ترین نیووی کامل. مثال با پله‌های پیش‌فرض [0.2, 0.5, 0.8]:
+  // مصرف ۰.۱۵ → ۰.۲ نیوو، مصرف ۰.۶ → ۰.۸ نیوو، مصرف ۱.۳۵ → ۲ نیوو.
   //
   // docs/PRD-image-gen-pricing-and-credit-fix.md §۱۴ — تصمیم صریح کاربر: این تابع دیگر به‌خاطر
   // موجودی ناکافی رد نمی‌کند (مثل قبل که false برمی‌گرداند و چیزی کم نمی‌شد). گیت واقعی preflight
@@ -384,25 +383,15 @@ export class PricingService {
     description: string,
     metadata?: Record<string, unknown>,
   ): Promise<boolean> {
-    const { tomanPerCredit } = await this.prisma.creditConfig.upsert({
-      where: { id: 'singleton' },
-      create: { id: 'singleton' },
-      update: {},
-    });
+    const { tomanPerCredit, roundingSteps } =
+      await this.prisma.creditConfig.upsert({
+        where: { id: 'singleton' },
+        create: { id: 'singleton' },
+        update: {},
+      });
     const rawCredit = (costToman * markup) / tomanPerCredit;
-    let roundedCredit: number;
-    if (rawCredit <= 0) {
-      roundedCredit = 0;
-    } else if (rawCredit < 0.2) {
-      roundedCredit = 0.2;
-    } else if (rawCredit < 0.5) {
-      roundedCredit = 0.5;
-    } else if (rawCredit < 0.8) {
-      roundedCredit = 0.8;
-    } else {
-      roundedCredit = Math.ceil(rawCredit);
-    }
-    const walletCost = Math.round(roundedCredit * tomanPerCredit);
+    const roundedCredit = this.roundCreditToStep(rawCredit, roundingSteps);
+    const walletCost = roundedCredit * tomanPerCredit;
     const wallet = await this.prisma.wallet.findUnique({ where: { userId } });
     if (!wallet) return false;
 
@@ -424,6 +413,16 @@ export class PricingService {
       }),
     ]);
     return true;
+  }
+
+  // steps باید صعودی و بین صفر و یک باشند (تضمین‌شده توسط ادمین، ولی sort هم دفاعی انجام می‌شود)
+  private roundCreditToStep(rawCredit: number, steps: number[]): number {
+    if (rawCredit <= 0) return 0;
+    const sortedSteps = [...steps].sort((a, b) => a - b);
+    for (const step of sortedSteps) {
+      if (rawCredit <= step) return step;
+    }
+    return Math.ceil(rawCredit);
   }
 
   private upsellMessageFor(planTier: string): string {

@@ -509,8 +509,13 @@ enum WalletTxType {
 // singleton (مثل ChatConfig/GrowthConfig) — نرخ تبدیل و ضریب فروش، هر دو از ادمین قابل‌تغییر
 model CreditConfig {
   id                               String   @id @default("singleton")
-  tomanPerCredit                   Int      @default(1200) // ارزش پایه‌ی هر ۱ نیوو، قبل از ضریب فروش
-  purchaseMarkup                   Float    @default(1.3) // ضریب فروش بسته — همان مفهوم Plan.payAsYouGoMarkup
+  tomanPerCredit                   Int      @default(1200) // ارزش پایه‌ی هر ۱ نیوو — قیمت بسته‌ها = credits × این عدد (بدون مارک‌آپ)
+  purchaseMarkup                   Float    @default(1.3) // ضریب مصرف «تبدیل عکس به پرامپت» (discovery-generation.service.ts) — روی قیمت بسته‌ها اثر ندارد
+  // پله‌های گرد‌کردن مصرف در PricingService.debitWallet — باید صعودی و همه بین صفر و یک باشند
+  // (مثلاً [0.2, 0.5, 0.8]): مصرف خام کمتر از اولین پله → همان پله؛ بین پله‌ها → پله‌ی بعدی؛
+  // بالاتر از آخرین پله → گرد به بالا به نزدیک‌ترین نیووی کامل. آرایه‌ی خالی یعنی بدون پله،
+  // همیشه فقط گرد به بالا به نیووی کامل.
+  roundingSteps                    Float[]  @default([0.2, 0.5, 0.8])
   freeSignupCredits                Int      @default(20) // شارژ اولیه‌ی رایگان که هر کاربر تازه‌وارد لحظه‌ی ثبت‌نام می‌گیرد — جایگزین سیستم قدیمی dailyFreeTokens/monthlyTotalTokens
   promptExtractionCreditCost       Int      @default(5) // کف قیمت «تبدیل عکس به پرامپت» فقط برای حالت دستی (انتخاب صریح مدل توسط کاربر)؛ حالت‌های خودکار زیر قیمت ثابت خودشان را دارند
   defaultExtractedPromptCreditCost Int      @default(16) // creditCost اولیه‌ی CreativePrompt ساخته‌شده از استخراج — ادمین بعداً می‌تواند تغییر دهد
@@ -535,7 +540,7 @@ model CreditConfig {
 }
 
 // بسته‌های خرید — قیمت نهایی در لحظه‌ی نمایش/خرید محاسبه می‌شود:
-// credits × tomanPerCredit × purchaseMarkup × (1 - discountPercent/100)
+// credits × tomanPerCredit × (1 - discountPercent/100)
 // docs/PRD-nivo-cal-standalone-app.md بخش ۶ — GENERAL همون بسته‌های فعلی (پیش‌فرض، توی همه‌جا
 // نمایش داده می‌شن)؛ NIVO_CAL فقط توی اپ/PWA نیوو کال دیده می‌شه (GET /v2/credits/packages?scope=NIVO_CAL).
 // کیف‌پول همچنان کاملاً مشترکه — این فیلد فقط روی نمایش/قیمت‌گذاری بسته اثر داره، نه مکانیزم اعتبار.

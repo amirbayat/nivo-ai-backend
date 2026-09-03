@@ -1,5 +1,13 @@
 import { Type } from 'class-transformer';
-import { IsInt, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import {
+  IsArray,
+  IsInt,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+} from 'class-validator';
 import { fa } from '../../../i18n/fa';
 
 // نرخ تبدیل + ضریب فروش + شارژ اولیه‌ی رایگان — همه از ادمین قابل‌تغییر (بخش ۵.۷/۳.۱)
@@ -21,6 +29,16 @@ export class UpdateCreditConfigDto {
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(0, { message: fa.validation.numberPositive })
   freeSignupCredits?: number;
+
+  // پله‌های گرد‌کردن مصرف (PricingService.debitWallet) — هرکدام بین صفر و یک؛ ترتیب مهم نیست،
+  // سمت مصرف قبل از استفاده صعودی‌سازی می‌شود
+  @IsOptional()
+  @IsArray()
+  @Type(() => Number)
+  @IsNumber({}, { each: true, message: fa.validation.mustBeNumber })
+  @Min(0.01, { each: true, message: fa.validation.numberPositive })
+  @Max(1, { each: true, message: fa.validation.numberPositive })
+  roundingSteps?: number[];
 
   // دو حالت خودکار «تبدیل عکس به پرامپت» — نام AiModel + قیمت ثابت به نیوو برای هرکدام.
   // null صریح یعنی «پاک کن، به انتخاب خودکار قدیمی برگرد» (فرانت وقتی Select خالی می‌شود همین
