@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
 import type { Queue } from 'bull';
+import { AiProviderService } from '../common/services/ai-provider.service';
 
 const FLUSH_CRON = '*/5 * * * *';
 const SUMMARY_CRON = '0 2 * * *';
@@ -35,6 +36,7 @@ export class QueueService implements OnApplicationBootstrap {
     private readonly liaraUsageSyncQueue: Queue,
     @InjectQueue('liara-key-retry')
     private readonly liaraKeyRetryQueue: Queue,
+    private readonly aiProvider: AiProviderService,
   ) {}
 
   async onApplicationBootstrap() {
@@ -115,28 +117,41 @@ export class QueueService implements OnApplicationBootstrap {
     );
     this.logger.log(`Admin alerts check job scheduled: ${ADMIN_ALERTS_CRON}`);
 
+    // docs/EXECUTION-PLAN.md قدم ۱۷ — این دو جاب فقط برای پلتفرم لیارا معنا دارند (کلید
+    // اختصاصی/رصد مصرف Liara). روی OpenRouter غیرفعال می‌شوند (نه حذف — طبق §۱۷ برای اگر روزی
+    // fallback به لیارا لازم شد دوباره لازم می‌شوند) و هر repeatable قبلی هم پاک می‌شود تا با
+    // سوییچ AI_PROVIDER بلافاصله متوقف شوند، نه فقط از دفعه‌ی بعد.
     const liaraUsageSyncRepeatables =
       await this.liaraUsageSyncQueue.getRepeatableJobs();
     for (const job of liaraUsageSyncRepeatables) {
       await this.liaraUsageSyncQueue.removeRepeatableByKey(job.key);
     }
-    await this.liaraUsageSyncQueue.add(
-      'sync',
-      {},
-      { repeat: { cron: LIARA_USAGE_SYNC_CRON } },
-    );
-    this.logger.log(`Liara usage sync job scheduled: ${LIARA_USAGE_SYNC_CRON}`);
-
     const liaraKeyRetryRepeatables =
       await this.liaraKeyRetryQueue.getRepeatableJobs();
     for (const job of liaraKeyRetryRepeatables) {
       await this.liaraKeyRetryQueue.removeRepeatableByKey(job.key);
     }
-    await this.liaraKeyRetryQueue.add(
-      'retry',
-      {},
-      { repeat: { cron: LIARA_KEY_RETRY_CRON } },
-    );
-    this.logger.log(`Liara key retry job scheduled: ${LIARA_KEY_RETRY_CRON}`);
+
+    if (this.aiProvider.isOpenRouter) {
+      this.logger.log(
+        'Liara usage sync / key retry jobs skipped (AI_PROVIDER=openrouter)',
+      );
+    } else {
+      await this.liaraUsageSyncQueue.add(
+        'sync',
+        {},
+        { repeat: { cron: LIARA_USAGE_SYNC_CRON } },
+      );
+      this.logger.log(
+        `Liara usage sync job scheduled: ${LIARA_USAGE_SYNC_CRON}`,
+      );
+
+      await this.liaraKeyRetryQueue.add(
+        'retry',
+        {},
+        { repeat: { cron: LIARA_KEY_RETRY_CRON } },
+      );
+      this.logger.log(`Liara key retry job scheduled: ${LIARA_KEY_RETRY_CRON}`);
+    }
   }
 }

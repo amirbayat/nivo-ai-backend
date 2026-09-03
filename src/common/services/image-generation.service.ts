@@ -425,6 +425,15 @@ export class ImageGenerationService {
       );
     const base64 = imageUrl.replace(/^data:image\/\w+;base64,/, '');
 
+    // اگر OpenRouter برای این مدل/درخواست usage.cost برنگرداند، کسر واقعی کیف‌پول به تخمین
+    // توکنی برمی‌گردد (chat.service.ts:1422) — این لاگ نبودش را همان لحظه مشخص می‌کند تا حدس
+    // زده نشود؛ سطح warn عمداً (نه debug) چون خودش نشانه‌ی یک مشکل واقعی در دقت صورت‌حساب است
+    if (typeof json.usage?.cost !== 'number') {
+      this.logger.warn(
+        `OpenRouter chat/completions (image) model=${modelId} returned no usage.cost — falling back to token estimate. raw usage=${JSON.stringify(json.usage ?? null)}`,
+      );
+    }
+
     return {
       base64,
       usage: {
