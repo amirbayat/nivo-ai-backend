@@ -67,11 +67,13 @@ const AUTO_MODE_SENTINELS = [
 
 // the input-length gate below runs before model routing (the router itself
 // uses input length as a heuristic signal), so the exact model isn't known
-// yet — o200k_base is the shared encoding for the whole gpt-4o family
-// (including the free plan's only model) and a close-enough reference for
-// this pre-routing safety check; real billing always uses the SDK's actual
-// usage.inputTokens/outputTokens for the model that ends up running.
-const PRE_ROUTING_REFERENCE_MODEL = 'openai/gpt-4o-mini';
+// yet — o200k_base is the shared encoding for the whole gpt-4o/gpt-5 family
+// and a close-enough reference for this pre-routing safety check; real
+// billing always uses the SDK's actual usage.inputTokens/outputTokens for
+// the model that ends up running. همچنین همان مدلی که برای دو تماس classify
+// سبک (classifyImageIntent/classifyImagePrompt) استفاده می‌شود — gpt-5.4-nano
+// (به‌جای gpt-4o-mini قدیمی) چون در roster فعلی پلن‌ها (models.seed.ts) است.
+const PRE_ROUTING_REFERENCE_MODEL = 'openai/gpt-5.4-nano';
 
 // تیتر مکالمه یک تولید کوتاه و کم‌ریسک است — همیشه با ارزان‌ترین مدل ساخته می‌شود، صرف‌نظر از
 // این‌که Router برای پاسخ اصلی همین پیام چه مدلی انتخاب کرده

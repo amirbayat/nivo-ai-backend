@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import type { MetadataExtractor } from '@ai-sdk/openai-compatible';
+import { ProxyAgent } from 'undici';
 
 export type AiProviderName = 'liara' | 'openrouter';
 
@@ -64,6 +65,8 @@ function createOpenRouterMetadataExtractor(): MetadataExtractor {
 // پیش‌فرض عمداً «liara» است تا استخراج این سرویس به‌تنهایی هیچ رفتار پروداکشن فعلی را عوض نکند.
 @Injectable()
 export class AiProviderService {
+  private proxyAgent?: ProxyAgent;
+
   constructor(private readonly config: ConfigService) {}
 
   get name(): AiProviderName {
@@ -120,6 +123,31 @@ export class AiProviderService {
     return Object.keys(headers).length ? headers : undefined;
   }
 
+  // زیرساخت پروداکشن (Darkube/همروش) داخل ایران است و OpenRouter پشت Cloudflare سرو می‌شود —
+  // اتصال مستقیم گاهی با connect-timeout مواجه می‌شود (فیلترینگ/مسیریابی رنج‌های Cloudflare).
+  // OPENROUTER_PROXY_URL اختیاری است (مثلاً یک HTTP(S) proxy روی یک سرور خارج از ایران)؛ فقط
+  // ترافیک OpenRouter از آن رد می‌شود، نه Liara یا بقیه‌ی fetch های اپ.
+  private get proxyDispatcher(): ProxyAgent | undefined {
+    if (!this.isOpenRouter) return undefined;
+    const proxyUrl = this.config.get<string>('OPENROUTER_PROXY_URL');
+    if (!proxyUrl) return undefined;
+    if (!this.proxyAgent) this.proxyAgent = new ProxyAgent(proxyUrl);
+    return this.proxyAgent;
+  }
+
+  // fetch سفارشی که caller های OpenRouter (هم AI SDK از طریق buildClient، هم fetch خام در
+  // image-generation.service.ts) باید به‌جایِ global fetch استفاده کنند؛ undefined یعنی
+  // OPENROUTER_PROXY_URL ست نشده و باید global fetch معمولی استفاده شود.
+  get fetch(): typeof globalThis.fetch | undefined {
+    const dispatcher = this.proxyDispatcher;
+    if (!dispatcher) return undefined;
+    return ((input: Parameters<typeof fetch>[0], init?: RequestInit) =>
+      globalThis.fetch(input, {
+        ...init,
+        dispatcher,
+      } as RequestInit)) as typeof globalThis.fetch;
+  }
+
   // apiKey اختیاری برای caller هایی که کلید اختصاصی خودشان را resolve کرده‌اند (مثل
   // resolveUserApiKey در chat.service.ts)؛ اگر پاس داده نشود، کلید مشترک provider فعال استفاده
   // می‌شود. extraOptions برای موارد خاص مثل supportsStructuredOutputs (nivo-cal.service.ts).
@@ -129,14 +157,28 @@ export class AiProviderService {
       baseURL: this.baseURL,
       apiKey: apiKey ?? this.sharedApiKey,
       ...(this.extraHeaders ? { headers: this.extraHeaders } : {}),
+      ...(this.fetch ? { fetch: this.fetch } : {}),
       // قدم ۴ — فقط روی OpenRouter: usage.cost واقعی را از provider بخواه و زیر
-      // OPENROUTER_METADATA_KEY در providerMetadata نتیجه در دسترس caller بگذار
+      // OPENROUTER_METADATA_KEY در providerMetadata نتیجه در دسترس caller بگذار.
+      // همچنین: @ai-sdk/openai-compatible فیلد reasoningEffort را به‌صورت مسطح
+      // `reasoning_effort` در بادی می‌سازد (فرمت خودِ OpenAI) — اما OpenRouter طبق مستنداتش
+      // انتظار آبجکت تودرتوی `reasoning: {effort}` دارد و فیلد مسطح را نادیده می‌گیرد. اینجا
+      // قبل از ارسال، مسطح را به فرمت مورد انتظار OpenRouter تبدیل می‌کنیم.
       ...(this.isOpenRouter
         ? {
-            transformRequestBody: (body: Record<string, unknown>) => ({
-              ...body,
-              usage: { include: true },
-            }),
+            transformRequestBody: (body: Record<string, unknown>) => {
+              const { reasoning_effort, ...rest } = body as {
+                reasoning_effort?: string;
+                [key: string]: unknown;
+              };
+              return {
+                ...rest,
+                ...(reasoning_effort
+                  ? { reasoning: { effort: reasoning_effort } }
+                  : {}),
+                usage: { include: true },
+              };
+            },
             metadataExtractor: createOpenRouterMetadataExtractor(),
           }
         : {}),

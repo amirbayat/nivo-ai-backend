@@ -354,16 +354,19 @@ export class ImageGenerationService {
     };
 
     const doFetch = () =>
-      fetch(`${this.aiProvider.baseURL}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-          ...(this.aiProvider.extraHeaders ?? {}),
+      (this.aiProvider.fetch ?? fetch)(
+        `${this.aiProvider.baseURL}/chat/completions`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+            ...(this.aiProvider.extraHeaders ?? {}),
+          },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(120_000),
         },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(120_000),
-      });
+      );
 
     let res: Awaited<ReturnType<typeof doFetch>>;
     try {
