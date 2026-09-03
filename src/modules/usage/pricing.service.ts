@@ -369,7 +369,12 @@ export class PricingService {
 
   // مبلغ نهایی به بالا رو به نزدیک‌ترین «نیوو» کامل گرد می‌شود (نه فقط تومان) — یعنی حتی
   // ۰.۱ نیوو اضافه هم یک نیوو کامل حساب می‌شود. برای صداگذاری‌های از پیش نیوو-محور (markup=1،
-  // costToman از قبل مضرب دقیق tomanPerCredit است) این عملاً no-op است
+  // costToman از قبل مضرب دقیق tomanPerCredit است) این عملاً no-op است.
+  //
+  // docs/PRD-image-gen-pricing-and-credit-fix.md §۱۴ — تصمیم صریح کاربر: این تابع دیگر به‌خاطر
+  // موجودی ناکافی رد نمی‌کند (مثل قبل که false برمی‌گرداند و چیزی کم نمی‌شد). گیت واقعی preflight
+  // است (balance>0 قبل از شروع، chat.service.ts) — اینجا فقط کسر نهایی رخ می‌دهد و می‌تواند
+  // موجودی را منفی کند؛ همین منفی شدن جلوی درخواست بعدی را در همان preflight می‌گیرد، تا شارژ.
   async debitWallet(
     userId: string,
     costToman: number,
@@ -385,7 +390,7 @@ export class PricingService {
     const walletCost =
       Math.ceil((costToman * markup) / tomanPerCredit) * tomanPerCredit;
     const wallet = await this.prisma.wallet.findUnique({ where: { userId } });
-    if (!wallet || wallet.balanceToman < walletCost) return false;
+    if (!wallet) return false;
 
     await this.prisma.$transaction([
       this.prisma.wallet.update({

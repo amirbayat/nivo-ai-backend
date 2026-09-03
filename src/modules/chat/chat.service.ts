@@ -23,7 +23,7 @@ import {
   rollingWindowKey,
   type PlanLimits,
 } from '../usage/token.service';
-import { PricingService, megapixelsFromSize } from '../usage/pricing.service';
+import { PricingService } from '../usage/pricing.service';
 import { TokenEstimatorService } from '../usage/token-estimator.service';
 import { ModelRouterService } from '../model-router/model-router.service';
 import { UsageAnalyticsService } from '../usage-analytics/usage-analytics.service';
@@ -531,18 +531,15 @@ export class ChatService {
     //   maxOut = Math.min(maxOut, plan.throttledOutputTokens);
     // }
 
-    // ── گیت مصرف PAYG — بدون بودجه‌ی درصدی، فقط موجودی واقعی کیف‌پول ────────
-    // docs/PRD-pay-as-you-go-wallet.md بخش ۵.۲ — تخمین بدبینانه (فرض مصرف کامل maxOut خروجی)
-    // تا هیچ‌وقت پیامی اجازه‌ی شروع پیدا نکند که موجودی برایش کافی نیست (بدون موجودی منفی)
+    // ── گیت مصرف PAYG — فقط موجودی مثبت، نه تخمین بدترین‌حالت ────────────────
+    // docs/PRD-image-gen-pricing-and-credit-fix.md §۱۴ — تصمیم صریح کاربر: تخمین بدترین‌حالت
+    // (قبلاً بر مبنای maxOut کامل) منبع چند باگ بود چون برای provider های بدون کالیبراسیون
+    // واقعی همیشه درست نیست. گیت ساده‌شده: موجودی مثبت → اجازه؛ صفر/منفی → رد. کسر واقعی بعد
+    // از پاسخ (پایین‌تر) دیگر رد نمی‌شود اگر ناکافی باشد — می‌تواند موجودی را منفی کند؛ همین
+    // منفی شدن جلوی پیام بعدی را می‌گیرد (تا شارژ مجدد).
     if (plan.isPayAsYouGo) {
-      const markup = plan.payAsYouGoMarkup ?? 1.3;
-      const worstCase = await this.pricingService.calcCost(
-        estimatedForQuota,
-        maxOut,
-        modelId,
-      );
       const balance = await this.pricingService.getWalletBalance(userId);
-      if (balance < Math.ceil(worstCase.costToman * markup)) {
+      if (balance <= 0) {
         throw new HttpException(
           {
             message: fa.payAsYouGo.insufficientBalance,
@@ -848,9 +845,9 @@ export class ChatService {
           : []),
       ]);
 
-      // docs/PRD-pay-as-you-go-wallet.md بخش ۵.۲ — هزینه‌ی واقعی × ضریب پلن از کیف‌پول کم می‌شود؛
-      // پیش‌چک بدبینانه‌ی بالاتر (maxOut کامل) تضمین می‌کند این تقریباً هیچ‌وقت insufficient نشود،
-      // ولی خطا اینجا فقط لاگ می‌شود نه throw — پیام و پاسخ قبلاً موفق برای کاربر تمام شده‌اند
+      // docs/PRD-image-gen-pricing-and-credit-fix.md §۱۴ — هزینه‌ی واقعی × ضریب پلن از کیف‌پول کم
+      // می‌شود؛ debitWallet دیگر به‌خاطر موجودی ناکافی رد نمی‌کند (می‌تواند منفی کند) — گیت واقعی
+      // preflight بالاتر (balance>0) بود، اینجا صرفاً کسر نهایی است، نه یک چک دوم
       if (plan.isPayAsYouGo) {
         this.pricingService
           .debitWallet(
@@ -1114,41 +1111,6 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
     });
   }
 
-  // تخمین محافظه‌کارانه (نه دقیق) — چون هزینه‌ی واقعی فقط بعد از دریافت usage از provider معلوم
-  // می‌شود، برای پیش‌چک PAYG (قبل از فراخوانی) باید یک سقفِ بدترین‌حالت تخمین بزنیم. عمداً
-  // بزرگ‌تر از واقعیت است تا کاربر رد نشود از قلم بیفتد و بعداً موجودی‌اش منفی شود.
-  // اعداد توکن خروجی از مستندات OpenAI برای gpt-image (low/medium/high در 1024×1024) گرفته شده؛
-  // برای ابعاد غیرمربعی یا مدل‌های دیگر همچنان یک سقفِ بالا (نه دقیق) کافی است.
-  private estimateWorstCaseImageUsd(
-    model: AiModel,
-    hasInputImages: boolean,
-  ): number {
-    // مدل‌های flat-priced (Recraft/Flux/Seedream/...) توکنی نیستند — قیمت ثابت هر عکس/مگاپیکسل
-    // مستقیماً سقف بدترین‌حالت است (بدون نیاز به تخمین تعداد توکن)
-    if (model.imageGenFlatPriceUnit) {
-      const megapixels =
-        model.imageGenFlatPriceUnit === 'megapixel'
-          ? megapixelsFromSize(model.imageGenSize)
-          : 1;
-      return (model.imageGenFlatPriceUsd ?? 0) * megapixels;
-    }
-
-    const OUTPUT_TOKENS_BY_TIER: Record<string, number> = {
-      SIMPLE: 300,
-      MEDIUM: 1100,
-      COMPLEX: 4200,
-    };
-    const outputTokens = OUTPUT_TOKENS_BY_TIER[model.tier] ?? 4200;
-    const textTokens = 300; // سقف بالا برای یک prompt معمولی
-    const imageInputTokens = hasInputImages ? 1500 : 0; // فقط حالت ویرایش — تخمین سقف بالا هر عکس ورودی
-    return (
-      (textTokens * model.inputPricePerM) / 1_000_000 +
-      (imageInputTokens * (model.imageGenInputImagePricePerM ?? 0)) /
-        1_000_000 +
-      (outputTokens * (model.imageGenOutputImagePricePerM ?? 0)) / 1_000_000
-    );
-  }
-
   // docs/PRD-chat-images.md بخش ۵.۵ — مسیر تولید عکس: مستقل از streamText/Router. پیش‌نمایش‌های
   // تدریجی (partial_images) و تصویر نهایی هرکدام با یک رویداد SSE جدا برگردانده می‌شوند.
   private async handleImageGeneration(
@@ -1293,19 +1255,15 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
         : ranked;
     }
 
+    // docs/PRD-image-gen-pricing-and-credit-fix.md §۱۴ — تصمیم صریح کاربر: دیگر بر اساس تخمین
+    // بدترین‌حالت، مدل کاربر را بی‌صدا عوض نمی‌کنیم (منبع چند باگ قبلی بود، چون این تخمین برای
+    // provider های بدون کالیبراسیون واقعی همیشه قابل‌اعتماد نیست). گیت تک و ساده: موجودی مثبت
+    // باشد → اجازه‌ی تولید با همان مدل درخواستی؛ موجودی صفر/منفی → رد با خطای موجودی ناکافی.
+    // کسر واقعی بعد از تولید (پایین‌تر) دیگر رد نمی‌شود اگر ناکافی باشد — می‌تواند منفی کند؛
+    // همین منفی شدن، جلوی پیام بعدی را همین‌جا می‌گیرد.
     if (plan.isPayAsYouGo) {
-      const markup = plan.payAsYouGoMarkup ?? 1.3;
       const balance = await this.pricingService.getWalletBalance(userId);
-      const hasAnyInputImages = hasExplicitInputImages || isEditIntent;
-      const affordableChain: AiModel[] = [];
-      for (const candidate of candidateChain) {
-        const { costToman } = await this.pricingService.calcFlatCostToman(
-          this.estimateWorstCaseImageUsd(candidate, hasAnyInputImages),
-        );
-        if (balance >= Math.ceil(costToman * markup))
-          affordableChain.push(candidate);
-      }
-      if (!affordableChain.length) {
+      if (balance <= 0) {
         throw new HttpException(
           {
             message: fa.payAsYouGo.insufficientBalance,
@@ -1314,7 +1272,6 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
           402,
         );
       }
-      candidateChain = affordableChain;
     }
 
     res.setHeader('Content-Type', 'text/event-stream');
