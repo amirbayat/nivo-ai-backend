@@ -23,7 +23,7 @@ import {
   rollingWindowKey,
   type PlanLimits,
 } from '../usage/token.service';
-import { PricingService } from '../usage/pricing.service';
+import { PricingService, megapixelsFromSize } from '../usage/pricing.service';
 import { TokenEstimatorService } from '../usage/token-estimator.service';
 import { ModelRouterService } from '../model-router/model-router.service';
 import { UsageAnalyticsService } from '../usage-analytics/usage-analytics.service';
@@ -1123,6 +1123,16 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
     model: AiModel,
     hasInputImages: boolean,
   ): number {
+    // مدل‌های flat-priced (Recraft/Flux/Seedream/...) توکنی نیستند — قیمت ثابت هر عکس/مگاپیکسل
+    // مستقیماً سقف بدترین‌حالت است (بدون نیاز به تخمین تعداد توکن)
+    if (model.imageGenFlatPriceUnit) {
+      const megapixels =
+        model.imageGenFlatPriceUnit === 'megapixel'
+          ? megapixelsFromSize(model.imageGenSize)
+          : 1;
+      return (model.imageGenFlatPriceUsd ?? 0) * megapixels;
+    }
+
     const OUTPUT_TOKENS_BY_TIER: Record<string, number> = {
       SIMPLE: 300,
       MEDIUM: 1100,
@@ -1405,7 +1415,9 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
         costUsdMicros,
         costInputUsdMicros,
         costOutputUsdMicros,
-      } = await this.pricingService.calcImageGenCost(result.usage, modelRecord);
+      } = modelRecord.imageGenFlatPriceUnit
+        ? await this.pricingService.calcImageGenFlatCost(modelRecord)
+        : await this.pricingService.calcImageGenCost(result.usage, modelRecord);
       // با نرخ همون لحظه (مثل بالا) — نه بازمحاسبه‌ی بعدی در آنالیز با نرخ روز
       const openrouterRealCostToman =
         result.usage.realCostUsdMicros != null

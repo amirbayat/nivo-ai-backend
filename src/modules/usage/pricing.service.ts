@@ -39,6 +39,16 @@ function dailyCostKey(userId: string) {
   return `cost:daily:${userId}:${d}`;
 }
 
+// برای مدل‌های flat-priced با unit="megapixel" (مثل flux.2-pro: "$0.03/megapixel") — از
+// imageGenSize (مثل "1024x1024") مگاپیکسل واقعی مشتق می‌شود. اگر size ست نباشد یا قابل‌پارس
+// نباشد، ۱ مگاپیکسل (اندازه‌ی رایج ۱۰۲۴×۱۰۲۴ ≈ ۱.۰۵) به‌عنوان تخمین محافظه‌کارانه استفاده می‌شود.
+export function megapixelsFromSize(size: string | null | undefined): number {
+  const match = size?.match(/^(\d+)\s*[x×]\s*(\d+)$/i);
+  if (!match) return 1;
+  const [, w, h] = match;
+  return (Number(w) * Number(h)) / 1_000_000;
+}
+
 function monthlyCostKey(userId: string) {
   const m = new Date().toISOString().slice(0, 7);
   return `cost:monthly:${userId}:${m}`;
@@ -118,7 +128,9 @@ export class PricingService {
   }
 
   // تولید/ویرایش عکس بر اساس usage واقعیِ برگشتی از provider حساب می‌شود (نه یک عدد ثابت هر عکس) —
-  // سه نوع توکن جدا: متن ورودی (همون inputPricePerM مدل)، عکس ورودی (فقط حالت ویرایش)، عکس خروجی
+  // سه نوع توکن جدا: متن ورودی (همون inputPricePerM مدل)، عکس ورودی (فقط حالت ویرایش)، عکس خروجی.
+  // این مسیر فقط برای مدل‌های token-based است؛ مدل‌های flat-priced (imageGenFlatPriceUnit ست)
+  // اصلاً usage توکنی معنادار ندارند و باید از calcImageGenFlatCost استفاده کنند.
   async calcImageGenCost(
     usage: {
       textInputTokens: number;
@@ -149,6 +161,32 @@ export class PricingService {
         (textInputUsd + imageInputUsd) * 1_000_000,
       ),
       costOutputUsdMicros: Math.round(imageOutputUsd * 1_000_000),
+    };
+  }
+
+  // مدل‌های flat-priced (Recraft/Flux/Seedream/...) — قیمت ثابت هر عکس یا هر مگاپیکسل، بدون
+  // ربط به توکن. imageCount پیش‌فرض ۱ است (n=1 در همه‌ی فراخوانی‌های فعلی تولید عکس)
+  async calcImageGenFlatCost(
+    model: {
+      imageGenFlatPriceUsd: number | null;
+      imageGenFlatPriceUnit: string | null;
+      imageGenSize: string | null;
+    },
+    imageCount = 1,
+  ): Promise<CostCalc> {
+    const perImageUsd =
+      model.imageGenFlatPriceUnit === 'megapixel'
+        ? (model.imageGenFlatPriceUsd ?? 0) *
+          megapixelsFromSize(model.imageGenSize)
+        : (model.imageGenFlatPriceUsd ?? 0);
+    const usdCost = perImageUsd * imageCount;
+    const rate = await this.exchangeRate.getUsdtToman();
+    const costToman = Math.ceil(usdCost * rate);
+    return {
+      costToman,
+      costUsdMicros: Math.round(usdCost * 1_000_000),
+      costInputUsdMicros: 0,
+      costOutputUsdMicros: Math.round(usdCost * 1_000_000),
     };
   }
 

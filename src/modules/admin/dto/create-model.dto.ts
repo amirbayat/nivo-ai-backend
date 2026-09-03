@@ -76,6 +76,18 @@ export class CreateModelDto {
   @IsString()
   imageGenSize?: string;
 
+  // برای مدل‌های flat-priced (Recraft/Flux/Seedream/...) — قیمت ثابت هر عکس یا هر مگاپیکسل،
+  // جایگزین imageGenOutputImagePricePerM وقتی مدل اصلاً per-token قیمت‌گذاری نمی‌شود
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  imageGenFlatPriceUsd?: number;
+
+  @IsOptional()
+  @IsIn(['image', 'megapixel'])
+  imageGenFlatPriceUnit?: string;
+
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;

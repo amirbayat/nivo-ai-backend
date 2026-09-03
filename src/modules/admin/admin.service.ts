@@ -37,6 +37,8 @@ const MODEL_IMPORT_COLUMNS = [
   'imageGenOutputImagePricePerM',
   'imageGenQuality',
   'imageGenSize',
+  'imageGenFlatPriceUsd',
+  'imageGenFlatPriceUnit',
   'isActive',
   'sortOrder',
   'tier',
@@ -105,6 +107,8 @@ function parseModelRow(raw: Record<string, unknown>) {
     ),
     imageGenQuality: cellToString(raw.imageGenQuality),
     imageGenSize: cellToString(raw.imageGenSize),
+    imageGenFlatPriceUsd: cellToNumber(raw.imageGenFlatPriceUsd),
+    imageGenFlatPriceUnit: cellToString(raw.imageGenFlatPriceUnit),
     isActive: cellToBoolean(raw.isActive, true),
     sortOrder: cellToNumber(raw.sortOrder) ?? 0,
     tier:

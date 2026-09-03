@@ -74,6 +74,16 @@ export class UpdateModelDto {
   imageGenSize?: string;
 
   @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  imageGenFlatPriceUsd?: number;
+
+  @IsOptional()
+  @IsIn(['image', 'megapixel'])
+  imageGenFlatPriceUnit?: string;
+
+  @IsOptional()
   @IsBoolean()
   isActive?: boolean;
 

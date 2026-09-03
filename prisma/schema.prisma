@@ -844,6 +844,13 @@ model AiModel {
   imageGenOutputImagePricePerM Float?
   imageGenQuality              String? // دقیقاً همان رشته‌ای که به provider پاس داده می‌شود — مثل "low"/"medium"/"high" (خانواده‌ی gpt-image) یا "standard"/"hd" (dall-e-3)
   imageGenSize                 String? // مثل "1024x1024" — مستقیم به provider پاس داده می‌شود
+
+  // بعضی مدل‌های عکس OpenRouter (Recraft، Flux، Seedream، ...) اصلاً per-token قیمت‌گذاری
+  // نمی‌شوند — قیمتشان ثابت هر عکس یا هر مگاپیکسل خروجی است. وقتی imageGenFlatPriceUnit ست
+  // باشد، calcImageGenCost/estimateWorstCaseImageUsd از این دو فیلد استفاده می‌کنند به‌جای
+  // imageGenOutputImagePricePerM (docs/PRD-image-gen-pricing-and-credit-fix.md §۵)
+  imageGenFlatPriceUsd  Float?
+  imageGenFlatPriceUnit String? // "image" | "megapixel" — null یعنی مدل token-based است (رفتار فعلی)
   isActive                     Boolean     @default(true)
   sortOrder                    Int         @default(0)
   tier                         ModelTier   @default(MEDIUM)

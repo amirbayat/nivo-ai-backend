@@ -619,7 +619,9 @@ export class DiscoveryGenerationService {
           quality: model.imageGenQuality ?? undefined,
         });
 
-    const costCalc = await this.pricing.calcImageGenCost(result.usage, model);
+    const costCalc = model.imageGenFlatPriceUnit
+      ? await this.pricing.calcImageGenFlatCost(model)
+      : await this.pricing.calcImageGenCost(result.usage, model);
     const outputBuffer = Buffer.from(result.base64, 'base64');
     const outputImageKey = await this.storage.uploadImage(outputBuffer, 'png');
 
