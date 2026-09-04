@@ -11,7 +11,19 @@ import { AiProviderService } from './ai-provider.service';
 // https://openrouter.ai/docs/api/api-reference/video-generation/create-videos):
 // - وقتی status=«completed» می‌شود، URL ویدیو در آرایه‌ی `unsigned_urls` می‌آید، نه `video.url`.
 // - علاوه بر «failed»، «cancelled» و «expired» هم وضعیت پایانی (شکست) هستند.
-// - فیلد error یک رشته‌ی ساده است، نه آبجکت {message}.
+// - فیلد error گاهی رشته‌ی ساده است، گاهی (خطاهای سطح gateway مثل ۴۰۱/۴۲۹/۵xx) آبجکت
+//   استاندارد {message,type,code} شبیه OpenAI/OpenRouter chat errors — دقیقاً مثل
+//   image-generation.service.ts، پس همیشه باید پیام رشته‌ای را از هر دو شکل استخراج کرد
+//   (وگرنه new Error(آبجکت) پیامش را با toString پیش‌فرض به "[object Object]" تبدیل می‌کند).
+function extractVideoErrorMessage(
+  error: string | { message?: string; code?: string | number; type?: string } | undefined,
+  fallback: string,
+): string {
+  if (!error) return fallback;
+  if (typeof error === 'string') return error;
+  return error.message ?? fallback;
+}
+
 export class VideoApiError extends Error {
   constructor(
     message: string,
@@ -86,17 +98,28 @@ export class VideoGenerationService {
     );
 
     const text = await res.text();
-    let json: { id?: string; error?: string };
+    let json: {
+      id?: string;
+      error?: string | { message?: string; code?: string | number; type?: string };
+    };
     try {
       json = JSON.parse(text);
     } catch {
       throw new VideoApiError(
-        `OpenRouter /videos returned non-JSON response: ${text.slice(0, 300)}`,
+        `OpenRouter /videos returned non-JSON response (status=${res.status}): ${text.slice(0, 300)}`,
         null,
       );
     }
     if (!res.ok || json.error || !json.id) {
-      throw new VideoApiError(json.error ?? text.slice(0, 300), null);
+      const message = extractVideoErrorMessage(json.error, text.slice(0, 300));
+      const code =
+        typeof json.error === 'object'
+          ? (json.error.code ?? json.error.type ?? null)
+          : null;
+      throw new VideoApiError(
+        `OpenRouter /videos submit failed (status=${res.status}): ${message}`,
+        code == null ? null : String(code),
+      );
     }
     return { jobId: json.id };
   }
@@ -119,23 +142,31 @@ export class VideoGenerationService {
     let json: {
       status?: VideoJobStatus;
       unsigned_urls?: string[];
-      error?: string;
+      error?: string | { message?: string; code?: string | number; type?: string };
     };
     try {
       json = JSON.parse(text);
     } catch {
       throw new VideoApiError(
-        `OpenRouter /videos/${jobId} returned non-JSON response: ${text.slice(0, 300)}`,
+        `OpenRouter /videos/${jobId} returned non-JSON response (status=${res.status}): ${text.slice(0, 300)}`,
         null,
       );
     }
     if (!res.ok) {
-      throw new VideoApiError(json.error ?? text.slice(0, 300), null);
+      const message = extractVideoErrorMessage(json.error, text.slice(0, 300));
+      const code =
+        typeof json.error === 'object'
+          ? (json.error.code ?? json.error.type ?? null)
+          : null;
+      throw new VideoApiError(
+        `OpenRouter /videos/${jobId} poll failed (status=${res.status}): ${message}`,
+        code == null ? null : String(code),
+      );
     }
     return {
       status: json.status ?? 'processing',
       videoUrl: json.unsigned_urls?.[0],
-      error: json.error,
+      error: json.error ? extractVideoErrorMessage(json.error, '') : undefined,
     };
   }
 

@@ -86,6 +86,7 @@ export class StudioVideoGenerationProcessor {
       data: { videoStatus: StudioShotVideoStatus.PROCESSING },
     });
 
+    let jobId: string | null = null;
     try {
       const model = await this.resolveModel(shot.project.videoModelId);
       const apiKey = this.aiProvider.sharedApiKey;
@@ -100,7 +101,7 @@ export class StudioVideoGenerationProcessor {
       // همان job قبلی را resume/poll می‌کنیم. requestShotVideo (video-studio.service.ts)
       // همیشه قبل از هر enqueue تازه videoJobId را null می‌کند، پس این فیلد در ابتدای
       // handleRender فقط از یک re-run واقعی می‌تواند پر باشد.
-      let jobId = shot.videoJobId;
+      jobId = shot.videoJobId;
       if (jobId) {
         this.logger.warn(
           `studio-video-generation: shot=${shotId} re-run detected (videoJobId=${jobId} already set) — resuming poll instead of resubmitting`,
@@ -189,8 +190,10 @@ export class StudioVideoGenerationProcessor {
         fa.videoStudio.videoReadyPushBody(shot.title),
       );
     } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err));
       this.logger.error(
-        `studio-video-generation failed for shot=${shotId}: ${(err as Error).message}`,
+        `studio-video-generation failed for shot=${shotId} jobId=${jobId ?? 'n/a'}: ${error.message}`,
+        error.stack,
       );
       await this.prisma.studioShot.update({
         where: { id: shotId },
