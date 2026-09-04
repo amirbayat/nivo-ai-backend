@@ -165,11 +165,20 @@ export class VideoGenerationService {
   async pollVideoJob(
     jobId: string,
     apiKey: string,
-  ): Promise<{ status: VideoJobStatus; videoUrl?: string; error?: string }> {
+  ): Promise<{
+    status: VideoJobStatus;
+    videoUrl?: string;
+    error?: string;
+    realCostUsd?: number;
+  }> {
     const { res, json, text } = await this.fetchOpenRouterVideo<{
       status?: VideoJobStatus;
       unsigned_urls?: string[];
       error?: string | { message?: string; code?: string | number; type?: string };
+      // هزینه‌ی واقعی provider — دقیقاً همون فیلد usage.cost که برای چت/عکس OpenRouter
+      // برمی‌گرداند (ai-provider.service.ts: OpenRouterUsage.cost)، طبق مستندات رسمی video
+      // generation فقط وقتی status=completed پر می‌شود.
+      usage?: { cost?: number };
     }>(
       `${this.aiProvider.baseURL}/videos/${jobId}`,
       () => ({
@@ -196,6 +205,7 @@ export class VideoGenerationService {
       status: json.status ?? 'processing',
       videoUrl: json.unsigned_urls?.[0],
       error: json.error ? extractVideoErrorMessage(json.error, '') : undefined,
+      realCostUsd: json.usage?.cost,
     };
   }
 

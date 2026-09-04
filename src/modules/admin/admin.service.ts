@@ -573,13 +573,33 @@ export class AdminService {
         })
       : [];
     const linkedMessageById = new Map(linkedMessages.map((m) => [m.id, m]));
-    const walletTransactionsWithMessage = walletTransactions.map((t) => ({
-      ...t,
-      message:
-        linkedMessageById.get(
-          (t.metadata as { messageId?: string } | null)?.messageId ?? '',
-        ) ?? null,
-    }));
+    const walletTransactionsWithMessage = walletTransactions.map((t) => {
+      const metadata = t.metadata as {
+        messageId?: string;
+        costToman?: number;
+        costUsdMicros?: number;
+        openrouterRealCostUsdMicros?: number;
+      } | null;
+      const linked = linkedMessageById.get(metadata?.messageId ?? '') ?? null;
+      // تراکنش‌های video-studio (studio-video-generation.processor.ts) پیام‌ی در کار
+      // نیست که join بزنیم — چون video-studio از مدل Message استفاده نمی‌کند — پس اگر
+      // متادیتا خودش هزینه‌ی دلاری را مستقیم حمل می‌کند، همون شکل «message» را از رویش
+      // می‌سازیم تا همون ستون فرانت ادمین (که message.openrouterRealCostUsdMicros را
+      // می‌خواند) بدون تغییر برای ویدیو هم کار کند.
+      const message =
+        linked ??
+        (metadata?.costUsdMicros != null || metadata?.openrouterRealCostUsdMicros != null
+          ? {
+              id: null,
+              model: null,
+              costToman: metadata.costToman ?? null,
+              costUsdMicros: metadata.costUsdMicros ?? null,
+              openrouterRealCostUsdMicros: metadata.openrouterRealCostUsdMicros ?? null,
+              openrouterRealCostToman: null,
+            }
+          : null);
+      return { ...t, message };
+    });
 
     const sumTypeUsage = (rows: typeof modelBreakdown) => ({
       messages: rows.reduce((s, r) => s + r.messages, 0),

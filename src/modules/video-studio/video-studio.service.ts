@@ -216,11 +216,15 @@ export class VideoStudioService {
     });
   }
 
+  // برای «تاریخچه‌ی استودیوی ویدیو» (معادل ImageStudioHistoryDrawer) — shots را هم برمی‌گرداند
+  // تا فرانت بتواند تعداد/وضعیت/thumbnail هر پروژه را نشان دهد، دقیقاً همون چیزی که
+  // getProjectOrThrow هم include می‌کند (نوع StudioProject فرانت از قبل shots را الزامی فرض کرده).
   async listMyProjects(userId: string) {
     return this.prisma.studioProject.findMany({
       where: { userId },
       orderBy: { createdAt: 'desc' },
       take: 50,
+      include: { characterOptions: true, shots: { orderBy: { order: 'asc' } } },
     });
   }
 

@@ -160,15 +160,25 @@ export class VideoStudioController {
   }
 
   // فرانت با axios (هدر Authorization واقعی) + responseType:'blob' صدا می‌زند — دقیقاً الگوی
-  // discovery.controller.ts/getImage؛ SkipThrottle چون گالری چند آیتم را هم‌زمان فچ می‌کند
+  // discovery.controller.ts/getImage؛ SkipThrottle چون گالری چند آیتم را هم‌زمان فچ می‌کند.
+  // StorageService.uploadImage کلید را گاهی با پیشوند پوشه می‌سازد (`${projectId}/${uuid}.${ext}`،
+  // برای عکس/ویدیوی تولیدشده‌ی داخل یک پروژه) و گاهی بدون پیشوند (`${uuid}.${ext}`، مسیر
+  // upload-image خام قبل از اینکه پیام/پروژه‌ای در کار باشد — video-studio.service.ts:694) —
+  // پس تعداد سگمنت‌های کلید ثابت نیست. یک `:key` تکی با path-to-regexp اسلش را match نمی‌کند
+  // (تست شد: نسخه‌ی ۸.۴.۲ نصب‌شده روی `/assets/:key` برای `/assets/a/b.mp4` مستقیماً false
+  // برمی‌گرداند و NestJS اصلاً route را match نمی‌کند → «Cannot GET»)، پس از wildcard چندسگمنتی
+  // استفاده می‌کنیم که هم ۱ و هم ۲+ سگمنت را می‌گیرد.
   @SkipThrottle()
-  @Get('assets/:key')
+  @Get('assets/*key')
   async getAsset(
     @CurrentUser() user: JwtPayload,
-    @Param('key') key: string,
+    @Param('key') keySegments: string[],
     @Res() res: Response,
   ) {
-    const { buffer, ext } = await this.videoStudio.getAsset(user.sub, key);
+    const { buffer, ext } = await this.videoStudio.getAsset(
+      user.sub,
+      keySegments.join('/'),
+    );
     res.setHeader('Content-Type', mimeTypeForVideoStudioExt(ext));
     res.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
     res.send(buffer);

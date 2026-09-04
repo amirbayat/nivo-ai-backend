@@ -133,11 +133,13 @@ export class StudioVideoGenerationProcessor {
       const durationSec = model.videoGenSupportedDurationsSec[0] ?? 4;
 
       let videoUrl: string | undefined;
+      let realCostUsd: number | undefined;
       for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
         await sleep(POLL_INTERVAL_MS);
         const status = await this.videoGen.pollVideoJob(jobId, apiKey);
         if (status.status === 'completed') {
           videoUrl = status.videoUrl;
+          realCostUsd = status.realCostUsd;
           break;
         }
         if (
@@ -169,7 +171,20 @@ export class StudioVideoGenerationProcessor {
         costCalc.costToman,
         1,
         `تولید ویدیو — صحنه ${shot.order + 1}`,
-        { feature: 'video-studio-shot', projectId: shot.projectId, shotId },
+        {
+          feature: 'video-studio-shot',
+          projectId: shot.projectId,
+          shotId,
+          costToman: costCalc.costToman,
+          costUsdMicros: costCalc.costUsdMicros,
+          // هزینه‌ی واقعی گزارش‌شده توسط OpenRouter (usage.cost در پاسخ poll) — دقیقاً همون
+          // چیزی که برای چت/عکس در Message.openrouterRealCostUsdMicros ذخیره می‌شود، اینجا چون
+          // video-studio از مدل Message استفاده نمی‌کند مستقیم در متادیتای تراکنش می‌آید
+          // (admin.service.ts این را برای نمایش در پنل ادمین می‌خواند).
+          ...(realCostUsd != null
+            ? { openrouterRealCostUsdMicros: Math.round(realCostUsd * 1_000_000) }
+            : {}),
+        },
       );
       if (!debited)
         this.logger.error(
