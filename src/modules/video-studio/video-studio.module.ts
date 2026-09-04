@@ -14,8 +14,13 @@ import { VideoStudioConfigModule } from '../video-studio-config/video-studio-con
     LiaraModule,
     VideoStudioConfigModule,
     // ثبت مجدد همین صف در ماژول تولیدکننده (پردازشگرش در queue.module.ts است) — الگوی
-    // استاندارد Bull/Nest برای چند-ماژولی؛ هر دو به یک صف Redis واحد وصل می‌شوند
-    BullModule.registerQueue({ name: 'studio-video-generation' }),
+    // استاندارد Bull/Nest برای چند-ماژولی؛ هر دو به یک صف Redis واحد وصل می‌شوند. settings
+    // باید عیناً با queue.module.ts یکی باشد (lockDuration بزرگ‌تر برای job طولانی‌مدت ویدیو —
+    // توضیح کامل آنجا).
+    BullModule.registerQueue({
+      name: 'studio-video-generation',
+      settings: { lockDuration: 35 * 60 * 1000 },
+    }),
   ],
   controllers: [VideoStudioController],
   providers: [VideoStudioService],

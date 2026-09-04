@@ -39,8 +39,17 @@ import { VideoGenerationModule } from '../common/services/video-generation.modul
     BullModule.registerQueue({ name: 'liara-usage-sync' }),
     BullModule.registerQueue({ name: 'liara-key-retry' }),
     // docs/PRD-video-studio-chat-flow.md §۸.۶ — همون صف که video-studio.module.ts هم رجیستر
-    // می‌کند (تولیدکننده‌ی job)؛ پردازشگرش همین‌جاست، دقیقاً الگوی بقیه‌ی صف‌های این ماژول
-    BullModule.registerQueue({ name: 'studio-video-generation' }),
+    // می‌کند (تولیدکننده‌ی job)؛ پردازشگرش همین‌جاست، دقیقاً الگوی بقیه‌ی صف‌های این ماژول.
+    // lockDuration دیفالت Bull (۳۰ ثانیه) برای این job که تا ۳۰ دقیقه sleep می‌کند خیلی کمه —
+    // Bull خودش لاک را هر lockRenewTime تمدید می‌کند، ولی هر وقفه‌ی گذرا (GC pause، کندی موقت
+    // اتصال Redis) در همون بازه‌ی ۳۰ ثانیه‌ای باعث «stalled» تشخیص دادن و اجرای دوباره‌ی کل
+    // handleRender می‌شد (submitVideoJob دوم با jobId متفاوت روی همون shot). این مقدار را با
+    // حاشیه‌ی امن بزرگ‌تر از سقف واقعی پولینگ (۳۰ دقیقه) ست می‌کنیم؛ گارد idempotency در
+    // studio-video-generation.processor.ts هم مکمل این است، برای وقتی واقعاً worker از بین برود.
+    BullModule.registerQueue({
+      name: 'studio-video-generation',
+      settings: { lockDuration: 35 * 60 * 1000 },
+    }),
     PrismaModule,
     MessageFeedbackModule,
     CampaignModule,

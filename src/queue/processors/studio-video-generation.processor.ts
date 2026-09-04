@@ -89,29 +89,47 @@ export class StudioVideoGenerationProcessor {
     try {
       const model = await this.resolveModel(shot.project.videoModelId);
       const apiKey = this.aiProvider.sharedApiKey;
+
+      // این job طولانی‌مدت است (تا ۳۰ دقیقه sleep در حلقه‌ی poll)؛ اگر وسط کار worker
+      // (پاد بک‌اند) عوض/ری‌استارت شود، Bull این job را stalled تشخیص می‌دهد و از نو
+      // روی handleRender اجرا می‌کند — یعنی این تابع دوباره از خط ۷۲ اجرا می‌شود. `shot`
+      // بالا هنوز videoJobId این اجرای جدید را ندارد (تازه از DB خوانده شده)، ولی اگر
+      // videoJobId از یک اجرای *قبلی* (که هنوز زنده و در حال poll است) از قبل ثبت شده
+      // باشد، یعنی این یک re-run است، نه اولین submit — به‌جای submitVideoJob دوباره
+      // (که یک jobId جدید و مصرف اضافه‌ی provider می‌سازد و اجرای قبلی را orphan می‌کند)،
+      // همان job قبلی را resume/poll می‌کنیم. requestShotVideo (video-studio.service.ts)
+      // همیشه قبل از هر enqueue تازه videoJobId را null می‌کند، پس این فیلد در ابتدای
+      // handleRender فقط از یک re-run واقعی می‌تواند پر باشد.
+      let jobId = shot.videoJobId;
+      if (jobId) {
+        this.logger.warn(
+          `studio-video-generation: shot=${shotId} re-run detected (videoJobId=${jobId} already set) — resuming poll instead of resubmitting`,
+        );
+      } else {
+        const referenceImage = shot.previewImageKey
+          ? await this.storage.downloadImage(shot.previewImageKey)
+          : undefined;
+
+        const submitted = await this.videoGen.submitVideoJob({
+          modelId: model.name,
+          prompt: shot.scenario,
+          apiKey,
+          durationSec: model.videoGenSupportedDurationsSec[0] ?? 4,
+          size:
+            model.videoGenSupportedSizes.find((s) =>
+              matchesAspectRatio(s, shot.project.videoAspectRatio),
+            ) ?? model.videoGenSupportedSizes[0],
+          audioEnabled: shot.audioEnabled,
+          referenceImage,
+        });
+        jobId = submitted.jobId;
+        await this.prisma.studioShot.update({
+          where: { id: shotId },
+          data: { videoJobId: jobId },
+        });
+      }
+
       const durationSec = model.videoGenSupportedDurationsSec[0] ?? 4;
-      const size =
-        model.videoGenSupportedSizes.find((s) =>
-          matchesAspectRatio(s, shot.project.videoAspectRatio),
-        ) ?? model.videoGenSupportedSizes[0];
-
-      const referenceImage = shot.previewImageKey
-        ? await this.storage.downloadImage(shot.previewImageKey)
-        : undefined;
-
-      const { jobId } = await this.videoGen.submitVideoJob({
-        modelId: model.name,
-        prompt: shot.scenario,
-        apiKey,
-        durationSec,
-        size,
-        audioEnabled: shot.audioEnabled,
-        referenceImage,
-      });
-      await this.prisma.studioShot.update({
-        where: { id: shotId },
-        data: { videoJobId: jobId },
-      });
 
       let videoUrl: string | undefined;
       for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
