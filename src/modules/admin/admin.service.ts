@@ -39,6 +39,11 @@ const MODEL_IMPORT_COLUMNS = [
   'imageGenSize',
   'imageGenFlatPriceUsd',
   'imageGenFlatPriceUnit',
+  'videoGenPricePerSecondUsd',
+  'videoGenAudioMultiplier',
+  'videoGenSupportedDurationsSec',
+  'videoGenSupportedSizes',
+  'videoStudioEligible',
   'isActive',
   'sortOrder',
   'tier',
@@ -79,6 +84,13 @@ function cellToStringArray(value: unknown): string[] | undefined {
     .filter(Boolean);
 }
 
+// videoGenSupportedDurationsSec هم مثل badges با کاما جدا می‌شود (مثل "4,6,8") ولی عدد است
+function cellToNumberArray(value: unknown): number[] | undefined {
+  const arr = cellToStringArray(value);
+  if (arr === undefined) return undefined;
+  return arr.map((n) => Number(n)).filter((n) => !Number.isNaN(n));
+}
+
 // platform هم مثل badges با کاما جدا می‌شود (مثل "LIARA,OPENROUTER")، ولی فقط مقادیر معتبر
 // enum را نگه می‌داریم — بقیه validate در CreateModelDto رد می‌شود
 function cellToPlatformArray(
@@ -109,6 +121,13 @@ function parseModelRow(raw: Record<string, unknown>) {
     imageGenSize: cellToString(raw.imageGenSize),
     imageGenFlatPriceUsd: cellToNumber(raw.imageGenFlatPriceUsd),
     imageGenFlatPriceUnit: cellToString(raw.imageGenFlatPriceUnit),
+    videoGenPricePerSecondUsd: cellToNumber(raw.videoGenPricePerSecondUsd),
+    videoGenAudioMultiplier: cellToNumber(raw.videoGenAudioMultiplier),
+    videoGenSupportedDurationsSec: cellToNumberArray(
+      raw.videoGenSupportedDurationsSec,
+    ),
+    videoGenSupportedSizes: cellToStringArray(raw.videoGenSupportedSizes),
+    videoStudioEligible: cellToBoolean(raw.videoStudioEligible, false),
     isActive: cellToBoolean(raw.isActive, true),
     sortOrder: cellToNumber(raw.sortOrder) ?? 0,
     tier:

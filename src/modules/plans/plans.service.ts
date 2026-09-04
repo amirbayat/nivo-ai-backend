@@ -64,6 +64,11 @@ export class PlansService {
         // بر اساس مدل ویدیوی انتخاب‌شده (بین مدل‌ها فرق دارد، طبق داده‌ی واقعی OpenRouter)
         videoGenSupportedDurationsSec: true,
         videoGenSupportedSizes: true,
+        // برای دسته‌بندی ارزان/متوسط/گران مدل‌های ویدیو سمت فرانت (دستور صریح کاربر)
+        videoGenPricePerSecondUsd: true,
+        videoGenAudioMultiplier: true,
+        // دستور صریح کاربر — استودیوی ویدیو فقط مدل‌های علامت‌خورده‌ی ادمین را در چیپ چت/عکس نشان می‌دهد
+        videoStudioEligible: true,
       },
     });
   }

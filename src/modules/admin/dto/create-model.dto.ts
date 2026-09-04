@@ -17,7 +17,12 @@ export const TOKENIZER_FAMILIES = [
   'cl100k_base',
   'approximate',
 ] as const;
-export const MODEL_TYPES = ['CHAT', 'EMBEDDING', 'IMAGE_GEN'] as const;
+export const MODEL_TYPES = [
+  'CHAT',
+  'EMBEDDING',
+  'IMAGE_GEN',
+  'VIDEO_GEN',
+] as const;
 
 export class CreateModelDto {
   @IsString()
@@ -87,6 +92,36 @@ export class CreateModelDto {
   @IsOptional()
   @IsIn(['image', 'megapixel'])
   imageGenFlatPriceUnit?: string;
+
+  // docs/PRD-video-studio-chat-flow.md — قیمت پایه (بدون صدا) هر ثانیه‌ی ویدیو + ضریب صدا
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  videoGenPricePerSecondUsd?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  videoGenAudioMultiplier?: number;
+
+  @IsOptional()
+  @IsArray()
+  @Type(() => Number)
+  @IsNumber({}, { each: true })
+  videoGenSupportedDurationsSec?: number[];
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  videoGenSupportedSizes?: string[];
+
+  // دستور صریح کاربر — استودیوی ویدیو کدام مدل‌های CHAT/IMAGE_GEN را در چیپ چت/عکس نشان بدهد
+  // را ادمین اینجا مشخص می‌کند (نه یک allowlist هاردکد در فرانت). برای VIDEO_GEN بی‌معنی است.
+  @IsOptional()
+  @IsBoolean()
+  videoStudioEligible?: boolean;
 
   @IsOptional()
   @IsBoolean()

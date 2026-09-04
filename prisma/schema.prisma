@@ -870,6 +870,12 @@ model AiModel {
   videoGenSupportedDurationsSec Int[]   @default([])
   videoGenSupportedSizes        String[] @default([])
 
+  // دستور صریح کاربر — استودیوی ویدیو نباید کل کاتالوگ چت/عکس سایت را نشان بدهد، ولی این انتخاب
+  // باید از پنل ادمین قابل‌تغییر باشد (نه یک allowlist هاردکد در کد فرانت). فقط برای مدل‌های
+  // CHAT/IMAGE_GEN معنی دارد؛ VIDEO_GEN نیازی ندارد چون کل کاتالوگ VIDEO_GEN ذاتاً مخصوص همین
+  // فیچر است. پیش‌فرض false تا هیچ مدل قدیمی خودکار توی استودیوی ویدیو ظاهر نشود.
+  videoStudioEligible Boolean @default(false)
+
   isActive                     Boolean     @default(true)
   sortOrder                    Int         @default(0)
   tier                         ModelTier   @default(MEDIUM)
