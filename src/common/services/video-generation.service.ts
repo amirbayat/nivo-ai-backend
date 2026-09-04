@@ -199,12 +199,37 @@ export class VideoGenerationService {
     };
   }
 
-  async downloadVideo(url: string): Promise<Buffer> {
-    const res = await (this.aiProvider.fetch ?? fetch)(url, {
-      signal: AbortSignal.timeout(120_000),
-    });
-    if (!res.ok)
-      throw new Error(`Failed to download generated video: ${res.status}`);
+  // مستندات رسمی (همون صفحه‌ی §بالا، بخش «Downloading the Video»، تایید‌شده با تست مستقیم
+  // امروز): برخلاف اسمش، `unsigned_urls` یک لینک CDN/S3 پیش‌امضاشده نیست — دقیقاً همون
+  // endpoint داخلی OpenRouter (`/videos/{jobId}/content?index=0`) است و برای دانلودش هم باید
+  // Authorization: Bearer فرستاد. پس به‌جای اعتماد به URL مطلق برگشتی از pollVideoJob (که
+  // مستقیم به‌ openrouter.ai اشاره می‌کند و از relay رد نمی‌شود — دقیقاً همون اتصال مستقیمی که
+  // AiProviderService.baseURL عمداً ممنوعش کرده)، خودمان از روی baseURL (relay) می‌سازیمش.
+  async downloadVideo(jobId: string, apiKey: string): Promise<Buffer> {
+    const url = `${this.aiProvider.baseURL}/videos/${jobId}/content?index=0`;
+    const doFetch = () =>
+      (this.aiProvider.fetch ?? fetch)(url, {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          ...(this.aiProvider.extraHeaders ?? {}),
+        },
+        signal: AbortSignal.timeout(120_000),
+      });
+
+    let res = await doFetch();
+    if (!res.ok && res.status >= 500) {
+      this.logger.warn(
+        `OpenRouter /videos/${jobId}/content returned ${res.status}, retrying once`,
+      );
+      res = await doFetch();
+    }
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new VideoApiError(
+        `Failed to download generated video (status=${res.status}): ${text.slice(0, 300)}`,
+        null,
+      );
+    }
     const arrayBuffer = await res.arrayBuffer();
     return Buffer.from(arrayBuffer);
   }

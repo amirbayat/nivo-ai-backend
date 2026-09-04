@@ -152,7 +152,7 @@ export class StudioVideoGenerationProcessor {
       }
       if (!videoUrl) throw new Error('video job polling timed out');
 
-      const buffer = await this.videoGen.downloadVideo(videoUrl);
+      const buffer = await this.videoGen.downloadVideo(jobId, apiKey);
       const videoKey = await this.storage.uploadImage(
         buffer,
         'mp4',
