@@ -1232,15 +1232,13 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
       });
     }
 
-    // زنجیره‌ی fallback: اگر مدل دقیقاً درخواست‌شده/پیش‌فرضِ پلن هست اول امتحان می‌شود، بعد
-    // بقیه‌ی مدل‌های ranked (بهترین تطابق کیفیت اول) — اگر اولی fail کند (نه به‌خاطر سیاست
-    // محتوا)، به بعدی fallback می‌شود، نه اینکه کل درخواست fail شود
-    let candidateChain: AiModel[];
+    // تصمیم صریح کاربر: هیچ‌جا مدل را بی‌صدا عوض نمی‌کنیم — دقیقاً همان مدلی که کاربر
+    // انتخاب کرده (یا در حالت auto، بهترین تطابق/پیش‌فرض پلن) امتحان می‌شود؛ اگر fail شد
+    // (نه سیاست محتوا)، به مدل دیگری fallback نمی‌کنیم، خطای روشن برمی‌گردانیم که کاربر
+    // خودش مدل دیگری انتخاب کند یا بعداً دوباره امتحان کند
+    let selectedModel: AiModel;
     if (explicitModelRecord) {
-      candidateChain = [
-        explicitModelRecord,
-        ...candidates.filter((c) => c.id !== explicitModelRecord.id),
-      ];
+      selectedModel = explicitModelRecord;
     } else {
       const { tier: idealTier, size: idealSize } =
         await this.classifyImagePrompt(dto.content, userId, apiKey);
@@ -1252,9 +1250,7 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
       const defaultRecord = plan.defaultImageGenModel
         ? ranked.find((c) => c.name === plan.defaultImageGenModel)
         : undefined;
-      candidateChain = defaultRecord
-        ? [defaultRecord, ...ranked.filter((c) => c.id !== defaultRecord.id)]
-        : ranked;
+      selectedModel = defaultRecord ?? ranked[0];
     }
 
     // docs/PRD-image-gen-pricing-and-credit-fix.md §۱۴ — تصمیم صریح کاربر: دیگر بر اساس تخمین
@@ -1322,48 +1318,28 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
         );
       };
 
-      // زنجیره‌ی fallback — روی خطای سیاست محتوا اصلاً fallback نمی‌کنیم (مدل دیگر هم رد
-      // می‌کند، فقط هزینه/تأخیر اضافه می‌شود)، ولی روی خطای شبکه/provider به مدل بعدی می‌رویم
-      let modelRecord: AiModel | null = null;
-      let result: Awaited<
-        ReturnType<typeof this.imageGen.generateImage>
-      > | null = null;
-      let lastErr: unknown = null;
-      for (const candidate of candidateChain) {
-        try {
-          result = inputImageBuffers.length
-            ? await this.imageGen.editImage({
-                modelId: candidate.name,
-                prompt: promptWithFaceInstruction,
-                images: inputImageBuffers,
-                apiKey,
-                size: candidate.imageGenSize ?? undefined,
-                quality: candidate.imageGenQuality ?? undefined,
-                onPartial,
-              })
-            : await this.imageGen.generateImage({
-                modelId: candidate.name,
-                prompt: dto.content,
-                apiKey,
-                size: candidate.imageGenSize ?? undefined,
-                quality: candidate.imageGenQuality ?? undefined,
-                onPartial,
-              });
-          modelRecord = candidate;
-          lastErr = null;
-          break;
-        } catch (err) {
-          lastErr = err;
-          if (err instanceof ImageApiError && err.isPolicyViolation) throw err;
-          this.logger.warn(
-            `image gen failed with model=${candidate.name}, trying next fallback: ${(err as Error).message}`,
-          );
-        }
-      }
-      if (!result || !modelRecord)
-        throw (
-          lastErr ?? new Error('image generation: no candidate model succeeded')
-        );
+      // فقط همان یک مدل انتخاب‌شده امتحان می‌شود — بدون fallback به مدل دیگر. اگر fail شد
+      // (چه سیاست محتوا چه خطای provider)، خطا مستقیم throw می‌شود و کچ بیرونی پیام روشن
+      // «مدل دیگری امتحان کنید یا بعداً دوباره تلاش کنید» را به کاربر برمی‌گرداند
+      const modelRecord = selectedModel;
+      const result = inputImageBuffers.length
+        ? await this.imageGen.editImage({
+            modelId: modelRecord.name,
+            prompt: promptWithFaceInstruction,
+            images: inputImageBuffers,
+            apiKey,
+            size: modelRecord.imageGenSize ?? undefined,
+            quality: modelRecord.imageGenQuality ?? undefined,
+            onPartial,
+          })
+        : await this.imageGen.generateImage({
+            modelId: modelRecord.name,
+            prompt: dto.content,
+            apiKey,
+            size: modelRecord.imageGenSize ?? undefined,
+            quality: modelRecord.imageGenQuality ?? undefined,
+            onPartial,
+          });
       const modelId = modelRecord.name;
       this.liveStats
         .recordLiaraCall('chat', true, Date.now() - callStart)
@@ -1493,7 +1469,7 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
         `image generation failed${err instanceof ImageApiError ? ` (code=${err.code})` : ''}: ${(err as Error).message}`,
       );
       res.write(
-        `data: ${JSON.stringify({ error: isPolicyViolation ? fa.chat.imageGenPolicyViolation : fa.chat.imageGenFailed })}\n\n`,
+        `data: ${JSON.stringify({ error: isPolicyViolation ? fa.chat.imageGenPolicyViolation : fa.chat.imageGenModelUnavailable })}\n\n`,
       );
     } finally {
       res.end();
