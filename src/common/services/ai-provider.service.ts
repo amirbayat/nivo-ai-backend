@@ -88,10 +88,21 @@ export class AiProviderService {
   }
 
   get baseURL(): string {
-    return this.isOpenRouter
-      ? (this.config.get<string>('OPENROUTER_BASE_URL') ??
-          'https://openrouter.ai/api/v1')
-      : this.config.get<string>('LIARA_AI_BASE_URL')!;
+    if (this.isOpenRouter) {
+      const url = this.config.get<string>('OPENROUTER_BASE_URL');
+      // عمداً fallback به https://openrouter.ai مستقیم نداریم: زیرساخت پروداکشن داخل
+      // ایران است و اتصال مستقیم به OpenRouter نباید هرگز رخ بدهد (باید از openrouter-relay
+      // خارج از ایران رد شود). اگر OPENROUTER_BASE_URL ست نشود، به‌جای دیفالت خاموش به
+      // اتصال مستقیم، صریحاً خطا می‌دهیم تا این misconfiguration فوراً دیده شود.
+      if (!url) {
+        throw new Error(
+          'OPENROUTER_BASE_URL باید صریحاً ست شود (آدرس openrouter-relay خارج از ایران) — ' +
+            'اتصال مستقیم به openrouter.ai از این طریق عمداً غیرفعال است.',
+        );
+      }
+      return url;
+    }
+    return this.config.get<string>('LIARA_AI_BASE_URL')!;
   }
 
   // کلید مشترک پلتفرم برای provider فعال — برای مسیرهایی که کلید اختصاصی-به‌ازای-کاربر معنا
