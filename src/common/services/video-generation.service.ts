@@ -47,6 +47,54 @@ export class VideoGenerationService {
 
   constructor(private readonly aiProvider: AiProviderService) {}
 
+  // مشاهده‌شده در پروداکشن: این endpoint (هنوز نسبتاً تازه/بتا در OpenRouter) گاه‌به‌گاه
+  // به‌جای گیت‌وی واقعی API، به fallback صفحه‌ی ۴۰۴ سایت مارکتینگ‌شان (HTML، نه JSON) می‌افتد
+  // — به‌نظر یک miss موقتی/edge-specific است چون درخواست بلافاصله‌ی بعدی معمولاً موفق است،
+  // دقیقاً مثل retry-once موجود برای شبکه/۵xx در image-generation.service.ts. `buildInit` هر بار
+  // فراخوانی می‌شود تا AbortSignal.timeout هر تلاش تازه باشد (نه از تلاش قبلی مصرف‌شده).
+  private async fetchOpenRouterVideo<T>(
+    url: string,
+    buildInit: () => RequestInit,
+    label: string,
+  ): Promise<{ res: Response; json: T; text: string }> {
+    const doFetch = () => (this.aiProvider.fetch ?? fetch)(url, buildInit());
+
+    let res: Response;
+    try {
+      res = await doFetch();
+      if (!res.ok && res.status >= 500) {
+        this.logger.warn(`${label} returned ${res.status}, retrying once`);
+        res = await doFetch();
+      }
+    } catch (err) {
+      this.logger.warn(
+        `${label} network error, retrying once: ${(err as Error).message}`,
+      );
+      res = await doFetch();
+    }
+
+    let text = await res.text();
+    let json: T;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      this.logger.warn(
+        `${label} returned non-JSON (status=${res.status}), retrying once`,
+      );
+      res = await doFetch();
+      text = await res.text();
+      try {
+        json = JSON.parse(text);
+      } catch {
+        throw new VideoApiError(
+          `${label} returned non-JSON response after retry (status=${res.status}): ${text.slice(0, 300)}`,
+          null,
+        );
+      }
+    }
+    return { res, json, text };
+  }
+
   async submitVideoJob(params: {
     modelId: string;
     prompt: string;
@@ -83,9 +131,12 @@ export class VideoGenerationService {
       ];
     }
 
-    const res = await (this.aiProvider.fetch ?? fetch)(
+    const { res, json, text } = await this.fetchOpenRouterVideo<{
+      id?: string;
+      error?: string | { message?: string; code?: string | number; type?: string };
+    }>(
       `${this.aiProvider.baseURL}/videos`,
-      {
+      () => ({
         method: 'POST',
         headers: {
           Authorization: `Bearer ${params.apiKey}`,
@@ -94,22 +145,9 @@ export class VideoGenerationService {
         },
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(60_000),
-      },
+      }),
+      'OpenRouter /videos submit',
     );
-
-    const text = await res.text();
-    let json: {
-      id?: string;
-      error?: string | { message?: string; code?: string | number; type?: string };
-    };
-    try {
-      json = JSON.parse(text);
-    } catch {
-      throw new VideoApiError(
-        `OpenRouter /videos returned non-JSON response (status=${res.status}): ${text.slice(0, 300)}`,
-        null,
-      );
-    }
     if (!res.ok || json.error || !json.id) {
       const message = extractVideoErrorMessage(json.error, text.slice(0, 300));
       const code =
@@ -128,30 +166,21 @@ export class VideoGenerationService {
     jobId: string,
     apiKey: string,
   ): Promise<{ status: VideoJobStatus; videoUrl?: string; error?: string }> {
-    const res = await (this.aiProvider.fetch ?? fetch)(
+    const { res, json, text } = await this.fetchOpenRouterVideo<{
+      status?: VideoJobStatus;
+      unsigned_urls?: string[];
+      error?: string | { message?: string; code?: string | number; type?: string };
+    }>(
       `${this.aiProvider.baseURL}/videos/${jobId}`,
-      {
+      () => ({
         headers: {
           Authorization: `Bearer ${apiKey}`,
           ...(this.aiProvider.extraHeaders ?? {}),
         },
         signal: AbortSignal.timeout(30_000),
-      },
+      }),
+      `OpenRouter /videos/${jobId} poll`,
     );
-    const text = await res.text();
-    let json: {
-      status?: VideoJobStatus;
-      unsigned_urls?: string[];
-      error?: string | { message?: string; code?: string | number; type?: string };
-    };
-    try {
-      json = JSON.parse(text);
-    } catch {
-      throw new VideoApiError(
-        `OpenRouter /videos/${jobId} returned non-JSON response (status=${res.status}): ${text.slice(0, 300)}`,
-        null,
-      );
-    }
     if (!res.ok) {
       const message = extractVideoErrorMessage(json.error, text.slice(0, 300));
       const code =
