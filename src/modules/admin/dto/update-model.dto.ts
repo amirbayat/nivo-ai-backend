@@ -84,6 +84,35 @@ export class UpdateModelDto {
   imageGenFlatPriceUnit?: string;
 
   @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  videoGenPricePerSecondUsd?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  videoGenAudioMultiplier?: number;
+
+  @IsOptional()
+  @IsArray()
+  @Type(() => Number)
+  @IsNumber({}, { each: true })
+  videoGenSupportedDurationsSec?: number[];
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  videoGenSupportedSizes?: string[];
+
+  // دستور صریح کاربر — سوییچ ستون «استودیوی ویدیو» توی جدول ادمین از همین DTO (نه CreateModelDto)
+  // رد می‌شود چون آپدیت‌های تک‌فیلدی از PATCH استفاده می‌کنند
+  @IsOptional()
+  @IsBoolean()
+  videoStudioEligible?: boolean;
+
+  @IsOptional()
   @IsBoolean()
   isActive?: boolean;
 

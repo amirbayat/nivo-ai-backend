@@ -21,6 +21,7 @@ import { SetVideoStudioModelsDto } from './dto/set-models.dto';
 import { GenerateStoryboardDto } from './dto/generate-storyboard.dto';
 import { UpdateShotDto } from './dto/update-shot.dto';
 import { SendMessageDto } from './dto/send-message.dto';
+import { UploadVideoStudioImageDto } from './dto/upload-image.dto';
 import { mimeTypeForExt } from '../../common/validators/chat-image.validator';
 
 // mimeTypeForExt (chat-image.validator.ts) فقط فرمت‌های عکس چت را می‌شناسد — اینجا mp4
@@ -137,6 +138,13 @@ export class VideoStudioController {
   @Get('projects/:id/messages')
   listMessages(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     return this.videoStudio.listMessages(user.sub, id);
+  }
+
+  // «افزودن عکس» توی کامپوزر — قبل از ارسال پیام صدا زده می‌شود؛ کلید برگشتی در
+  // SendMessageDto.imageKey فرستاده می‌شود (دقیقاً الگوی discovery/upload-image)
+  @Post('upload-image')
+  uploadImage(@Body() dto: UploadVideoStudioImageDto) {
+    return this.videoStudio.uploadImage(dto.image);
   }
 
   // فرانت با axios (هدر Authorization واقعی) + responseType:'blob' صدا می‌زند — دقیقاً الگوی

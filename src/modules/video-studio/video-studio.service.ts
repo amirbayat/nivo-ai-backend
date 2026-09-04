@@ -25,6 +25,11 @@ import {
 import { AiProviderService } from '../../common/services/ai-provider.service';
 import { LiaraKeyProvisioningService } from '../liara/liara-key-provisioning.service';
 import { VideoStudioConfigService } from '../video-studio-config/video-studio-config.service';
+import {
+  normalizeHeicDataUrl,
+  parseChatImageDataUrl,
+  validateChatImages,
+} from '../../common/validators/chat-image.validator';
 import { CreateVideoProjectDto } from './dto/create-project.dto';
 import { SetVideoStudioModelsDto } from './dto/set-models.dto';
 import { GenerateStoryboardDto } from './dto/generate-storyboard.dto';
@@ -600,10 +605,14 @@ export class VideoStudioService {
 
   // یک شات مستقیم از متن خام کاربر (بدون طراحی کاراکتر/استوری‌برد) — «یه ضرب ویدیو» طبق
   // درخواست کاربر. requestShotVideo بعدش همان مسیر preflight/صف معمولی را انجام می‌دهد.
+  // imageKey اختیاری («این عکس رو برام ویدیو کن») همان‌طور روی previewImageKey می‌نشیند که
+  // برای استوری‌برد هم استفاده می‌شود — پردازشگر صف از قبل این فیلد را به‌عنوان
+  // referenceImage به submitVideoJob پاس می‌دهد (studio-video-generation.processor.ts)
   private async generateQuickVideo(
     userId: string,
     projectId: string,
     prompt: string,
+    imageKey?: string,
   ) {
     const project = await this.getProjectOrThrow(userId, projectId);
     const config = await this.videoStudioConfig.getConfig();
@@ -616,10 +625,26 @@ export class VideoStudioService {
         order: nextOrder,
         title: prompt.slice(0, 40),
         scenario: prompt,
+        previewImageKey: imageKey ?? null,
         audioEnabled: config.defaultAudioEnabled,
       },
     });
     await this.requestShotVideo(userId, projectId, shot.id);
+  }
+
+  // آپلود عکس مرجع برای «این عکس رو برام ویدیو کن» — قبل از sendMessage صدا زده می‌شود؛
+  // دقیقاً الگوی DiscoveryGenerationService.uploadInputImage، فقط بدون وابستگی به ChatConfig
+  // چون این یک محدودیت ثابت و کوچک است، نه یک تنظیم قابل‌ادمین
+  async uploadImage(rawDataUrl: string): Promise<{ key: string }> {
+    const dataUrl = await normalizeHeicDataUrl(rawDataUrl);
+    validateChatImages([dataUrl], {
+      maxCount: 1,
+      maxSizeMb: 8,
+      allowedFormats: ['jpeg', 'jpg', 'png', 'webp'],
+    });
+    const parsed = parseChatImageDataUrl(dataUrl)!;
+    const key = await this.storage.uploadImage(parsed.buffer, parsed.ext);
+    return { key };
   }
 
   private extractErrorMessage(err: unknown): string {
@@ -677,7 +702,7 @@ export class VideoStudioService {
 - "generate_quick_video": خواسته مستقیم و فوری یک ویدیوی کوتاه از یک توصیف ساده ساخته شود، بدون طی مراحل کاراکتر/استوری‌برد.
 - "general": پیام یک سؤال/گفتگوی عمومی است یا آنقدر مبهم است که نمی‌شود مطمئن به یکی از موارد بالا رسید — فقط پاسخ بده و در suggestedActions قدم بعدی منطقی را (با توجه به وضعیت فعلی پروژه) پیشنهاد کن.
 reply را همیشه فارسی، کوتاه و دوستانه بنویس. اگر intent مبهم است، در reply صریح بپرس («می‌خوای برات عکس مدل‌ها رو بسازم یا مستقیم بریم سراغ سناریو؟»).`,
-        prompt: `وضعیت فعلی پروژه:\n${stateSummary}\n\nایده‌ی اولیه‌ی پروژه: ${project.initialPrompt}\n\nگفتگوی اخیر:\n${history}\n\nپیام جدید کاربر: ${dto.content}`,
+        prompt: `وضعیت فعلی پروژه:\n${stateSummary}\n\nایده‌ی اولیه‌ی پروژه: ${project.initialPrompt}\n\nگفتگوی اخیر:\n${history}\n\nپیام جدید کاربر: ${dto.content}${dto.imageKey ? '\n\n(کاربر یک عکس هم ضمیمه کرده — اگر پیام صراحتاً یا ضمنی خواسته از همین عکس ویدیو ساخته شود، intent را generate_quick_video بگذار.)' : ''}`,
         abortSignal: AbortSignal.timeout(20_000),
       });
       classification = object;
@@ -710,6 +735,7 @@ reply را همیشه فارسی، کوتاه و دوستانه بنویس. اگ
             userId,
             projectId,
             classification.extractedDetails ?? dto.content,
+            dto.imageKey,
           );
           break;
         case 'general':
