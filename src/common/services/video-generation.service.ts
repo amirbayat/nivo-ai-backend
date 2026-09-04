@@ -7,11 +7,11 @@ import { AiProviderService } from './ai-provider.service';
 // polling interval/timeout کلی و ذخیره‌سازی نتیجه در MinIO به‌عهده‌ی صف/پردازشگر بالادستی است
 // (queue/processors/studio-video-generation.processor.ts).
 //
-// ⚠️ هشدار مهم: شکل دقیق request/response زیر بر اساس الگوی مستند-شده‌ی OpenRouter برای
-// endpointهای async (submit → poll با job id) و ساختار endpoint.supported_video_parameters
-// در کاتالوگ مدل (openroutermodels.json) نوشته شده — هنوز با یک curl واقعی روی حساب OpenRouter
-// پروژه تست/تایید نشده (طبق انضباط خودِ EXECUTION-PLAN.md قدم ۲: «هر مدل با یک curl مستقیم
-// تست شود»). قبل از تکیه‌ی پروداکشن، حتماً با یک درخواست واقعی این فرمت تایید/اصلاح شود.
+// شکل request/response زیر با مستندات رسمی OpenRouter تایید شده (۱۴۰۵-۰۶-۱۴،
+// https://openrouter.ai/docs/api/api-reference/video-generation/create-videos):
+// - وقتی status=«completed» می‌شود، URL ویدیو در آرایه‌ی `unsigned_urls` می‌آید، نه `video.url`.
+// - علاوه بر «failed»، «cancelled» و «expired» هم وضعیت پایانی (شکست) هستند.
+// - فیلد error یک رشته‌ی ساده است، نه آبجکت {message}.
 export class VideoApiError extends Error {
   constructor(
     message: string,
@@ -21,7 +21,13 @@ export class VideoApiError extends Error {
   }
 }
 
-export type VideoJobStatus = 'pending' | 'processing' | 'completed' | 'failed';
+export type VideoJobStatus =
+  | 'pending'
+  | 'processing'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'expired';
 
 @Injectable()
 export class VideoGenerationService {
@@ -47,8 +53,22 @@ export class VideoGenerationService {
         ? { generate_audio: params.audioEnabled }
         : {}),
     };
+    // frame_images: [{type, image_url:{url}, frame_type}] — تایید شده با مستندات رسمی OpenRouter
+    // (https://openrouter.ai/docs/guides/overview/multimodal/video-generation)؛ کاتالوگ مدل‌ها
+    // (openroutermodels.json: supported_video_parameters.supported_frame_images) هم فقط همین
+    // فیلد را برای مدل‌های ویدیو نشان می‌دهد، نه input_reference/input_references (که مخصوص
+    // مدل‌های تصویر است). عکس preview کاراکتر به‌عنوان first_frame فرستاده می‌شود تا ظاهر
+    // شخصیت در طول صحنه ثابت بماند.
     if (params.referenceImage) {
-      body.input_reference = `data:image/png;base64,${params.referenceImage.toString('base64')}`;
+      body.frame_images = [
+        {
+          type: 'image_url',
+          image_url: {
+            url: `data:image/png;base64,${params.referenceImage.toString('base64')}`,
+          },
+          frame_type: 'first_frame',
+        },
+      ];
     }
 
     const res = await (this.aiProvider.fetch ?? fetch)(
@@ -66,7 +86,7 @@ export class VideoGenerationService {
     );
 
     const text = await res.text();
-    let json: { id?: string; error?: { code?: string; message?: string } };
+    let json: { id?: string; error?: string };
     try {
       json = JSON.parse(text);
     } catch {
@@ -76,10 +96,7 @@ export class VideoGenerationService {
       );
     }
     if (!res.ok || json.error || !json.id) {
-      throw new VideoApiError(
-        json.error?.message ?? text.slice(0, 300),
-        json.error?.code ?? null,
-      );
+      throw new VideoApiError(json.error ?? text.slice(0, 300), null);
     }
     return { jobId: json.id };
   }
@@ -101,8 +118,8 @@ export class VideoGenerationService {
     const text = await res.text();
     let json: {
       status?: VideoJobStatus;
-      video?: { url?: string };
-      error?: { message?: string };
+      unsigned_urls?: string[];
+      error?: string;
     };
     try {
       json = JSON.parse(text);
@@ -113,12 +130,12 @@ export class VideoGenerationService {
       );
     }
     if (!res.ok) {
-      throw new VideoApiError(json.error?.message ?? text.slice(0, 300), null);
+      throw new VideoApiError(json.error ?? text.slice(0, 300), null);
     }
     return {
       status: json.status ?? 'processing',
-      videoUrl: json.video?.url,
-      error: json.error?.message,
+      videoUrl: json.unsigned_urls?.[0],
+      error: json.error,
     };
   }
 

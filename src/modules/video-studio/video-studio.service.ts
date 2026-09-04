@@ -177,7 +177,13 @@ export class VideoStudioService {
     text: string,
     apiKey: string,
   ): Promise<string> {
-    const provider = this.aiProvider.buildClient(apiKey);
+    // supportsStructuredOutputs=true — بدون این، OpenRouter/@ai-sdk/openai-compatible schema را
+    // strict enforce نمی‌کند و صرفاً یک دستور متنی «JSON برگردون» می‌فرستد، پس گاهی خروجی مدل با
+    // zod schema نمی‌خواند و «No object generated: response did not match schema» می‌دهد (دقیقاً
+    // مثل nivo-cal.service.ts:140-142) — و بدتر، فالبک این تابع یعنی moderation دور زده می‌شود.
+    const provider = this.aiProvider.buildClient(apiKey, {
+      supportsStructuredOutputs: true,
+    });
     try {
       const { object } = await generateObject({
         model: provider(TRANSLATION_MODEL),
@@ -367,7 +373,9 @@ export class VideoStudioService {
     const apiKey = await this.resolveApiKey(userId);
     const chatModel = await this.resolveModel(AiModelType.CHAT, project.chatModelId);
     const photoModel = await this.resolveModel(AiModelType.IMAGE_GEN, project.photoModelId);
-    const provider = this.aiProvider.buildClient(apiKey);
+    const provider = this.aiProvider.buildClient(apiKey, {
+      supportsStructuredOutputs: true,
+    });
 
     const translatedDetails = await this.translateAndModerate(
       dto.details,
@@ -727,7 +735,9 @@ export class VideoStudioService {
 
     const apiKey = await this.resolveApiKey(userId);
     const chatModel = await this.resolveModel(AiModelType.CHAT, project.chatModelId);
-    const provider = this.aiProvider.buildClient(apiKey);
+    const provider = this.aiProvider.buildClient(apiKey, {
+      supportsStructuredOutputs: true,
+    });
 
     let classification: z.infer<typeof IntentSchema>;
     try {

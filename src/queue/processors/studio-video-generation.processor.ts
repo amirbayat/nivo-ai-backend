@@ -121,8 +121,14 @@ export class StudioVideoGenerationProcessor {
           videoUrl = status.videoUrl;
           break;
         }
-        if (status.status === 'failed') {
-          throw new Error(status.error ?? 'video job failed on provider side');
+        if (
+          status.status === 'failed' ||
+          status.status === 'cancelled' ||
+          status.status === 'expired'
+        ) {
+          throw new Error(
+            status.error ?? `video job ${status.status} on provider side`,
+          );
         }
       }
       if (!videoUrl) throw new Error('video job polling timed out');
