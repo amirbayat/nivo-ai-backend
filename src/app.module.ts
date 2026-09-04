@@ -42,6 +42,8 @@ import { ProjectsModule } from './modules/projects/projects.module';
 import { DiscoveryModule } from './modules/discovery/discovery.module';
 import { AdminCreativeModule } from './modules/admin-creative/admin-creative.module';
 import { NivoCalModule } from './modules/nivo-cal/nivo-cal.module';
+import { VideoStudioModule } from './modules/video-studio/video-studio.module';
+import { VideoStudioConfigModule } from './modules/video-studio-config/video-studio-config.module';
 
 @Module({
   imports: [
@@ -85,6 +87,8 @@ import { NivoCalModule } from './modules/nivo-cal/nivo-cal.module';
     DiscoveryModule,
     AdminCreativeModule,
     NivoCalModule,
+    VideoStudioModule,
+    VideoStudioConfigModule,
   ],
   providers: [{ provide: APP_FILTER, useClass: AllExceptionsFilter }],
 })

@@ -9,5 +9,8 @@ import { FirebaseModule } from '../../common/firebase/firebase.module';
   imports: [PrismaModule, FirebaseModule],
   controllers: [PushNotificationsController],
   providers: [PushNotificationsService, PushFcmService],
+  // docs/PRD-video-studio-chat-flow.md §۸.۶.۵ — پردازشگر صف ویدیو (queue.module.ts) مستقیم به
+  // PushFcmService نیاز دارد تا بعد از تکمیل job به همان کاربر پوش بفرستد (نه broadcast ادمین)
+  exports: [PushFcmService],
 })
 export class PushNotificationsModule {}

@@ -118,8 +118,12 @@ export class AiProviderService {
     const headers: Record<string, string> = {};
     const siteUrl = this.config.get<string>('OPENROUTER_SITE_URL');
     const appName = this.config.get<string>('OPENROUTER_APP_NAME');
+    const relaySecret = this.config.get<string>('OPENROUTER_RELAY_SECRET');
     if (siteUrl) headers['HTTP-Referer'] = siteUrl;
     if (appName) headers['X-Title'] = appName;
+    // فقط وقتی OPENROUTER_BASE_URL به دامنه‌ی openrouter-relay (پروژه‌ی جدا) اشاره می‌کند
+    // معنا دارد — خودِ OpenRouter این هدر را نادیده می‌گیرد، پس همیشه امن است اضافه شود.
+    if (relaySecret) headers['X-Relay-Secret'] = relaySecret;
     return Object.keys(headers).length ? headers : undefined;
   }
 

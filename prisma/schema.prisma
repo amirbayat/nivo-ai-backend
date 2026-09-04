@@ -55,6 +55,7 @@ model User {
   foodLogs                  FoodLog[]
   nutritionProfile          NutritionProfile?
   weightLogs                WeightLog[]
+  studioProjects            StudioProject[]
 
   @@map("users")
 }
@@ -817,6 +818,7 @@ enum AiModelType {
   CHAT
   EMBEDDING
   IMAGE_GEN
+  VIDEO_GEN
 }
 
 // شناسه‌ی مدل بین لیارا و OpenRouter لزوماً یکسان نیست (docs/PRD-openrouter-migration.md §۶.۳) —
@@ -856,6 +858,18 @@ model AiModel {
   // imageGenOutputImagePricePerM (docs/PRD-image-gen-pricing-and-credit-fix.md §۵)
   imageGenFlatPriceUsd  Float?
   imageGenFlatPriceUnit String? // "image" | "megapixel" — null یعنی مدل token-based است (رفتار فعلی)
+
+  // docs/PRD-video-studio-chat-flow.md — قیمت‌گذاری OpenRouter برای ویدیو per-second است، نه
+  // per-token/per-image مثل بالا. videoGenPricePerSecondUsd نرخ پایه (پایین‌ترین کیفیت/بدون صدا)
+  // است؛ وقتی کاربر صدا را فعال می‌کند، نرخ در videoGenAudioMultiplier ضرب می‌شود
+  // (calcVideoGenCost در pricing.service.ts). videoGenSupportedDurationsSec/videoGenSupportedSizes
+  // مستقیم از openroutermodels.json (endpoint.supported_video_parameters) پر می‌شوند — بین مدل‌ها
+  // فرق دارند، پس UI باید بر اساس مدل انتخابی فیلتر کند، نه یک لیست ثابت ۱۶:۹/۱:۱/۹:۱۶.
+  videoGenPricePerSecondUsd     Float?
+  videoGenAudioMultiplier       Float?
+  videoGenSupportedDurationsSec Int[]   @default([])
+  videoGenSupportedSizes        String[] @default([])
+
   isActive                     Boolean     @default(true)
   sortOrder                    Int         @default(0)
   tier                         ModelTier   @default(MEDIUM)
@@ -1010,6 +1024,124 @@ model ChatConfig {
   updatedAt               DateTime @updatedAt
 
   @@map("chat_config")
+}
+
+// docs/PRD-video-studio-chat-flow.md — سینگلتون تنظیمات استودیوی ویدیو، دقیقاً الگوی ChatConfig.
+// characterOptionCount عمداً DB-backed و ادمین-قابل‌تغییر است (نه هاردکد ۴/env) — طبق تصمیم صریح
+// کاربر، چون تعداد گزینه‌ی کاراکتر مستقیم روی هزینه‌ی هر پروژه اثر می‌گذارد (هر ۴ عکس شمارش و
+// کسر می‌شود، نه فقط عکس انتخاب‌شده — video-studio.service.ts).
+model VideoStudioConfig {
+  id                                String   @id @default("singleton")
+  characterOptionCount              Int      @default(4)
+  maxCharacterRegeneratesPerProject Int      @default(10)
+  maxConcurrentVideoJobsPerUser     Int      @default(2)
+  maxVideoGenPerDayPerUser          Int? // null = بدون سقف روزانه
+  defaultAudioEnabled               Boolean  @default(false)
+  updatedAt                         DateTime @updatedAt
+
+  @@map("video_studio_config")
+}
+
+// ─── استودیوی ویدیو (docs/PRD-video-studio-chat-flow.md) ──────────────────────
+
+enum StudioProjectStatus {
+  DRAFT
+  CHARACTER_SELECTED
+  STORYBOARD_READY
+  COMPLETED
+}
+
+enum StudioShotVideoStatus {
+  NOT_STARTED
+  PENDING
+  PROCESSING
+  SUCCEEDED
+  FAILED
+}
+
+enum StudioModerationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// یک پروژه‌ی تولید ویدیو = یک گفتگوی پیوسته (بدون wizard/استپر، طبق §۲ PRD). سه مدل جدا
+// (چت/عکس/ویدیو) و دو ابعاد جدا (تصویر/ویدیو) روی خود پروژه نگه داشته می‌شوند چون در تمام
+// مراحل قابل‌تغییرند، نه فقط یک‌بار در ابتدا.
+model StudioProject {
+  id               String              @id @default(uuid())
+  userId           String
+  user             User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  initialPrompt    String
+  visualStyle      String?
+  status           StudioProjectStatus @default(DRAFT)
+  chatModelId      String?
+  photoModelId     String?
+  videoModelId     String?
+  imageAspectRatio String? // "1:1" | "16:9" | "9:16"
+  videoAspectRatio String?
+  createdAt        DateTime            @default(now())
+
+  characterOptions StudioCharacterOption[]
+  shots            StudioShot[]
+  messages         StudioMessage[]
+
+  @@map("studio_projects")
+}
+
+// تاریخچه‌ی واقعی گفتگو — پیام‌های کاربر + پاسخ/تصمیم دستیار، برای این‌که چت واقعاً یک
+// گفتگوی پیوسته باشد (طبق §۲ PRD: «بدون wizard/استپر»)، نه یک اسکریپت ثابت driven by مرحله.
+// intent/suggestedActions فقط روی پیام‌های role="assistant" پر می‌شوند — نتیجه‌ی طبقه‌بندی
+// video-studio.service.ts/sendMessage روی پیام کاربر که این پاسخ را تولید کرده.
+model StudioMessage {
+  id                String        @id @default(uuid())
+  projectId         String
+  project           StudioProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  role              String // "user" | "assistant"
+  content           String
+  intent            String? // فقط assistant: "generate_character"|"generate_storyboard"|"generate_quick_video"|"general"
+  suggestedActions  String[]      @default([]) // فقط assistant، وقتی intent="general" — پیشنهاد قدم بعدی برای UI (چیپ قابل‌کلیک)
+  createdAt         DateTime      @default(now())
+
+  @@index([projectId, createdAt])
+  @@map("studio_messages")
+}
+
+// هر پروژه چند گزینه‌ی هم‌زمان دارد (تعداد از VideoStudioConfig.characterOptionCount) — کاربر
+// یکی را انتخاب می‌کند یا «بازطراحی کن» می‌زند (رکوردهای جدید، قدیمی‌ها می‌مانند برای تاریخچه).
+model StudioCharacterOption {
+  id               String                 @id @default(uuid())
+  projectId        String
+  project          StudioProject          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  imageKey         String
+  selected         Boolean                @default(false)
+  moderationStatus StudioModerationStatus @default(PENDING)
+  createdAt        DateTime               @default(now())
+
+  @@index([projectId])
+  @@map("studio_character_options")
+}
+
+// هر شات = یک صحنه‌ی استوری‌برد؛ videoStatus/videoJobId/videoKey توسط صف async
+// (studio-video-generation.processor.ts) آپدیت می‌شوند، نه synchronous.
+model StudioShot {
+  id               String                 @id @default(uuid())
+  projectId        String
+  project          StudioProject          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  order            Int
+  title            String
+  scenario         String
+  previewImageKey  String?
+  audioEnabled     Boolean                @default(false)
+  moderationStatus StudioModerationStatus @default(PENDING)
+  videoStatus      StudioShotVideoStatus  @default(NOT_STARTED)
+  videoJobId       String?
+  videoKey         String?
+  creditCost       Float?
+  createdAt        DateTime               @default(now())
+
+  @@index([projectId])
+  @@map("studio_shots")
 }
 
 // ─── Growth / Traction (docs/PRD-growth-traction-features.md) ─────────────────

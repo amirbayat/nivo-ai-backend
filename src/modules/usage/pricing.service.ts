@@ -190,6 +190,33 @@ export class PricingService {
     };
   }
 
+  // docs/PRD-video-studio-chat-flow.md — قیمت‌گذاری ویدیو OpenRouter per-second است (نه
+  // per-token/per-image). videoGenPricePerSecondUsd نرخ پایه (بدون صدا)؛ وقتی audioEnabled باشد
+  // در videoGenAudioMultiplier ضرب می‌شود (طبق داده‌ی واقعی OpenRouter — مثلاً Veo 3.1 با صدا
+  // تقریباً ۲برابر بدون صداست). کسر واقعی فقط بعد از موفقیت job در پردازشگر صف صدا زده می‌شود.
+  async calcVideoGenCost(
+    model: {
+      videoGenPricePerSecondUsd: number | null;
+      videoGenAudioMultiplier: number | null;
+    },
+    durationSec: number,
+    audioEnabled: boolean,
+  ): Promise<CostCalc> {
+    const baseUsd = (model.videoGenPricePerSecondUsd ?? 0) * durationSec;
+    const usdCost =
+      audioEnabled && model.videoGenAudioMultiplier
+        ? baseUsd * model.videoGenAudioMultiplier
+        : baseUsd;
+    const rate = await this.exchangeRate.getUsdtToman();
+    const costToman = Math.ceil(usdCost * rate);
+    return {
+      costToman,
+      costUsdMicros: Math.round(usdCost * 1_000_000),
+      costInputUsdMicros: 0,
+      costOutputUsdMicros: Math.round(usdCost * 1_000_000),
+    };
+  }
+
   async dailyBudgetToman(priceMonthly: number): Promise<number> {
     if (priceMonthly === 0) return Math.floor(this.freeBudgetToman / 30);
     return Math.floor((priceMonthly * this.aiShare) / 30);

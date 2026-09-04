@@ -10,12 +10,16 @@ import { ChatImageCleanupProcessor } from './processors/chat-image-cleanup.proce
 import { AdminAlertsProcessor } from './processors/admin-alerts.processor';
 import { LiaraUsageSyncProcessor } from './processors/liara-usage-sync.processor';
 import { LiaraKeyRetryProcessor } from './processors/liara-key-retry.processor';
+import { StudioVideoGenerationProcessor } from './processors/studio-video-generation.processor';
 import { PrismaModule } from '../prisma/prisma.module';
 import { MessageFeedbackModule } from '../modules/message-feedback/message-feedback.module';
 import { CampaignModule } from '../modules/campaign/campaign.module';
 import { LiveStatsModule } from '../modules/live-stats/live-stats.module';
 import { AdminNotificationsModule } from '../modules/admin-notifications/admin-notifications.module';
 import { LiaraModule } from '../modules/liara/liara.module';
+import { UsageModule } from '../modules/usage/usage.module';
+import { PushNotificationsModule } from '../modules/push-notifications/push-notifications.module';
+import { VideoGenerationModule } from '../common/services/video-generation.module';
 
 @Module({
   imports: [
@@ -34,12 +38,18 @@ import { LiaraModule } from '../modules/liara/liara.module';
     BullModule.registerQueue({ name: 'admin-alerts' }),
     BullModule.registerQueue({ name: 'liara-usage-sync' }),
     BullModule.registerQueue({ name: 'liara-key-retry' }),
+    // docs/PRD-video-studio-chat-flow.md §۸.۶ — همون صف که video-studio.module.ts هم رجیستر
+    // می‌کند (تولیدکننده‌ی job)؛ پردازشگرش همین‌جاست، دقیقاً الگوی بقیه‌ی صف‌های این ماژول
+    BullModule.registerQueue({ name: 'studio-video-generation' }),
     PrismaModule,
     MessageFeedbackModule,
     CampaignModule,
     LiveStatsModule,
     AdminNotificationsModule,
     LiaraModule,
+    UsageModule,
+    PushNotificationsModule,
+    VideoGenerationModule,
   ],
   providers: [
     QueueService,
@@ -51,6 +61,7 @@ import { LiaraModule } from '../modules/liara/liara.module';
     AdminAlertsProcessor,
     LiaraUsageSyncProcessor,
     LiaraKeyRetryProcessor,
+    StudioVideoGenerationProcessor,
   ],
 })
 export class QueueModule {}

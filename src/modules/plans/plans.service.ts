@@ -37,7 +37,9 @@ export class PlansService {
     return this.prisma.aiModel.findMany({
       where: {
         isActive: true,
-        modelType: { in: ['CHAT', 'IMAGE_GEN'] },
+        // docs/PRD-video-studio-chat-flow.md — VIDEO_GEN اضافه شد تا استودیوی ویدیو هم از همین
+        // کاتالوگ عمومی مدل تغذیه شود (سه چیپ مدل چت/عکس/ویدیو، همان الگوی ModelSelector.tsx)
+        modelType: { in: ['CHAT', 'IMAGE_GEN', 'VIDEO_GEN'] },
         // فقط مدل‌هایی که روی provider فعلی (لیارا/OpenRouter) واقعاً معتبرند — طبق
         // docs/PRD-openrouter-migration.md §۶.۳
         platform: { has: this.aiProvider.platform },
@@ -58,6 +60,10 @@ export class PlansService {
         badges: true,
         inputPricePerM: true,
         outputPricePerM: true,
+        // docs/PRD-video-studio-chat-flow.md — برای فیلتر کردن گزینه‌های ابعاد/مدت ویدیو در UI
+        // بر اساس مدل ویدیوی انتخاب‌شده (بین مدل‌ها فرق دارد، طبق داده‌ی واقعی OpenRouter)
+        videoGenSupportedDurationsSec: true,
+        videoGenSupportedSizes: true,
       },
     });
   }

@@ -239,4 +239,29 @@ export const fa = {
     profileAlreadyExists:
       'پروفایل تغذیه‌ات قبلاً ساخته شده — می‌تونی ویرایشش کنی',
   },
+  // docs/PRD-video-studio-chat-flow.md — استودیوی ویدیو (فلوی چت‌محور)
+  videoStudio: {
+    projectNotFound: 'این پروژه یافت نشد',
+    insufficientCredits: 'اعتبار نیوو کافی نیست — لطفاً شارژ کنید',
+    characterGenerationFailed:
+      'طراحی کاراکتر ناموفق بود — اعتبار شما کسر نشد، دوباره امتحان کنید',
+    tooManyRegenerates:
+      'به سقف مجاز بازطراحی کاراکتر برای این پروژه رسیده‌اید',
+    characterOptionNotFound: 'این گزینه‌ی کاراکتر یافت نشد',
+    noCharacterSelected: 'ابتدا باید یک کاراکتر انتخاب کنید',
+    storyboardGenerationFailed:
+      'ساخت استوری‌برد ناموفق بود — اعتبار شما کسر نشد، دوباره امتحان کنید',
+    shotNotFound: 'این صحنه یافت نشد',
+    tooManyConcurrentJobs:
+      'شما چند ویدیوی دیگر در صف تولید دارید — صبر کنید تا تمام شوند',
+    dailyVideoLimitReached: 'به سقف روزانه‌ی تولید ویدیو رسیده‌اید',
+    videoAlreadyProcessing: 'ساخت ویدیوی این صحنه قبلاً شروع شده است',
+    contentRejected:
+      'این توصیف طبق قوانین استفاده از سرویس قابل‌تولید نیست — لطفاً توصیف را تغییر دهید',
+    videoReadyPushTitle: 'ویدیوی شما آماده شد',
+    videoReadyPushBody: (title: string) => `«${title}» آماده‌ی دانلود است`,
+    videoFailedPushTitle: 'ساخت ویدیو ناموفق بود',
+    videoFailedPushBody: (title: string) =>
+      `ساخت «${title}» ناموفق بود — اعتبار شما کسر نشد`,
+  },
 } as const;

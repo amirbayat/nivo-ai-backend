@@ -41,6 +41,23 @@ const MODELS = [
   { name: 'google/gemini-2.5-flash-image', displayName: 'Gemini 2.5 Flash Image', provider: 'google', modelType: 'IMAGE_GEN' as const, inputPricePerM: 0, outputPricePerM: 0, supportsVision: false, supportsImageGen: true, platform: ['OPENROUTER' as const], sortOrder: 25, tier: 'MEDIUM' as const, tokenizerFamily: 'approximate', avgCharsPerToken: 4 },
   { name: 'openai/gpt-5-image-mini', displayName: 'GPT-5 Image Mini', provider: 'openai', modelType: 'IMAGE_GEN' as const, inputPricePerM: 0, outputPricePerM: 0, supportsVision: false, supportsImageGen: true, platform: ['OPENROUTER' as const], sortOrder: 26, tier: 'MEDIUM' as const, tokenizerFamily: 'approximate', avgCharsPerToken: 4 },
   { name: 'openai/gpt-5.4-image-2', displayName: 'GPT-5.4 Image 2', provider: 'openai', modelType: 'IMAGE_GEN' as const, inputPricePerM: 0, outputPricePerM: 0, supportsVision: false, supportsImageGen: true, platform: ['OPENROUTER' as const], sortOrder: 27, tier: 'COMPLEX' as const, tokenizerFamily: 'approximate', avgCharsPerToken: 4 },
+
+  // docs/PRD-video-studio-chat-flow.md — استودیوی ویدیو. برخلاف مدل‌های عکس بالا (که قیمت صفر
+  // دارند تا ادمین دستی پر کند)، اینجا videoGenPricePerSecondUsd/videoGenAudioMultiplier مستقیم
+  // از داده‌ی واقعی OpenRouter (openroutermodels.json، دامپ ۱۴۰۵-۰۶-۱۳/2026-09-04،
+  // endpoint.display_pricing) پر شده‌اند: base = نرخ «بدون صدا»، multiplier = نسبت «با صدا»/«بدون
+  // صدا». این نرخ‌ها *فقط پایین‌ترین tier کیفیت* provider‌اند (مثلاً Veo 3.1 در 4K گران‌تر
+  // می‌شود) — calcVideoGenCost فعلاً tier کیفیت را مدل نمی‌کند، پس این تخمین محافظه‌کارانه (ارزان‌ترین
+  // حالت) است، نه قیمت دقیق هر رزولوشن؛ باید قبل از تکیه‌ی کامل پروداکشن با یک curl واقعی تایید و
+  // در پنل ادمین به‌روزرسانی شود (طبق EXECUTION-PLAN.md قدم ۲). sortOrder پایین‌تر = پیش‌فرض
+  // ارزان‌تر/سریع‌تر (veo-3.1-fast)، دقیقاً همون منطق sortOrder:0 مدل‌های IMAGE_GEN بالا.
+  { name: 'google/veo-3.1-fast', displayName: 'Veo 3.1 Fast', provider: 'google', modelType: 'VIDEO_GEN' as const, inputPricePerM: 0, outputPricePerM: 0, supportsVision: false, platform: ['OPENROUTER' as const], sortOrder: 28, tier: 'SIMPLE' as const, tokenizerFamily: 'approximate', avgCharsPerToken: 4, videoGenPricePerSecondUsd: 0.08, videoGenAudioMultiplier: 1.25, videoGenSupportedDurationsSec: [4, 6, 8], videoGenSupportedSizes: ['1280x720', '720x1280', '1920x1080', '1080x1920', '3840x2160', '2160x3840'] },
+  { name: 'kwaivgi/kling-v3.0-pro', displayName: 'Kling v3.0 Pro', provider: 'kwaivgi', modelType: 'VIDEO_GEN' as const, inputPricePerM: 0, outputPricePerM: 0, supportsVision: false, platform: ['OPENROUTER' as const], sortOrder: 29, tier: 'MEDIUM' as const, tokenizerFamily: 'approximate', avgCharsPerToken: 4, videoGenPricePerSecondUsd: 0.112, videoGenAudioMultiplier: 1.5, videoGenSupportedDurationsSec: [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], videoGenSupportedSizes: ['1280x720', '720x1280', '720x720'] },
+  // Seedance با ۲۵ اندازه‌ی خروجی واقعی پشتیبانی می‌کند (openroutermodels.json) — برای UI قابل‌فهم،
+  // فقط زیرمجموعه‌ی رایج ۱۶:۹/۹:۱۶/۱:۱ (دو کیفیت) نگه داشته شده، نه کل لیست خام provider
+  { name: 'bytedance/seedance-2.0', displayName: 'Seedance 2.0', provider: 'bytedance', modelType: 'VIDEO_GEN' as const, inputPricePerM: 0, outputPricePerM: 0, supportsVision: false, platform: ['OPENROUTER' as const], sortOrder: 30, tier: 'MEDIUM' as const, tokenizerFamily: 'approximate', avgCharsPerToken: 4, videoGenPricePerSecondUsd: 0.1512, videoGenAudioMultiplier: 1, videoGenSupportedDurationsSec: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], videoGenSupportedSizes: ['1280x720', '720x1280', '1080x1080', '1920x1080', '1080x1920'] },
+  { name: 'google/veo-3.1', displayName: 'Veo 3.1', provider: 'google', modelType: 'VIDEO_GEN' as const, inputPricePerM: 0, outputPricePerM: 0, supportsVision: false, platform: ['OPENROUTER' as const], sortOrder: 31, tier: 'COMPLEX' as const, tokenizerFamily: 'approximate', avgCharsPerToken: 4, videoGenPricePerSecondUsd: 0.2, videoGenAudioMultiplier: 2, videoGenSupportedDurationsSec: [4, 6, 8], videoGenSupportedSizes: ['1280x720', '720x1280', '1920x1080', '1080x1920', '3840x2160', '2160x3840'] },
+  { name: 'openai/sora-2-pro', displayName: 'Sora 2 Pro', provider: 'openai', modelType: 'VIDEO_GEN' as const, inputPricePerM: 0, outputPricePerM: 0, supportsVision: false, platform: ['OPENROUTER' as const], sortOrder: 32, tier: 'COMPLEX' as const, tokenizerFamily: 'approximate', avgCharsPerToken: 4, videoGenPricePerSecondUsd: 0.3, videoGenAudioMultiplier: 1, videoGenSupportedDurationsSec: [4, 8, 12, 16, 20], videoGenSupportedSizes: ['1280x720', '720x1280', '1920x1080', '1080x1920'] },
 ]
 
 async function main() {

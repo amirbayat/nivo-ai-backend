@@ -35,6 +35,10 @@ class EnvironmentVariables {
   // برای دورزدن connect-timeout به IP های Cloudflare که OpenRouter پشتشان سرو می‌شود. فرمت:
   // http://user:pass@host:port — ai-provider.service.ts این را می‌خواند (AiProviderService.fetch)
   @IsOptional() @IsUrl({ require_tld: false }) OPENROUTER_PROXY_URL?: string;
+  // secret مشترک با openrouter-relay (پروژه‌ی جدا، دیپلوی‌شده روی سروری خارج از ایران) —
+  // وقتی OPENROUTER_BASE_URL به دامنه‌ی relay اشاره می‌کند، این مقدار به‌صورت هدر
+  // X-Relay-Secret به هر درخواست اضافه می‌شود تا relay فقط به بک‌اند خودمان جواب بدهد.
+  @IsOptional() @IsString() OPENROUTER_RELAY_SECRET?: string;
 
   // docs/PRD-liara-usage-reconciliation.md — رصد مصرف واقعی هر کاربر با کلید اختصاصی روی لیارا.
   // عمداً اختیاری: بدون این‌ها provisioning fail می‌شود و chat بی‌صدا روی LIARA_API_KEY مشترک
