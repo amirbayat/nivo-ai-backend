@@ -35,6 +35,7 @@ import { SetVideoStudioModelsDto } from './dto/set-models.dto';
 import { GenerateStoryboardDto } from './dto/generate-storyboard.dto';
 import { UpdateShotDto } from './dto/update-shot.dto';
 import { SendMessageDto } from './dto/send-message.dto';
+import { GenerateSimpleVideoDto } from './dto/generate-simple-video.dto';
 import { fa } from '../../i18n/fa';
 
 // مدل ثابت و ارزان برای ترجمه‌ی فارسی→انگلیسی + فیلتر محتوا (§۸.۵/۸.۹ PRD قدیمی) — یک
@@ -601,6 +602,45 @@ export class VideoStudioService {
       where: { projectId },
       orderBy: { createdAt: 'asc' },
     });
+  }
+
+  // فاز اول ساده‌شده (دستور صریح کاربر ۱۴۰۵-۰۶-۱۳): متن + عکس اختیاری + مدل + سایز → مستقیم یک
+  // ویدیو، بدون رفتن از لایه‌ی چت/intent classification (که با خطای provider ناپایدار بود). یک
+  // پروژه‌ی سبک می‌سازد و بقیه‌ی مسیر را می‌سپارد به requestShotVideo همین سرویس (preflight
+  // کیف‌پول + صف رندر، بدون تکرار آن منطق اینجا).
+  async generateSimpleVideo(userId: string, dto: GenerateSimpleVideoDto) {
+    const videoModel = await this.prisma.aiModel.findUnique({
+      where: { name: dto.videoModelId },
+    });
+    if (
+      !videoModel ||
+      !videoModel.isActive ||
+      videoModel.modelType !== AiModelType.VIDEO_GEN
+    ) {
+      throw new BadRequestException(fa.videoStudio.invalidVideoModel);
+    }
+
+    const config = await this.videoStudioConfig.getConfig();
+    const project = await this.prisma.studioProject.create({
+      data: {
+        userId,
+        initialPrompt: dto.prompt,
+        videoModelId: dto.videoModelId,
+        videoAspectRatio: dto.videoAspectRatio,
+      },
+    });
+    const shot = await this.prisma.studioShot.create({
+      data: {
+        projectId: project.id,
+        order: 0,
+        title: dto.prompt.slice(0, 40),
+        scenario: dto.prompt,
+        previewImageKey: dto.imageKey ?? null,
+        audioEnabled: dto.audioEnabled ?? config.defaultAudioEnabled,
+      },
+    });
+    await this.requestShotVideo(userId, project.id, shot.id);
+    return { projectId: project.id, shotId: shot.id };
   }
 
   // یک شات مستقیم از متن خام کاربر (بدون طراحی کاراکتر/استوری‌برد) — «یه ضرب ویدیو» طبق

@@ -21,6 +21,7 @@ import { SetVideoStudioModelsDto } from './dto/set-models.dto';
 import { GenerateStoryboardDto } from './dto/generate-storyboard.dto';
 import { UpdateShotDto } from './dto/update-shot.dto';
 import { SendMessageDto } from './dto/send-message.dto';
+import { GenerateSimpleVideoDto } from './dto/generate-simple-video.dto';
 import { UploadVideoStudioImageDto } from './dto/upload-image.dto';
 import { mimeTypeForExt } from '../../common/validators/chat-image.validator';
 
@@ -36,6 +37,17 @@ function mimeTypeForVideoStudioExt(ext: string): string {
 @UseGuards(JwtGuard)
 export class VideoStudioController {
   constructor(private readonly videoStudio: VideoStudioService) {}
+
+  // فاز اول ساده‌شده (دستور صریح کاربر): متن + عکس اختیاری + مدل + سایز → مستقیم یک ویدیو،
+  // بدون رفتن از لایه‌ی چت/تشخیص intent. خروجی projectId/shotId برای پولینگ همان
+  // GET projects/:id/shots/:shotId/video-status موجود است.
+  @Post('simple/generate')
+  generateSimpleVideo(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: GenerateSimpleVideoDto,
+  ) {
+    return this.videoStudio.generateSimpleVideo(user.sub, dto);
+  }
 
   @Post('projects')
   createProject(
