@@ -90,6 +90,14 @@ export class AsrService {
 
     const url = `${this.aiProvider.baseURL}/audio/transcriptions`;
 
+    // لاگ تشخیصی: چون بدنه‌ی خطای OpenRouter برای ۴۰۰های forward-شده از provider معمولاً
+    // فقط پیام عمومی "Provider returned 400" است (بدون جزئیات واقعی)، حداقل مشخصات خودِ
+    // درخواست (حجم صدا/زبان) را این‌جا لاگ می‌کنیم تا بعداً بشود حدس زد آیا مشکل مختص یک
+    // فایل خاص (مثلاً صدای خیلی کوتاه/بی‌صدا) بوده یا نه
+    this.logger.log(
+      `ASR ${model} request: audioBytes=${audioBuffer.length} language=${language}`,
+    );
+
     let res: Response;
     try {
       res = await (this.aiProvider.fetch ?? fetch)(url, {
@@ -109,12 +117,16 @@ export class AsrService {
     }
 
     const text = await res.text();
+    // شناسه‌ی درخواست OpenRouter برای پیگیری بعدی با پشتیبانی‌شان (خودِ بدنه‌ی خطا چیزی
+    // بیشتر از پیام عمومی ندارد، ولی این هدر ممکن است در پنل/پشتیبانی OpenRouter قابل جستجو باشد)
+    const requestId = res.headers.get('x-request-id') ?? res.headers.get('cf-ray');
 
     if (!res.ok) {
+      const detail = `status=${res.status} audioBytes=${audioBuffer.length} requestId=${requestId ?? 'n/a'}: ${text.slice(0, 300)}`;
       if (res.status === 429 || res.status >= 500) {
-        throw new AsrAvailabilityError(`ASR ${model} unavailable (status=${res.status}): ${text.slice(0, 300)}`);
+        throw new AsrAvailabilityError(`ASR ${model} unavailable (${detail})`);
       }
-      throw new Error(`ASR ${model} request failed (status=${res.status}): ${text.slice(0, 300)}`);
+      throw new Error(`ASR ${model} request failed (${detail})`);
     }
 
     let json: OpenRouterTranscriptionResponse;
