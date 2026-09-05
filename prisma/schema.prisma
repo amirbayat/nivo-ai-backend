@@ -1226,6 +1226,10 @@ model CaptionProject {
   user              User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
   sourceVideoKey    String // کلید MinIO ویدیوی مبدأ (آپلودی کاربر، بعد از نرمال‌سازی HEVC→h264 اگر لازم بود)
   sourceDurationSec Float?
+  sourceWidth       Int? // ابعاد واقعی سورس (از ffprobe در مرحله‌ی transcribe) — برای گزینه‌های رزولوشن خروجی
+  sourceHeight      Int?
+  debugAudioKey     String? // کلید MinIO صدای استخراج‌شده‌ی دیباگ (caption-transcribe.processor.ts) — برای حذف بعدی لازم است
+  sourceDeletedAt   DateTime? // وقتی ست شود یعنی sourceVideoKey/debugAudioKey از MinIO حذف شده‌اند (دستی یا cron)
   asrModelName      String? // نام AiModel واقعی که پاسخ داد (بخش ۱۷.۳/۱۷.۴) — برای گزارش/دیباگ fallback
   transcriptWords   Json? // خروجی خام ASR: [{word,start,end,speaker}]
   segments          Json? // cueهای ادیت‌شده‌ی کاربر: [{id,startMs,endMs,text,words:[...]}]

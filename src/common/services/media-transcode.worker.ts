@@ -18,6 +18,11 @@ export interface BurnCaptionsTask {
   inputBuffer: Buffer;
   inputExt: string;
   assContent: string; // متن کامل فایل .ass ساخته‌شده توسط ass-subtitle-builder.ts
+  // اگر ست شده باشد (کوچک‌تر از ابعاد واقعی ورودی)، خروجی قبل از سوزاندن زیرنویس به این
+  // ابعاد اسکیل می‌شود (گزینه‌ی HD/Full HD/4K در caption-render.processor.ts) — هر دو باید
+  // زوج باشند (الزام libx264) و از قبل با PlayResX/Y فایل ASS یکی محاسبه شده باشند
+  targetWidth?: number;
+  targetHeight?: number;
 }
 
 export interface VideoDimensions {
@@ -131,6 +136,8 @@ export async function burnCaptions({
   inputBuffer,
   inputExt,
   assContent,
+  targetWidth,
+  targetHeight,
 }: BurnCaptionsTask): Promise<Buffer> {
   return withTempDir(async (dir) => {
     const inPath = join(dir, `${randomUUID()}.${inputExt}`);
@@ -138,9 +145,15 @@ export async function burnCaptions({
     const outPath = join(dir, `${randomUUID()}.mp4`);
     await writeFile(inPath, inputBuffer);
     await writeFile(assPath, assContent, 'utf8');
+    // اسکیل (اگر رزولوشن پایین‌تری درخواست شده) باید قبل از فیلتر ass= اعمال شود — PlayResX/Y
+    // فایل ASS از قبل با همین targetWidth/targetHeight محاسبه شده (caption-render.processor.ts)
+    const vf =
+      targetWidth && targetHeight
+        ? `scale=${targetWidth}:${targetHeight},ass=${assPath}`
+        : `ass=${assPath}`;
     await runFfmpeg([
       '-y', '-i', inPath,
-      '-vf', `ass=${assPath}`,
+      '-vf', vf,
       '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
       '-c:a', 'copy',
       '-movflags', '+faststart',

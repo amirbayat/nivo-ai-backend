@@ -20,6 +20,7 @@ import { JwtGuard } from '../../common/guards/jwt.guard';
 import { CurrentUser, JwtPayload } from '../../common/decorators/current-user.decorator';
 import { CaptionStudioService, type SubtitleExportFormat } from './caption-studio.service';
 import { UpdateCaptionProjectDto } from './dto/update-caption-project.dto';
+import { StartRenderDto } from './dto/start-render.dto';
 
 const EXPORT_FORMATS: SubtitleExportFormat[] = ['srt', 'vtt', 'ass'];
 
@@ -64,8 +65,19 @@ export class CaptionStudioController {
   }
 
   @Post('projects/:id/render')
-  startRender(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
-    return this.captionStudio.startRender(user.sub, id);
+  startRender(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: StartRenderDto,
+  ) {
+    return this.captionStudio.startRender(user.sub, id, dto.targetHeight);
+  }
+
+  // «پایان کار و آزادسازی فضا» (بخش ۱ پلن) — حذف فوری و صریح سورس/دیباگ‌آدیو؛ برخلاف
+  // cleanup خودکار، غیرقابل‌بازگشت است و کاربر خودش درخواستش می‌دهد
+  @Post('projects/:id/discard-source')
+  discardSource(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    return this.captionStudio.discardSource(user.sub, id);
   }
 
   // خروجی فایل زیرنویس خام (بخش ۸.۲) — دانلود مستقیم با Content-Disposition

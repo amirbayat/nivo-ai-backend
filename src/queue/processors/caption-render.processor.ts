@@ -50,13 +50,24 @@ export class CaptionRenderProcessor {
   }
 
   @Process('render')
-  async handleRender(job: Job<{ captionProjectId: string }>) {
-    const { captionProjectId } = job.data;
+  async handleRender(job: Job<{ captionProjectId: string; targetHeight?: number }>) {
+    const { captionProjectId, targetHeight } = job.data;
     const project = await this.prisma.captionProject.findUnique({
       where: { id: captionProjectId },
     });
     if (!project) {
       this.logger.warn(`caption-render: project ${captionProjectId} not found, skipping`);
+      return;
+    }
+
+    if (project.sourceDeletedAt) {
+      this.logger.warn(
+        `caption-render project=${captionProjectId}: sourceVideoKey از قبل حذف شده، رندر ممکن نیست`,
+      );
+      await this.prisma.captionProject.update({
+        where: { id: captionProjectId },
+        data: { status: CaptionProjectStatus.FAILED },
+      });
       return;
     }
 
@@ -71,6 +82,18 @@ export class CaptionRenderProcessor {
 
       const dims = await this.mediaTranscode.getVideoDimensions(videoBuffer, ext);
 
+      // فقط رزولوشن‌های مساوی یا کوچک‌تر از سورس معتبرند (بدون آپ‌اسکیل جعلی) — عرض با
+      // گرد کردن به نزدیک‌ترین عدد زوج (الزام libx264) از نسبت تصویر واقعی محاسبه می‌شود
+      const targetDimensions =
+        targetHeight && targetHeight > 0 && targetHeight < dims.height
+          ? {
+              width: Math.round((dims.width * (targetHeight / dims.height)) / 2) * 2,
+              height: targetHeight,
+            }
+          : undefined;
+      const outputWidth = targetDimensions?.width ?? dims.width;
+      const outputHeight = targetDimensions?.height ?? dims.height;
+
       const segments =
         (project.segments as unknown as CaptionSegment[] | null) ??
         buildDefaultSegments(
@@ -79,11 +102,16 @@ export class CaptionRenderProcessor {
       const assContent = buildAssSubtitle(
         segments,
         project.styleOverrides as unknown as CaptionStyleOverrides | null,
-        dims.width,
-        dims.height,
+        outputWidth,
+        outputHeight,
       );
 
-      const renderedBuffer = await this.mediaTranscode.burnCaptions(videoBuffer, ext, assContent);
+      const renderedBuffer = await this.mediaTranscode.burnCaptions(
+        videoBuffer,
+        ext,
+        assContent,
+        targetDimensions,
+      );
       const renderedVideoKey = await this.storage.uploadImage(renderedBuffer, 'mp4');
 
       const creditCost = await this.captionPricing.getCreditCost(project.sourceDurationSec ?? 0);

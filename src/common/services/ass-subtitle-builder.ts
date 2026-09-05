@@ -2,10 +2,6 @@
 // کاربر) + styleOverrides به یک فایل .ass قابل‌مصرف توسط ffmpeg (فیلتر ass=، از طریق
 // libass). عمداً یک تابع خالص (بدون وابستگی به NestJS/Prisma) — هم قابل unit-test مستقل،
 // هم چون این فایل صرفاً روی داده‌ی JSON کار می‌کند، نه I/O.
-//
-// MVP فقط یک «انیمیشن» دارد: هایلایت کلمه‌ی جاری (رنگ برند) در میان بقیه‌ی کلمات (رنگ پیش‌فرض)
-// — دقیقاً همان چیزی که در مکاپ طراحی (Main.dc.html) دیده می‌شود. قالب #۱ تا #۱۰ بخش ۸.۱
-// (کاراکاپ زرد، نئون، پیل گرد و ...) فاز بعدی‌اند؛ اینجا فقط یک استایل واحد و کامل پیاده شده.
 
 export interface CaptionWord {
   word: string;
@@ -28,18 +24,30 @@ export interface CaptionStyleOverrides {
   backgroundMode?: 'none' | 'translucent' | 'solid';
   fontSizePx?: number;
   position?: 'top' | 'center' | 'bottom';
+  // مختصات آزاد (بخش جابجایی با درگ) — وقتی هر دو ست شده باشند، اولویت با این‌هاست، نه
+  // position گسسته‌ی بالا (که فقط fallback پروژه‌های قدیمی است)
+  positionX?: number; // نسبت ۰ تا ۱ از عرض ویدیو
+  positionY?: number; // نسبت ۰ تا ۱ از ارتفاع ویدیو
+  wordsPerLine?: number; // چند کلمه در هر خط نمایشی
+  linesPerCue?: number; // ۱ یا ۲ — چند خط هم‌زمان روی صفحه
+  styleId?: string; // کلید پریست از STYLE_PRESETS
 }
 
-const WORDS_PER_SEGMENT = 4;
+type CoreStyle = Omit<CaptionStyleOverrides, 'positionX' | 'positionY' | 'styleId'>;
 
-// اگر کاربر هیچ ادیتی نکرده باشد (segments هنوز null است)، همون گروه‌بندی ساده‌ی پیش‌فرض (هر
-// ۴ کلمه یک cue) از transcriptWords ساخته می‌شود — کاربر نباید مجبور باشد قبل از اولین
-// رندر/export حتماً دستی ادیت کند (docs/PRD-video-auto-captions.md §۳/§۵.۲). هم caption-render
-// و هم export فایل خام (بخش ۸.۲) از همین تابع استفاده می‌کنند.
-export function buildDefaultSegments(words: CaptionWord[]): CaptionSegment[] {
+// اگر کاربر هیچ ادیتی نکرده باشد (segments هنوز null است)، همون گروه‌بندی ساده‌ی پیش‌فرض
+// (هر wordsPerLine×linesPerCue کلمه یک cue) از transcriptWords ساخته می‌شود — کاربر نباید
+// مجبور باشد قبل از اولین رندر/export حتماً دستی ادیت کند (docs/PRD-video-auto-captions.md
+// §۳/§۵.۲). هم caption-render و هم export فایل خام (بخش ۸.۲) از همین تابع استفاده می‌کنند.
+export function buildDefaultSegments(
+  words: CaptionWord[],
+  wordsPerLine = 4,
+  linesPerCue = 1,
+): CaptionSegment[] {
+  const perCue = Math.max(1, wordsPerLine) * Math.max(1, linesPerCue);
   const segments: CaptionSegment[] = [];
-  for (let i = 0; i < words.length; i += WORDS_PER_SEGMENT) {
-    const group = words.slice(i, i + WORDS_PER_SEGMENT);
+  for (let i = 0; i < words.length; i += perCue) {
+    const group = words.slice(i, i + perCue);
     if (group.length === 0) continue;
     segments.push({
       id: `seg-${i}`,
@@ -52,25 +60,89 @@ export function buildDefaultSegments(words: CaptionWord[]): CaptionSegment[] {
   return segments;
 }
 
-// «Vazirmatn» (فونت وب nivo) هنوز داخل ایمیج داکر باندل نشده — libass از طریق fontconfig
-// فقط فونتی را پیدا می‌کند که واقعاً روی سیستم نصب باشد. «Noto Naskh Arabic» تنها فونتی
-// است که تست واقعی (۱۴۰۵-۰۶-۱۴، docs/PRD-video-auto-captions.md §۱۶) تأیید کرد روی
-// node:22-alpine + apk نصب می‌شود و پوشش کامل حروف فارسی/عربی دارد. وقتی فونت برند واقعی
-// در ایمیج باندل شد (فاز بعد)، این پیش‌فرض باید عوض شود.
-const DEFAULT_STYLE: Required<CaptionStyleOverrides> = {
+const DEFAULT_STYLE: Required<CoreStyle> = {
   fontFamily: 'Noto Naskh Arabic',
   textColor: '#FFFFFF',
   highlightColor: '#10B981', // برند امرالد nivo — همون رنگی که در پیش‌نمایش فرانت استفاده می‌شود
   backgroundMode: 'translucent',
   fontSizePx: 42,
   position: 'bottom',
+  wordsPerLine: 4,
+  linesPerCue: 1,
 };
 
-const ALIGNMENT_BY_POSITION: Record<CaptionStyleOverrides['position'] & string, number> = {
-  top: 8,
-  center: 5,
-  bottom: 2,
+// ۴ پریست واقع‌بینانه با محدودیت‌های ASS/libass (بدون گوشه‌ی گرد یا glow واقعی — فقط
+// رنگ/وزن فونت/outline/باکس). «ایران‌یکان» با وزن‌های Bold/ExtraBold از
+// nivo-ai-frontend/src/assets/fonts/IRANYekanMsn داخل ایمیج داکر باندل شده (Dockerfile).
+interface StylePresetDefaults {
+  fontFamily: string;
+  textColor: string;
+  highlightColor: string;
+  backgroundMode: CaptionStyleOverrides['backgroundMode'];
+  outlineWidth: number;
+  outlineColorHex: string;
+  boxColorHex: string;
+}
+
+const STYLE_PRESETS: Record<string, StylePresetDefaults> = {
+  default: {
+    fontFamily: 'Noto Naskh Arabic',
+    textColor: '#FFFFFF',
+    highlightColor: '#10B981',
+    backgroundMode: 'translucent',
+    outlineWidth: 2,
+    outlineColorHex: '#000000',
+    boxColorHex: '#000000',
+  },
+  boldOutline: {
+    fontFamily: 'IRANYekanMsn ExtraBold',
+    textColor: '#FFFFFF',
+    highlightColor: '#FBBF24',
+    backgroundMode: 'none',
+    outlineWidth: 5,
+    outlineColorHex: '#000000',
+    boxColorHex: '#000000',
+  },
+  neon: {
+    fontFamily: 'Vazirmatn',
+    textColor: '#22D3EE',
+    highlightColor: '#F472B6',
+    backgroundMode: 'none',
+    outlineWidth: 3,
+    outlineColorHex: '#7C3AED',
+    boxColorHex: '#000000',
+  },
+  speakerBox: {
+    fontFamily: 'IRANYekanMsn',
+    textColor: '#FFFFFF',
+    highlightColor: '#FBBF24',
+    backgroundMode: 'solid',
+    outlineWidth: 1,
+    outlineColorHex: '#000000',
+    boxColorHex: '#1E1B4B',
+  },
 };
+
+// فونت‌هایی که واقعاً روی ایمیج داکر نصب‌اند (Dockerfile/Dockerfile.prod، assets/fonts/*.ttf
+// نصب‌شده در fontconfig) — اگر fontFamily ورودی (کاربر یا پریست) در این لیست نباشد، silently
+// به پیش‌فرض برمی‌گردیم؛ وگرنه fontconfig یک فونت جایگزین غیرقابل‌پیش‌بینی انتخاب می‌کند
+// بدون هیچ خطایی. «IRANYekanMsn ExtraBold» یک نام خانواده‌ی مجزاست (فایل فونت این‌طور
+// name-table دارد)؛ برای Bold از همون خانواده‌ی IRANYekanMsn/Vazirmatn با فلگ Bold استفاده
+// می‌شود (نه یک نام خانواده‌ی جدا) — به همین خاطر هیچ «X Bold» دیگری در این لیست نیست.
+const ALLOWED_FONTS = new Set([
+  'Noto Naskh Arabic',
+  'IRANYekanMsn',
+  'IRANYekanMsn ExtraBold',
+  'Vazirmatn',
+  'Tahoma',
+]);
+
+// خانواده‌ی «IRANYekanMsn ExtraBold» خودش از قبل سنگین‌ترین وزن است — فلگ Bold روی آن اضافه
+// نمی‌شود (وگرنه libass با bold مصنوعی رویش، بیش‌ازحد سنگین می‌شود)؛ بقیه‌ی خانواده‌ها (که هم
+// وزن Regular هم Bold دارند) با فلگ Bold=-1 وزن Bold واقعی‌شان انتخاب می‌شود.
+function boldFlagFor(fontFamily: string): number {
+  return fontFamily === 'IRANYekanMsn ExtraBold' ? 0 : -1;
+}
 
 function hexToAssColor(hex: string, alphaHex = '00'): string {
   const clean = hex.replace('#', '').padEnd(6, '0');
@@ -92,10 +164,31 @@ function msToAssTime(ms: number): string {
 }
 
 // {} در ASS برای override tag رزرو شده و \ شروع‌کننده‌ی تگ است — متن خام کاربر (که این
-// کاراکترها را ندارد معمولاً، ولی نباید کورکورانه اعتماد کرد) باید qبل از قرارگرفتن در فایل
+// کاراکترها را ندارد معمولاً، ولی نباید کورکورانه اعتماد کرد) باید قبل از قرارگرفتن در فایل
 // پاک‌سازی شود، وگرنه یک متن دست‌کاری‌شده می‌تواند در رندر تگ تزریق کند
 function escapeAssText(text: string): string {
   return text.replace(/\\/g, '').replace(/[{}]/g, '').replace(/\r?\n/g, ' ');
+}
+
+// جابجایی آزاد با درگ (نه فقط ۳ حالت گسسته) — وقتی positionX/Y ست نشده، از position قدیمی
+// (بالا/وسط/پایین) به‌عنوان fallback پروژه‌های قدیمی استفاده می‌شود
+function resolvePositionRatio(style: CaptionStyleOverrides): { x: number; y: number } {
+  const clamp = (v: number) => Math.min(0.94, Math.max(0.06, v));
+  if (typeof style.positionX === 'number' && typeof style.positionY === 'number') {
+    return { x: clamp(style.positionX), y: clamp(style.positionY) };
+  }
+  const y = style.position === 'top' ? 0.12 : style.position === 'center' ? 0.5 : 0.88;
+  return { x: 0.5, y };
+}
+
+// کلمات را با فاصله‌ی معمولی می‌چسباند، ولی هر wordsPerLine-امین مرز را با \N (شکست خط ASS)
+// جدا می‌کند — همین یک مکانیزم هم «چند کلمه در هر خط» هم «چند خط هم‌زمان» را پیاده می‌کند
+function joinWordsForDisplay(parts: string[], wordsPerLine: number): string {
+  return parts.reduce((acc, cur, idx) => {
+    if (idx === 0) return cur;
+    const sep = idx % wordsPerLine === 0 ? '\\N' : ' ';
+    return `${acc}${sep}${cur}`;
+  }, '');
 }
 
 export function buildAssSubtitle(
@@ -104,17 +197,31 @@ export function buildAssSubtitle(
   videoWidth: number,
   videoHeight: number,
 ): string {
-  const style = { ...DEFAULT_STYLE, ...(styleOverrides ?? {}) };
-  const alignment = ALIGNMENT_BY_POSITION[style.position] ?? 2;
+  const preset = STYLE_PRESETS[styleOverrides?.styleId ?? 'default'] ?? STYLE_PRESETS.default;
+  const style: Required<CoreStyle> = {
+    ...DEFAULT_STYLE,
+    fontFamily: preset.fontFamily,
+    textColor: preset.textColor,
+    highlightColor: preset.highlightColor,
+    backgroundMode: preset.backgroundMode ?? DEFAULT_STYLE.backgroundMode,
+    ...(styleOverrides ?? {}),
+  };
+  const fontFamily = ALLOWED_FONTS.has(style.fontFamily) ? style.fontFamily : DEFAULT_STYLE.fontFamily;
+  const wordsPerLine = style.wordsPerLine > 0 ? style.wordsPerLine : 4;
+
+  const { x: posXRatio, y: posYRatio } = resolvePositionRatio(styleOverrides ?? {});
+  const posX = Math.round(posXRatio * videoWidth);
+  const posY = Math.round(posYRatio * videoHeight);
 
   const primaryColour = hexToAssColor(style.textColor);
   const highlightColour = hexToAssColor(style.highlightColor);
+  const outlineColour = hexToAssColor(preset.outlineColorHex);
   // BorderStyle=3 یعنی جعبه‌ی پس‌زمینه‌ی توپر (به‌جای outline+shadow معمولی)؛ رنگ/شفافیتش از
   // BackColour می‌آید. 'none' یعنی بدون جعبه — BorderStyle=1 با outline نازک برای خوانایی.
   const useBox = style.backgroundMode !== 'none';
   const borderStyle = useBox ? 3 : 1;
   const backAlpha = style.backgroundMode === 'solid' ? '00' : '60'; // 00=توپر کامل، 60≈%62 شفافیت
-  const backColour = hexToAssColor('#000000', backAlpha);
+  const backColour = hexToAssColor(preset.boxColorHex, backAlpha);
 
   const header = `[Script Info]
 ScriptType: v4.00+
@@ -125,18 +232,19 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,${style.fontFamily},${style.fontSizePx},${primaryColour},&H000000FF,&H00000000,${backColour},-1,0,0,0,100,100,0,0,${borderStyle},2,1,${alignment},20,20,40,1
+Style: Default,${fontFamily},${style.fontSizePx},${primaryColour},&H000000FF,${outlineColour},${backColour},${boldFlagFor(fontFamily)},0,0,0,100,100,0,0,${borderStyle},${preset.outlineWidth},1,5,20,20,40,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`;
 
+  const posTag = `{\\an5\\pos(${posX},${posY})}`;
   const dialogueLines: string[] = [];
 
   for (const segment of segments) {
     const words = segment.words ?? [];
     if (words.length === 0) {
       dialogueLines.push(
-        `Dialogue: 0,${msToAssTime(segment.startMs)},${msToAssTime(segment.endMs)},Default,,0,0,0,,${escapeAssText(segment.text)}`,
+        `Dialogue: 0,${msToAssTime(segment.startMs)},${msToAssTime(segment.endMs)},Default,,0,0,0,,${posTag}${escapeAssText(segment.text)}`,
       );
       continue;
     }
@@ -149,12 +257,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
       const endMs = i === words.length - 1 ? segment.endMs : Math.round(words[i + 1].start * 1000);
       if (endMs <= startMs) continue;
 
-      const text = words
-        .map((w, idx) => {
-          const safe = escapeAssText(w.word);
-          return idx === i ? `{\\c${highlightColour}}${safe}{\\c${primaryColour}}` : safe;
-        })
-        .join(' ');
+      const parts = words.map((w, idx) => {
+        const safe = escapeAssText(w.word);
+        return idx === i ? `{\\c${highlightColour}}${safe}{\\c${primaryColour}}` : safe;
+      });
+      const text = `${posTag}${joinWordsForDisplay(parts, wordsPerLine)}`;
 
       dialogueLines.push(
         `Dialogue: 0,${msToAssTime(startMs)},${msToAssTime(endMs)},Default,,0,0,0,,${text}`,

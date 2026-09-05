@@ -48,8 +48,19 @@ export class MediaTranscodeService implements OnModuleDestroy {
     return this.pool.run(task, { name: 'getVideoDimensions' });
   }
 
-  async burnCaptions(inputBuffer: Buffer, inputExt: string, assContent: string): Promise<Buffer> {
-    const task: BurnCaptionsTask = { inputBuffer, inputExt, assContent };
+  async burnCaptions(
+    inputBuffer: Buffer,
+    inputExt: string,
+    assContent: string,
+    targetDimensions?: { width: number; height: number },
+  ): Promise<Buffer> {
+    const task: BurnCaptionsTask = {
+      inputBuffer,
+      inputExt,
+      assContent,
+      targetWidth: targetDimensions?.width,
+      targetHeight: targetDimensions?.height,
+    };
     const result = await this.pool.run(task, { name: 'burnCaptions' });
     return Buffer.from(result);
   }

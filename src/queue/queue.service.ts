@@ -8,6 +8,8 @@ const SUMMARY_CRON = '0 2 * * *';
 const MODEL_FEEDBACK_SUMMARY_CRON = '0 3 * * *'; // یک ساعت بعد از فیدبک عمومی، تا فشار هم‌زمان روی AI provider نباشد
 const WAITLIST_REMINDER_CRON = '0 9 * * *'; // ساعت ۹ صبح — پیامک یادآوری در ساعت معقولی برسد
 const CHAT_IMAGE_CLEANUP_CRON = '15 * * * *'; // ساعتی یک‌بار — عکس‌های چت قدیمی‌تر از ۲۴ ساعت حذف می‌شوند
+// شبانه، ساعت ۳:۳۰ — safety-net حذف سورس ویدیوهای caption-studio که ۷ روز بی‌فعالیت مانده‌اند
+const CAPTION_SOURCE_CLEANUP_CRON = '30 3 * * *';
 // docs/PRD-admin-notifications-and-mobile.md بخش ۴/۷ — چک آستانه‌ی خطای سیستمی/Liara هر ۵ دقیقه
 const ADMIN_ALERTS_CRON = '*/5 * * * *';
 // موقتاً هر ۵ دقیقه برای رصد نزدیک‌به‌لحظه‌ی مصرف امروز — بعداً دوباره به یک‌بار در شبانه‌روز برمی‌گردد
@@ -30,6 +32,8 @@ export class QueueService implements OnApplicationBootstrap {
     private readonly waitlistReminderQueue: Queue,
     @InjectQueue('chat-image-cleanup')
     private readonly chatImageCleanupQueue: Queue,
+    @InjectQueue('caption-source-cleanup')
+    private readonly captionSourceCleanupQueue: Queue,
     @InjectQueue('admin-alerts')
     private readonly adminAlertsQueue: Queue,
     @InjectQueue('liara-usage-sync')
@@ -103,6 +107,20 @@ export class QueueService implements OnApplicationBootstrap {
     );
     this.logger.log(
       `Chat image cleanup job scheduled: ${CHAT_IMAGE_CLEANUP_CRON}`,
+    );
+
+    const captionSourceCleanupRepeatables =
+      await this.captionSourceCleanupQueue.getRepeatableJobs();
+    for (const job of captionSourceCleanupRepeatables) {
+      await this.captionSourceCleanupQueue.removeRepeatableByKey(job.key);
+    }
+    await this.captionSourceCleanupQueue.add(
+      'cleanup',
+      {},
+      { repeat: { cron: CAPTION_SOURCE_CLEANUP_CRON } },
+    );
+    this.logger.log(
+      `Caption source cleanup job scheduled: ${CAPTION_SOURCE_CLEANUP_CRON}`,
     );
 
     const adminAlertsRepeatables =

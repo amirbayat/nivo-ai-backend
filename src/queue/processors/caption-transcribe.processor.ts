@@ -59,11 +59,27 @@ export class CaptionTranscribeProcessor {
         `caption-transcribe project=${captionProjectId}: استخراج صدا با ffmpeg تمام شد، audioBytes=${audioBuffer.length}`,
       );
 
-      // لاگ تشخیصی موقت: صدای استخراج‌شده را هم در MinIO آپلود می‌کنیم تا در صورت خطای ASR
-      // بشود همین فایل را مستقیم از MinIO دانلود کرد و با گوش‌دادن/ffprobe چک کرد که واقعاً
-      // صحیح extract شده یا نه — خطای آپلود دیباگ نباید کل job را fail کند
+      // ابعاد واقعی سورس — برای اینکه فرانت بتواند گزینه‌های رزولوشن خروجی (HD/Full HD/4K) را
+      // فقط تا سقف رزولوشن واقعی کاربر نشان دهد، بدون نیاز به دانلود دوباره‌ی کل ویدیو
+      let sourceWidth: number | null = null;
+      let sourceHeight: number | null = null;
       try {
-        const debugAudioKey = await this.storage.uploadImage(
+        const dims = await this.mediaTranscode.getVideoDimensions(videoBuffer, ext);
+        sourceWidth = dims.width;
+        sourceHeight = dims.height;
+      } catch (dimsErr) {
+        this.logger.warn(
+          `caption-transcribe project=${captionProjectId}: تشخیص ابعاد ویدیو failed (نادیده گرفته می‌شود): ${(dimsErr as Error).message}`,
+        );
+      }
+
+      // لاگ تشخیصی: صدای استخراج‌شده را هم در MinIO آپلود می‌کنیم تا در صورت خطای ASR بشود
+      // همین فایل را مستقیم از MinIO دانلود کرد و با گوش‌دادن/ffprobe چک کرد که واقعاً صحیح
+      // extract شده یا نه — خطای آپلود دیباگ نباید کل job را fail کند. کلید واقعی روی پروژه
+      // ذخیره می‌شود تا بعداً (حذف دستی/cron cleanup) بشود همین فایل را هم پاک کرد.
+      let debugAudioKey: string | null = null;
+      try {
+        debugAudioKey = await this.storage.uploadImage(
           audioBuffer,
           'mp3',
           `caption-debug-audio`,
@@ -93,6 +109,9 @@ export class CaptionTranscribeProcessor {
           asrModelName: result.modelUsed,
           asrCostUsd: result.costUsd,
           sourceDurationSec: result.durationSec,
+          sourceWidth,
+          sourceHeight,
+          debugAudioKey,
           status: CaptionProjectStatus.READY_FOR_EDIT,
         },
       });

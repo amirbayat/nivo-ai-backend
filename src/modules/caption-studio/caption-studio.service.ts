@@ -191,8 +191,10 @@ export class CaptionStudioService {
 
   // شروع رندر نهایی (بخش ۱۴.۴) — پیش‌چک موجودی قبل از صف‌شدن job، دقیقاً الگوی
   // nivo-cal.service.ts scan (قیمت ثابت، نه هزینه‌محور؛ کسر واقعی فقط بعد از موفقیت
-  // در caption-render.processor.ts رخ می‌دهد)
-  async startRender(userId: string, id: string) {
+  // در caption-render.processor.ts رخ می‌دهد). targetHeight اختیاری برای گزینه‌ی
+  // HD/Full HD/4K — فقط اگر از ابعاد واقعی سورس کوچک‌تر باشد اعمال می‌شود، وگرنه نادیده
+  // گرفته می‌شود (بدون آپ‌اسکیل جعلی)
+  async startRender(userId: string, id: string, targetHeight?: number) {
     const project = await this.findOwnedProject(userId, id);
     if (
       project.status !== CaptionProjectStatus.READY_FOR_EDIT &&
@@ -200,6 +202,13 @@ export class CaptionStudioService {
     ) {
       throw new BadRequestException(fa.captionStudio.notReadyForRender);
     }
+    if (project.sourceDeletedAt) {
+      throw new BadRequestException(fa.captionStudio.sourceAlreadyDeleted);
+    }
+    const validTargetHeight =
+      targetHeight && project.sourceHeight && targetHeight < project.sourceHeight
+        ? targetHeight
+        : undefined;
 
     const creditCost = await this.captionPricing.getCreditCost(project.sourceDurationSec ?? 0);
     const creditConfig = await this.credits.getConfig();
@@ -216,7 +225,7 @@ export class CaptionStudioService {
 
     await this.renderQueue.add(
       'render',
-      { captionProjectId: id },
+      { captionProjectId: id, targetHeight: validTargetHeight },
       {
         attempts: 3,
         backoff: { type: 'exponential', delay: 5000 },
@@ -235,11 +244,34 @@ export class CaptionStudioService {
     if (project.status !== CaptionProjectStatus.FAILED) {
       throw new BadRequestException(fa.captionStudio.onlyFailedCanRetry);
     }
+    if (project.sourceDeletedAt) {
+      throw new BadRequestException(fa.captionStudio.sourceAlreadyDeleted);
+    }
     await this.prisma.captionProject.update({
       where: { id },
       data: { status: CaptionProjectStatus.UPLOADED },
     });
     await this.enqueueTranscribe(id);
     return this.prisma.captionProject.findUnique({ where: { id } });
+  }
+
+  // دکمه‌ی صریح «پایان کار و آزادسازی فضا» (بخش ۱ پلن) — چون سورس تا وقتی کاربر خودش
+  // نخواهد نگه داشته می‌شود (برای امکان «رندر دوباره»)، این تنها راه فوری آزادسازی فضاست؛
+  // safety-net خودکار همین کار را بعد از ۷ روز بی‌فعالیتی با caption-source-cleanup انجام می‌دهد
+  async discardSource(userId: string, id: string) {
+    const project = await this.findOwnedProject(userId, id);
+    if (project.sourceDeletedAt) {
+      return this.prisma.captionProject.findUnique({ where: { id } });
+    }
+    await Promise.all([
+      this.storage.deleteObject(project.sourceVideoKey).catch(() => undefined),
+      project.debugAudioKey
+        ? this.storage.deleteObject(project.debugAudioKey).catch(() => undefined)
+        : Promise.resolve(),
+    ]);
+    return this.prisma.captionProject.update({
+      where: { id },
+      data: { sourceDeletedAt: new Date() },
+    });
   }
 }

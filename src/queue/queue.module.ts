@@ -13,6 +13,7 @@ import { LiaraKeyRetryProcessor } from './processors/liara-key-retry.processor';
 import { StudioVideoGenerationProcessor } from './processors/studio-video-generation.processor';
 import { CaptionTranscribeProcessor } from './processors/caption-transcribe.processor';
 import { CaptionRenderProcessor } from './processors/caption-render.processor';
+import { CaptionSourceCleanupProcessor } from './processors/caption-source-cleanup.processor';
 import { PrismaModule } from '../prisma/prisma.module';
 import { MessageFeedbackModule } from '../modules/message-feedback/message-feedback.module';
 import { CampaignModule } from '../modules/campaign/campaign.module';
@@ -64,6 +65,8 @@ import { AsrModule } from '../common/services/asr.module';
       name: 'caption-render',
       settings: { lockDuration: 10 * 60 * 1000 },
     }),
+    // safety-net حذف خودکار سورس بعد از ۷ روز بی‌فعالیتی — caption-source-cleanup.processor.ts
+    BullModule.registerQueue({ name: 'caption-source-cleanup' }),
     PrismaModule,
     MessageFeedbackModule,
     CampaignModule,
@@ -90,6 +93,7 @@ import { AsrModule } from '../common/services/asr.module';
     StudioVideoGenerationProcessor,
     CaptionTranscribeProcessor,
     CaptionRenderProcessor,
+    CaptionSourceCleanupProcessor,
   ],
 })
 export class QueueModule {}

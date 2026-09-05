@@ -281,5 +281,6 @@ export const fa = {
     videoReadyPushBody: 'ویدیوی شما با زیرنویس آماده‌ی دانلود است',
     renderFailedPushTitle: 'رندر زیرنویس ناموفق بود',
     renderFailedPushBody: 'رندر زیرنویس ناموفق بود — اعتبار شما کسر نشد',
+    sourceAlreadyDeleted: 'ویدیوی اصلی حذف شده — امکان رندر یا تلاش مجدد نیست',
   },
 } as const;
