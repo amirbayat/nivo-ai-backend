@@ -5,11 +5,12 @@ import { AiProviderService } from './ai-provider.service';
 // برود (۴۲۹/۵xx/شبکه/timeout). خطای دیگر (مثلاً ۴۰۰ به‌خاطر فایل صوتی خراب) با مدل بعدی هم
 // دوباره رخ می‌دهد، پس باید مستقیم پرت شود، نه fallback — docs/PRD-video-auto-captions.md §۱۷.۴
 //
-// TODO موقت (۱۴۰۵-۰۶-۱۵): چون دو پروژه‌ی متفاوت هر دو فقط با ۴۰۰ دقیقاً روی
-// whisper-large-v3-turbo شکست خوردند (نه محتوای صوتی خاص یک پروژه)، فعلاً پایین‌تر ۴۰۰ هم
-// موقتاً AsrAvailabilityError می‌شود تا زنجیره‌ی fallback امتحان شود و مشخص شود مشکل مختص
-// این مدل/provider (DeepInfra) است یا نه. بعد از جمع‌آوری داده‌ی کافی این رفتار را طبق §۱۷.۴
-// اصلی (۴۰۰ = پرتاب مستقیم، بدون fallback) برگردان.
+// ریشه‌ی واقعی سری ۴۰۰های ۱۴۰۵-۰۶-۱۵ پیدا شد و رفع شد: MediaTranscodeService از worker
+// thread (Piscina) یک Uint8Array خام برمی‌گرداند نه Buffer واقعی، پس audioBuffer.toString('base64')
+// این‌جا به‌جای base64 واقعی یک رشته‌ی بی‌معنی comma-separated تولید می‌کرد — به همین دلیل
+// هر ۴ مدل fallback هم دقیقاً همان ۴۰۰ را می‌گرفتند (داده‌ی ورودی برای همه خراب بود، نه یک
+// مدل/provider خاص). فیکس در media-transcode.service.ts (Buffer.from روی خروجی pool.run).
+// رفتار ۴۰۰=بدون fallback به حالت اصلی §۱۷.۴ برگشت.
 export class AsrAvailabilityError extends Error {}
 
 export interface AsrWord {
@@ -132,9 +133,7 @@ export class AsrService {
 
     if (!res.ok) {
       const detail = `status=${res.status} audioBytes=${audioBuffer.length} requestId=${requestId ?? 'n/a'}: ${text.slice(0, 300)}`;
-      // TODO موقت (۱۴۰۵-۰۶-۱۵، بالای فایل): ۴۰۰ فعلاً هم fallback می‌کند تا مشخص شود مشکل
-      // مختص whisper-large-v3-turbo/DeepInfra است یا نه — طبق §۱۷.۴ اصلی باید حذف شود.
-      if (res.status === 429 || res.status >= 500 || res.status === 400) {
+      if (res.status === 429 || res.status >= 500) {
         throw new AsrAvailabilityError(`ASR ${model} unavailable (${detail})`);
       }
       throw new Error(`ASR ${model} request failed (${detail})`);

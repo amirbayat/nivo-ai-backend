@@ -27,12 +27,20 @@ export class MediaTranscodeService implements OnModuleDestroy {
 
   async extractAudio(inputBuffer: Buffer, inputExt: string): Promise<Buffer> {
     const task: ExtractAudioTask = { inputBuffer, inputExt };
-    return this.pool.run(task, { name: 'extractAudio' });
+    const result = await this.pool.run(task, { name: 'extractAudio' });
+    // پیام‌رسانی Piscina بین worker/main thread با structured clone انجام می‌شود که ساب‌کلاس
+    // Buffer را حفظ نمی‌کند — چیزی که برمی‌گردد یک Uint8Array معمولی است، نه Buffer واقعی
+    // (instanceof Buffer === false)، با اینکه امضای تابع Promise<Buffer> اعلام شده. بدون این
+    // rewrap، کالرهایی مثل MinIO.putObject (چک isBuffer) یا Buffer.prototype.toString('base64')
+    // (که روی Uint8Array خام نادیده گرفته می‌شود و یک رشته‌ی اعشاری comma-separated بی‌معنی
+    // می‌دهد) بی‌سروصدا داده‌ی خراب تولید می‌کنند
+    return Buffer.from(result);
   }
 
   async transcodeVideo(inputBuffer: Buffer, inputExt: string): Promise<Buffer> {
     const task: TranscodeVideoTask = { inputBuffer, inputExt };
-    return this.pool.run(task, { name: 'transcodeVideo' });
+    const result = await this.pool.run(task, { name: 'transcodeVideo' });
+    return Buffer.from(result);
   }
 
   async getVideoDimensions(inputBuffer: Buffer, inputExt: string): Promise<VideoDimensions> {
@@ -42,7 +50,8 @@ export class MediaTranscodeService implements OnModuleDestroy {
 
   async burnCaptions(inputBuffer: Buffer, inputExt: string, assContent: string): Promise<Buffer> {
     const task: BurnCaptionsTask = { inputBuffer, inputExt, assContent };
-    return this.pool.run(task, { name: 'burnCaptions' });
+    const result = await this.pool.run(task, { name: 'burnCaptions' });
+    return Buffer.from(result);
   }
 
   async onModuleDestroy() {
