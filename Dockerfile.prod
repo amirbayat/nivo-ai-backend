@@ -2,7 +2,12 @@ FROM node:22-alpine
 
 # کرومیوم سیستمی برای Puppeteer (تولید PDF فاکتور) — روی آلپاین باینری خودِ
 # Puppeteer اجرا نمی‌شود، پس دانلودش را غیرفعال و به‌جایش از این استفاده می‌کنیم
-RUN apk add --no-cache chromium
+# font-noto-naskh-arabic: تنها راه تضمینی که libass (فیلتر ass= سوزاندن زیرنویس، بخش ۵.۱)
+# واقعاً بتواند متن فارسی رسم کند — بدون این پکیج، fc-list کاملاً خالی است (تست شد روی
+# node:22-alpine واقعی، ۱۴۰۵-۰۶-۱۴) و رندر یا با تافوباکس/گلیف گم‌شده خراب می‌شود یا اصلاً
+# fallback معتبری ندارد. docs/PRD-video-auto-captions.md §۱۶/۱۷.۵ — فونت برند (Vazirmatn) هنوز
+# باندل نشده، این یک جایگزین Noto با پوشش کامل حروف عربی/فارسی است.
+RUN apk add --no-cache chromium ffmpeg fontconfig font-noto-naskh-arabic
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 

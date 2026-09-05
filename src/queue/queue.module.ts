@@ -11,6 +11,8 @@ import { AdminAlertsProcessor } from './processors/admin-alerts.processor';
 import { LiaraUsageSyncProcessor } from './processors/liara-usage-sync.processor';
 import { LiaraKeyRetryProcessor } from './processors/liara-key-retry.processor';
 import { StudioVideoGenerationProcessor } from './processors/studio-video-generation.processor';
+import { CaptionTranscribeProcessor } from './processors/caption-transcribe.processor';
+import { CaptionRenderProcessor } from './processors/caption-render.processor';
 import { PrismaModule } from '../prisma/prisma.module';
 import { MessageFeedbackModule } from '../modules/message-feedback/message-feedback.module';
 import { CampaignModule } from '../modules/campaign/campaign.module';
@@ -18,8 +20,11 @@ import { LiveStatsModule } from '../modules/live-stats/live-stats.module';
 import { AdminNotificationsModule } from '../modules/admin-notifications/admin-notifications.module';
 import { LiaraModule } from '../modules/liara/liara.module';
 import { UsageModule } from '../modules/usage/usage.module';
+import { CreditsModule } from '../modules/credits/credits.module';
 import { PushNotificationsModule } from '../modules/push-notifications/push-notifications.module';
 import { VideoGenerationModule } from '../common/services/video-generation.module';
+import { MediaTranscodeModule } from '../common/services/media-transcode.module';
+import { AsrModule } from '../common/services/asr.module';
 
 @Module({
   imports: [
@@ -50,6 +55,15 @@ import { VideoGenerationModule } from '../common/services/video-generation.modul
       name: 'studio-video-generation',
       settings: { lockDuration: 35 * 60 * 1000 },
     }),
+    // docs/PRD-video-auto-captions.md §۱۱/§۱۶.۴ — تولیدکننده در caption-studio.module.ts
+    BullModule.registerQueue({
+      name: 'caption-transcribe',
+      settings: { lockDuration: 10 * 60 * 1000 },
+    }),
+    BullModule.registerQueue({
+      name: 'caption-render',
+      settings: { lockDuration: 10 * 60 * 1000 },
+    }),
     PrismaModule,
     MessageFeedbackModule,
     CampaignModule,
@@ -59,6 +73,9 @@ import { VideoGenerationModule } from '../common/services/video-generation.modul
     UsageModule,
     PushNotificationsModule,
     VideoGenerationModule,
+    MediaTranscodeModule,
+    AsrModule,
+    CreditsModule,
   ],
   providers: [
     QueueService,
@@ -71,6 +88,8 @@ import { VideoGenerationModule } from '../common/services/video-generation.modul
     LiaraUsageSyncProcessor,
     LiaraKeyRetryProcessor,
     StudioVideoGenerationProcessor,
+    CaptionTranscribeProcessor,
+    CaptionRenderProcessor,
   ],
 })
 export class QueueModule {}

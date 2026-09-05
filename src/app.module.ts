@@ -44,6 +44,7 @@ import { AdminCreativeModule } from './modules/admin-creative/admin-creative.mod
 import { NivoCalModule } from './modules/nivo-cal/nivo-cal.module';
 import { VideoStudioModule } from './modules/video-studio/video-studio.module';
 import { VideoStudioConfigModule } from './modules/video-studio-config/video-studio-config.module';
+import { CaptionStudioModule } from './modules/caption-studio/caption-studio.module';
 
 @Module({
   imports: [
@@ -88,6 +89,7 @@ import { VideoStudioConfigModule } from './modules/video-studio-config/video-stu
     AdminCreativeModule,
     NivoCalModule,
     VideoStudioModule,
+    CaptionStudioModule,
     VideoStudioConfigModule,
   ],
   providers: [{ provide: APP_FILTER, useClass: AllExceptionsFilter }],

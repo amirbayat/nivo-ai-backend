@@ -23,6 +23,9 @@ npx ts-node --transpile-only prisma/seeds/credit-packages.seed.ts
 echo ">>> Seeding pricing tiers (ضریب پله‌ای)..."
 npx ts-node --transpile-only prisma/seeds/pricing-tiers.seed.ts
 
+echo ">>> Seeding caption pricing tiers (زیرنویس خودکار)..."
+npx ts-node --transpile-only prisma/seeds/caption-pricing-tiers.seed.ts
+
 echo ">>> Seeding discovery category tree..."
 npx ts-node --transpile-only prisma/seeds/creative-categories.seed.ts
 

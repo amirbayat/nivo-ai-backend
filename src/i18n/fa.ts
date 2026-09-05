@@ -268,4 +268,18 @@ export const fa = {
     videoFailedPushBody: (title: string) =>
       `ساخت «${title}» ناموفق بود — اعتبار شما کسر نشد`,
   },
+  captionStudio: {
+    projectNotFound: 'این پروژه یافت نشد',
+    invalidVideoFormat: 'فرمت ویدیو پشتیبانی نمی‌شود (فقط MP4/MOV)',
+    fileTooLarge: 'حجم فایل بیشتر از حد مجاز است',
+    noFileUploaded: 'فایلی ارسال نشده',
+    onlyFailedCanRetry: 'فقط پروژه‌ی ناموفق قابل‌تلاش‌مجدد است',
+    notReadyForRender: 'این پروژه هنوز آماده‌ی رندر نیست',
+    insufficientCredits: 'اعتبار نیوو کافی نیست — لطفاً شارژ کنید',
+    renderDebitDescription: 'رندر زیرنویس ویدیو',
+    videoReadyPushTitle: 'ویدیوی زیرنویس‌دار شما آماده شد',
+    videoReadyPushBody: 'ویدیوی شما با زیرنویس آماده‌ی دانلود است',
+    renderFailedPushTitle: 'رندر زیرنویس ناموفق بود',
+    renderFailedPushBody: 'رندر زیرنویس ناموفق بود — اعتبار شما کسر نشد',
+  },
 } as const;

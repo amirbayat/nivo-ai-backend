@@ -56,6 +56,7 @@ model User {
   nutritionProfile          NutritionProfile?
   weightLogs                WeightLog[]
   studioProjects            StudioProject[]
+  captionProjects           CaptionProject[]
 
   @@map("users")
 }
@@ -535,6 +536,10 @@ model CreditConfig {
   // پرامپت» عمداً فقط یک مدل ثابت (openai/gpt-5.4-mini) و یک قیمت ثابت دارد، نه دو تایر
   // انتخابی، چون فاز ۱ باید «خیلی ساده» باشد — هیچ انتخاب مدلی جلوی کاربر نیست
   nivoCalScanCreditCost            Int      @default(1)
+  // docs/PRD-video-auto-captions.md §۱۴.۳ — اکسپورت دوباره‌ی همون پروژه‌ی زیرنویس (کیفیت/فرمت
+  // دیگر، بدون تشخیص گفتار جدید). هزینه‌ی اصلی (بر اساس طول ویدیو) از CaptionPricingTier می‌آید،
+  // نه این‌جا — این فقط برای اکسپورت تکراری است، مستقل از طول ویدیو
+  captionReRenderCreditCost        Int      @default(2)
   updatedAt                        DateTime @updatedAt
 
   @@map("credit_config")
@@ -560,6 +565,21 @@ model PricingTier {
 
   @@index([type, minToman])
   @@map("pricing_tiers")
+}
+
+// docs/PRD-video-auto-captions.md §۱۴.۲/۱۴.۳ — برخلاف PricingTier (هزینه‌ی واقعی × ضریب)،
+// عمداً cost-based نیست: هزینه‌ی واقعی ASR ناچیز است (کسری از سنت) و قیمت‌گذاری بر پایه‌ی آن
+// ارزش واقعی فیچر (یک ویدیوی کامل با زیرنویس حرفه‌ای) را منعکس نمی‌کند. ادمین مستقیم قیمت هر
+// پله‌ی «تا X ثانیه» را تعیین می‌کند. maxDurationSec=null یعنی آخرین پله‌ی باز (بدون سقف).
+model CaptionPricingTier {
+  id             String   @id @default(cuid())
+  maxDurationSec Int? // شامل خودش؛ null = بدون سقف (آخرین پله‌ی باز)
+  creditCost     Int
+  sortOrder      Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@map("caption_pricing_tiers")
 }
 
 // بسته‌های خرید — قیمت نهایی در لحظه‌ی نمایش/خرید محاسبه می‌شود:
@@ -841,6 +861,7 @@ enum AiModelType {
   EMBEDDING
   IMAGE_GEN
   VIDEO_GEN
+  AUDIO_TRANSCRIPTION // مدل‌های ASR (whisper-*، grok-stt، ...) — docs/PRD-video-auto-captions.md §۴/§۱۷
 }
 
 // شناسه‌ی مدل بین لیارا و OpenRouter لزوماً یکسان نیست (docs/PRD-openrouter-migration.md §۶.۳) —
@@ -897,6 +918,12 @@ model AiModel {
   // CHAT/IMAGE_GEN معنی دارد؛ VIDEO_GEN نیازی ندارد چون کل کاتالوگ VIDEO_GEN ذاتاً مخصوص همین
   // فیچر است. پیش‌فرض false تا هیچ مدل قدیمی خودکار توی استودیوی ویدیو ظاهر نشود.
   videoStudioEligible Boolean @default(false)
+
+  // docs/PRD-video-auto-captions.md §۴.۲/§۱۷ — فقط برای AiModelType.AUDIO_TRANSCRIPTION.
+  // ترتیب زنجیره‌ی fallback ASR از همون sortOrder موجود پایین‌تر می‌آید (دقیقاً همون الگوی
+  // resolveModel در studio-video-generation.processor.ts برای VIDEO_GEN).
+  asrPricePerMinuteUsd      Float?
+  asrSupportsWordTimestamps Boolean @default(false)
 
   isActive                     Boolean     @default(true)
   sortOrder                    Int         @default(0)
@@ -1177,6 +1204,45 @@ model StudioShot {
 
   @@index([projectId])
   @@map("studio_shots")
+}
+
+// ─── Auto Captions Studio (docs/PRD-video-auto-captions.md) ───────────────────
+
+enum CaptionProjectStatus {
+  UPLOADED
+  TRANSCRIBING
+  READY_FOR_EDIT
+  RENDERING
+  DONE
+  FAILED
+}
+
+// مستقل از StudioProject/StudioShot — ورودی این‌جا هر ویدیوی آپلودی دلخواه کاربر است (نه
+// لزوماً ویدیوی تولیدشده با AI)، پس فرض‌های آن دو مدل (scenario تولیدمحور، moderationStatus)
+// این‌جا معنا ندارد — docs/PRD-video-auto-captions.md §۶
+model CaptionProject {
+  id                String               @id @default(uuid())
+  userId            String
+  user              User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sourceVideoKey    String // کلید MinIO ویدیوی مبدأ (آپلودی کاربر، بعد از نرمال‌سازی HEVC→h264 اگر لازم بود)
+  sourceDurationSec Float?
+  asrModelName      String? // نام AiModel واقعی که پاسخ داد (بخش ۱۷.۳/۱۷.۴) — برای گزارش/دیباگ fallback
+  transcriptWords   Json? // خروجی خام ASR: [{word,start,end,speaker}]
+  segments          Json? // cueهای ادیت‌شده‌ی کاربر: [{id,startMs,endMs,text,words:[...]}]
+  styleId           String? // کلید قالب انتخابی از کاتالوگ استایل (بخش ۸.۱)
+  // شخصی‌سازی روی قالب انتخابی — MVP این را project-wide نگه می‌دارد (بخش ۵.۲/۱۴):
+  // {fontFamily, textColor, backgroundMode:'none'|'translucent'|'solid', fontSizePx,
+  //  position:'top'|'center'|'bottom'}
+  styleOverrides    Json?
+  status            CaptionProjectStatus @default(UPLOADED)
+  renderedVideoKey  String?
+  asrCostUsd        Float? // هزینه‌ی خام واقعی ASR — فقط برای گزارش حاشیه‌ی سود، نه تعیین مبلغ کسرشده (بخش ۱۴.۴)
+  renderCreditCost  Int? // مبلغ واقعی کسرشده از CaptionPricingTier در لحظه‌ی رندر موفق
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  @@index([userId])
+  @@map("caption_projects")
 }
 
 // ─── Growth / Traction (docs/PRD-growth-traction-features.md) ─────────────────
