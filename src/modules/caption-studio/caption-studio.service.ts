@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
@@ -51,6 +52,8 @@ const MAX_UPLOAD_BYTES = 500 * 1024 * 1024; // ۵۰۰ مگابایت
 
 @Injectable()
 export class CaptionStudioService {
+  private readonly logger = new Logger(CaptionStudioService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
@@ -223,7 +226,7 @@ export class CaptionStudioService {
       data: { status: CaptionProjectStatus.RENDERING },
     });
 
-    await this.renderQueue.add(
+    const job = await this.renderQueue.add(
       'render',
       { captionProjectId: id, targetHeight: validTargetHeight },
       {
@@ -232,6 +235,9 @@ export class CaptionStudioService {
         removeOnComplete: true,
         removeOnFail: false,
       },
+    );
+    this.logger.log(
+      `caption-render job صف شد project=${id} jobId=${job.id} targetHeight=${validTargetHeight ?? 'source'}`,
     );
 
     return this.prisma.captionProject.findUnique({ where: { id } });

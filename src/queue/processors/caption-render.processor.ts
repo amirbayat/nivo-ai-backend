@@ -52,6 +52,9 @@ export class CaptionRenderProcessor {
   @Process('render')
   async handleRender(job: Job<{ captionProjectId: string; targetHeight?: number }>) {
     const { captionProjectId, targetHeight } = job.data;
+    this.logger.log(
+      `caption-render: job دریافت شد project=${captionProjectId} jobId=${job.id} attemptsMade=${job.attemptsMade}`,
+    );
     const project = await this.prisma.captionProject.findUnique({
       where: { id: captionProjectId },
     });
@@ -76,11 +79,25 @@ export class CaptionRenderProcessor {
       data: { status: CaptionProjectStatus.RENDERING },
     });
 
+    // لاگ‌های گام‌به‌گام (بخش ۱۶.۴ درخواست‌شده) — رندر چند مرحله‌ی کند دارد (دانلود فایل حجیم،
+    // ffmpeg re-encode)؛ بدون این لاگ‌ها تشخیص اینکه یک رندر «طولانی» واقعاً کجا گیر کرده
+    // (دانلود از MinIO، خودِ ffmpeg، آپلود خروجی، یا هیچ‌کدام و اصلاً worker پردازش نکرده)
+    // ممکن نیست.
+    const t0 = Date.now();
     try {
+      this.logger.log(
+        `caption-render project=${captionProjectId}: شروع، دانلود ویدیوی مبدأ از MinIO key=${project.sourceVideoKey} targetHeight=${targetHeight ?? 'source'}`,
+      );
       const videoBuffer = await this.storage.downloadImage(project.sourceVideoKey);
       const ext = project.sourceVideoKey.split('.').pop() ?? 'mp4';
+      this.logger.log(
+        `caption-render project=${captionProjectId}: ویدیو دانلود شد (${videoBuffer.length} بایت) در ${Date.now() - t0}ms`,
+      );
 
       const dims = await this.mediaTranscode.getVideoDimensions(videoBuffer, ext);
+      this.logger.log(
+        `caption-render project=${captionProjectId}: ابعاد سورس ${dims.width}x${dims.height}`,
+      );
 
       // فقط رزولوشن‌های مساوی یا کوچک‌تر از سورس معتبرند (بدون آپ‌اسکیل جعلی) — عرض با
       // گرد کردن به نزدیک‌ترین عدد زوج (الزام libx264) از نسبت تصویر واقعی محاسبه می‌شود
@@ -105,14 +122,25 @@ export class CaptionRenderProcessor {
         outputWidth,
         outputHeight,
       );
+      this.logger.log(
+        `caption-render project=${captionProjectId}: فایل ASS ساخته شد (${segments.length} segment، خروجی ${outputWidth}x${outputHeight})`,
+      );
 
+      const burnStart = Date.now();
       const renderedBuffer = await this.mediaTranscode.burnCaptions(
         videoBuffer,
         ext,
         assContent,
         targetDimensions,
       );
+      this.logger.log(
+        `caption-render project=${captionProjectId}: ffmpeg burnCaptions تمام شد در ${Date.now() - burnStart}ms (خروجی ${renderedBuffer.length} بایت)`,
+      );
+
       const renderedVideoKey = await this.storage.uploadImage(renderedBuffer, 'mp4');
+      this.logger.log(
+        `caption-render project=${captionProjectId}: خروجی در MinIO آپلود شد key=${renderedVideoKey}`,
+      );
 
       const creditCost = await this.captionPricing.getCreditCost(project.sourceDurationSec ?? 0);
       const creditConfig = await this.credits.getConfig();
@@ -150,6 +178,9 @@ export class CaptionRenderProcessor {
         project.userId,
         fa.captionStudio.videoReadyPushTitle,
         fa.captionStudio.videoReadyPushBody,
+      );
+      this.logger.log(
+        `caption-render project=${captionProjectId}: کامل شد در ${Date.now() - t0}ms مجموع`,
       );
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
