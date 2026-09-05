@@ -540,6 +540,28 @@ model CreditConfig {
   @@map("credit_config")
 }
 
+// ضریب مارک‌آپ پله‌ای بر اساس نوع تولید (متن/عکس/ویدیو) و بازه‌ی هزینه‌ی واقعی (تومان) —
+// جایگزین Plan.payAsYouGoMarkup ثابت قبلی. هر نوع می‌تواند چند پله داشته باشد؛ maxToman=null
+// یعنی آخرین پله (بدون سقف). از پنل ادمین کاملاً CRUD می‌شود — docs/PRD-tiered-pricing-and-studio-features.md
+enum PricingGenerationType {
+  TEXT
+  IMAGE
+  VIDEO
+}
+
+model PricingTier {
+  id        String                @id @default(cuid())
+  type      PricingGenerationType
+  minToman  Int // شامل خودش
+  maxToman  Int? // null = بدون سقف (آخرین پله‌ی این نوع)
+  markup    Float
+  createdAt DateTime              @default(now())
+  updatedAt DateTime              @updatedAt
+
+  @@index([type, minToman])
+  @@map("pricing_tiers")
+}
+
 // بسته‌های خرید — قیمت نهایی در لحظه‌ی نمایش/خرید محاسبه می‌شود:
 // credits × tomanPerCredit × (1 - discountPercent/100)
 // docs/PRD-nivo-cal-standalone-app.md بخش ۶ — GENERAL همون بسته‌های فعلی (پیش‌فرض، توی همه‌جا
@@ -1040,7 +1062,7 @@ model VideoStudioConfig {
   id                                String   @id @default("singleton")
   characterOptionCount              Int      @default(4)
   maxCharacterRegeneratesPerProject Int      @default(10)
-  maxConcurrentVideoJobsPerUser     Int      @default(2)
+  maxConcurrentVideoJobsPerUser     Int      @default(4)
   maxVideoGenPerDayPerUser          Int? // null = بدون سقف روزانه
   defaultAudioEnabled               Boolean  @default(false)
   updatedAt                         DateTime @updatedAt
@@ -1086,6 +1108,9 @@ model StudioProject {
   videoModelId     String?
   imageAspectRatio String? // "1:1" | "16:9" | "9:16"
   videoAspectRatio String?
+  // انتخاب اختیاری کاربر (SimpleVideoForm) — باید عضو AiModel.videoGenSupportedDurationsSec مدل
+  // انتخابی باشد؛ null یعنی رفتار قبلی (اولین مقدار پشتیبانی‌شده‌ی مدل، یا ۴ ثانیه در نبود آن)
+  videoDurationSec Int?
   createdAt        DateTime            @default(now())
 
   characterOptions StudioCharacterOption[]
@@ -1145,6 +1170,10 @@ model StudioShot {
   videoKey         String?
   creditCost       Float?
   createdAt        DateTime               @default(now())
+  // لحظه‌ای که پردازشگر ویدیو، videoStatus را به SUCCEEDED/FAILED رساند — مبنای نوتیف هدر وب
+  videoCompletedAt   DateTime?
+  // وقتی کاربر نوتیف این شات را در دراپ‌داون هدر دیده/باز کرده؛ null یعنی هنوز ندیده (badge)
+  notificationSeenAt DateTime?
 
   @@index([projectId])
   @@map("studio_shots")

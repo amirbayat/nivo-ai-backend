@@ -3,12 +3,14 @@ import { Logger } from '@nestjs/common';
 import type { Job } from 'bull';
 import {
   AiModelType,
+  PricingGenerationType,
   StudioShotVideoStatus,
   type AiModel,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
 import { PricingService } from '../../modules/usage/pricing.service';
+import { PricingTiersService } from '../../modules/usage/pricing-tiers.service';
 import { AiProviderService } from '../../common/services/ai-provider.service';
 import { VideoGenerationService } from '../../common/services/video-generation.service';
 import { PushFcmService } from '../../modules/push-notifications/fcm.service';
@@ -33,6 +35,7 @@ export class StudioVideoGenerationProcessor {
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
     private readonly pricing: PricingService,
+    private readonly pricingTiers: PricingTiersService,
     private readonly aiProvider: AiProviderService,
     private readonly videoGen: VideoGenerationService,
     private readonly pushFcm: PushFcmService,
@@ -115,7 +118,10 @@ export class StudioVideoGenerationProcessor {
           modelId: model.name,
           prompt: shot.scenario,
           apiKey,
-          durationSec: model.videoGenSupportedDurationsSec[0] ?? 4,
+          durationSec:
+            shot.project.videoDurationSec ??
+            model.videoGenSupportedDurationsSec[0] ??
+            4,
           size:
             model.videoGenSupportedSizes.find((s) =>
               matchesAspectRatio(s, shot.project.videoAspectRatio),
@@ -130,7 +136,10 @@ export class StudioVideoGenerationProcessor {
         });
       }
 
-      const durationSec = model.videoGenSupportedDurationsSec[0] ?? 4;
+      const durationSec =
+        shot.project.videoDurationSec ??
+        model.videoGenSupportedDurationsSec[0] ??
+        4;
 
       let videoUrl: string | undefined;
       let realCostUsd: number | undefined;
@@ -166,10 +175,14 @@ export class StudioVideoGenerationProcessor {
         shot.audioEnabled,
       );
 
+      const markup = await this.pricingTiers.getMarkup(
+        PricingGenerationType.VIDEO,
+        costCalc.costToman,
+      );
       const debited = await this.pricing.debitWallet(
         shot.project.userId,
         costCalc.costToman,
-        1,
+        markup,
         `تولید ویدیو — صحنه ${shot.order + 1}`,
         {
           feature: 'video-studio-shot',
@@ -197,6 +210,7 @@ export class StudioVideoGenerationProcessor {
           videoStatus: StudioShotVideoStatus.SUCCEEDED,
           videoKey,
           creditCost: costCalc.costToman,
+          videoCompletedAt: new Date(),
         },
       });
       await this.notifyUser(
@@ -212,7 +226,10 @@ export class StudioVideoGenerationProcessor {
       );
       await this.prisma.studioShot.update({
         where: { id: shotId },
-        data: { videoStatus: StudioShotVideoStatus.FAILED },
+        data: {
+          videoStatus: StudioShotVideoStatus.FAILED,
+          videoCompletedAt: new Date(),
+        },
       });
       await this.notifyUser(
         shot.project.userId,

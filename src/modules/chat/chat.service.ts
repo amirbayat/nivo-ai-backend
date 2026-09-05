@@ -10,7 +10,12 @@ import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
 import { streamText, generateText, generateObject, APICallError } from 'ai';
 import type { ModelMessage, UserModelMessage } from 'ai';
-import { ModelTier, Prisma, type AiModel } from '@prisma/client';
+import {
+  ModelTier,
+  Prisma,
+  PricingGenerationType,
+  type AiModel,
+} from '@prisma/client';
 import { z } from 'zod';
 import {
   isModelUnavailableError,
@@ -24,6 +29,7 @@ import {
   type PlanLimits,
 } from '../usage/token.service';
 import { PricingService } from '../usage/pricing.service';
+import { PricingTiersService } from '../usage/pricing-tiers.service';
 import { TokenEstimatorService } from '../usage/token-estimator.service';
 import { ModelRouterService } from '../model-router/model-router.service';
 import { UsageAnalyticsService } from '../usage-analytics/usage-analytics.service';
@@ -85,6 +91,14 @@ const TITLE_GENERATION_MODEL = 'openai/gpt-5-nano';
 type ReasoningEffort =
   'provider-default' | 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 
+// همان سه اندازه‌ای که classifyImagePrompt پایین‌تر (حدس خودکار) هم استفاده می‌کند — انتخاب
+// صریح کاربر روی همین سه گزینه محدود است تا با هر دو مسیر (دستی/خودکار) یکدست بماند
+const IMAGE_ASPECT_RATIO_TO_SIZE: Record<'1:1' | '16:9' | '9:16', string> = {
+  '1:1': '1024x1024',
+  '16:9': '1536x1024',
+  '9:16': '1024x1536',
+};
+
 const LEGACY_MODEL_MAP: Record<string, string> = {
   'gpt-4o-mini': 'openai/gpt-4o-mini',
   'gpt-4o': 'openai/gpt-4o',
@@ -108,6 +122,7 @@ export class ChatService {
     private readonly redis: RedisService,
     private readonly tokenService: TokenService,
     private readonly pricingService: PricingService,
+    private readonly pricingTiers: PricingTiersService,
     private readonly tokenEstimator: TokenEstimatorService,
     private readonly modelRouter: ModelRouterService,
     private readonly usageAnalytics: UsageAnalyticsService,
@@ -411,16 +426,12 @@ export class ChatService {
       );
     }
     if (explicitImageToggle || imageIntent?.wantsImage) {
-      const isEditIntent = explicitImageToggle
-        ? Boolean(dto.images?.length)
-        : Boolean(imageIntent?.isEdit);
       return this.handleImageGeneration(
         res,
         conversationId,
         userId,
         dto,
         plan,
-        isEditIntent,
         apiKey,
         conversation.title,
       );
@@ -851,13 +862,18 @@ export class ChatService {
       // می‌شود؛ debitWallet دیگر به‌خاطر موجودی ناکافی رد نمی‌کند (می‌تواند منفی کند) — گیت واقعی
       // preflight بالاتر (balance>0) بود، اینجا صرفاً کسر نهایی است، نه یک چک دوم
       if (plan.isPayAsYouGo) {
+        // هزینه‌ی واقعی OpenRouter (اگر برگشت) جایگزین تخمین توکن‌محور می‌شود؛ روی لیارا
+        // که این متادیتا همیشه null است، همان تخمین (costToman) به‌عنوان fallback می‌ماند
+        const debitCostToman = openrouterRealCostToman ?? costToman;
+        const markup = await this.pricingTiers.getMarkup(
+          PricingGenerationType.TEXT,
+          debitCostToman,
+        );
         this.pricingService
           .debitWallet(
             userId,
-            // هزینه‌ی واقعی OpenRouter (اگر برگشت) جایگزین تخمین توکن‌محور می‌شود؛ روی لیارا
-            // که این متادیتا همیشه null است، همان تخمین (costToman) به‌عنوان fallback می‌ماند
-            openrouterRealCostToman ?? costToman,
-            plan.payAsYouGoMarkup ?? 1.3,
+            debitCostToman,
+            markup,
             fa.payAsYouGo.messageDebitDescription,
             {
               messageId: assistantMessage.id,
@@ -1013,35 +1029,6 @@ isEdit: اگر wantsImage=true، آیا منظورش ویرایش/ادامه‌�
     }
   }
 
-  // چون گیت‌وی ما previous_response_id (حافظه‌ی مکالمه‌ی خودِ OpenAI برای عکس) را ندارد، خودمان
-  // آخرین عکس مرتبط این مکالمه (آپلودی یا تولیدشده، فرقی نمی‌کند) را برای ادامه‌ی ویرایش می‌گیریم
-  private async resolveLastConversationImages(
-    conversationId: string,
-  ): Promise<Buffer[]> {
-    const lastImageMessage = await this.prisma.message.findFirst({
-      where: { conversationId, images: { not: Prisma.DbNull } },
-      orderBy: { createdAt: 'desc' },
-      select: { images: true },
-    });
-    const keys = (lastImageMessage?.images as string[] | null) ?? [];
-    const buffers = await Promise.all(
-      keys.map(async (keyOrDataUrl): Promise<Buffer | null> => {
-        if (this.storageService.isStorageKey(keyOrDataUrl)) {
-          try {
-            return await this.storageService.downloadImage(keyOrDataUrl);
-          } catch (err) {
-            this.logger.warn(
-              `Failed to download last conversation image for edit continuation: ${(err as Error).message}`,
-            );
-            return null;
-          }
-        }
-        return parseChatImageDataUrl(keyOrDataUrl)?.buffer ?? null;
-      }),
-    );
-    return buffers.filter((b): b is Buffer => b !== null);
-  }
-
   // یک مدل تولید عکس ممکن است چند ردیف با کیفیت/قیمت مختلف داشته باشد (مثلاً low/medium/high
   // خانواده‌ی gpt-image) — به‌جای اینکه کاربر خودش کیفیت را انتخاب کند، از روی متن پیام تشخیص
   // می‌دهیم که این تصویر چقدر باید دقیق/پیچیده باشد، و اندازه‌ی مناسب (مربع/عمودی/افقی) را هم
@@ -1121,7 +1108,6 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
     userId: string,
     dto: StreamMessageDto,
     plan: PlanLimits,
-    isEditIntent: boolean,
     apiKey: string,
     conversationTitle: string | null,
   ): Promise<void> {
@@ -1137,8 +1123,6 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
     // اگر کاربر عکس هم فرستاده باشد، این یک درخواست «ویرایش/ترکیب» است (images/edits) نه تولید
     // از صفر — دقیقاً مثل مثال gpt-image-1-mini (چند عکس ورودی + prompt → یک عکس جدید)
     const hasExplicitInputImages = Boolean(dto.images?.length);
-    // isEditIntent (از classifyImageIntent) یعنی این ادامه‌ی ویرایش یک عکس قبلی همین مکالمه‌ست،
-    // حتی اگه کاربر خودش دوباره عکس رو پیوست نکرده باشه («نه، صورتیش کن» بدون آپلود دوباره)
 
     // سقف مستقل تولید/ویرایش عکس این پلن — قبل از هر ذخیره‌سازی/فراخوانی provider چک می‌شود
     // (مثل بقیه‌ی preflight‌های streamChat)، چون هر عکس چند برابر گران‌تر از یک پیام معمولی است
@@ -1289,18 +1273,17 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
     const callStart = Date.now();
 
     try {
-      // اگر کاربر خودش عکس نفرستاده ولی این ادامه‌ی یک ویرایش قبلی تشخیص داده شده («نه، صورتیش
-      // کن»)، آخرین عکس مرتبط همین مکالمه را خودمان از MinIO می‌گیریم — گیت‌وی ما (برخلاف
-      // Responses API خودِ OpenAI با previous_response_id) هیچ حافظه‌ای بین تماس‌ها ندارد،
-      // پس این حافظه را خودمان دستی نگه می‌داریم
+      // فقط عکسی که کاربر همین پیام صریحاً attach کرده (آپلود تازه یا «افزودن به پرامپت» روی
+      // یکی از عکس‌های قبلی گالری) به مدل فرستاده می‌شود. قبلاً وقتی heuristic/طبقه‌بند implicit
+      // حدس می‌زد isEditIntent=true («نه، صورتیش کن») بدون هیچ attachment صریحی، آخرین عکس
+      // مکالمه خودکار برداشته و ویرایش می‌شد — تصمیم صریح کاربر: این رفتار خودکار حذف شود؛
+      // بدون attachment، حتی با متن ویرایشی، یک عکس تازه از پرامپت تولید می‌شود (resolveLastConversationImages دیگر استفاده نمی‌شود)
       const inputImageBuffers = hasExplicitInputImages
         ? (dto.images ?? [])
             .map((dataUrl) => parseChatImageDataUrl(dataUrl))
             .filter((p): p is NonNullable<typeof p> => p !== null)
             .map((p) => p.buffer)
-        : isEditIntent
-          ? await this.resolveLastConversationImages(conversationId)
-          : [];
+        : [];
 
       // سوییچ «تغییر ندادن چهره» (MessageInput.tsx) — فقط وقتی واقعاً عکس ورودی داریم معنا
       // دارد؛ پیش‌فرض روشن (نبودن preserveFace هم یعنی true)، مثل مسیر مشابه در
@@ -1322,13 +1305,18 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
       // (چه سیاست محتوا چه خطای provider)، خطا مستقیم throw می‌شود و کچ بیرونی پیام روشن
       // «مدل دیگری امتحان کنید یا بعداً دوباره تلاش کنید» را به کاربر برمی‌گرداند
       const modelRecord = selectedModel;
+      // انتخاب صریح نسبت تصویر توسط کاربر همیشه روی اندازه‌ی ثابت مدل اولویت دارد — نخواستن
+      // یعنی همان رفتار قبلی (imageGenSize مدل)
+      const requestedSize = dto.imageAspectRatio
+        ? IMAGE_ASPECT_RATIO_TO_SIZE[dto.imageAspectRatio]
+        : (modelRecord.imageGenSize ?? undefined);
       const result = inputImageBuffers.length
         ? await this.imageGen.editImage({
             modelId: modelRecord.name,
             prompt: promptWithFaceInstruction,
             images: inputImageBuffers,
             apiKey,
-            size: modelRecord.imageGenSize ?? undefined,
+            size: requestedSize,
             quality: modelRecord.imageGenQuality ?? undefined,
             onPartial,
           })
@@ -1336,7 +1324,7 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
             modelId: modelRecord.name,
             prompt: dto.content,
             apiKey,
-            size: modelRecord.imageGenSize ?? undefined,
+            size: requestedSize,
             quality: modelRecord.imageGenQuality ?? undefined,
             onPartial,
           });
@@ -1412,13 +1400,18 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
       ]);
 
       if (plan.isPayAsYouGo) {
+        // هزینه‌ی واقعی OpenRouter (اگر برگشت) جایگزین تخمین توکن‌محور می‌شود؛ روی لیارا
+        // که این متادیتا همیشه null است، همان تخمین (costToman) به‌عنوان fallback می‌ماند
+        const debitCostToman = openrouterRealCostToman ?? costToman;
+        const markup = await this.pricingTiers.getMarkup(
+          PricingGenerationType.IMAGE,
+          debitCostToman,
+        );
         this.pricingService
           .debitWallet(
             userId,
-            // هزینه‌ی واقعی OpenRouter (اگر برگشت) جایگزین تخمین توکن‌محور می‌شود؛ روی لیارا
-            // که این متادیتا همیشه null است، همان تخمین (costToman) به‌عنوان fallback می‌ماند
-            openrouterRealCostToman ?? costToman,
-            plan.payAsYouGoMarkup ?? 1.3,
+            debitCostToman,
+            markup,
             fa.payAsYouGo.messageDebitDescription,
             {
               messageId: assistantMessage.id,

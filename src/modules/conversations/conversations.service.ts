@@ -10,7 +10,11 @@ import { CreateConversationDto } from './dto/create-conversation.dto';
 import { UpdateConversationDto } from './dto/update-conversation.dto';
 import { ListConversationsDto } from './dto/list-conversations.dto';
 import { mimeTypeForExt } from '../../common/validators/chat-image.validator';
-import { CreativeGenerationStatus, CreativeOutputType } from '@prisma/client';
+import {
+  CreativeGenerationStatus,
+  CreativeOutputType,
+  Prisma,
+} from '@prisma/client';
 
 @Injectable()
 export class ConversationsService {
@@ -221,5 +225,44 @@ export class ConversationsService {
     if (!conv) throw new NotFoundException(fa.conversations.notFound);
     if (conv.userId !== userId)
       throw new ForbiddenException(fa.conversations.forbidden);
+  }
+
+  // «انتخاب از تولیدات قبلی» در استودیو ویدیو (docs: پلن «ضریب پله‌ای قیمت‌گذاری + فیچرهای
+  // استودیو») — همه‌ی عکس‌های تولیدشده‌ی کاربر در تمام مکالمات، بدون نیاز به join روی
+  // Conversation (Message.userId از قبل denormalized است، درست برای همین‌جور کوئری‌ها).
+  // URL هر عکس دقیقاً همان مسیر امن موجود (/conversations/:id/images/:filename) است — بدون
+  // endpoint سرو جدید، فقط لیست‌گیری تازه است.
+  async listMyImages(userId: string, cursor?: string, limit = 30) {
+    const messages = await this.prisma.message.findMany({
+      where: {
+        userId,
+        role: 'ASSISTANT',
+        images: { not: Prisma.DbNull },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: limit + 1,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      select: { id: true, conversationId: true, images: true, createdAt: true },
+    });
+
+    const hasMore = messages.length > limit;
+    const page = hasMore ? messages.slice(0, limit) : messages;
+
+    const items = page.flatMap((m) => {
+      const keys = (m.images as string[] | null) ?? [];
+      return keys
+        .filter((img) => this.storage.isStorageKey(img))
+        .map((img) => ({
+          messageId: m.id,
+          conversationId: m.conversationId,
+          imageUrl: `/conversations/${m.conversationId}/images/${img.split('/').pop()}`,
+          createdAt: m.createdAt,
+        }));
+    });
+
+    return {
+      items,
+      nextCursor: hasMore ? page[page.length - 1].id : null,
+    };
   }
 }

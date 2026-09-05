@@ -42,6 +42,22 @@ export class ConversationsController {
     return this.conversationsService.findAll(user.sub, query);
   }
 
+  // «انتخاب از تولیدات قبلی» (استودیو ویدیو) — باید قبل از ':id' ثبت شود وگرنه Nest 'images'
+  // را به‌عنوان مقدار پارامتر :id تفسیر می‌کند
+  @Get('images/mine')
+  listMyImages(
+    @CurrentUser() user: JwtPayload,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const parsedLimit = limit ? Math.min(Number(limit) || 30, 100) : 30;
+    return this.conversationsService.listMyImages(
+      user.sub,
+      cursor,
+      parsedLimit,
+    );
+  }
+
   @Get(':id')
   findOne(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     return this.conversationsService.findOne(id, user.sub);

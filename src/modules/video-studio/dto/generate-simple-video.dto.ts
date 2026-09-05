@@ -1,4 +1,4 @@
-import { IsBoolean, IsIn, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsBoolean, IsIn, IsInt, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 import { fa } from '../../../i18n/fa';
 
 const ASPECT_RATIOS = ['1:1', '16:9', '9:16'] as const;
@@ -27,4 +27,11 @@ export class GenerateSimpleVideoDto {
   @IsOptional()
   @IsBoolean()
   audioEnabled?: boolean;
+
+  // اختیاری — نبود آن یعنی رفتار قبلی (اولین مقدار پشتیبانی‌شده‌ی مدل). باید عضو
+  // videoGenSupportedDurationsSec مدل انتخابی باشد؛ چون این لیست به‌ازای هر مدل فرق می‌کند،
+  // چک واقعی در video-studio.service.ts/generateSimpleVideo انجام می‌شود، نه اینجا با @IsIn ثابت
+  @IsOptional()
+  @IsInt()
+  videoDurationSec?: number;
 }

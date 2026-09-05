@@ -53,4 +53,11 @@ export class StreamMessageDto {
   @IsOptional()
   @IsBoolean({ message: fa.validation.mustBeBoolean })
   preserveFace?: boolean;
+
+  // انتخاب اختیاری نسبت تصویر توسط کاربر (استودیو عکس) — خالی یعنی رفتار قبلی (اندازه‌ی
+  // ثابت مدل انتخابی، یا در حالت auto حدس خودکار از روی متن). وقتی ست باشد، این همیشه
+  // اندازه‌ی نهایی ارسالی به provider را override می‌کند، صرف‌نظر از مدل انتخاب‌شده.
+  @IsOptional()
+  @IsIn(['1:1', '16:9', '9:16'], { message: fa.validation.required })
+  imageAspectRatio?: '1:1' | '16:9' | '9:16';
 }

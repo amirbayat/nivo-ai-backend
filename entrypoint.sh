@@ -20,6 +20,9 @@ npx ts-node --transpile-only prisma/seeds/segments.seed.ts
 echo ">>> Seeding credit packages (نیوو)..."
 npx ts-node --transpile-only prisma/seeds/credit-packages.seed.ts
 
+echo ">>> Seeding pricing tiers (ضریب پله‌ای)..."
+npx ts-node --transpile-only prisma/seeds/pricing-tiers.seed.ts
+
 echo ">>> Seeding discovery category tree..."
 npx ts-node --transpile-only prisma/seeds/creative-categories.seed.ts
 

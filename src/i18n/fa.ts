@@ -245,6 +245,7 @@ export const fa = {
   videoStudio: {
     projectNotFound: 'این پروژه یافت نشد',
     invalidVideoModel: 'مدل ویدیوی انتخاب‌شده معتبر نیست',
+    invalidVideoDuration: 'این طول مدت برای مدل انتخاب‌شده پشتیبانی نمی‌شود',
     insufficientCredits: 'اعتبار نیوو کافی نیست — لطفاً شارژ کنید',
     characterGenerationFailed:
       'طراحی کاراکتر ناموفق بود — اعتبار شما کسر نشد، دوباره امتحان کنید',

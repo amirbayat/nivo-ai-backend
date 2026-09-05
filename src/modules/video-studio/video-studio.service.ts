@@ -11,12 +11,14 @@ import { generateObject } from 'ai';
 import { z } from 'zod';
 import {
   AiModelType,
+  PricingGenerationType,
   StudioProjectStatus,
   StudioShotVideoStatus,
   type AiModel,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PricingService } from '../usage/pricing.service';
+import { PricingTiersService } from '../usage/pricing-tiers.service';
 import { StorageService } from '../../storage/storage.service';
 import {
   ImageGenerationService,
@@ -111,6 +113,7 @@ export class VideoStudioService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly pricing: PricingService,
+    private readonly pricingTiers: PricingTiersService,
     private readonly storage: StorageService,
     private readonly imageGen: ImageGenerationService,
     private readonly aiProvider: AiProviderService,
@@ -232,6 +235,51 @@ export class VideoStudioService {
     return this.getProjectOrThrow(userId, projectId);
   }
 
+  // آیکون نوتیف هدر (وب) — شات‌هایی که videoCompletedAt دارند (موفق یا ناموفق) در ۷ روز
+  // اخیر؛ seen بر مبنای notificationSeenAt. جایگزین «فقط FCM موبایل» قبلی برای کاربران وب.
+  async listNotifications(userId: string) {
+    const since = new Date();
+    since.setDate(since.getDate() - 7);
+    const shots = await this.prisma.studioShot.findMany({
+      where: {
+        project: { userId },
+        videoCompletedAt: { gte: since },
+      },
+      orderBy: { videoCompletedAt: 'desc' },
+      take: 30,
+      select: {
+        id: true,
+        projectId: true,
+        title: true,
+        videoStatus: true,
+        previewImageKey: true,
+        videoCompletedAt: true,
+        notificationSeenAt: true,
+      },
+    });
+    return shots.map((s) => ({
+      shotId: s.id,
+      projectId: s.projectId,
+      title: s.title,
+      videoStatus: s.videoStatus,
+      previewImageKey: s.previewImageKey,
+      completedAt: s.videoCompletedAt,
+      seen: s.notificationSeenAt !== null,
+    }));
+  }
+
+  async markNotificationsSeen(userId: string, shotId?: string) {
+    await this.prisma.studioShot.updateMany({
+      where: {
+        project: { userId },
+        notificationSeenAt: null,
+        ...(shotId ? { id: shotId } : {}),
+      },
+      data: { notificationSeenAt: new Date() },
+    });
+    return { ok: true };
+  }
+
   async setModels(
     userId: string,
     projectId: string,
@@ -323,10 +371,14 @@ export class VideoStudioService {
     // کسر واقعی فقط برای عکس‌هایی که واقعاً موفق شدند — طبق تصمیم کاربر «هزینه‌ی هر تعداد
     // عکسی که تولید می‌شود کسر بشه» (نه هزینه‌ی کامل N حتی اگر بعضی fail شده باشند)
     if (totalToman > 0) {
+      const markup = await this.pricingTiers.getMarkup(
+        PricingGenerationType.IMAGE,
+        totalToman,
+      );
       const debited = await this.pricing.debitWallet(
         userId,
         totalToman,
-        1,
+        markup,
         `طراحی کاراکتر ویدیو — ${projectId}`,
         { feature: 'video-studio-character', projectId, count: created.length },
       );
@@ -477,10 +529,14 @@ export class VideoStudioService {
     }
 
     if (totalToman > 0) {
+      const markup = await this.pricingTiers.getMarkup(
+        PricingGenerationType.IMAGE,
+        totalToman,
+      );
       const debited = await this.pricing.debitWallet(
         userId,
         totalToman,
-        1,
+        markup,
         `استوری‌برد ویدیو — ${projectId}`,
         { feature: 'video-studio-storyboard', projectId, sceneCount: createdShots.length },
       );
@@ -572,7 +628,10 @@ export class VideoStudioService {
       AiModelType.VIDEO_GEN,
       project.videoModelId,
     );
-    const durationSec = videoModel.videoGenSupportedDurationsSec[0] ?? 4;
+    const durationSec =
+      project.videoDurationSec ??
+      videoModel.videoGenSupportedDurationsSec[0] ??
+      4;
     const estimate = await this.pricing.calcVideoGenCost(
       videoModel,
       durationSec,
@@ -631,6 +690,12 @@ export class VideoStudioService {
     ) {
       throw new BadRequestException(fa.videoStudio.invalidVideoModel);
     }
+    if (
+      dto.videoDurationSec != null &&
+      !videoModel.videoGenSupportedDurationsSec.includes(dto.videoDurationSec)
+    ) {
+      throw new BadRequestException(fa.videoStudio.invalidVideoDuration);
+    }
 
     const config = await this.videoStudioConfig.getConfig();
     const project = await this.prisma.studioProject.create({
@@ -639,6 +704,7 @@ export class VideoStudioService {
         initialPrompt: dto.prompt,
         videoModelId: dto.videoModelId,
         videoAspectRatio: dto.videoAspectRatio,
+        videoDurationSec: dto.videoDurationSec ?? null,
       },
     });
     const shot = await this.prisma.studioShot.create({

@@ -62,6 +62,21 @@ export class VideoStudioController {
     return this.videoStudio.listMyProjects(user.sub);
   }
 
+  // آیکون نوتیف هدر (وب) — لیست شات‌های اخیراً تمام‌شده‌ی کاربر، برای دراپ‌داون + بج شمارنده
+  @Get('notifications')
+  listNotifications(@CurrentUser() user: JwtPayload) {
+    return this.videoStudio.listNotifications(user.sub);
+  }
+
+  // بدنه‌ی خالی/بدون shotId یعنی «همه را دیده‌شده علامت بزن» (باز شدن دراپ‌داون)
+  @Post('notifications/seen')
+  markNotificationsSeen(
+    @CurrentUser() user: JwtPayload,
+    @Body() body: { shotId?: string },
+  ) {
+    return this.videoStudio.markNotificationsSeen(user.sub, body?.shotId);
+  }
+
   @Get('projects/:id')
   getProject(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     return this.videoStudio.getProject(user.sub, id);
