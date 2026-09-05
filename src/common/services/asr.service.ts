@@ -4,6 +4,12 @@ import { AiProviderService } from './ai-provider.service';
 // خطای «در دسترس نبودن» — فقط این نوع خطا باعث می‌شود transcribeWithFallback سراغ مدل بعدی
 // برود (۴۲۹/۵xx/شبکه/timeout). خطای دیگر (مثلاً ۴۰۰ به‌خاطر فایل صوتی خراب) با مدل بعدی هم
 // دوباره رخ می‌دهد، پس باید مستقیم پرت شود، نه fallback — docs/PRD-video-auto-captions.md §۱۷.۴
+//
+// TODO موقت (۱۴۰۵-۰۶-۱۵): چون دو پروژه‌ی متفاوت هر دو فقط با ۴۰۰ دقیقاً روی
+// whisper-large-v3-turbo شکست خوردند (نه محتوای صوتی خاص یک پروژه)، فعلاً پایین‌تر ۴۰۰ هم
+// موقتاً AsrAvailabilityError می‌شود تا زنجیره‌ی fallback امتحان شود و مشخص شود مشکل مختص
+// این مدل/provider (DeepInfra) است یا نه. بعد از جمع‌آوری داده‌ی کافی این رفتار را طبق §۱۷.۴
+// اصلی (۴۰۰ = پرتاب مستقیم، بدون fallback) برگردان.
 export class AsrAvailabilityError extends Error {}
 
 export interface AsrWord {
@@ -123,7 +129,9 @@ export class AsrService {
 
     if (!res.ok) {
       const detail = `status=${res.status} audioBytes=${audioBuffer.length} requestId=${requestId ?? 'n/a'}: ${text.slice(0, 300)}`;
-      if (res.status === 429 || res.status >= 500) {
+      // TODO موقت (۱۴۰۵-۰۶-۱۵، بالای فایل): ۴۰۰ فعلاً هم fallback می‌کند تا مشخص شود مشکل
+      // مختص whisper-large-v3-turbo/DeepInfra است یا نه — طبق §۱۷.۴ اصلی باید حذف شود.
+      if (res.status === 429 || res.status >= 500 || res.status === 400) {
         throw new AsrAvailabilityError(`ASR ${model} unavailable (${detail})`);
       }
       throw new Error(`ASR ${model} request failed (${detail})`);
