@@ -1,12 +1,13 @@
 FROM node:22-alpine
 
 # کرومیوم سیستمی برای Puppeteer (تولید PDF فاکتور) — روی آلپاین باینری خودِ
-# Puppeteer اجرا نمی‌شود، پس دانلودش را غیرفعال و به‌جایش از این استفاده می‌کنیم
-# font-noto-naskh-arabic: تنها راه تضمینی که libass (فیلتر ass= سوزاندن زیرنویس، بخش ۵.۱)
-# واقعاً بتواند متن فارسی رسم کند — بدون این پکیج، fc-list کاملاً خالی است (تست شد روی
-# node:22-alpine واقعی، ۱۴۰۵-۰۶-۱۴) و رندر یا با تافوباکس/گلیف گم‌شده خراب می‌شود یا اصلاً
-# fallback معتبری ندارد. docs/PRD-video-auto-captions.md §۱۶/۱۷.۵.
-RUN apk add --no-cache chromium ffmpeg fontconfig font-noto-naskh-arabic
+# Puppeteer اجرا نمی‌شود، پس دانلودش را غیرفعال و به‌جایش از این استفاده می‌کنیم.
+# «Noto Naskh Arabic» دیگر از apk نصب نمی‌شود — همان نسخه‌ی رسمی Google Fonts که در
+# assets/fonts/ باندل شده (پایین‌تر) استفاده می‌شود. پکیج apk (font-noto-naskh-arabic) برای
+# libass/فونت‌کانفیگ (رندر) درست کار می‌کرد، ولی فایل TTF داخلش با text-shaping.ts (اندازه‌گیری
+# دقیق پیکسلی کلمات با harfbuzzjs، برای موقعیت‌دهی هایلایت کلمه‌به‌کلمه — بخش RTL) ناسازگار
+# بود؛ نسخه‌ی رسمی هم برای رندر هم برای اندازه‌گیری کار می‌کند، پس یک فایل واحد جای دو منبع را می‌گیرد.
+RUN apk add --no-cache chromium ffmpeg fontconfig
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 
@@ -17,10 +18,11 @@ RUN npm install
 
 COPY . .
 
-# فونت‌های برند (Vazirmatn/IRANYekanMsn، از قبل در assets/fonts/ برای Puppeteer PDF فاکتور
-# باندل بودند) را به مسیر فونت‌های سیستمی هم نصب می‌کنیم تا libass/fontconfig هم بشناسدشان —
-# قبل این تغییر فقط Noto Naskh Arabic برای رندر نهایی زیرنویس در دسترس بود
-# (ass-subtitle-builder.ts، بخش استایل‌ها/فونت‌ها)
+# فونت‌های برند (Vazirmatn/IRANYekanMsn) + Noto Naskh Arabic (نسخه‌ی رسمی، نه apk — بالا) را
+# به مسیر فونت‌های سیستمی نصب می‌کنیم تا هم libass/fontconfig (رندر نهایی) هم text-shaping.ts
+# (اندازه‌گیری pixel-perfect عرض کلمات، از همین فایل‌ها در assets/fonts/ می‌خواند) دقیقاً همین
+# فایل‌ها را ببینند — عدم‌تطابق بین این دو منبع باعث می‌شد جایگاه هایلایت کلمه چند پیکسل جابه‌جا
+# باشد (ass-subtitle-builder.ts).
 RUN mkdir -p /usr/share/fonts/nivo && cp assets/fonts/*.ttf /usr/share/fonts/nivo/ && fc-cache -f
 
 RUN npx prisma generate

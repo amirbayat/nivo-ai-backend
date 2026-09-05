@@ -116,7 +116,7 @@ export class CaptionRenderProcessor {
         buildDefaultSegments(
           (project.transcriptWords as unknown as { word: string; start: number; end: number }[] | null) ?? [],
         );
-      const assContent = buildAssSubtitle(
+      const assContent = await buildAssSubtitle(
         segments,
         project.styleOverrides as unknown as CaptionStyleOverrides | null,
         outputWidth,

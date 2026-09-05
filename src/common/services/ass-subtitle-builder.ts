@@ -1,7 +1,10 @@
 // docs/PRD-video-auto-captions.md §۵.۱/§۸.۱ — تبدیل segments (بخش ۶: cueهای ادیت‌شده‌ی
 // کاربر) + styleOverrides به یک فایل .ass قابل‌مصرف توسط ffmpeg (فیلتر ass=، از طریق
-// libass). عمداً یک تابع خالص (بدون وابستگی به NestJS/Prisma) — هم قابل unit-test مستقل،
-// هم چون این فایل صرفاً روی داده‌ی JSON کار می‌کند، نه I/O.
+// libass). عمداً بدون وابستگی به NestJS/Prisma (قابل unit-test مستقل) — ولی دیگر کاملاً
+// «بدون I/O» نیست: برای موقعیت‌دهی پیکسلی هایلایت کلمه‌به‌کلمه (پایین‌تر) از text-shaping.ts
+// استفاده می‌کند که فایل فونت را از دیسک می‌خواند (cache شده، فقط یک‌بار به‌ازای هر فونت).
+
+import { measureLine } from './text-shaping';
 
 export interface CaptionWord {
   word: string;
@@ -33,7 +36,10 @@ export interface CaptionStyleOverrides {
   styleId?: string; // کلید پریست از STYLE_PRESETS
 }
 
-type CoreStyle = Omit<CaptionStyleOverrides, 'positionX' | 'positionY' | 'styleId'>;
+type CoreStyle = Omit<
+  CaptionStyleOverrides,
+  'positionX' | 'positionY' | 'styleId'
+>;
 
 // اگر کاربر هیچ ادیتی نکرده باشد (segments هنوز null است)، همون گروه‌بندی ساده‌ی پیش‌فرض
 // (هر wordsPerLine×linesPerCue کلمه یک cue) از transcriptWords ساخته می‌شود — کاربر نباید
@@ -172,32 +178,31 @@ function escapeAssText(text: string): string {
 
 // جابجایی آزاد با درگ (نه فقط ۳ حالت گسسته) — وقتی positionX/Y ست نشده، از position قدیمی
 // (بالا/وسط/پایین) به‌عنوان fallback پروژه‌های قدیمی استفاده می‌شود
-function resolvePositionRatio(style: CaptionStyleOverrides): { x: number; y: number } {
+function resolvePositionRatio(style: CaptionStyleOverrides): {
+  x: number;
+  y: number;
+} {
   const clamp = (v: number) => Math.min(0.94, Math.max(0.06, v));
-  if (typeof style.positionX === 'number' && typeof style.positionY === 'number') {
+  if (
+    typeof style.positionX === 'number' &&
+    typeof style.positionY === 'number'
+  ) {
     return { x: clamp(style.positionX), y: clamp(style.positionY) };
   }
-  const y = style.position === 'top' ? 0.12 : style.position === 'center' ? 0.5 : 0.88;
+  const y =
+    style.position === 'top' ? 0.12 : style.position === 'center' ? 0.5 : 0.88;
   return { x: 0.5, y };
 }
 
-// کلمات را با فاصله‌ی معمولی می‌چسباند، ولی هر wordsPerLine-امین مرز را با \N (شکست خط ASS)
-// جدا می‌کند — همین یک مکانیزم هم «چند کلمه در هر خط» هم «چند خط هم‌زمان» را پیاده می‌کند
-function joinWordsForDisplay(parts: string[], wordsPerLine: number): string {
-  return parts.reduce((acc, cur, idx) => {
-    if (idx === 0) return cur;
-    const sep = idx % wordsPerLine === 0 ? '\\N' : ' ';
-    return `${acc}${sep}${cur}`;
-  }, '');
-}
-
-export function buildAssSubtitle(
+export async function buildAssSubtitle(
   segments: CaptionSegment[],
   styleOverrides: CaptionStyleOverrides | null | undefined,
   videoWidth: number,
   videoHeight: number,
-): string {
-  const preset = STYLE_PRESETS[styleOverrides?.styleId ?? 'default'] ?? STYLE_PRESETS.default;
+): Promise<string> {
+  const preset =
+    STYLE_PRESETS[styleOverrides?.styleId ?? 'default'] ??
+    STYLE_PRESETS.default;
   const style: Required<CoreStyle> = {
     ...DEFAULT_STYLE,
     fontFamily: preset.fontFamily,
@@ -206,10 +211,14 @@ export function buildAssSubtitle(
     backgroundMode: preset.backgroundMode ?? DEFAULT_STYLE.backgroundMode,
     ...(styleOverrides ?? {}),
   };
-  const fontFamily = ALLOWED_FONTS.has(style.fontFamily) ? style.fontFamily : DEFAULT_STYLE.fontFamily;
+  const fontFamily = ALLOWED_FONTS.has(style.fontFamily)
+    ? style.fontFamily
+    : DEFAULT_STYLE.fontFamily;
   const wordsPerLine = style.wordsPerLine > 0 ? style.wordsPerLine : 4;
 
-  const { x: posXRatio, y: posYRatio } = resolvePositionRatio(styleOverrides ?? {});
+  const { x: posXRatio, y: posYRatio } = resolvePositionRatio(
+    styleOverrides ?? {},
+  );
   const posX = Math.round(posXRatio * videoWidth);
   const posY = Math.round(posYRatio * videoHeight);
 
@@ -223,6 +232,12 @@ export function buildAssSubtitle(
   const backAlpha = style.backgroundMode === 'solid' ? '00' : '60'; // 00=توپر کامل، 60≈%62 شفافیت
   const backColour = hexToAssColor(preset.boxColorHex, backAlpha);
 
+  // استایل «Highlight» عمداً BorderStyle=1 (بدون جعبه) دارد، حتی وقتی preset اصلی
+  // backgroundMode='solid'/'translucent' باشد — چون لایه‌ی هایلایت یک Dialogue جدا برای
+  // همان یک کلمه است (پایین‌تر)؛ اگر BorderStyle آن هم ۳ می‌بود، یک جعبه‌ی کوچک اضافه دقیقاً
+  // زیر همان کلمه رسم می‌شد، روی جعبه‌ی کاملِ خط که لایه‌ی پایه از قبل کشیده — یعنی یک
+  // نواردوتایی/ضخیم‌تر فقط زیر کلمه‌ی هایلایت. BackColour آن هم بی‌اهمیت است (چون
+  // BorderStyle=1 اصلاً جعبه رسم نمی‌کند) ولی برای وضوح alpha=FF (کاملاً شفاف) گذاشته شده.
   const header = `[Script Info]
 ScriptType: v4.00+
 PlayResX: ${videoWidth}
@@ -233,12 +248,19 @@ ScaledBorderAndShadow: yes
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Default,${fontFamily},${style.fontSizePx},${primaryColour},&H000000FF,${outlineColour},${backColour},${boldFlagFor(fontFamily)},0,0,0,100,100,0,0,${borderStyle},${preset.outlineWidth},1,5,20,20,40,1
+Style: Highlight,${fontFamily},${style.fontSizePx},${highlightColour},&H000000FF,${outlineColour},&HFF000000,${boldFlagFor(fontFamily)},0,0,0,100,100,0,0,1,${preset.outlineWidth},1,5,20,20,40,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`;
 
   const posTag = `{\\an5\\pos(${posX},${posY})}`;
   const dialogueLines: string[] = [];
+  const bold = boldFlagFor(fontFamily) !== 0;
+  // طبق تست عملی (رندر واقعی + اندازه‌گیری پیکسلی)، «فاصله‌ی عمودی بین دو خط» تقریباً برابر
+  // خودِ Fontsize است (چون Fontsize از قبل طوری کالیبره شده که با ascender-descender فونت
+  // برابر باشد — همان توضیح text-shaping.ts) — این فرمول فقط برای حالت تک‌خط (پیش‌فرض،
+  // linesPerCue=1) واقعاً تست‌شده؛ برای cueهای چندخطی یک تقریب معقول است، نه پیکسل-دقیق.
+  const lineHeightPx = style.fontSizePx;
 
   for (const segment of segments) {
     const words = segment.words ?? [];
@@ -249,22 +271,66 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
       continue;
     }
 
-    // هر کلمه یک Dialogue جدا می‌شود که از پایان کلمه‌ی قبلی تا شروع کلمه‌ی بعدی طول می‌کشد
-    // (نه دقیقاً بازه‌ی خودش) — این‌طور کل خط پیوسته روی صفحه می‌ماند و فقط هایلایت جابه‌جا
-    // می‌شود، بدون سوسوزدن بین کلمات (بخش ۵.۲/۸.۱)
+    // خط پایه: یک Dialogue واحد برای کل بازه‌ی segment، شامل همه‌ی کلمات با رنگ عادی —
+    // عمداً بدون هیچ override tag میان‌متنی (تک-run) چون تست عملی نشان داد libass با هر
+    // تگی که وسط متن یک خط را بشکند، ترتیب کلمات RTL را به‌هم می‌ریزد (اجزای قبل/بعد تگ را
+    // به‌شکل معکوس داخل خودشان رندر می‌کند). هایلایت کلمه‌به‌کلمه به‌جای تگ رنگ وسط متن، با
+    // یک Dialogue کاملاً جدا (پایین‌تر) پیاده می‌شود که همان یک کلمه را با \pos محاسبه‌شده
+    // دقیقاً روی جای خودش می‌کارد.
+    const escapedWords = words.map((w) => escapeAssText(w.word));
+    const lines: string[][] = [];
+    for (let i = 0; i < escapedWords.length; i += wordsPerLine) {
+      lines.push(escapedWords.slice(i, i + wordsPerLine));
+    }
+    const baseText = lines.map((line) => line.join(' ')).join('\\N');
+    dialogueLines.push(
+      `Dialogue: 0,${msToAssTime(segment.startMs)},${msToAssTime(segment.endMs)},Default,,0,0,0,,${posTag}${baseText}`,
+    );
+
+    // هایلایت: هر کلمه یک Dialogue جدا می‌شود که از پایان کلمه‌ی قبلی تا شروع کلمه‌ی بعدی
+    // طول می‌کشد (نه دقیقاً بازه‌ی خودش) — این‌طور بدون سوسوزدن بین کلمات هایلایت جابه‌جا
+    // می‌شود (بخش ۵.۲/۸.۱)
+    const lineMeasurements = new Map<
+      number,
+      Awaited<ReturnType<typeof measureLine>>
+    >();
     for (let i = 0; i < words.length; i++) {
-      const startMs = i === 0 ? segment.startMs : Math.round(words[i].start * 1000);
-      const endMs = i === words.length - 1 ? segment.endMs : Math.round(words[i + 1].start * 1000);
+      const startMs =
+        i === 0 ? segment.startMs : Math.round(words[i].start * 1000);
+      const endMs =
+        i === words.length - 1
+          ? segment.endMs
+          : Math.round(words[i + 1].start * 1000);
       if (endMs <= startMs) continue;
 
-      const parts = words.map((w, idx) => {
-        const safe = escapeAssText(w.word);
-        return idx === i ? `{\\c${highlightColour}}${safe}{\\c${primaryColour}}` : safe;
-      });
-      const text = `${posTag}${joinWordsForDisplay(parts, wordsPerLine)}`;
+      const lineIdx = Math.floor(i / wordsPerLine);
+      const idxInLine = i % wordsPerLine;
+      let measurement = lineMeasurements.get(lineIdx);
+      if (!measurement) {
+        measurement = await measureLine(
+          lines[lineIdx],
+          fontFamily,
+          bold,
+          style.fontSizePx,
+        );
+        lineMeasurements.set(lineIdx, measurement);
+      }
 
+      // RTL: کلمه‌ی اول رشته سمت راست‌ترین است — پس فاصله از لبه‌ی راست خط تا لبه‌ی راست
+      // این کلمه = prefixWidth، و مرکز کلمه از لبه‌ی راست خط = prefixWidth + نصف عرض خودش
+      const lineRightEdgeX = posX + measurement.totalWidthPx / 2;
+      const wordCenterFromRightEdge =
+        measurement.prefixWidthsPx[idxInLine] +
+        measurement.wordWidthsPx[idxInLine] / 2;
+      const overlayX = Math.round(lineRightEdgeX - wordCenterFromRightEdge);
+      const numLines = lines.length;
+      const overlayY = Math.round(
+        posY + (lineIdx - (numLines - 1) / 2) * lineHeightPx,
+      );
+
+      const overlayTag = `{\\an5\\pos(${overlayX},${overlayY})}`;
       dialogueLines.push(
-        `Dialogue: 0,${msToAssTime(startMs)},${msToAssTime(endMs)},Default,,0,0,0,,${text}`,
+        `Dialogue: 1,${msToAssTime(startMs)},${msToAssTime(endMs)},Highlight,,0,0,0,,${overlayTag}${escapedWords[i]}`,
       );
     }
   }

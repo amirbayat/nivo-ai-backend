@@ -181,7 +181,7 @@ export class CaptionStudioService {
     if (format === 'srt') return { content: buildSrt(segments), mime: 'application/x-subrip', ext: 'srt' };
     if (format === 'vtt') return { content: buildVtt(segments), mime: 'text/vtt', ext: 'vtt' };
     return {
-      content: buildAssSubtitle(
+      content: await buildAssSubtitle(
         segments,
         project.styleOverrides as unknown as CaptionStyleOverrides | null,
         DEFAULT_EXPORT_WIDTH,

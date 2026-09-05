@@ -4091,6 +4091,11 @@ handlebars@^4.7.9:
   optionalDependencies:
     uglify-js "^3.1.4"
 
+harfbuzzjs@1.6.1:
+  version "1.6.1"
+  resolved "https://registry.npmjs.org/harfbuzzjs/-/harfbuzzjs-1.6.1.tgz"
+  integrity sha512-+JeJmO+HzXjDwpfCOdGSyM2bNP8WzJNFKl/8TKivbInMYDtfRIuPIDLtnBNmQzcJw6GptbhHY6o5gaH6deCMEw==
+
 has-flag@^4.0.0:
   version "4.0.0"
   resolved "https://registry.npmjs.org/has-flag/-/has-flag-4.0.0.tgz"
