@@ -97,11 +97,14 @@ export class AsrService {
     const url = `${this.aiProvider.baseURL}/audio/transcriptions`;
 
     // لاگ تشخیصی: چون بدنه‌ی خطای OpenRouter برای ۴۰۰های forward-شده از provider معمولاً
-    // فقط پیام عمومی "Provider returned 400" است (بدون جزئیات واقعی)، حداقل مشخصات خودِ
-    // درخواست (حجم صدا/زبان) را این‌جا لاگ می‌کنیم تا بعداً بشود حدس زد آیا مشکل مختص یک
-    // فایل خاص (مثلاً صدای خیلی کوتاه/بی‌صدا) بوده یا نه
+    // فقط پیام عمومی "Provider returned 400" است (بدون جزئیات واقعی)، دقیقاً چه چیزی/چطور
+    // ارسال می‌شود را کامل لاگ می‌کنیم (بدون خودِ base64 صدا، آن خیلی حجیم است) تا بعداً
+    // بشود حدس زد آیا مشکل مختص یک فایل خاص، فرمت request، یا مسیر relay بوده یا نه
     this.logger.log(
-      `ASR ${model} request: audioBytes=${audioBuffer.length} language=${language}`,
+      `ASR ${model} request → POST ${url} | via=${this.aiProvider.fetch ? 'proxy-fetch(undici+dispatcher)' : 'global-fetch'} | ` +
+        `body: model=${model} language=${language} response_format=verbose_json timestamp_granularities=[word] ` +
+        `input_audio.format=mp3 audioBytes=${audioBuffer.length} (base64Len=${body.input_audio.data.length}) | ` +
+        `extraHeaders=${JSON.stringify(Object.keys(this.aiProvider.extraHeaders ?? {}))}`,
     );
 
     let res: Response;

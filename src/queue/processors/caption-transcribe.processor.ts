@@ -45,13 +45,46 @@ export class CaptionTranscribeProcessor {
     });
 
     try {
+      this.logger.log(
+        `caption-transcribe project=${captionProjectId}: دانلود ویدیوی مبدأ از MinIO، key=${project.sourceVideoKey}`,
+      );
       const videoBuffer = await this.storage.downloadImage(project.sourceVideoKey);
       const ext = project.sourceVideoKey.split('.').pop() ?? 'mp4';
+      this.logger.log(
+        `caption-transcribe project=${captionProjectId}: ویدیو دانلود شد، videoBytes=${videoBuffer.length} ext=${ext}`,
+      );
 
       const audioBuffer = await this.mediaTranscode.extractAudio(videoBuffer, ext);
+      this.logger.log(
+        `caption-transcribe project=${captionProjectId}: استخراج صدا با ffmpeg تمام شد، audioBytes=${audioBuffer.length}`,
+      );
+
+      // لاگ تشخیصی موقت: صدای استخراج‌شده را هم در MinIO آپلود می‌کنیم تا در صورت خطای ASR
+      // بشود همین فایل را مستقیم از MinIO دانلود کرد و با گوش‌دادن/ffprobe چک کرد که واقعاً
+      // صحیح extract شده یا نه — خطای آپلود دیباگ نباید کل job را fail کند
+      try {
+        const debugAudioKey = await this.storage.uploadImage(
+          audioBuffer,
+          'mp3',
+          `caption-debug-audio`,
+        );
+        this.logger.log(
+          `caption-transcribe project=${captionProjectId}: صدای استخراج‌شده برای بررسی دستی در MinIO آپلود شد، bucket key=${debugAudioKey}`,
+        );
+      } catch (uploadErr) {
+        this.logger.warn(
+          `caption-transcribe project=${captionProjectId}: آپلود دیباگ صدا در MinIO failed (نادیده گرفته می‌شود): ${(uploadErr as Error).message}`,
+        );
+      }
 
       const apiKey = this.aiProvider.sharedApiKey;
+      this.logger.log(
+        `caption-transcribe project=${captionProjectId}: شروع ASR (زبان=fa) با زنجیره‌ی fallback`,
+      );
       const result = await this.asr.transcribeWithFallback(audioBuffer, apiKey, 'fa');
+      this.logger.log(
+        `caption-transcribe project=${captionProjectId}: ASR موفق شد با مدل=${result.modelUsed} durationSec=${result.durationSec} costUsd=${result.costUsd}`,
+      );
 
       await this.prisma.captionProject.update({
         where: { id: captionProjectId },
