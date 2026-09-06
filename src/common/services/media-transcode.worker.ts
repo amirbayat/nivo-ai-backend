@@ -4,6 +4,11 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { MessagePort } from 'node:worker_threads';
+import { renderCaptionFrames } from './canvas-caption-renderer';
+import type {
+  CaptionSegment,
+  CaptionStyleOverrides,
+} from './caption-style-catalog';
 
 export interface ExtractAudioTask {
   inputBuffer: Buffer;
@@ -18,12 +23,17 @@ export interface TranscodeVideoTask {
 export interface BurnCaptionsTask {
   inputBuffer: Buffer;
   inputExt: string;
-  assContent: string; // متن کامل فایل .ass ساخته‌شده توسط ass-subtitle-builder.ts
-  // اگر ست شده باشد (کوچک‌تر از ابعاد واقعی ورودی)، خروجی قبل از سوزاندن زیرنویس به این
-  // ابعاد اسکیل می‌شود (گزینه‌ی HD/Full HD/4K در caption-render.processor.ts) — هر دو باید
-  // زوج باشند (الزام libx264) و از قبل با PlayResX/Y فایل ASS یکی محاسبه شده باشند
-  targetWidth?: number;
-  targetHeight?: number;
+  segments: CaptionSegment[];
+  styleOverrides: CaptionStyleOverrides | null;
+  // مدت کامل ویدیو (میلی‌ثانیه) — برای پر کردن کل تایم‌لاین رندر کپشن (renderCaptionFrames)
+  // بدون گپ لازم است
+  videoDurationMs: number;
+  // ابعاد دقیق خروجی نهایی — بر خلاف ass=/libass قدیمی (که با PlayResX/Y هر رزولوشنی را
+  // auto-scale می‌کرد)، فریم‌های PNG رندرشده باید از قبل دقیقاً به همین ابعاد باشند تا overlay
+  // با فریم‌های ویدیوی اسکیل‌شده یکی دربیاید — caption-render.processor.ts این را همیشه با
+  // ابعاد واقعی ورودی (وقتی هدف/دانلود رزولوشن پایین‌تر انتخاب نشده) پر می‌کند، هرگز undefined
+  outputWidth: number;
+  outputHeight: number;
   // مدت واقعی ویدیو (ثانیه) — برای محاسبه‌ی درصد پیشرفت از out_time خروجی ffmpeg -progress لازم است
   durationSec?: number;
   // پورت MessageChannel برای ارسال درصد پیشرفت به ترد اصلی (media-transcode.service.ts)؛
@@ -267,39 +277,107 @@ export async function getVideoDuration({
   });
 }
 
-// سوزاندن زیرنویس روی ویدیو با ffmpeg + libass (فیلتر ass=) — بخش ۵.۱: چون خودِ فایل ASS
-// از قبل native از کاراکاپ/رنگ/موقعیت پشتیبانی می‌کند، رندر فریم‌به‌فریم لازم نیست. صدای اصلی
-// دست‌نخورده کپی می‌شود (-c:a copy)، فقط ویدیو دوباره انکود می‌شود (برای اعمال فیلتر زیرنویس).
+// سوزاندن زیرنویس روی ویدیو، دو پاس با canvas-caption-renderer.ts به‌جای ffmpeg+libass —
+// چون زنجیر کردن صدها فیلتر overlay (یکی به‌ازای هر کلمه) در یک filter_complex برای ویدیوهای
+// واقعی (صدها کلمه) مقیاس‌پذیر نیست: پاس A تمام «لایه‌ی کپشن» را یک‌بار به یک ویدیوی آلفای
+// جدا (overlay.mkv، کدک png که rgba را native پشتیبانی می‌کند) تبدیل می‌کند، پاس B (فقط یک
+// overlay) آن را روی ویدیوی اصلی می‌نشاند. صدای اصلی دست‌نخورده کپی می‌شود (-c:a copy).
 export async function burnCaptions({
   inputBuffer,
   inputExt,
-  assContent,
-  targetWidth,
-  targetHeight,
+  segments,
+  styleOverrides,
+  videoDurationMs,
+  outputWidth,
+  outputHeight,
   durationSec,
   progressPort,
 }: BurnCaptionsTask): Promise<Buffer> {
   return withTempDir(async (dir) => {
     const inPath = join(dir, `${randomUUID()}.${inputExt}`);
-    const assPath = join(dir, `${randomUUID()}.ass`);
+    const overlayPath = join(dir, `${randomUUID()}-overlay.mkv`);
     const outPath = join(dir, `${randomUUID()}.mp4`);
     await writeFile(inPath, inputBuffer);
-    await writeFile(assPath, assContent, 'utf8');
-    // اسکیل (اگر رزولوشن پایین‌تری درخواست شده) باید قبل از فیلتر ass= اعمال شود — PlayResX/Y
-    // فایل ASS از قبل با همین targetWidth/targetHeight محاسبه شده (caption-render.processor.ts)
-    const vf =
-      targetWidth && targetHeight
-        ? `scale=${targetWidth}:${targetHeight},ass=${assPath}`
-        : `ass=${assPath}`;
+
+    const onProgress = progressPort
+      ? (percent: number) => progressPort.postMessage(percent)
+      : undefined;
+
+    const frames = await renderCaptionFrames(
+      segments,
+      styleOverrides,
+      outputWidth,
+      outputHeight,
+      videoDurationMs,
+    );
+
+    // فریم‌های شفاف/گپ (بین/قبل/بعد segmentها) همگی همان یک buffer را reference می‌کنند
+    // (renderCaptionFrames از blankFramePng یک instance مشترک برمی‌گرداند) — به‌جای نوشتن
+    // هرکدام به فایل جدا، فقط یک‌بار نوشته و در concat list چندبار reference می‌شود
+    const writtenPathByBuffer = new Map<Buffer, string>();
+    const framePaths = await Promise.all(
+      frames.map(async (frame, i) => {
+        const existing = writtenPathByBuffer.get(frame.png);
+        if (existing) return existing;
+        const framePath = join(dir, `frame-${String(i).padStart(5, '0')}.png`);
+        await writeFile(framePath, frame.png);
+        writtenPathByBuffer.set(frame.png, framePath);
+        return framePath;
+      }),
+    );
+
+    const concatLines: string[] = ['ffconcat version 1.0'];
+    frames.forEach((frame, i) => {
+      concatLines.push(`file '${framePaths[i]}'`);
+      concatLines.push(`duration ${((frame.endMs - frame.startMs) / 1000).toFixed(3)}`);
+    });
+    // ffconcat: duration آخرین فایل فقط با تکرار همان فایل بدون duration اعمال می‌شود
+    if (framePaths.length > 0) {
+      concatLines.push(`file '${framePaths[framePaths.length - 1]}'`);
+    }
+    const framesListPath = join(dir, 'frames.txt');
+    await writeFile(framesListPath, concatLines.join('\n'), 'utf8');
+
+    onProgress?.(0);
+    await runFfmpeg([
+      '-y',
+      '-f',
+      'concat',
+      '-safe',
+      '0',
+      '-i',
+      framesListPath,
+      '-fps_mode',
+      'vfr',
+      '-pix_fmt',
+      'rgba',
+      '-c:v',
+      'png',
+      overlayPath,
+    ]);
+    onProgress?.(15);
+
+    // ویدیوی مبدأ همیشه به همان ابعادی اسکیل می‌شود که overlay.mkv با آن رندر شده — چون
+    // overlay یک لایه‌ی raster پیکسلی است (نه ASS/libass که با PlayResX/Y هر ابعادی را
+    // auto-scale می‌کرد)، اگر ابعاد فریم پایه با ابعاد overlay یکی نباشد، ffmpeg با خطای
+    // «different frame sizes» متوقف می‌شود.
+    const filterComplex = `[0:v]scale=${outputWidth}:${outputHeight}[base];[base][1:v]overlay=0:0[v]`;
+
     await runFfmpegWithProgress(
       [
         '-y',
         '-i',
         inPath,
+        '-i',
+        overlayPath,
         '-progress',
         'pipe:1',
-        '-vf',
-        vf,
+        '-filter_complex',
+        filterComplex,
+        '-map',
+        '[v]',
+        '-map',
+        '0:a?',
         '-c:v',
         'libx264',
         '-preset',
@@ -313,7 +391,7 @@ export async function burnCaptions({
         outPath,
       ],
       durationSec,
-      progressPort ? (percent) => progressPort.postMessage(percent) : undefined,
+      onProgress ? (percent) => onProgress(15 + Math.round(percent * 0.85)) : undefined,
     );
     return readFile(outPath);
   });

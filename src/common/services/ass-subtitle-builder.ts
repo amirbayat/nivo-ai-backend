@@ -5,150 +5,24 @@
 // استفاده می‌کند که فایل فونت را از دیسک می‌خواند (cache شده، فقط یک‌بار به‌ازای هر فونت).
 
 import { measureLine } from './text-shaping';
+import {
+  ALLOWED_FONTS,
+  DEFAULT_STYLE,
+  STYLE_PRESETS,
+  boldFlagFor,
+  computeWordHighlightIntervals,
+  resolvePositionRatio,
+  type CaptionSegment,
+  type CaptionStyleOverrides,
+  type CoreStyle,
+} from './caption-style-catalog';
 
-export interface CaptionWord {
-  word: string;
-  start: number; // ثانیه، مطلق روی ویدیو
-  end: number;
-}
-
-export interface CaptionSegment {
-  id: string;
-  startMs: number;
-  endMs: number;
-  text: string;
-  words: CaptionWord[];
-}
-
-export interface CaptionStyleOverrides {
-  fontFamily?: string;
-  textColor?: string; // "#RRGGBB"
-  highlightColor?: string; // "#RRGGBB"
-  backgroundMode?: 'none' | 'translucent' | 'solid';
-  fontSizePx?: number;
-  position?: 'top' | 'center' | 'bottom';
-  // مختصات آزاد (بخش جابجایی با درگ) — وقتی هر دو ست شده باشند، اولویت با این‌هاست، نه
-  // position گسسته‌ی بالا (که فقط fallback پروژه‌های قدیمی است)
-  positionX?: number; // نسبت ۰ تا ۱ از عرض ویدیو
-  positionY?: number; // نسبت ۰ تا ۱ از ارتفاع ویدیو
-  wordsPerLine?: number; // چند کلمه در هر خط نمایشی
-  linesPerCue?: number; // ۱ یا ۲ — چند خط هم‌زمان روی صفحه
-  styleId?: string; // کلید پریست از STYLE_PRESETS
-}
-
-type CoreStyle = Omit<
+export type {
+  CaptionWord,
+  CaptionSegment,
   CaptionStyleOverrides,
-  'positionX' | 'positionY' | 'styleId'
->;
-
-// اگر کاربر هیچ ادیتی نکرده باشد (segments هنوز null است)، همون گروه‌بندی ساده‌ی پیش‌فرض
-// (هر wordsPerLine×linesPerCue کلمه یک cue) از transcriptWords ساخته می‌شود — کاربر نباید
-// مجبور باشد قبل از اولین رندر/export حتماً دستی ادیت کند (docs/PRD-video-auto-captions.md
-// §۳/§۵.۲). هم caption-render و هم export فایل خام (بخش ۸.۲) از همین تابع استفاده می‌کنند.
-export function buildDefaultSegments(
-  words: CaptionWord[],
-  wordsPerLine = 4,
-  linesPerCue = 1,
-): CaptionSegment[] {
-  const perCue = Math.max(1, wordsPerLine) * Math.max(1, linesPerCue);
-  const segments: CaptionSegment[] = [];
-  for (let i = 0; i < words.length; i += perCue) {
-    const group = words.slice(i, i + perCue);
-    if (group.length === 0) continue;
-    segments.push({
-      id: `seg-${i}`,
-      startMs: Math.round(group[0].start * 1000),
-      endMs: Math.round(group[group.length - 1].end * 1000),
-      text: group.map((w) => w.word.trim()).join(' '),
-      words: group,
-    });
-  }
-  return segments;
-}
-
-const DEFAULT_STYLE: Required<CoreStyle> = {
-  fontFamily: 'Noto Naskh Arabic',
-  textColor: '#FFFFFF',
-  highlightColor: '#10B981', // برند امرالد nivo — همون رنگی که در پیش‌نمایش فرانت استفاده می‌شود
-  backgroundMode: 'translucent',
-  fontSizePx: 42,
-  position: 'bottom',
-  wordsPerLine: 4,
-  linesPerCue: 1,
-};
-
-// ۴ پریست واقع‌بینانه با محدودیت‌های ASS/libass (بدون گوشه‌ی گرد یا glow واقعی — فقط
-// رنگ/وزن فونت/outline/باکس). «ایران‌یکان» با وزن‌های Bold/ExtraBold از
-// nivo-ai-frontend/src/assets/fonts/IRANYekanMsn داخل ایمیج داکر باندل شده (Dockerfile).
-interface StylePresetDefaults {
-  fontFamily: string;
-  textColor: string;
-  highlightColor: string;
-  backgroundMode: CaptionStyleOverrides['backgroundMode'];
-  outlineWidth: number;
-  outlineColorHex: string;
-  boxColorHex: string;
-}
-
-const STYLE_PRESETS: Record<string, StylePresetDefaults> = {
-  default: {
-    fontFamily: 'Noto Naskh Arabic',
-    textColor: '#FFFFFF',
-    highlightColor: '#10B981',
-    backgroundMode: 'translucent',
-    outlineWidth: 2,
-    outlineColorHex: '#000000',
-    boxColorHex: '#000000',
-  },
-  boldOutline: {
-    fontFamily: 'IRANYekanMsn ExtraBold',
-    textColor: '#FFFFFF',
-    highlightColor: '#FBBF24',
-    backgroundMode: 'none',
-    outlineWidth: 5,
-    outlineColorHex: '#000000',
-    boxColorHex: '#000000',
-  },
-  neon: {
-    fontFamily: 'Vazirmatn',
-    textColor: '#22D3EE',
-    highlightColor: '#F472B6',
-    backgroundMode: 'none',
-    outlineWidth: 3,
-    outlineColorHex: '#7C3AED',
-    boxColorHex: '#000000',
-  },
-  speakerBox: {
-    fontFamily: 'IRANYekanMsn',
-    textColor: '#FFFFFF',
-    highlightColor: '#FBBF24',
-    backgroundMode: 'solid',
-    outlineWidth: 1,
-    outlineColorHex: '#000000',
-    boxColorHex: '#1E1B4B',
-  },
-};
-
-// فونت‌هایی که واقعاً روی ایمیج داکر نصب‌اند (Dockerfile/Dockerfile.prod، assets/fonts/*.ttf
-// نصب‌شده در fontconfig) — اگر fontFamily ورودی (کاربر یا پریست) در این لیست نباشد، silently
-// به پیش‌فرض برمی‌گردیم؛ وگرنه fontconfig یک فونت جایگزین غیرقابل‌پیش‌بینی انتخاب می‌کند
-// بدون هیچ خطایی. «IRANYekanMsn ExtraBold» یک نام خانواده‌ی مجزاست (فایل فونت این‌طور
-// name-table دارد)؛ برای Bold از همون خانواده‌ی IRANYekanMsn/Vazirmatn با فلگ Bold استفاده
-// می‌شود (نه یک نام خانواده‌ی جدا) — به همین خاطر هیچ «X Bold» دیگری در این لیست نیست.
-const ALLOWED_FONTS = new Set([
-  'Noto Naskh Arabic',
-  'IRANYekanMsn',
-  'IRANYekanMsn ExtraBold',
-  'Vazirmatn',
-  'Tahoma',
-]);
-
-// خانواده‌ی «IRANYekanMsn ExtraBold» خودش از قبل سنگین‌ترین وزن است — فلگ Bold روی آن اضافه
-// نمی‌شود (وگرنه libass با bold مصنوعی رویش، بیش‌ازحد سنگین می‌شود)؛ بقیه‌ی خانواده‌ها (که هم
-// وزن Regular هم Bold دارند) با فلگ Bold=-1 وزن Bold واقعی‌شان انتخاب می‌شود.
-function boldFlagFor(fontFamily: string): number {
-  return fontFamily === 'IRANYekanMsn ExtraBold' ? 0 : -1;
-}
+} from './caption-style-catalog';
+export { buildDefaultSegments } from './caption-style-catalog';
 
 function hexToAssColor(hex: string, alphaHex = '00'): string {
   const clean = hex.replace('#', '').padEnd(6, '0');
@@ -174,24 +48,6 @@ function msToAssTime(ms: number): string {
 // پاک‌سازی شود، وگرنه یک متن دست‌کاری‌شده می‌تواند در رندر تگ تزریق کند
 function escapeAssText(text: string): string {
   return text.replace(/\\/g, '').replace(/[{}]/g, '').replace(/\r?\n/g, ' ');
-}
-
-// جابجایی آزاد با درگ (نه فقط ۳ حالت گسسته) — وقتی positionX/Y ست نشده، از position قدیمی
-// (بالا/وسط/پایین) به‌عنوان fallback پروژه‌های قدیمی استفاده می‌شود
-function resolvePositionRatio(style: CaptionStyleOverrides): {
-  x: number;
-  y: number;
-} {
-  const clamp = (v: number) => Math.min(0.94, Math.max(0.06, v));
-  if (
-    typeof style.positionX === 'number' &&
-    typeof style.positionY === 'number'
-  ) {
-    return { x: clamp(style.positionX), y: clamp(style.positionY) };
-  }
-  const y =
-    style.position === 'top' ? 0.12 : style.position === 'center' ? 0.5 : 0.88;
-  return { x: 0.5, y };
 }
 
 export async function buildAssSubtitle(
@@ -294,15 +150,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
       number,
       Awaited<ReturnType<typeof measureLine>>
     >();
-    for (let i = 0; i < words.length; i++) {
-      const startMs =
-        i === 0 ? segment.startMs : Math.round(words[i].start * 1000);
-      const endMs =
-        i === words.length - 1
-          ? segment.endMs
-          : Math.round(words[i + 1].start * 1000);
-      if (endMs <= startMs) continue;
-
+    for (const { wordIndex: i, startMs, endMs } of computeWordHighlightIntervals(
+      segment,
+    )) {
       const lineIdx = Math.floor(i / wordsPerLine);
       const idxInLine = i % wordsPerLine;
       let measurement = lineMeasurements.get(lineIdx);

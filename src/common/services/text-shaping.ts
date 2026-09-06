@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type * as HB from 'harfbuzzjs';
+import { FONT_FILES, FONTS_DIR } from './caption-style-catalog';
 
 // harfbuzzjs یک پکیج ESM-only است (بدون خروجی CommonJS) در حالی‌که خروجی کامپایل این پروژه
 // CJS است (tsconfig: module=nodenext ولی package.json ریشه بدون "type":"module") — یعنی
@@ -26,39 +27,6 @@ function loadHarfbuzz(): Promise<typeof HB> {
 // محاسبه)، libass طوری مقیاس می‌کند که (ascender - descender) فونت برابر Fontsize شود، نه
 // unitsPerEm. ضریب scale پایین دقیقاً همین رابطه را پیاده می‌کند؛ بدون آن هر عدد تقریباً ۱.۷
 // برابر مقدار واقعی درمی‌آمد.
-
-interface FontFiles {
-  regular: string;
-  bold: string;
-}
-
-// باید دقیقاً همان فایل‌هایی باشد که Dockerfile/Dockerfile.prod در assets/fonts/ نصب می‌کنند
-// (و از همان‌جا هم به /usr/share/fonts/nivo/ کپی می‌شود) — تا فونت رندر (libass) و فونت
-// اندازه‌گیری (این فایل) دقیقاً یکی باشند، وگرنه هایلایت چند پیکسل جابه‌جا می‌شود.
-const FONT_FILES: Record<string, FontFiles> = {
-  'Noto Naskh Arabic': {
-    regular: 'NotoNaskhArabic-Regular.ttf',
-    bold: 'NotoNaskhArabic-Bold.ttf',
-  },
-  Vazirmatn: { regular: 'Vazirmatn-Regular.ttf', bold: 'Vazirmatn-Bold.ttf' },
-  IRANYekanMsn: {
-    regular: 'IRANYekanRegularMsn.ttf',
-    bold: 'IRANYekanBoldMsn.ttf',
-  },
-  'IRANYekanMsn ExtraBold': {
-    regular: 'IRANYekanExtraBoldMsn.ttf',
-    bold: 'IRANYekanExtraBoldMsn.ttf',
-  },
-  // فایل Tahoma باندل نشده (هیچ‌کدام از STYLE_PRESETS ازش استفاده نمی‌کنند، فقط برای
-  // styleOverrides دلخواه‌ی قدیمی در ALLOWED_FONTS مانده) — تقریب با Noto Naskh Arabic
-  // بهتر از کرش کردن است.
-  Tahoma: {
-    regular: 'NotoNaskhArabic-Regular.ttf',
-    bold: 'NotoNaskhArabic-Bold.ttf',
-  },
-};
-
-const FONTS_DIR = join(process.cwd(), 'assets', 'fonts');
 
 interface LoadedFont {
   font: HB.Font;

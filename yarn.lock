@@ -1150,6 +1150,28 @@
   resolved "https://registry.npmjs.org/@msgpackr-extract/msgpackr-extract-darwin-arm64/-/msgpackr-extract-darwin-arm64-3.0.4.tgz"
   integrity sha512-LCkGo6JDfaBhgST7UpPWgNgLINpcpabaHfyz5OBx75nUYxBsaEPxjnyNjWpeb/xBup/682QnBfRBy2/LvPutZQ==
 
+"@napi-rs/canvas-darwin-arm64@1.0.8":
+  version "1.0.8"
+  resolved "https://registry.npmjs.org/@napi-rs/canvas-darwin-arm64/-/canvas-darwin-arm64-1.0.8.tgz"
+  integrity sha512-7jQ47gi+fZ7KJmfc/5rNyy1CYw/cu4kZ0KPIYbo9UUgSdW0bKQJpt+WihEor6s4Lyp7+xc3a+3HeyXmAEbbnPg==
+
+"@napi-rs/canvas@^1.0.8":
+  version "1.0.8"
+  resolved "https://registry.npmjs.org/@napi-rs/canvas/-/canvas-1.0.8.tgz"
+  integrity sha512-/SaLcvlqGWdm0HSCWMgHu7cjJiQXfP8/mOY+6dUyV9flQz7sPBBZ+ed2zYtoukojPmxOaL7bm+d/G4GeWWoN7g==
+  optionalDependencies:
+    "@napi-rs/canvas-android-arm64" "1.0.8"
+    "@napi-rs/canvas-darwin-arm64" "1.0.8"
+    "@napi-rs/canvas-darwin-x64" "1.0.8"
+    "@napi-rs/canvas-linux-arm-gnueabihf" "1.0.8"
+    "@napi-rs/canvas-linux-arm64-gnu" "1.0.8"
+    "@napi-rs/canvas-linux-arm64-musl" "1.0.8"
+    "@napi-rs/canvas-linux-riscv64-gnu" "1.0.8"
+    "@napi-rs/canvas-linux-x64-gnu" "1.0.8"
+    "@napi-rs/canvas-linux-x64-musl" "1.0.8"
+    "@napi-rs/canvas-win32-arm64-msvc" "1.0.8"
+    "@napi-rs/canvas-win32-x64-msvc" "1.0.8"
+
 "@napi-rs/nice-darwin-arm64@1.1.1":
   version "1.1.1"
   resolved "https://registry.npmjs.org/@napi-rs/nice-darwin-arm64/-/nice-darwin-arm64-1.1.1.tgz"

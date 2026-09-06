@@ -6,11 +6,10 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
 import { MediaTranscodeService } from '../../common/services/media-transcode.service';
 import {
-  buildAssSubtitle,
   buildDefaultSegments,
   type CaptionSegment,
   type CaptionStyleOverrides,
-} from '../../common/services/ass-subtitle-builder';
+} from '../../common/services/caption-style-catalog';
 import { PricingService } from '../../modules/usage/pricing.service';
 import { CaptionPricingService } from '../../modules/usage/caption-pricing.service';
 import { CreditsService } from '../../modules/credits/credits.service';
@@ -116,27 +115,28 @@ export class CaptionRenderProcessor {
         buildDefaultSegments(
           (project.transcriptWords as unknown as { word: string; start: number; end: number }[] | null) ?? [],
         );
-      const assContent = await buildAssSubtitle(
-        segments,
-        project.styleOverrides as unknown as CaptionStyleOverrides | null,
-        outputWidth,
-        outputHeight,
-      );
+      const styleOverrides = project.styleOverrides as unknown as CaptionStyleOverrides | null;
       this.logger.log(
-        `caption-render project=${captionProjectId}: فایل ASS ساخته شد (${segments.length} segment، خروجی ${outputWidth}x${outputHeight})`,
+        `caption-render project=${captionProjectId}: ${segments.length} segment، خروجی ${outputWidth}x${outputHeight}`,
       );
 
-      // مدت واقعی سورس برای محاسبه‌ی درصد پیشرفت از out_time خروجی ffmpeg -progress — از قبل
-      // در project.sourceDurationSec (مرحله‌ی transcribe) موجود است، نیازی به ffprobe جدید نیست
-      const durationSec = project.sourceDurationSec ?? undefined;
+      // مدت واقعی سورس هم برای محاسبه‌ی درصد پیشرفت هم برای پر کردن کامل تایم‌لاین رندر کپشن
+      // (renderCaptionFrames، بدون گپ) لازم است — قبلاً فقط برای پیشرفت اختیاری بود، اگر از
+      // مرحله‌ی transcribe موجود نباشد همین‌جا با ffprobe محاسبه می‌شود
+      const sourceDurationSec =
+        project.sourceDurationSec ??
+        (await this.mediaTranscode.getVideoDuration(videoBuffer, ext));
+      const videoDurationMs = Math.round(sourceDurationSec * 1000);
       let lastReportedProgress = -1;
       const burnStart = Date.now();
       const renderedBuffer = await this.mediaTranscode.burnCaptions(
         videoBuffer,
         ext,
-        assContent,
-        targetDimensions,
-        durationSec,
+        segments,
+        styleOverrides,
+        videoDurationMs,
+        { width: outputWidth, height: outputHeight },
+        sourceDurationSec,
         (percent) => {
           // throttle — ffmpeg -progress هر چند صدم ثانیه یک خط می‌فرستد، نوشتن هر تیک روی
           // دیتابیس هم لازم نیست هم فشار بی‌مورد به Postgres پروداکشن است

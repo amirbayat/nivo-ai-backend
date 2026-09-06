@@ -8,6 +8,10 @@ import type {
   TranscodeVideoTask,
   VideoDimensions,
 } from './media-transcode.worker';
+import type {
+  CaptionSegment,
+  CaptionStyleOverrides,
+} from './caption-style-catalog';
 
 // ffmpeg خودش با child_process.spawn یک OS process جداست، ولی نوشتن/خواندن buffer و مدیریت
 // فایل موقت هم بهتر است از ترد اصلی Node دور بماند تا HTTP request handling + SSE چت مسدود
@@ -63,8 +67,10 @@ export class MediaTranscodeService implements OnModuleDestroy {
   async burnCaptions(
     inputBuffer: Buffer,
     inputExt: string,
-    assContent: string,
-    targetDimensions?: { width: number; height: number },
+    segments: CaptionSegment[],
+    styleOverrides: CaptionStyleOverrides | null,
+    videoDurationMs: number,
+    outputDimensions: { width: number; height: number },
     durationSec?: number,
     onProgress?: (percent: number) => void,
   ): Promise<Buffer> {
@@ -78,9 +84,11 @@ export class MediaTranscodeService implements OnModuleDestroy {
     const task: BurnCaptionsTask = {
       inputBuffer,
       inputExt,
-      assContent,
-      targetWidth: targetDimensions?.width,
-      targetHeight: targetDimensions?.height,
+      segments,
+      styleOverrides,
+      videoDurationMs,
+      outputWidth: outputDimensions.width,
+      outputHeight: outputDimensions.height,
       durationSec,
       progressPort: channel?.port2,
     };
