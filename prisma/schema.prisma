@@ -1240,6 +1240,7 @@ model CaptionProject {
   //  position:'top'|'center'|'bottom'}
   styleOverrides    Json?
   status            CaptionProjectStatus @default(UPLOADED)
+  renderProgress    Int                  @default(0) // درصد پیشرفت رندر فعلی (۰-۹۹ حین RENDERING؛ فقط برای نمایش UI، معیار موفقیت همچنان status است)
   renderedVideoKey  String?
   asrCostUsd        Float? // هزینه‌ی خام واقعی ASR — فقط برای گزارش حاشیه‌ی سود، نه تعیین مبلغ کسرشده (بخش ۱۴.۴)
   renderCreditCost  Int? // مبلغ واقعی کسرشده از CaptionPricingTier در لحظه‌ی رندر موفق

@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { join } from 'node:path';
+import { MessageChannel } from 'node:worker_threads';
 import Piscina from 'piscina';
 import type {
   BurnCaptionsTask,
@@ -64,16 +65,34 @@ export class MediaTranscodeService implements OnModuleDestroy {
     inputExt: string,
     assContent: string,
     targetDimensions?: { width: number; height: number },
+    durationSec?: number,
+    onProgress?: (percent: number) => void,
   ): Promise<Buffer> {
+    // Piscina داده‌ی task را با structured clone منتقل می‌کند، پس یک callback معمولی قابل عبور
+    // به worker نیست — MessageChannel راه استاندارد worker_threads برای این مورد است: port2 به
+    // worker منتقل می‌شود (با transferList)، port1 همین‌جا در ترد اصلی پیام‌ها را می‌شنود.
+    const channel = onProgress ? new MessageChannel() : undefined;
+    if (onProgress && channel) {
+      channel.port1.on('message', (percent: number) => onProgress(percent));
+    }
     const task: BurnCaptionsTask = {
       inputBuffer,
       inputExt,
       assContent,
       targetWidth: targetDimensions?.width,
       targetHeight: targetDimensions?.height,
+      durationSec,
+      progressPort: channel?.port2,
     };
-    const result = await this.pool.run(task, { name: 'burnCaptions' });
-    return Buffer.from(result);
+    try {
+      const result = await this.pool.run(task, {
+        name: 'burnCaptions',
+        transferList: channel ? [channel.port2] : undefined,
+      });
+      return Buffer.from(result);
+    } finally {
+      channel?.port1.close();
+    }
   }
 
   async onModuleDestroy() {

@@ -76,7 +76,7 @@ export class CaptionRenderProcessor {
 
     await this.prisma.captionProject.update({
       where: { id: captionProjectId },
-      data: { status: CaptionProjectStatus.RENDERING },
+      data: { status: CaptionProjectStatus.RENDERING, renderProgress: 0 },
     });
 
     // لاگ‌های گام‌به‌گام (بخش ۱۶.۴ درخواست‌شده) — رندر چند مرحله‌ی کند دارد (دانلود فایل حجیم،
@@ -126,12 +126,28 @@ export class CaptionRenderProcessor {
         `caption-render project=${captionProjectId}: فایل ASS ساخته شد (${segments.length} segment، خروجی ${outputWidth}x${outputHeight})`,
       );
 
+      // مدت واقعی سورس برای محاسبه‌ی درصد پیشرفت از out_time خروجی ffmpeg -progress — از قبل
+      // در project.sourceDurationSec (مرحله‌ی transcribe) موجود است، نیازی به ffprobe جدید نیست
+      const durationSec = project.sourceDurationSec ?? undefined;
+      let lastReportedProgress = -1;
       const burnStart = Date.now();
       const renderedBuffer = await this.mediaTranscode.burnCaptions(
         videoBuffer,
         ext,
         assContent,
         targetDimensions,
+        durationSec,
+        (percent) => {
+          // throttle — ffmpeg -progress هر چند صدم ثانیه یک خط می‌فرستد، نوشتن هر تیک روی
+          // دیتابیس هم لازم نیست هم فشار بی‌مورد به Postgres پروداکشن است
+          if (percent <= lastReportedProgress) return;
+          lastReportedProgress = percent;
+          this.prisma.captionProject
+            .update({ where: { id: captionProjectId }, data: { renderProgress: percent } })
+            .catch((err) =>
+              this.logger.warn(`caption-render progress update failed project=${captionProjectId}: ${err}`),
+            );
+        },
       );
       this.logger.log(
         `caption-render project=${captionProjectId}: ffmpeg burnCaptions تمام شد در ${Date.now() - burnStart}ms (خروجی ${renderedBuffer.length} بایت)`,

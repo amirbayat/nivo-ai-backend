@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { MessagePort } from 'node:worker_threads';
 
 export interface ExtractAudioTask {
   inputBuffer: Buffer;
@@ -23,6 +24,11 @@ export interface BurnCaptionsTask {
   // زوج باشند (الزام libx264) و از قبل با PlayResX/Y فایل ASS یکی محاسبه شده باشند
   targetWidth?: number;
   targetHeight?: number;
+  // مدت واقعی ویدیو (ثانیه) — برای محاسبه‌ی درصد پیشرفت از out_time خروجی ffmpeg -progress لازم است
+  durationSec?: number;
+  // پورت MessageChannel برای ارسال درصد پیشرفت به ترد اصلی (media-transcode.service.ts)؛
+  // چون Piscina task data را با structured clone منتقل می‌کند، callback معمولی قابل عبور نیست
+  progressPort?: MessagePort;
 }
 
 export interface VideoDimensions {
@@ -42,6 +48,48 @@ async function runFfmpeg(args: string[]): Promise<void> {
     proc.stderr.on('data', (chunk: Buffer) => {
       stderr += chunk.toString();
     });
+    proc.on('error', (err) => reject(err));
+    proc.on('close', (code) => {
+      if (code === 0) resolve();
+      else
+        reject(
+          new Error(`ffmpeg exited with code ${code}: ${stderr.slice(-2000)}`),
+        );
+    });
+  });
+}
+
+// مثل runFfmpeg، فقط علاوه‌بر آن با `-progress pipe:1` خروجی ساختاریافته‌ی ffmpeg را از stdout
+// می‌خواند و از خط‌های `out_time=HH:MM:SS.ms` درصد پیشرفت را حساب می‌کند (بخش پراگرس رندر
+// caption-studio — قبلاً هیچ‌جا این خروجی parse نمی‌شد). فرمت out_time به‌مراتب پایدارتر از
+// out_time_ms است (نام گمراه‌کننده‌ی همیشگی‌اش که در نسخه‌های مختلف ffmpeg واحدش عوض شده).
+function runFfmpegWithProgress(
+  args: string[],
+  durationSec: number | undefined,
+  onProgress?: (percent: number) => void,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn('ffmpeg', args);
+    let stderr = '';
+    let stdoutBuf = '';
+    proc.stderr.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+    if (onProgress && durationSec && durationSec > 0) {
+      proc.stdout.on('data', (chunk: Buffer) => {
+        stdoutBuf += chunk.toString();
+        const lines = stdoutBuf.split('\n');
+        stdoutBuf = lines.pop() ?? '';
+        for (const line of lines) {
+          const match = /^out_time=(\d+):(\d+):(\d+(?:\.\d+)?)/.exec(line);
+          if (!match) continue;
+          const outSec = Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]);
+          // تا ۹۹٪ — ۱۰۰٪ فقط بعد از resolve واقعی (موفقیت آپلود خروجی) در processor ست می‌شود
+          const percent = Math.min(99, Math.max(0, Math.round((outSec / durationSec) * 100)));
+          onProgress(percent);
+        }
+      });
+    }
     proc.on('error', (err) => reject(err));
     proc.on('close', (code) => {
       if (code === 0) resolve();
@@ -143,6 +191,13 @@ export async function transcodeVideo({
 
 // لازم تا PlayResX/PlayResY فایل ASS با ابعاد واقعی ویدیو یکی باشد — وگرنه اندازه/موقعیت
 // زیرنویس روی ویدیوی عمودی (۹:۱۶) اشتباه محاسبه می‌شود (docs/PRD-video-auto-captions.md §۵.۲)
+//
+// ویدیوهای موبایل (مخصوصاً آیفون در حالت عمودی) اغلب با ابعاد coded افقی ذخیره می‌شوند و فقط
+// یک متادیتای چرخش (rotate tag قدیمی QuickTime یا Display Matrix جدید) دارند که پلیر/مرورگر
+// موقع نمایش می‌چرخاندش. اگر همین عدد خام (width,height) بدون توجه به چرخش استفاده شود، هم
+// canvas زیرنویس (PlayResX/Y) هم نسبت تصویر واقعی هنگام scale اشتباه محاسبه می‌شود و ویدیوی
+// خروجی نسبت به سورس واقعی «کج»/با نسبت اشتباه از آب درمی‌آید — پس width/height باید بر اساس
+// چرخش واقعی swap شوند تا با آنچه کاربر واقعاً می‌بیند یکی باشند.
 export async function getVideoDimensions({
   inputBuffer,
   inputExt,
@@ -156,14 +211,32 @@ export async function getVideoDimensions({
       '-select_streams',
       'v:0',
       '-show_entries',
-      'stream=width,height',
+      'stream=width,height,side_data_list:stream_tags=rotate',
       '-of',
-      'csv=p=0',
+      'json',
       inPath,
     ]);
-    const [width, height] = out.trim().split(',').map(Number);
-    if (!width || !height)
+    const parsed = JSON.parse(out) as {
+      streams?: Array<{
+        width?: number;
+        height?: number;
+        tags?: { rotate?: string };
+        side_data_list?: Array<{ rotation?: number }>;
+      }>;
+    };
+    const stream = parsed.streams?.[0];
+    if (!stream?.width || !stream?.height) {
       throw new Error(`could not determine video dimensions: "${out}"`);
+    }
+    let { width, height } = stream;
+    const tagRotate = Number(stream.tags?.rotate ?? 0);
+    const sideDataRotate = stream.side_data_list?.find(
+      (d) => typeof d.rotation === 'number',
+    )?.rotation;
+    const rotation = ((tagRotate || sideDataRotate || 0) % 360 + 360) % 360;
+    if (rotation === 90 || rotation === 270) {
+      [width, height] = [height, width];
+    }
     return { width, height };
   });
 }
@@ -203,6 +276,8 @@ export async function burnCaptions({
   assContent,
   targetWidth,
   targetHeight,
+  durationSec,
+  progressPort,
 }: BurnCaptionsTask): Promise<Buffer> {
   return withTempDir(async (dir) => {
     const inPath = join(dir, `${randomUUID()}.${inputExt}`);
@@ -216,24 +291,30 @@ export async function burnCaptions({
       targetWidth && targetHeight
         ? `scale=${targetWidth}:${targetHeight},ass=${assPath}`
         : `ass=${assPath}`;
-    await runFfmpeg([
-      '-y',
-      '-i',
-      inPath,
-      '-vf',
-      vf,
-      '-c:v',
-      'libx264',
-      '-preset',
-      'veryfast',
-      '-crf',
-      '20',
-      '-c:a',
-      'copy',
-      '-movflags',
-      '+faststart',
-      outPath,
-    ]);
+    await runFfmpegWithProgress(
+      [
+        '-y',
+        '-i',
+        inPath,
+        '-progress',
+        'pipe:1',
+        '-vf',
+        vf,
+        '-c:v',
+        'libx264',
+        '-preset',
+        'veryfast',
+        '-crf',
+        '20',
+        '-c:a',
+        'copy',
+        '-movflags',
+        '+faststart',
+        outPath,
+      ],
+      durationSec,
+      progressPort ? (percent) => progressPort.postMessage(percent) : undefined,
+    );
     return readFile(outPath);
   });
 }
