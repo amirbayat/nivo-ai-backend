@@ -42,9 +42,15 @@ interface OpenRouterTranscriptionResponse {
 // (docs/PRD-video-auto-captions.md §۱۷.۵، ۱۴۰۵-۰۶-۱۴): هر ۴ مدل واقعاً timestamp سطح کلمه
 // می‌دهند. gpt-4o-transcribe/gpt-4o-mini-transcribe عمداً در این لیست نیستند — طبق مستندات
 // رسمی OpenAI اصلاً timestamp_granularities را پشتیبانی نمی‌کنند (§۱۷.۱).
+//
+// ۱۴۰۵-۰۶-۱۶: whisper-large-v3 به اولویت ۱ منتقل شد (قبلاً turbo اول بود). دلیل: کاربر گزارش
+// داد دقت turbo روی صداهای واقعی پروداکشن ضعیف بود؛ طبق همون تست §۱۷.۵، large-v3 دقیق‌تر از
+// turbo بود (تنها مدلی که جمله‌ی آخر نمونه رو کامل درست نوشت) و هزینه‌اش هنوز ناچیزه (~۲برابر
+// turbo، مثلاً $۰.۰۰۰۱۶۶ در برابر $۰.۰۰۰۰۷۴ برای یک کلیپ ۲۲ثانیه‌ای) — کاربر صراحتاً این افزایش
+// هزینه‌ی جزئی رو برای دقت بهتر پذیرفت. turbo به‌عنوان fallback دوم می‌ماند.
 export const ASR_FALLBACK_CHAIN = [
-  'openai/whisper-large-v3-turbo',
   'openai/whisper-large-v3',
+  'openai/whisper-large-v3-turbo',
   'openai/whisper-1',
   'x-ai/grok-stt-1.0',
 ] as const;

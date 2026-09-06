@@ -377,7 +377,7 @@ export async function burnCaptions({
         '-map',
         '[v]',
         '-map',
-        '0:a?',
+        '0:a:0?',
         '-c:v',
         'libx264',
         '-preset',
