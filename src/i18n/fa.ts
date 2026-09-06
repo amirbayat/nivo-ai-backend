@@ -287,7 +287,11 @@ export const fa = {
     modelDisabled: 'این مدل دیگر فعال نیست',
     featureDisabled: 'ویرایش ویدیو فعلاً غیرفعال است',
     jobNotFound: 'این درخواست یافت نشد',
-    insufficientCredits: 'اعتبار نیوو کافی نیست — لطفاً شارژ کنید',
+    // مبلغ لازم/موجود واقعی توی پیام نشان داده می‌شود، نه فقط «کافی نیست» — با واحد «نیوو»
+    // (همون واحد نمایشی-به-کاربر CreditsService)، نه تومان خام؛ دستور صریح کاربر. video-edit.service.ts
+    // createJob هم amounts خام را در بدنه‌ی خطا (neededCredits/balanceCredits) برمی‌گرداند
+    insufficientCredits: (neededCredits: number, balanceCredits: number) =>
+      `برای این کار حدود ${neededCredits.toLocaleString('fa-IR')} نیوو لازم است؛ موجودی فعلی شما ${balanceCredits.toLocaleString('fa-IR')} نیوو است. لطفاً کیف‌پول خود را شارژ کنید.`,
     tooManyConcurrentJobs:
       'شما چند ویدیوی دیگر در صف دارید — صبر کنید تا تمام شوند',
     dailyLimitReached: 'به سقف روزانه‌ی این فیچر رسیده‌اید',

@@ -11,6 +11,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
 import { MediaTranscodeService } from '../../common/services/media-transcode.service';
 import { PricingService } from '../usage/pricing.service';
+import { CreditsService } from '../credits/credits.service';
 import { KieVideoModelsService } from '../kie-video-models/kie-video-models.service';
 import { VideoEditConfigService } from '../video-edit-config/video-edit-config.service';
 import { CreateVideoEditJobDto } from './dto/create-video-edit-job.dto';
@@ -62,6 +63,7 @@ export class VideoEditService {
     private readonly storage: StorageService,
     private readonly mediaTranscode: MediaTranscodeService,
     private readonly pricing: PricingService,
+    private readonly credits: CreditsService,
     private readonly kieModels: KieVideoModelsService,
     private readonly videoEditConfig: VideoEditConfigService,
     @InjectQueue('video-edit')
@@ -70,6 +72,16 @@ export class VideoEditService {
 
   async listModels() {
     return this.kieModels.listActive();
+  }
+
+  // فرانت برای نمایش عدد واقعی «مدت ثابت تولید» (به‌جای یک برچسب مبهم) به این نیاز دارد —
+  // فقط فیلدهای بی‌ضرر عمومی، نه کل VideoEditConfig ادمین (بدون سقف‌های همزمانی/روزانه)
+  async getPublicConfig() {
+    const config = await this.videoEditConfig.getConfig();
+    return {
+      isEnabled: config.isEnabled,
+      generateFixedDurationSec: config.generateFixedDurationSec,
+    };
   }
 
   async uploadImage(file: Express.Multer.File): Promise<{ key: string }> {
@@ -190,9 +202,25 @@ export class VideoEditService {
     const estimateUsd =
       estimateDurationSec * (model.pricePerSecondUsdConfirmed ?? 0.1);
     const estimate = await this.pricing.calcFlatCostToman(estimateUsd);
-    const walletBalance = await this.pricing.getWalletBalance(userId);
-    if (walletBalance < estimate.costToman) {
-      throw new BadRequestException(fa.videoEdit.insufficientCredits);
+    // «نیوو» واحد نمایشی-به-کاربر است (بخش کامنت CreditsService)، نه تومان خام — کاربر
+    // صریحاً خواست پیام خطا هم با همین واحد باشد، نه تومان
+    const balance = await this.credits.getBalance(userId);
+    if (balance.balanceToman < estimate.costToman) {
+      const neededCredits = Math.ceil(
+        estimate.costToman / balance.tomanPerCredit,
+      );
+      // مبلغ لازم/موجود هم توی بدنه‌ی خطا برمی‌گردد (نه فقط متن ثابت) تا فرانت بتواند دقیقاً
+      // نشان دهد چقدر کم دارد — دقیقاً همون الگوی {message, code} که chat.service.ts هم
+      // برای خطاهای ساختاریافته استفاده می‌کند
+      throw new BadRequestException({
+        message: fa.videoEdit.insufficientCredits(
+          neededCredits,
+          balance.credits,
+        ),
+        code: 'INSUFFICIENT_CREDITS',
+        neededCredits,
+        balanceCredits: balance.credits,
+      });
     }
 
     const job = await this.prisma.videoEditJob.create({

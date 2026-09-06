@@ -40,6 +40,13 @@ export class VideoEditController {
     return this.videoEdit.listModels();
   }
 
+  // مقادیر عمومی/بی‌ضرر VideoEditConfig (مدت ثابت تولید) — برای نمایش عدد واقعی در فرم،
+  // نه یک برچسب مبهم «مدت ثابت»
+  @Get('config')
+  getPublicConfig() {
+    return this.videoEdit.getPublicConfig();
+  }
+
   @Post('upload-image')
   @UseInterceptors(
     FileInterceptor('file', { limits: { fileSize: 20 * 1024 * 1024 } }),
