@@ -154,7 +154,7 @@ export class AsrService {
     return {
       text: json.text ?? '',
       words: (json.words ?? []).map((w) => ({
-        word: w.word,
+        word: w.word.trim(),
         start: w.start,
         end: w.end,
         speaker: w.speaker ?? null,

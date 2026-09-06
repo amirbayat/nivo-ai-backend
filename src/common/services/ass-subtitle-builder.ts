@@ -277,7 +277,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
     // به‌شکل معکوس داخل خودشان رندر می‌کند). هایلایت کلمه‌به‌کلمه به‌جای تگ رنگ وسط متن، با
     // یک Dialogue کاملاً جدا (پایین‌تر) پیاده می‌شود که همان یک کلمه را با \pos محاسبه‌شده
     // دقیقاً روی جای خودش می‌کارد.
-    const escapedWords = words.map((w) => escapeAssText(w.word));
+    const escapedWords = words.map((w) => escapeAssText(w.word.trim()));
     const lines: string[][] = [];
     for (let i = 0; i < escapedWords.length; i += wordsPerLine) {
       lines.push(escapedWords.slice(i, i + wordsPerLine));
