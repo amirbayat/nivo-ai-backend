@@ -168,8 +168,12 @@ export class VideoEditProcessor {
         videoJob.id,
       );
 
-      // هزینه‌ی واقعی بر مبنای creditsConsumed واقعی Kie (بخش ۶.۵ سند) — نه تخمین preflight
-      const costUsd = (creditsConsumed ?? 0) * 0.005;
+      // هزینه‌ی واقعی بر مبنای creditsConsumed واقعی Kie (بخش ۶.۵ سند) — نه تخمین preflight.
+      // نرخ ۰.۰۰۵ ($۵ = ۱۰۰۰ credit) دیگر حدس/منبع ثالث نیست — کاربر مستقیم از حساب واقعی
+      // Kie.ai تأیید کرد (۱۴۰۵/۰۶/۱۵)، هم‌راستا با همون رقمی که قبل از این تست هم استفاده
+      // می‌شد؛ اگر بعداً Kie نرخش را عوض کرد (مثلاً پله‌ی حجمی)، این عدد باید به‌روزرسانی شود.
+      const KIE_USD_PER_CREDIT = 0.005;
+      const costUsd = (creditsConsumed ?? 0) * KIE_USD_PER_CREDIT;
       const costCalc = await this.pricing.calcFlatCostToman(costUsd);
       const markup = await this.pricingTiers.getMarkup(
         PricingGenerationType.VIDEO,
