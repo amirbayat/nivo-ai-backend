@@ -221,7 +221,7 @@ export async function getVideoDimensions({
       '-select_streams',
       'v:0',
       '-show_entries',
-      'stream=width,height,side_data_list:stream_tags=rotate',
+      'stream=width,height:stream_tags=rotate:stream_side_data=rotation',
       '-of',
       'json',
       inPath,
