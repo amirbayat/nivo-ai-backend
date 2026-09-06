@@ -14,6 +14,7 @@ import { StudioVideoGenerationProcessor } from './processors/studio-video-genera
 import { CaptionTranscribeProcessor } from './processors/caption-transcribe.processor';
 import { CaptionRenderProcessor } from './processors/caption-render.processor';
 import { CaptionSourceCleanupProcessor } from './processors/caption-source-cleanup.processor';
+import { VideoEditProcessor } from './processors/video-edit.processor';
 import { PrismaModule } from '../prisma/prisma.module';
 import { MessageFeedbackModule } from '../modules/message-feedback/message-feedback.module';
 import { CampaignModule } from '../modules/campaign/campaign.module';
@@ -26,6 +27,7 @@ import { PushNotificationsModule } from '../modules/push-notifications/push-noti
 import { VideoGenerationModule } from '../common/services/video-generation.module';
 import { MediaTranscodeModule } from '../common/services/media-transcode.module';
 import { AsrModule } from '../common/services/asr.module';
+import { KieProviderModule } from '../common/services/kie-provider.module';
 
 @Module({
   imports: [
@@ -67,6 +69,12 @@ import { AsrModule } from '../common/services/asr.module';
     }),
     // safety-net حذف خودکار سورس بعد از ۷ روز بی‌فعالیتی — caption-source-cleanup.processor.ts
     BullModule.registerQueue({ name: 'caption-source-cleanup' }),
+    // docs/PRD-video-edit-omni-kie.md §۵.۲ — تولیدکننده در video-edit.module.ts؛ همون
+    // lockDuration بزرگ ویدیوی موجود (job تا ۳۰ دقیقه poll می‌کند)
+    BullModule.registerQueue({
+      name: 'video-edit',
+      settings: { lockDuration: 35 * 60 * 1000 },
+    }),
     PrismaModule,
     MessageFeedbackModule,
     CampaignModule,
@@ -78,6 +86,7 @@ import { AsrModule } from '../common/services/asr.module';
     VideoGenerationModule,
     MediaTranscodeModule,
     AsrModule,
+    KieProviderModule,
     CreditsModule,
   ],
   providers: [
@@ -94,6 +103,7 @@ import { AsrModule } from '../common/services/asr.module';
     CaptionTranscribeProcessor,
     CaptionRenderProcessor,
     CaptionSourceCleanupProcessor,
+    VideoEditProcessor,
   ],
 })
 export class QueueModule {}

@@ -45,7 +45,10 @@ async function runFfmpeg(args: string[]): Promise<void> {
     proc.on('error', (err) => reject(err));
     proc.on('close', (code) => {
       if (code === 0) resolve();
-      else reject(new Error(`ffmpeg exited with code ${code}: ${stderr.slice(-2000)}`));
+      else
+        reject(
+          new Error(`ffmpeg exited with code ${code}: ${stderr.slice(-2000)}`),
+        );
     });
   });
 }
@@ -73,34 +76,65 @@ function runFfprobe(args: string[]): Promise<string> {
     proc.on('error', (err) => reject(err));
     proc.on('close', (code) => {
       if (code === 0) resolve(stdout);
-      else reject(new Error(`ffprobe exited with code ${code}: ${stderr.slice(-1000)}`));
+      else
+        reject(
+          new Error(`ffprobe exited with code ${code}: ${stderr.slice(-1000)}`),
+        );
     });
   });
 }
 
 // صدای mono ۱۶kHz در ۶۴kbps — کافی برای ASR (whisper و مشابه) و طبق docs/PRD-video-auto-captions.md
 // §۱۰/§۱۶.۱ حتی برای سقف محصول ۲۰ دقیقه هم به‌مراتب زیر سقف ۲۵MB آپلود OpenRouter می‌ماند.
-export async function extractAudio({ inputBuffer, inputExt }: ExtractAudioTask): Promise<Buffer> {
+export async function extractAudio({
+  inputBuffer,
+  inputExt,
+}: ExtractAudioTask): Promise<Buffer> {
   return withTempDir(async (dir) => {
     const inPath = join(dir, `${randomUUID()}.${inputExt}`);
     const outPath = join(dir, `${randomUUID()}.mp3`);
     await writeFile(inPath, inputBuffer);
-    await runFfmpeg(['-y', '-i', inPath, '-vn', '-ac', '1', '-ar', '16000', '-b:a', '64k', outPath]);
+    await runFfmpeg([
+      '-y',
+      '-i',
+      inPath,
+      '-vn',
+      '-ac',
+      '1',
+      '-ar',
+      '16000',
+      '-b:a',
+      '64k',
+      outPath,
+    ]);
     return readFile(outPath);
   });
 }
 
 // نرمال‌سازی HEVC/.mov آیفون → H.264/.mp4 — سازگاری تضمین‌شده پیش از ارسال به هر provider
 // (docs/PRD-video-auto-captions.md §۷ / docs/PRD-video-studio-editing.md §۷)
-export async function transcodeVideo({ inputBuffer, inputExt }: TranscodeVideoTask): Promise<Buffer> {
+export async function transcodeVideo({
+  inputBuffer,
+  inputExt,
+}: TranscodeVideoTask): Promise<Buffer> {
   return withTempDir(async (dir) => {
     const inPath = join(dir, `${randomUUID()}.${inputExt}`);
     const outPath = join(dir, `${randomUUID()}.mp4`);
     await writeFile(inPath, inputBuffer);
     await runFfmpeg([
-      '-y', '-i', inPath,
-      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
-      '-c:a', 'aac', '-movflags', '+faststart',
+      '-y',
+      '-i',
+      inPath,
+      '-c:v',
+      'libx264',
+      '-preset',
+      'veryfast',
+      '-crf',
+      '23',
+      '-c:a',
+      'aac',
+      '-movflags',
+      '+faststart',
       outPath,
     ]);
     return readFile(outPath);
@@ -117,15 +151,46 @@ export async function getVideoDimensions({
     const inPath = join(dir, `${randomUUID()}.${inputExt}`);
     await writeFile(inPath, inputBuffer);
     const out = await runFfprobe([
-      '-v', 'error',
-      '-select_streams', 'v:0',
-      '-show_entries', 'stream=width,height',
-      '-of', 'csv=p=0',
+      '-v',
+      'error',
+      '-select_streams',
+      'v:0',
+      '-show_entries',
+      'stream=width,height',
+      '-of',
+      'csv=p=0',
       inPath,
     ]);
     const [width, height] = out.trim().split(',').map(Number);
-    if (!width || !height) throw new Error(`could not determine video dimensions: "${out}"`);
+    if (!width || !height)
+      throw new Error(`could not determine video dimensions: "${out}"`);
     return { width, height };
+  });
+}
+
+// docs/PRD-video-edit-omni-kie.md §۵.۴ — مدت واقعی ویدیوی آپلودی (نه فرض‌شده) لازم است هم
+// برای preflight هزینه (بخش ۶.۵) هم برای اعتبارسنجی پنجره‌ی start/end حالت EDIT/GENERATE
+export async function getVideoDuration({
+  inputBuffer,
+  inputExt,
+}: TranscodeVideoTask): Promise<number> {
+  return withTempDir(async (dir) => {
+    const inPath = join(dir, `${randomUUID()}.${inputExt}`);
+    await writeFile(inPath, inputBuffer);
+    const out = await runFfprobe([
+      '-v',
+      'error',
+      '-show_entries',
+      'format=duration',
+      '-of',
+      'csv=p=0',
+      inPath,
+    ]);
+    const duration = Number(out.trim());
+    if (!duration || !isFinite(duration)) {
+      throw new Error(`could not determine video duration: "${out}"`);
+    }
+    return duration;
   });
 }
 
@@ -152,11 +217,21 @@ export async function burnCaptions({
         ? `scale=${targetWidth}:${targetHeight},ass=${assPath}`
         : `ass=${assPath}`;
     await runFfmpeg([
-      '-y', '-i', inPath,
-      '-vf', vf,
-      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
-      '-c:a', 'copy',
-      '-movflags', '+faststart',
+      '-y',
+      '-i',
+      inPath,
+      '-vf',
+      vf,
+      '-c:v',
+      'libx264',
+      '-preset',
+      'veryfast',
+      '-crf',
+      '20',
+      '-c:a',
+      'copy',
+      '-movflags',
+      '+faststart',
       outPath,
     ]);
     return readFile(outPath);

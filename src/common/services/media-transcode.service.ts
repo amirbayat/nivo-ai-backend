@@ -43,9 +43,20 @@ export class MediaTranscodeService implements OnModuleDestroy {
     return Buffer.from(result);
   }
 
-  async getVideoDimensions(inputBuffer: Buffer, inputExt: string): Promise<VideoDimensions> {
+  async getVideoDimensions(
+    inputBuffer: Buffer,
+    inputExt: string,
+  ): Promise<VideoDimensions> {
     const task: TranscodeVideoTask = { inputBuffer, inputExt };
     return this.pool.run(task, { name: 'getVideoDimensions' });
+  }
+
+  async getVideoDuration(
+    inputBuffer: Buffer,
+    inputExt: string,
+  ): Promise<number> {
+    const task: TranscodeVideoTask = { inputBuffer, inputExt };
+    return this.pool.run(task, { name: 'getVideoDuration' });
   }
 
   async burnCaptions(
@@ -68,6 +79,8 @@ export class MediaTranscodeService implements OnModuleDestroy {
   async onModuleDestroy() {
     await this.pool
       .destroy()
-      .catch((err) => this.logger.error('media transcode pool destroy failed', err));
+      .catch((err) =>
+        this.logger.error('media transcode pool destroy failed', err),
+      );
   }
 }

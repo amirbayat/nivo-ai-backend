@@ -249,8 +249,7 @@ export const fa = {
     insufficientCredits: 'اعتبار نیوو کافی نیست — لطفاً شارژ کنید',
     characterGenerationFailed:
       'طراحی کاراکتر ناموفق بود — اعتبار شما کسر نشد، دوباره امتحان کنید',
-    tooManyRegenerates:
-      'به سقف مجاز بازطراحی کاراکتر برای این پروژه رسیده‌اید',
+    tooManyRegenerates: 'به سقف مجاز بازطراحی کاراکتر برای این پروژه رسیده‌اید',
     characterOptionNotFound: 'این گزینه‌ی کاراکتر یافت نشد',
     noCharacterSelected: 'ابتدا باید یک کاراکتر انتخاب کنید',
     storyboardGenerationFailed:
@@ -282,5 +281,31 @@ export const fa = {
     renderFailedPushTitle: 'رندر زیرنویس ناموفق بود',
     renderFailedPushBody: 'رندر زیرنویس ناموفق بود — اعتبار شما کسر نشد',
     sourceAlreadyDeleted: 'ویدیوی اصلی حذف شده — امکان رندر یا تلاش مجدد نیست',
+  },
+  videoEdit: {
+    modelNotFound: 'این مدل یافت نشد یا دیگر فعال نیست',
+    modelDisabled: 'این مدل دیگر فعال نیست',
+    featureDisabled: 'ویرایش ویدیو فعلاً غیرفعال است',
+    jobNotFound: 'این درخواست یافت نشد',
+    insufficientCredits: 'اعتبار نیوو کافی نیست — لطفاً شارژ کنید',
+    tooManyConcurrentJobs:
+      'شما چند ویدیوی دیگر در صف دارید — صبر کنید تا تمام شوند',
+    dailyLimitReached: 'به سقف روزانه‌ی این فیچر رسیده‌اید',
+    videoRequiredForEdit: 'برای ادیت باید یک ویدیو آپلود کنید',
+    imagesNotSupportedForEdit: 'این مدل در حالت ادیت عکس نمی‌پذیرد',
+    videoNotSupportedByModel: 'این مدل ویدیوی مرجع/منبع نمی‌پذیرد',
+    imagesNotSupportedByModel: 'این مدل عکس مرجع نمی‌پذیرد',
+    tooManyImages: (max: number) => `این مدل حداکثر ${max} عکس می‌پذیرد`,
+    videoWindowRequired: 'باید بازه‌ی زمانی ویدیو (شروع/پایان) را مشخص کنید',
+    videoWindowTooWide: (max: number) =>
+      `پهنای بازه‌ی انتخابی نباید بیشتر از ${max} ثانیه باشد`,
+    videoTooLong: (max: number) =>
+      `این ویدیو طولانی‌تر از حداکثر مجاز (${max} ثانیه) است`,
+    invalidVideoFormat: 'فرمت ویدیو پشتیبانی نمی‌شود (فقط MP4/MOV)',
+    noFileUploaded: 'فایلی ارسال نشده',
+    jobReadyPushTitle: 'ویدیوی شما آماده شد',
+    jobReadyPushBody: 'ویدیوی شما آماده‌ی دانلود است',
+    jobFailedPushTitle: 'پردازش ویدیو ناموفق بود',
+    jobFailedPushBody: 'پردازش ویدیوی شما ناموفق بود — اعتبار شما کسر نشد',
   },
 } as const;
