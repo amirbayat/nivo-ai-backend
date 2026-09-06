@@ -437,6 +437,16 @@ export class ChatService {
       );
     }
 
+    // ── حالت اجباری gpt-5.4-nano وقتی موجودی PAYG صفر/منفی است ────────────────
+    // تصمیم محصول: به‌جای بلاک کامل (گیت قدیمی پایین‌تر)، کاربر PAYG با موجودی ناکافی می‌تواند
+    // نامحدود چت کند ولی مدل بی‌صدا (صرف‌نظر از انتخابش) روی gpt-5.4-nano قفل می‌شود؛ این پیام‌ها
+    // هم رایگان‌اند — debitWallet پایین‌تر برای همین حالت صدا زده نمی‌شود.
+    let forcedNanoMode = false;
+    if (plan.isPayAsYouGo) {
+      const walletBalance = await this.pricingService.getWalletBalance(userId);
+      forcedNanoMode = walletBalance <= 0;
+    }
+
     // ── model selection via Router — همیشه اجرا می‌شود، حتی روی انتخاب دستی ──
     // سه حالت: انتخاب دستی مدل مشخص، «مصرف بهینه» (ارزان‌ترین مدل توانا)، «بهترین پاسخ» (قوی‌ترین
     // مدل صرف‌نظر از قیمت). برای پلن‌های غیر-PAYG (که این selectionMode دیده نمی‌شود)، Router طبق
@@ -475,7 +485,9 @@ export class ChatService {
       isPayAsYouGo: plan.isPayAsYouGo,
       selectionMode,
     });
-    const modelId = routed.modelId;
+    const modelId = forcedNanoMode
+      ? PRE_ROUTING_REFERENCE_MODEL
+      : routed.modelId;
     this.modelRouter.log({ userId, conversationId, ...routed }).catch(() => {});
 
     // دراپ‌دون «سریع/هوشمند» کنار ارسال پیام — فقط reasoning effort را override می‌کند، انتخاب
@@ -512,7 +524,10 @@ export class ChatService {
         },
         select: { supportsVision: true },
       });
-      if (modelRecord && !modelRecord.supportsVision) {
+      // forcedNanoMode یعنی مدل واقعی که اجرا می‌شود PRE_ROUTING_REFERENCE_MODEL است، نه
+      // rawModelChoice — و آن مدل vision دارد، پس این چک (که روی انتخاب اصلی کاربر است) اینجا
+      // نامربوط می‌شود
+      if (modelRecord && !modelRecord.supportsVision && !forcedNanoMode) {
         throw new BadRequestException(
           'این مدل از تصویر پشتیبانی نمی‌کند. لطفاً یک مدل Vision‌دار انتخاب کنید.',
         );
@@ -544,24 +559,11 @@ export class ChatService {
     //   maxOut = Math.min(maxOut, plan.throttledOutputTokens);
     // }
 
-    // ── گیت مصرف PAYG — فقط موجودی مثبت، نه تخمین بدترین‌حالت ────────────────
-    // docs/PRD-image-gen-pricing-and-credit-fix.md §۱۴ — تصمیم صریح کاربر: تخمین بدترین‌حالت
-    // (قبلاً بر مبنای maxOut کامل) منبع چند باگ بود چون برای provider های بدون کالیبراسیون
-    // واقعی همیشه درست نیست. گیت ساده‌شده: موجودی مثبت → اجازه؛ صفر/منفی → رد. کسر واقعی بعد
-    // از پاسخ (پایین‌تر) دیگر رد نمی‌شود اگر ناکافی باشد — می‌تواند موجودی را منفی کند؛ همین
-    // منفی شدن جلوی پیام بعدی را می‌گیرد (تا شارژ مجدد).
-    if (plan.isPayAsYouGo) {
-      const balance = await this.pricingService.getWalletBalance(userId);
-      if (balance <= 0) {
-        throw new HttpException(
-          {
-            message: fa.payAsYouGo.insufficientBalance,
-            stage: 'wallet_insufficient',
-          },
-          402,
-        );
-      }
-    }
+    // ── گیت مصرف PAYG قدیمی حذف شد ────────────────────────────────────────
+    // قبلاً اینجا موجودی صفر/منفی کاربر PAYG را با HttpException(402) بلاک می‌کرد. طبق تصمیم
+    // محصول جدید، دیگر بلاک نمی‌شود — همان کاربر بالاتر forcedNanoMode شده و روی gpt-5.4-nano
+    // (رایگان، بدون کسر از کیف‌پول) چت می‌کند؛ رفتار قبلی برای کاربران بدون موجودی کافی به‌طور
+    // کامل با این جایگزین شده.
 
     // ── ALL CHECKS PASSED — start SSE stream ──────────────────────────────
     res.setHeader('Content-Type', 'text/event-stream');
@@ -860,8 +862,10 @@ export class ChatService {
 
       // docs/PRD-image-gen-pricing-and-credit-fix.md §۱۴ — هزینه‌ی واقعی × ضریب پلن از کیف‌پول کم
       // می‌شود؛ debitWallet دیگر به‌خاطر موجودی ناکافی رد نمی‌کند (می‌تواند منفی کند) — گیت واقعی
-      // preflight بالاتر (balance>0) بود، اینجا صرفاً کسر نهایی است، نه یک چک دوم
-      if (plan.isPayAsYouGo) {
+      // preflight بالاتر (balance>0) بود، اینجا صرفاً کسر نهایی است، نه یک چک دوم.
+      // forcedNanoMode یعنی این پیام همان حالت رایگان gpt-5.4-nano بود — کسر نمی‌شود (وگرنه
+      // موجودی منفی هر پیام رایگان بازهم منفی‌تر می‌شد).
+      if (plan.isPayAsYouGo && !forcedNanoMode) {
         // هزینه‌ی واقعی OpenRouter (اگر برگشت) جایگزین تخمین توکن‌محور می‌شود؛ روی لیارا
         // که این متادیتا همیشه null است، همان تخمین (costToman) به‌عنوان fallback می‌ماند
         const debitCostToman = openrouterRealCostToman ?? costToman;

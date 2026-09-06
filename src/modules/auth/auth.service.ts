@@ -44,6 +44,7 @@ const PLAN_SUMMARY_SELECT = {
   allowedModels: true,
   featuredModels: true,
   featuredModelsCount: true,
+  isPayAsYouGo: true,
 } as const;
 
 function otpKey(phone: string) {
