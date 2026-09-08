@@ -115,18 +115,27 @@ export class VideoEditProcessor {
     },
     durationSec: number,
   ): Promise<Record<string, unknown>> {
-    // نکته‌ی مهم (خطای پروداکشن ۱۴۰۵/۰۶/۱۷): وقتی ویدیوی مرجع داده می‌شود، ByteDance/Seedance
-    // duration مثبت را رد می‌کند («duration must be -1»)، ولی خودِ Zod schema سطح gateway
-    // OpenRouter هم مقدار -1 را رد می‌کند (`duration: too_small, minimum 1`) — یعنی هیچ مقدار
-    // صریحی (نه مثبت، نه -1) از این فیلد برای OpenRouter+ویدیوی مرجع قابل‌قبول نیست. راه‌حل:
-    // فیلد duration کلاً حذف شود (نه هیچ مقداری، نه -1) — دقیقاً همون قراردادی که Kie هم دارد
-    // (buildKieInput بالا)، تا خودِ مدل مدت را از ویدیوی مرجع استنباط کند.
+    // نکته‌ی مهم (بررسی‌شده با تست زنده‌ی API ۱۴۰۵/۰۶/۱۷، سه سناریو): duration مثبت همیشه ارسال
+    // می‌شود، حتی وقتی ویدیوی مرجع داده شده — چون تست‌های زیر ثابت کرد مشکل مربوط به «حضور
+    // ویدیوی مرجع» نیست، مربوط به تشخیص خودِ Seedance از روی **متن پرامپت** است:
+    //   ۱) duration=-1 صریح → رد می‌شود توسط خودِ gateway schema OpenRouter (نه ByteDance):
+    //      `duration: too_small, minimum 1` — یعنی -1 هرگز از این مسیر عبور نمی‌کند.
+    //   ۲) duration کلاً حذف‌شده + پرامپت شبیه دستور ویرایش («تغییر بده X، بقیه رو نگه‌دار») →
+    //      قبول (202) ولی در پردازش واقعی شکست می‌خورد: "Seedance identified your task as video
+    //      editing based on your prompt... duration must be -1" — و چون گزینه‌ی (۱) بسته است،
+    //      این حالت خاص (پرامپت ویرایش‌گونه + ویدیوی مرجع) از مسیر OpenRouter اصلاً ممکن نیست؛
+    //      نه passthrough (`provider.options.seed.parameters.duration`) کمک کرد، چون "duration"
+    //      اصلاً جزو allowed_passthrough_parameters این مدل نیست و بی‌صدا حذف می‌شود.
+    //   ۳) duration مثبت + پرامپت تولیدی («یه ویدیوی سینمایی از...، با الهام از ویدیوی مرجع») →
+    //      کامل موفق (تایید‌شده، هزینه‌ی واقعی $0.556 برای ۴ث/480p+یک ویدیوی مرجع).
+    // نتیجه: duration مثبت همیشه درست است؛ تنها حالتی که شکست می‌خورد (پرامپت‌های ویرایش‌گونه)
+    // یک محدودیت واقعی سمت OpenRouter/ByteDance است که از این مسیر قابل‌دورزدن نیست — آن حالت
+    // فقط باید به‌عنوان شکست job (نه کرش) به کاربر نشان داده شود.
     const input: Record<string, unknown> = {
       prompt: job.prompt,
       resolution: job.resolution,
-      ...(job.videoKey
-        ? {}
-        : { duration: durationSec, aspect_ratio: job.aspectRatio ?? '16:9' }),
+      duration: durationSec,
+      ...(job.videoKey ? {} : { aspect_ratio: job.aspectRatio ?? '16:9' }),
     };
 
     // همان آپلودر موقت Kie (public URL) برای هر دو نوع رفرنس — OpenRouter برای input_references
@@ -182,8 +191,8 @@ export class VideoEditProcessor {
         });
 
         if (isOpenRouter) {
-          // دقیقاً هم‌قرارداد Kie: duration فقط وقتی ویدیوی رفرنس *نیست* فرستاده می‌شود — رجوع
-          // کن به کامنت داخل buildOpenRouterInput برای دلیل (نه مقدار مثبت، نه -1 قابل‌قبول است)
+          // duration مثبت همیشه فرستاده می‌شود، حتی با ویدیوی مرجع — رجوع کن به کامنت داخل
+          // buildOpenRouterInput (تست زنده‌ی سه‌سناریویی ۱۴۰۵/۰۶/۱۷) برای دلیل کامل
           const input = await this.buildOpenRouterInput(
             videoJob,
             config.generateFixedDurationSec,
@@ -229,8 +238,15 @@ export class VideoEditProcessor {
             status.status === 'cancelled' ||
             status.status === 'expired'
           ) {
+            // پیام فنی/انگلیسی خام OpenRouter مستقیم به کاربر نمایش داده می‌شود
+            // (VideoEditGallery.tsx: job.errorMessage) — این یک حالت شناخته‌شده است (رجوع کن
+            // به کامنت buildOpenRouterInput)، پس پیام فارسی قابل‌فهم جایگزینش می‌شود
+            const isEditClassificationError =
+              status.errorMessage?.includes('duration must be -1') ?? false;
             throw new Error(
-              status.errorMessage ?? `OpenRouter video job ${status.status}`,
+              isEditClassificationError
+                ? fa.videoEdit.openRouterEditPromptRejected
+                : (status.errorMessage ?? `OpenRouter video job ${status.status}`),
             );
           }
         } else {
