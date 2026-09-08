@@ -58,6 +58,7 @@ model User {
   studioProjects            StudioProject[]
   captionProjects           CaptionProject[]
   videoEditJobs             VideoEditJob[]
+  videoEditSessions         VideoEditSession[]
 
   @@map("users")
 }
@@ -1887,6 +1888,21 @@ enum VideoModelProvider {
   OPENROUTER
 }
 
+// شکل input که video-edit.processor.ts باید برای این مدل بسازد — چون هر خانواده‌ی مدل Kie
+// قرارداد کاملاً متفاوتی دارد (تحقیق ۱۴۰۵/۰۶/۱۷ روی docs.kie.ai)، نه فقط یک اختلاف جزئی فیلد:
+//   OMNI: video_list:[{url,start,ends}] — duration وقتی ویدیو هست کاملاً نادیده گرفته می‌شود
+//   SEEDANCE: reference_video_urls:[url] — duration:-1 یعنی «هم‌طول ویدیوی ورودی»
+//   WAN_V2V: video_urls:[url] — duration فقط رشته‌ی enum ثابت ("5"/"10"، KieVideoModel.fixedDurations)
+//   WAN_R2V: reference_video/reference_image — duration عدد ساده در بازه‌ی [2,10]، بدون sentinel
+//   WAN_VIDEO_EDIT: video_url تکی — duration:0 یعنی «طول کامل ورودی» (sentinel متفاوت از Seedance)
+enum KieInputSchema {
+  OMNI
+  SEEDANCE
+  WAN_V2V
+  WAN_R2V
+  WAN_VIDEO_EDIT
+}
+
 // دسته‌بندی محصولی مدل‌های ویدیوی این کاتالوگ (kie.ai/market/video-to-video،
 // kie.ai/market/video-editing و مدل‌های ویدیوی OpenRouter) — برای گروه‌بندی در UI کاتالوگ، نه یک تفاوت API
 enum KieVideoCategory {
@@ -1931,6 +1947,15 @@ model KieVideoModel {
   supportsDuration    Boolean          @default(true) // نادیده گرفته می‌شود وقتی ویدیویی داده شده (بخش ۲.۱ سند)
   resolutions         String[]        @default(["720p"])
 
+  kieInputSchema      KieInputSchema  @default(OMNI) // فقط برای provider=KIE معنا دارد؛ کدام builder در video-edit.processor.ts صدا زده شود
+  // جایگزین دقیق‌تر گیت قبلی («provider===KIE یعنی edit می‌تواند»)؛ الان می‌دانیم بعضی مدل‌های
+  // KIE (Seedance/Wan-R2V/Wan-V2V) فقط GENERATE-with-reference دارند، نه ادیت صحنه‌حفظ‌کننده‌ی
+  // واقعی — فقط Omni و Wan-VideoEdit این را دارند
+  supportsScenePreservingEdit Boolean @default(false)
+  // خالی = بدون گزینه‌ی ثابت (duration محاسبه‌شده/پیوسته)؛ پر = چیپ‌های انتخاب مدت با همین مقادیر
+  // دقیق (مثلاً Wan V2V: [5,10] — enum رشته‌ای ثابت سمت Kie، نه بازه‌ی آزاد)
+  fixedDurations      Int[]           @default([])
+
   // فقط بعد از یک تست واقعی پر می‌شود (دقیقاً مثل بخش ۶.۲ سند — Kie قیمت را از قبل منتشر
   // نمی‌کند)؛ null یعنی «هنوز تست نشده»، preflight باید این حالت را جدا مدیریت کند
   pricePerSecondUsdConfirmed Float?
@@ -1969,12 +1994,30 @@ model VideoEditConfig {
   @@map("video_edit_config")
 }
 
+// «جلسه»ی ویرایش ویدیو — دقیقاً هم‌الگوی StudioProject (video-studio): یک ظرف قابل‌نام‌گذاری
+// برای گروهی از جاب‌های مرتبط، تا کاربر بتواند به یک ویرایش قبلی برگردد و ادامه بدهد، نه اینکه
+// همه‌ی جاب‌هایش در یک گالری تخت و بدون‌گروه‌بندی گم شوند (بازطراحی ۱۴۰۵/۰۶/۱۷)
+model VideoEditSession {
+  id        String         @id @default(uuid())
+  userId    String
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String? // null = «بدون عنوان» (پیش‌نویس تا اولین job)
+  createdAt DateTime       @default(now())
+  jobs      VideoEditJob[]
+
+  @@index([userId])
+  @@map("video_edit_sessions")
+}
+
 // یک ردیف = یک تسک Kie — چه GENERATE چه EDIT، چون هر دو یک createTask هستند (بخش ۲ سند).
-// یک‌شاته (نه چندصحنه‌ای مثل StudioProject) چون این فیچر «یک ورودی → یک ویدیوی خروجی» است
+// یک‌شاته (نه چندصحنه‌ای مثل StudioProject) چون این فیچر «یک ورودی → یک ویدیوی خروجی» است —
+// گروه‌بندی چندتایی‌اش را VideoEditSession انجام می‌دهد، نه خودِ این مدل
 model VideoEditJob {
   id              String        @id @default(uuid())
   userId          String
   user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessionId       String
+  session         VideoEditSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   kieVideoModelId String
   kieVideoModel   KieVideoModel @relation(fields: [kieVideoModelId], references: [id])
   mode            VideoEditMode
@@ -1998,5 +2041,6 @@ model VideoEditJob {
   completedAt         DateTime?
 
   @@index([userId])
+  @@index([sessionId])
   @@map("video_edit_jobs")
 }

@@ -1,7 +1,12 @@
 import { Process, Processor } from '@nestjs/bull';
 import { Logger } from '@nestjs/common';
 import type { Job } from 'bull';
-import { PricingGenerationType, VideoJobStatus } from '@prisma/client';
+import {
+  KieInputSchema,
+  PricingGenerationType,
+  VideoJobStatus,
+  type KieVideoModel,
+} from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
 import { PricingService } from '../../modules/usage/pricing.service';
@@ -16,6 +21,30 @@ const MAX_POLL_ATTEMPTS = 180; // ۳۰ دقیقه سقف — همون منطق s
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// فیلدهای مشترکی که هر ۵ input-builder از روی ردیف VideoEditJob لازم دارند
+type JobFields = {
+  prompt: string;
+  referenceImageKeys: string[];
+  videoKey: string | null;
+  videoWindowStartSec: number | null;
+  videoWindowEndSec: number | null;
+  aspectRatio: string | null;
+  resolution: string;
+};
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+// Wan V2V فقط enum رشته‌ای ثابت می‌پذیرد (مثلاً فقط "5"/"10")، بدون مقدار میانی — نزدیک‌ترین
+// گزینه‌ی مجاز مدل به durationSec پیشنهادی انتخاب می‌شود
+function pickClosestFixedDuration(options: number[], target: number): number {
+  if (!options.length) return target;
+  return options.reduce((closest, v) =>
+    Math.abs(v - target) < Math.abs(closest - target) ? v : closest,
+  );
 }
 
 // docs/PRD-video-edit-omni-kie.md بخش ۵.۲ — تنها پردازشگری که واقعاً با Kie.ai حرف می‌زند.
@@ -49,52 +78,145 @@ export class VideoEditProcessor {
     );
   }
 
-  // ورودی خام Kie را از روی ردیف job + کاتالوگ مدل می‌سازد — مدل‌آگنوستیک (بخش ۲ سند):
-  // فقط فیلدهایی که واقعاً پر شده‌اند اضافه می‌شوند، بدون فرض‌گرفتن شکل ثابت برای هر مدل
-  private async buildKieInput(job: {
-    prompt: string;
-    referenceImageKeys: string[];
-    videoKey: string | null;
-    videoWindowStartSec: number | null;
-    videoWindowEndSec: number | null;
-    aspectRatio: string | null;
-    resolution: string;
-  }): Promise<Record<string, unknown>> {
+  // ابزار مشترک هر ۵ builder — دانلود از MinIO + آپلود موقت Kie، برای یک کلید تکی
+  private async uploadRef(key: string): Promise<string> {
+    const buffer = await this.storage.downloadImage(key);
+    const { url } = await this.kieProvider.uploadFile(buffer, key);
+    return url;
+  }
+
+  private async uploadRefs(keys: string[]): Promise<string[]> {
+    const urls: string[] = [];
+    for (const key of keys) urls.push(await this.uploadRef(key));
+    return urls;
+  }
+
+  // Omni: video_list آبجکتی با پنجره‌ی start/ends (تنها مدل با trim واقعی)؛ duration وقتی
+  // ویدیویی داده شده کلاً نادیده گرفته می‌شود (بخش ۲.۱ سند)
+  private async buildOmniInput(
+    job: JobFields,
+    durationSec: number,
+  ): Promise<Record<string, unknown>> {
     const input: Record<string, unknown> = {
       prompt: job.prompt,
       resolution: job.resolution,
     };
-
     if (job.videoKey) {
-      const buffer = await this.storage.downloadImage(job.videoKey);
-      const { url } = await this.kieProvider.uploadFile(
-        buffer,
-        `${job.videoKey}`,
-      );
       input.video_list = [
         {
-          url,
+          url: await this.uploadRef(job.videoKey),
           start: job.videoWindowStartSec ?? 0,
           ends: job.videoWindowEndSec ?? 8,
         },
       ];
     } else {
-      // duration فقط وقتی معنا دارد که ویدیویی داده نشده — Kie خودش نادیده می‌گیرد وگرنه
-      // (بخش ۲.۱ سند)؛ رشته چون schema رسمی نمونه‌اش را همیشه به‌صورت رشته نشان داده ("4")
+      input.duration = String(durationSec);
       input.aspect_ratio = job.aspectRatio ?? '16:9';
     }
-
     if (job.referenceImageKeys.length) {
-      const urls: string[] = [];
-      for (const key of job.referenceImageKeys) {
-        const buffer = await this.storage.downloadImage(key);
-        const { url } = await this.kieProvider.uploadFile(buffer, key);
-        urls.push(url);
-      }
-      input.image_urls = urls;
+      input.image_urls = await this.uploadRefs(job.referenceImageKeys);
     }
-
     return input;
+  }
+
+  // Seedance (2.5/2.0/2.0-fast/2.0-mini، هم روی OpenRouter هم Kie): reference_video_urls،
+  // duration:-1 یعنی «هم‌طول ویدیوی مرجع» (تایید‌شده مستقیم روی Kie ۱۴۰۵/۰۶/۱۷ — برخلاف
+  // OpenRouter که -1 را در همون gateway رد می‌کند). هیچ trim/window‌ای نیست، کل بافر می‌رود.
+  private async buildSeedanceInput(
+    job: JobFields,
+    durationSec: number,
+  ): Promise<Record<string, unknown>> {
+    const input: Record<string, unknown> = {
+      prompt: job.prompt,
+      resolution: job.resolution,
+      duration: job.videoKey ? -1 : durationSec,
+      ...(job.videoKey ? {} : { aspect_ratio: job.aspectRatio ?? '16:9' }),
+    };
+    if (job.referenceImageKeys.length) {
+      input.reference_image_urls = await this.uploadRefs(
+        job.referenceImageKeys,
+      );
+    }
+    if (job.videoKey) {
+      input.reference_video_urls = [await this.uploadRef(job.videoKey)];
+    }
+    return input;
+  }
+
+  // Wan 2.6 Video-to-Video: duration فقط enum رشته‌ای ثابت ("5"/"10") — sentinel ندارد، پس
+  // نزدیک‌ترین مقدار مجاز مدل (KieVideoModel.fixedDurations) به durationSec انتخاب می‌شود
+  private async buildWanV2VInput(
+    job: JobFields,
+    model: KieVideoModel,
+    durationSec: number,
+  ): Promise<Record<string, unknown>> {
+    const input: Record<string, unknown> = {
+      prompt: job.prompt,
+      resolution: job.resolution,
+      duration: String(pickClosestFixedDuration(model.fixedDurations, durationSec)),
+      ...(job.videoKey ? {} : { aspect_ratio: job.aspectRatio ?? '16:9' }),
+    };
+    if (job.videoKey) input.video_urls = [await this.uploadRef(job.videoKey)];
+    return input;
+  }
+
+  // Wan 2.7 Reference-to-Video: duration عدد ساده در بازه‌ی [2,10]، بدون sentinel — فقط clamp
+  private async buildWanR2VInput(
+    job: JobFields,
+    durationSec: number,
+  ): Promise<Record<string, unknown>> {
+    const input: Record<string, unknown> = {
+      prompt: job.prompt,
+      resolution: job.resolution,
+      duration: clamp(durationSec, 2, 10),
+      ...(job.videoKey ? {} : { aspect_ratio: job.aspectRatio ?? '16:9' }),
+    };
+    if (job.referenceImageKeys.length) {
+      input.reference_image = await this.uploadRefs(job.referenceImageKeys);
+    }
+    if (job.videoKey) input.reference_video = [await this.uploadRef(job.videoKey)];
+    return input;
+  }
+
+  // Wan 2.7 VideoEdit: video_url تکی (نه آرایه)؛ duration:0 یعنی «طول کامل ورودی بدون برش» —
+  // sentinel متفاوت از Seedance (-1) و Omni (نادیده‌گرفتن کامل)
+  private async buildWanVideoEditInput(
+    job: JobFields,
+    durationSec: number,
+  ): Promise<Record<string, unknown>> {
+    const input: Record<string, unknown> = {
+      prompt: job.prompt,
+      resolution: job.resolution,
+      duration: job.videoKey ? 0 : durationSec,
+      ...(job.videoKey ? {} : { aspect_ratio: job.aspectRatio ?? '16:9' }),
+    };
+    if (job.videoKey) input.video_url = await this.uploadRef(job.videoKey);
+    if (job.referenceImageKeys.length) {
+      input.reference_image = await this.uploadRefs(job.referenceImageKeys);
+    }
+    return input;
+  }
+
+  // dispatcher — کدام builder بر اساس KieVideoModel.kieInputSchema صدا زده شود؛ اضافه‌کردن
+  // خانواده‌ی ششم یعنی یک case جدید اینجا + یک builder جدید، نه دست‌کاری بقیه
+  private async buildKieInputForModel(
+    job: JobFields,
+    model: KieVideoModel,
+    durationSec: number,
+  ): Promise<Record<string, unknown>> {
+    switch (model.kieInputSchema) {
+      case KieInputSchema.SEEDANCE:
+        return this.buildSeedanceInput(job, durationSec);
+      case KieInputSchema.WAN_V2V:
+        return this.buildWanV2VInput(job, model, durationSec);
+      case KieInputSchema.WAN_R2V:
+        return this.buildWanR2VInput(job, durationSec);
+      case KieInputSchema.WAN_VIDEO_EDIT:
+        return this.buildWanVideoEditInput(job, durationSec);
+      case KieInputSchema.OMNI:
+      default:
+        return this.buildOmniInput(job, durationSec);
+    }
   }
 
   // OpenRouter input_references — تایید‌شده با تست مستقیم API امروز (۱۴۰۵/۰۶/۱۷): آرایه‌ی
@@ -203,11 +325,13 @@ export class VideoEditProcessor {
           );
           taskId = submitted.id;
         } else {
-          const durationForGenerate = videoJob.videoKey
-            ? undefined
-            : config.generateFixedDurationSec;
-          const input = await this.buildKieInput(videoJob);
-          if (durationForGenerate) input.duration = String(durationForGenerate);
+          // هر builder خودش تصمیم می‌گیرد duration را چطور بفرستد (نادیده‌گرفتن/-1/0/enum/بازه)
+          // — رجوع کن به کامنت هرکدام برای قرارداد دقیق آن خانواده‌ی مدل
+          const input = await this.buildKieInputForModel(
+            videoJob,
+            videoJob.kieVideoModel,
+            config.generateFixedDurationSec,
+          );
 
           const submitted = await this.kieProvider.createTask(
             videoJob.kieVideoModel.slug,

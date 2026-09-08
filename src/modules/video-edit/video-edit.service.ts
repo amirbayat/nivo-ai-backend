@@ -123,6 +123,38 @@ export class VideoEditService {
     return model;
   }
 
+  // دقیقاً الگوی VideoStudioService.listMyProjects — تاریخچه‌ی جلسه‌ها + جاب‌های هرکدام،
+  // برای drawer تاریخچه و گالری «کارهای این جلسه» (بازطراحی ۱۴۰۵/۰۶/۱۷)
+  async listMySessions(userId: string) {
+    return this.prisma.videoEditSession.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+      include: {
+        jobs: { orderBy: { createdAt: 'desc' }, include: { kieVideoModel: true } },
+      },
+    });
+  }
+
+  // «شروع ویرایش جدید» صریح از drawer تاریخچه — معمولاً لازم نیست چون createJob خودش session
+  // بی‌عنوان می‌سازد وقتی sessionId نیامده، ولی این endpoint برای وقتی UI می‌خواهد قبل از هر
+  // job واقعی یک session خالی در تاریخچه داشته باشد مفید است
+  async createSession(userId: string, title?: string) {
+    return this.prisma.videoEditSession.create({
+      data: { userId, title: title ?? null },
+    });
+  }
+
+  private async getOwnedSessionOrThrow(userId: string, id: string) {
+    const session = await this.prisma.videoEditSession.findUnique({
+      where: { id },
+    });
+    if (!session) throw new NotFoundException(fa.videoEdit.sessionNotFound);
+    if (session.userId !== userId)
+      throw new ForbiddenException(fa.errors.forbidden);
+    return session;
+  }
+
   // اعتبارسنجی مخصوص mode/مدل — بخش ۲ سند: GENERATE و EDIT روی یک endpoint Kie می‌روند،
   // این تفاوت فقط این‌جا (نه در schema/API) اعمال می‌شود
   private validateAgainstMode(
@@ -135,12 +167,13 @@ export class VideoEditService {
       if (dto.referenceImageKeys?.length) {
         throw new BadRequestException(fa.videoEdit.imagesNotSupportedForEdit);
       }
-      // مسیر EDIT یعنی «ویرایش صحنه‌حفظ‌کننده با پنجره‌ی start/end» — چیزی که فقط برای Kie
-      // (video_list با start/ends) تایید شده؛ برای OpenRouter (input_references/video_url) هیچ
-      // trim/window تایید‌شده‌ای پیدا نشد (تحقیق ۱۴۰۵/۰۶/۱۷)، پس فعلاً فقط GENERATE ارائه می‌شود
-      if (model.provider === 'OPENROUTER') {
+      // مسیر EDIT یعنی «ویرایش صحنه‌حفظ‌کننده با پنجره‌ی start/end» — فقط مدل‌هایی که واقعاً
+      // این قابلیت را تایید کرده‌اند (Omni، Wan-VideoEdit) — نه صرفاً provider=KIE، چون
+      // Seedance/Wan-R2V/Wan-V2V هم روی Kie هستند ولی فقط GENERATE-with-reference دارند
+      // (تحقیق ۱۴۰۵/۰۶/۱۷)
+      if (!model.supportsScenePreservingEdit) {
         throw new BadRequestException(
-          fa.videoEdit.editModeNotSupportedByProvider,
+          fa.videoEdit.editModeNotSupportedByModel,
         );
       }
     }
@@ -186,6 +219,13 @@ export class VideoEditService {
 
     const model = await this.getActiveModelOrThrow(dto.kieVideoModelId);
     this.validateAgainstMode(dto, model);
+
+    // session یا موجود (باید مال همین کاربر باشد) یا تازه‌ساز («شروع ویرایش جدید» بی‌عنوان)
+    const session = dto.sessionId
+      ? await this.getOwnedSessionOrThrow(userId, dto.sessionId)
+      : await this.prisma.videoEditSession.create({
+          data: { userId, title: null },
+        });
 
     const activeJobsCount = await this.prisma.videoEditJob.count({
       where: {
@@ -238,9 +278,19 @@ export class VideoEditService {
       });
     }
 
+    // اولین job یک session بی‌عنوان → عنوان از ۴۰ کاراکتر اول همین پرامپت (دقیقاً الگوی
+    // backfill در manual-migrations/20260908b — کاربر هیچ فرم «تغییر نام» جداگانه نمی‌بیند)
+    if (session.title == null) {
+      await this.prisma.videoEditSession.update({
+        where: { id: session.id },
+        data: { title: dto.prompt.slice(0, 40) },
+      });
+    }
+
     const job = await this.prisma.videoEditJob.create({
       data: {
         userId,
+        sessionId: session.id,
         kieVideoModelId: model.id,
         mode: dto.mode,
         prompt: dto.prompt,

@@ -51,6 +51,9 @@ export class KieVideoModelsAdminController {
       resolutions: dto.resolutions ?? ['720p'],
       pricePerSecondUsdConfirmed: dto.pricePerSecondUsdConfirmed ?? null,
       pricingNote: dto.pricingNote ?? null,
+      kieInputSchema: dto.kieInputSchema ?? 'OMNI',
+      supportsScenePreservingEdit: dto.supportsScenePreservingEdit ?? false,
+      fixedDurations: dto.fixedDurations ?? [],
     });
   }
 

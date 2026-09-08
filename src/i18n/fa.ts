@@ -287,6 +287,7 @@ export const fa = {
     modelDisabled: 'این مدل دیگر فعال نیست',
     featureDisabled: 'ویرایش ویدیو فعلاً غیرفعال است',
     jobNotFound: 'این درخواست یافت نشد',
+    sessionNotFound: 'این جلسه یافت نشد',
     // مبلغ لازم/موجود واقعی توی پیام نشان داده می‌شود، نه فقط «کافی نیست» — با واحد «نیوو»
     // (همون واحد نمایشی-به-کاربر CreditsService)، نه تومان خام؛ دستور صریح کاربر. video-edit.service.ts
     // createJob هم amounts خام را در بدنه‌ی خطا (neededCredits/balanceCredits) برمی‌گرداند
@@ -298,7 +299,7 @@ export const fa = {
     videoRequiredForEdit: 'برای ادیت باید یک ویدیو آپلود کنید',
     imagesNotSupportedForEdit: 'این مدل در حالت ادیت عکس نمی‌پذیرد',
     videoNotSupportedByModel: 'این مدل ویدیوی مرجع/منبع نمی‌پذیرد',
-    editModeNotSupportedByProvider:
+    editModeNotSupportedByModel:
       'این مدل فقط از حالت «تولید با رفرنس» پشتیبانی می‌کند، نه ویرایش صحنه‌حفظ‌کننده',
     resolutionNotSupportedByModel: (allowed: string[]) =>
       `این رزولوشن برای این مدل پشتیبانی نمی‌شود — گزینه‌های مجاز: ${allowed.join('، ')}`,

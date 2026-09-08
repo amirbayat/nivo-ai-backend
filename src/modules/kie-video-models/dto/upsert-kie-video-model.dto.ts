@@ -7,10 +7,11 @@ import {
   IsString,
   Min,
 } from 'class-validator';
-import { KieVideoCategory, VideoModelProvider } from '@prisma/client';
+import { KieInputSchema, KieVideoCategory, VideoModelProvider } from '@prisma/client';
 
 const CATEGORIES = Object.values(KieVideoCategory);
 const PROVIDERS = Object.values(VideoModelProvider);
+const KIE_INPUT_SCHEMAS = Object.values(KieInputSchema);
 
 // برای هر دو create/update استفاده می‌شود — همه‌ی فیلدها اینجا اختیاری‌اند، سرویس تصمیم
 // می‌گیرد کدام‌ها برای create اجباری‌اند (slug/displayName/category)
@@ -82,4 +83,21 @@ export class UpsertKieVideoModelDto {
   @IsOptional()
   @IsString()
   pricingNote?: string;
+
+  // فقط برای provider=KIE معنا دارد — تعیین می‌کند کدام builder در video-edit.processor.ts
+  // صدا زده شود (Omni/Seedance/Wan V2V/Wan R2V/Wan VideoEdit)
+  @IsOptional()
+  @IsIn(KIE_INPUT_SCHEMAS)
+  kieInputSchema?: KieInputSchema;
+
+  @IsOptional()
+  @IsBoolean()
+  supportsScenePreservingEdit?: boolean;
+
+  // خالی = duration پیوسته (config.generateFixedDurationSec)؛ پر = چیپ‌های مدت با همین
+  // مقادیر دقیق (مثلاً Wan V2V فقط [5,10] را قبول می‌کند)
+  @IsOptional()
+  @IsArray()
+  @IsInt({ each: true })
+  fixedDurations?: number[];
 }

@@ -19,6 +19,7 @@ import {
 } from '../../common/decorators/current-user.decorator';
 import { VideoEditService } from './video-edit.service';
 import { CreateVideoEditJobDto } from './dto/create-video-edit-job.dto';
+import { CreateVideoEditSessionDto } from './dto/create-video-edit-session.dto';
 
 function mimeTypeForVideoEditExt(ext: string): string {
   if (ext.toLowerCase() === 'mov') return 'video/quicktime';
@@ -61,6 +62,22 @@ export class VideoEditController {
   )
   uploadVideo(@UploadedFile() file: Express.Multer.File) {
     return this.videoEdit.uploadVideo(file);
+  }
+
+  // بازطراحی ۱۴۰۵/۰۶/۱۷ — «Session»: تاریخچه‌ی جلسه‌های ویرایش (هر session چند job دارد).
+  // معمولاً لازم نیست صریح صدا زده شود چون POST jobs خودش وقتی sessionId نیامده می‌سازد؛
+  // این endpoint برای وقتی UI می‌خواهد قبل از هر job واقعی «شروع ویرایش جدید» بزند مفید است
+  @Get('sessions')
+  listMySessions(@CurrentUser() user: JwtPayload) {
+    return this.videoEdit.listMySessions(user.sub);
+  }
+
+  @Post('sessions')
+  createSession(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: CreateVideoEditSessionDto,
+  ) {
+    return this.videoEdit.createSession(user.sub, dto.title);
   }
 
   @Post('jobs')

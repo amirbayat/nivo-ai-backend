@@ -17,6 +17,12 @@ const ASPECT_RATIOS = ['16:9', '9:16'] as const;
 // اعتبارسنجی مخصوص هر mode (مثلاً EDIT بدون عکس، videoKey اجباری) در video-edit.service.ts
 // انجام می‌شود، نه اینجا با دکوریتورهای ثابت — چون این قوانین به‌ازای مدل کاتالوگ هم فرق می‌کند
 export class CreateVideoEditJobDto {
+  // اختیاری — اگر نیاید، یک VideoEditSession تازه (بی‌عنوان) ساخته می‌شود (بازطراحی ۱۴۰۵/۰۶/۱۷:
+  // «شروع ویرایش جدید»)؛ اگر بیاید باید مال همین کاربر باشد (چک در video-edit.service.ts)
+  @IsOptional()
+  @IsString()
+  sessionId?: string;
+
   @IsIn(MODES)
   mode: VideoEditMode;
 
