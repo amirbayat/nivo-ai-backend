@@ -7,8 +7,11 @@ import {
   Param,
   Post,
   Patch,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { JwtGuard } from '../../common/guards/jwt.guard';
 import { AdminGuard } from '../../common/guards/admin.guard';
 import { KieVideoModelsService } from './kie-video-models.service';
@@ -49,6 +52,22 @@ export class KieVideoModelsAdminController {
       pricePerSecondUsdConfirmed: dto.pricePerSecondUsdConfirmed ?? null,
       pricingNote: dto.pricingNote ?? null,
     });
+  }
+
+  // دقیقاً هم‌الگوی admin/models/import (اکسل AiModel) — آپلود چندردیفی به‌جای فرم تک‌ردیفی؛
+  // ستون‌های مورد انتظار در KieVideoModelsService.importFromXlsx مستند شده‌اند
+  @Post('import')
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: 5 * 1024 * 1024 } }),
+  )
+  importFromXlsx(@UploadedFile() file: Express.Multer.File) {
+    if (!file) throw new BadRequestException('فایلی ارسال نشده');
+    if (!/\.(xlsx|xls)$/i.test(file.originalname)) {
+      throw new BadRequestException(
+        'فقط فایل اکسل (.xlsx یا .xls) پذیرفته می‌شود',
+      );
+    }
+    return this.models.importFromXlsx(file.buffer);
   }
 
   @Patch(':id')
