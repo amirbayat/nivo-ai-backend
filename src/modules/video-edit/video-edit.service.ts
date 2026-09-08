@@ -170,6 +170,13 @@ export class VideoEditService {
         );
       }
     }
+    // کاربر رزولوشن را از بین model.resolutions انتخاب می‌کند (نه همیشه resolutions[0]) — باید
+    // دقیقاً یکی از مقادیر همین کاتالوگ باشد، وگرنه چیزی که provider پشتیبانی نمی‌کند فرستاده می‌شود
+    if (dto.resolution && !model.resolutions.includes(dto.resolution)) {
+      throw new BadRequestException(
+        fa.videoEdit.resolutionNotSupportedByModel(model.resolutions),
+      );
+    }
   }
 
   async createJob(userId: string, dto: CreateVideoEditJobDto) {
@@ -242,7 +249,7 @@ export class VideoEditService {
         videoWindowStartSec: dto.videoWindowStartSec ?? null,
         videoWindowEndSec: dto.videoWindowEndSec ?? null,
         aspectRatio: dto.videoKey ? null : (dto.aspectRatio ?? '16:9'),
-        resolution: model.resolutions[0] ?? '720p',
+        resolution: dto.resolution ?? model.resolutions[0] ?? '720p',
       },
     });
 

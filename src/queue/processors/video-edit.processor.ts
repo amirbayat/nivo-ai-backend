@@ -118,7 +118,10 @@ export class VideoEditProcessor {
     const input: Record<string, unknown> = {
       prompt: job.prompt,
       resolution: job.resolution,
-      duration: durationSec,
+      // وقتی ویدیوی مرجع داده شده، Seedance این را ویرایش تشخیص می‌دهد و مدت زمان خروجی را
+      // از خودِ ویدیوی ورودی می‌گیرد — duration باید دقیقاً -1 باشد، نه حذف و نه مقدار تولید
+      // (خطای پروداکشن ۱۴۰۵/۰۶/۱۷: "duration must be -1" برای Seedance 2.5)
+      duration: job.videoKey ? -1 : durationSec,
       ...(job.videoKey ? {} : { aspect_ratio: job.aspectRatio ?? '16:9' }),
     };
 
@@ -175,8 +178,8 @@ export class VideoEditProcessor {
         });
 
         if (isOpenRouter) {
-          // برخلاف Kie، duration همیشه فرستاده می‌شود (حتی وقتی ویدیوی رفرنس داده شده) — چون
-          // حذف‌شدنش‌وقتی رفرنس هست برای OpenRouter تایید نشده (بخش ۴ سند بالا)
+          // برخلاف Kie (که duration را کلاً حذف می‌کند)، برای OpenRouter وقتی ویدیوی رفرنس
+          // داده شده duration باید -1 فرستاده شود، نه حذف شود — رجوع کن به buildOpenRouterInput
           const input = await this.buildOpenRouterInput(
             videoJob,
             config.generateFixedDurationSec,

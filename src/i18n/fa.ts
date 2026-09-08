@@ -300,6 +300,8 @@ export const fa = {
     videoNotSupportedByModel: 'این مدل ویدیوی مرجع/منبع نمی‌پذیرد',
     editModeNotSupportedByProvider:
       'این مدل فقط از حالت «تولید با رفرنس» پشتیبانی می‌کند، نه ویرایش صحنه‌حفظ‌کننده',
+    resolutionNotSupportedByModel: (allowed: string[]) =>
+      `این رزولوشن برای این مدل پشتیبانی نمی‌شود — گزینه‌های مجاز: ${allowed.join('، ')}`,
     imagesNotSupportedByModel: 'این مدل عکس مرجع نمی‌پذیرد',
     tooManyImages: (max: number) => `این مدل حداکثر ${max} عکس می‌پذیرد`,
     videoWindowRequired: 'باید بازه‌ی زمانی ویدیو (شروع/پایان) را مشخص کنید',

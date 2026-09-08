@@ -51,4 +51,10 @@ export class CreateVideoEditJobDto {
   @IsOptional()
   @IsIn(ASPECT_RATIOS)
   aspectRatio?: (typeof ASPECT_RATIOS)[number];
+
+  // اختیاری — باید یکی از model.resolutions باشد (اعتبارسنجی در video-edit.service.ts، چون
+  // مقادیر مجاز به‌ازای هر مدل فرق می‌کند)؛ اگر نیاید، اولین رزولوشن کاتالوگ مدل استفاده می‌شود
+  @IsOptional()
+  @IsString()
+  resolution?: string;
 }
