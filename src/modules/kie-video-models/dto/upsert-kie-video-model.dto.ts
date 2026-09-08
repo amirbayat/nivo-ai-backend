@@ -7,13 +7,19 @@ import {
   IsString,
   Min,
 } from 'class-validator';
-import { KieVideoCategory } from '@prisma/client';
+import { KieVideoCategory, VideoModelProvider } from '@prisma/client';
 
 const CATEGORIES = Object.values(KieVideoCategory);
+const PROVIDERS = Object.values(VideoModelProvider);
 
 // برای هر دو create/update استفاده می‌شود — همه‌ی فیلدها اینجا اختیاری‌اند، سرویس تصمیم
 // می‌گیرد کدام‌ها برای create اجباری‌اند (slug/displayName/category)
 export class UpsertKieVideoModelDto {
+  // پیش‌فرض KIE در کنترلر اعمال می‌شود (نه اینجا) تا این DTO برای update هم قابل‌استفاده بماند
+  @IsOptional()
+  @IsIn(PROVIDERS)
+  provider?: VideoModelProvider;
+
   @IsOptional()
   @IsString()
   slug?: string;

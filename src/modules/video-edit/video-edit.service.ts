@@ -135,6 +135,14 @@ export class VideoEditService {
       if (dto.referenceImageKeys?.length) {
         throw new BadRequestException(fa.videoEdit.imagesNotSupportedForEdit);
       }
+      // مسیر EDIT یعنی «ویرایش صحنه‌حفظ‌کننده با پنجره‌ی start/end» — چیزی که فقط برای Kie
+      // (video_list با start/ends) تایید شده؛ برای OpenRouter (input_references/video_url) هیچ
+      // trim/window تایید‌شده‌ای پیدا نشد (تحقیق ۱۴۰۵/۰۶/۱۷)، پس فعلاً فقط GENERATE ارائه می‌شود
+      if (model.provider === 'OPENROUTER') {
+        throw new BadRequestException(
+          fa.videoEdit.editModeNotSupportedByProvider,
+        );
+      }
     }
     if (dto.videoKey) {
       if (!model.supportsVideo) {

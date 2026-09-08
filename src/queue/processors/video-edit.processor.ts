@@ -7,6 +7,7 @@ import { StorageService } from '../../storage/storage.service';
 import { PricingService } from '../../modules/usage/pricing.service';
 import { PricingTiersService } from '../../modules/usage/pricing-tiers.service';
 import { KieProviderService } from '../../common/services/kie-provider.service';
+import { OpenRouterVideoProviderService } from '../../common/services/openrouter-video-provider.service';
 import { PushFcmService } from '../../modules/push-notifications/fcm.service';
 import { fa } from '../../i18n/fa';
 
@@ -31,6 +32,7 @@ export class VideoEditProcessor {
     private readonly pricing: PricingService,
     private readonly pricingTiers: PricingTiersService,
     private readonly kieProvider: KieProviderService,
+    private readonly openRouterProvider: OpenRouterVideoProviderService,
     private readonly pushFcm: PushFcmService,
   ) {}
 
@@ -95,6 +97,49 @@ export class VideoEditProcessor {
     return input;
   }
 
+  // OpenRouter input_references — تایید‌شده با تست مستقیم API امروز (۱۴۰۵/۰۶/۱۷): آرایه‌ی
+  // input_references علاوه بر type:"image_url" (مستند رسمی)، type:"video_url" را هم می‌پذیرد و
+  // به بالادستی (ByteDance/MiniMax) فوروارد می‌کند — جایی در مستندات رسمی OpenRouter نوشته
+  // نشده، ولی با خطای دقیق «URL پیدا نشد» (نه خطای schema/نام فیلد غلط) برای هر ۵ مدل هدف
+  // (Seedance 2.0/2.0-fast/2.0-mini/2.5, Hailuo H3) تایید شد. هیچ trim/window تایید‌شده‌ای برای
+  // video_url پیدا نشد (برخلاف video_list.start/ends در Kie)، پس کل بافر ویدیوی آپلودشده
+  // فرستاده می‌شود — همین باعث می‌شود مسیر EDIT (پنجره‌ی اجباری) فقط برای provider=KIE ارائه
+  // شود (گارد در video-edit.service.ts/validateAgainstMode).
+  private async buildOpenRouterInput(
+    job: {
+      prompt: string;
+      referenceImageKeys: string[];
+      videoKey: string | null;
+      aspectRatio: string | null;
+      resolution: string;
+    },
+    durationSec: number,
+  ): Promise<Record<string, unknown>> {
+    const input: Record<string, unknown> = {
+      prompt: job.prompt,
+      resolution: job.resolution,
+      duration: durationSec,
+      ...(job.videoKey ? {} : { aspect_ratio: job.aspectRatio ?? '16:9' }),
+    };
+
+    // همان آپلودر موقت Kie (public URL) برای هر دو نوع رفرنس — OpenRouter برای input_references
+    // به یک URL واقعی fetchable نیاز دارد، نه data URI (حجم ویدیو تا ۱۰۰ مگابایت است)
+    const references: Record<string, unknown>[] = [];
+    for (const key of job.referenceImageKeys) {
+      const buffer = await this.storage.downloadImage(key);
+      const { url } = await this.kieProvider.uploadFile(buffer, key);
+      references.push({ type: 'image_url', image_url: { url } });
+    }
+    if (job.videoKey) {
+      const buffer = await this.storage.downloadImage(job.videoKey);
+      const { url } = await this.kieProvider.uploadFile(buffer, job.videoKey);
+      references.push({ type: 'video_url', video_url: { url } });
+    }
+    if (references.length) input.input_references = references;
+
+    return input;
+  }
+
   @Process('render')
   async handleRender(job: Job<{ jobId: string }>) {
     const { jobId } = job.data;
@@ -112,6 +157,7 @@ export class VideoEditProcessor {
       data: { status: VideoJobStatus.PROCESSING },
     });
 
+    const isOpenRouter = videoJob.kieVideoModel.provider === 'OPENROUTER';
     let taskId: string | null = null;
     try {
       // resume به‌جای resubmit — دقیقاً همون گارد idempotency studio-video-generation.processor.ts
@@ -119,26 +165,40 @@ export class VideoEditProcessor {
       taskId = videoJob.kieTaskId;
       if (taskId) {
         this.logger.warn(
-          `video-edit: job=${jobId} re-run detected (kieTaskId=${taskId} already set) — resuming poll instead of resubmitting`,
+          `video-edit: job=${jobId} re-run detected (kieTaskId=${taskId} already set, provider=${videoJob.kieVideoModel.provider}) — resuming poll instead of resubmitting`,
         );
       } else {
-        const durationForGenerate = videoJob.videoKey
-          ? undefined
-          : await this.prisma.videoEditConfig
-              .upsert({
-                where: { id: 'singleton' },
-                create: { id: 'singleton' },
-                update: {},
-              })
-              .then((c) => c.generateFixedDurationSec);
-        const input = await this.buildKieInput(videoJob);
-        if (durationForGenerate) input.duration = String(durationForGenerate);
+        const config = await this.prisma.videoEditConfig.upsert({
+          where: { id: 'singleton' },
+          create: { id: 'singleton' },
+          update: {},
+        });
 
-        const submitted = await this.kieProvider.createTask(
-          videoJob.kieVideoModel.slug,
-          input,
-        );
-        taskId = submitted.taskId;
+        if (isOpenRouter) {
+          // برخلاف Kie، duration همیشه فرستاده می‌شود (حتی وقتی ویدیوی رفرنس داده شده) — چون
+          // حذف‌شدنش‌وقتی رفرنس هست برای OpenRouter تایید نشده (بخش ۴ سند بالا)
+          const input = await this.buildOpenRouterInput(
+            videoJob,
+            config.generateFixedDurationSec,
+          );
+          const submitted = await this.openRouterProvider.createVideoJob(
+            videoJob.kieVideoModel.slug,
+            input,
+          );
+          taskId = submitted.id;
+        } else {
+          const durationForGenerate = videoJob.videoKey
+            ? undefined
+            : config.generateFixedDurationSec;
+          const input = await this.buildKieInput(videoJob);
+          if (durationForGenerate) input.duration = String(durationForGenerate);
+
+          const submitted = await this.kieProvider.createTask(
+            videoJob.kieVideoModel.slug,
+            input,
+          );
+          taskId = submitted.taskId;
+        }
         await this.prisma.videoEditJob.update({
           where: { id: jobId },
           data: { kieTaskId: taskId },
@@ -146,34 +206,56 @@ export class VideoEditProcessor {
       }
 
       let resultUrl: string | undefined;
-      let creditsConsumed: number | undefined;
+      let creditsConsumed: number | undefined; // فقط Kie
+      let realCostUsd: number | undefined; // فقط OpenRouter — دلار مستقیم، نه credit
       for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
         await sleep(POLL_INTERVAL_MS);
-        const status = await this.kieProvider.pollTask(taskId);
-        if (status.state === 'success') {
-          resultUrl = status.resultUrls[0];
-          creditsConsumed = status.creditsConsumed;
-          break;
-        }
-        if (status.state === 'fail') {
-          throw new Error(status.failMsg ?? 'Kie job failed on provider side');
+        if (isOpenRouter) {
+          const status = await this.openRouterProvider.pollVideoJob(taskId);
+          if (status.status === 'completed') {
+            resultUrl = status.resultUrl;
+            realCostUsd = status.realCostUsd;
+            break;
+          }
+          if (
+            status.status === 'failed' ||
+            status.status === 'cancelled' ||
+            status.status === 'expired'
+          ) {
+            throw new Error(
+              status.errorMessage ?? `OpenRouter video job ${status.status}`,
+            );
+          }
+        } else {
+          const status = await this.kieProvider.pollTask(taskId);
+          if (status.state === 'success') {
+            resultUrl = status.resultUrls[0];
+            creditsConsumed = status.creditsConsumed;
+            break;
+          }
+          if (status.state === 'fail') {
+            throw new Error(status.failMsg ?? 'Kie job failed on provider side');
+          }
         }
       }
       if (!resultUrl) throw new Error('video-edit job polling timed out');
 
-      const buffer = await this.kieProvider.downloadResult(resultUrl);
+      const buffer = isOpenRouter
+        ? await this.openRouterProvider.downloadVideoResult(taskId)
+        : await this.kieProvider.downloadResult(resultUrl);
       const resultVideoKey = await this.storage.uploadImage(
         buffer,
         'mp4',
         videoJob.id,
       );
 
-      // هزینه‌ی واقعی بر مبنای creditsConsumed واقعی Kie (بخش ۶.۵ سند) — نه تخمین preflight.
-      // نرخ ۰.۰۰۵ ($۵ = ۱۰۰۰ credit) دیگر حدس/منبع ثالث نیست — کاربر مستقیم از حساب واقعی
-      // Kie.ai تأیید کرد (۱۴۰۵/۰۶/۱۵)، هم‌راستا با همون رقمی که قبل از این تست هم استفاده
-      // می‌شد؛ اگر بعداً Kie نرخش را عوض کرد (مثلاً پله‌ی حجمی)، این عدد باید به‌روزرسانی شود.
+      // هزینه‌ی واقعی: Kie از creditsConsumed*نرخ (بخش ۶.۵ سند — نرخ ۰.۰۰۵ $=1000credit، تایید‌شده
+      // با حساب واقعی Kie.ai ۱۴۰۵/۰۶/۱۵)؛ OpenRouter مستقیم usage.cost دلاری برمی‌گرداند، نیازی
+      // به تبدیل نرخ نیست (تایید‌شده با تست زنده‌ی امروز، مثلاً $0.415481 برای ۴ث/480p).
       const KIE_USD_PER_CREDIT = 0.005;
-      const costUsd = (creditsConsumed ?? 0) * KIE_USD_PER_CREDIT;
+      const costUsd = isOpenRouter
+        ? (realCostUsd ?? 0)
+        : (creditsConsumed ?? 0) * KIE_USD_PER_CREDIT;
       const costCalc = await this.pricing.calcFlatCostToman(costUsd);
       const markup = await this.pricingTiers.getMarkup(
         PricingGenerationType.VIDEO,
@@ -183,12 +265,13 @@ export class VideoEditProcessor {
         videoJob.userId,
         costCalc.costToman,
         markup,
-        `ویرایش ویدیو (Kie.ai) — ${videoJob.mode}`,
+        `ویرایش ویدیو (${isOpenRouter ? 'OpenRouter' : 'Kie.ai'}) — ${videoJob.mode}`,
         {
           feature: 'video-edit',
           jobId,
           kieVideoModelId: videoJob.kieVideoModelId,
           creditsConsumed,
+          realCostUsd,
           costToman: costCalc.costToman,
         },
       );
@@ -203,7 +286,9 @@ export class VideoEditProcessor {
         data: {
           status: VideoJobStatus.SUCCEEDED,
           resultVideoKey,
-          creditsConsumedRaw: creditsConsumed ?? null,
+          // OpenRouter: usd واقعی (realCostUsd) در همین فیلد ذخیره می‌شود، نه creditsConsumed —
+          // چون مفهوم «رقم خام گزارش‌شده‌ی provider» است، صرفاً واحدش عوض می‌شود
+          creditsConsumedRaw: isOpenRouter ? (realCostUsd ?? null) : (creditsConsumed ?? null),
           creditCost: costCalc.costToman,
           completedAt: new Date(),
         },

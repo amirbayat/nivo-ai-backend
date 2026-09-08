@@ -1880,8 +1880,15 @@ model WeightLog {
 // LIARA/OPENROUTER) با قرارداد /chat/completions طراحی شده‌اند؛ Kie.ai یک قرارداد
 // queue-based کاملاً متفاوت دارد (jobs/createTask + jobs/recordInfo) — بخش ۳ سند.
 
-// دسته‌بندی محصولی مدل‌های Kie.ai مارکت (kie.ai/market/video-to-video،
-// kie.ai/market/video-editing) — برای گروه‌بندی در UI کاتالوگ، نه یک تفاوت API
+// کدام provider واقعاً این مدل را اجرا می‌کند — تعیین‌کننده‌ی اینکه پردازشگر صف کدام سرویس
+// (kie-provider.service.ts یا openrouter-video-provider.service.ts) را صدا بزند
+enum VideoModelProvider {
+  KIE
+  OPENROUTER
+}
+
+// دسته‌بندی محصولی مدل‌های ویدیوی این کاتالوگ (kie.ai/market/video-to-video،
+// kie.ai/market/video-editing و مدل‌های ویدیوی OpenRouter) — برای گروه‌بندی در UI کاتالوگ، نه یک تفاوت API
 enum KieVideoCategory {
   GENERATE // تولید ویدیوی جدید از پرامپت/عکس/ویدیوی مرجع (مثل gemini-omni-video، reference-to-video)
   EDIT // ویرایش صحنه‌حفظ‌کننده‌ی یک ویدیوی موجود
@@ -1893,16 +1900,23 @@ enum KieVideoCategory {
   OTHER
 }
 
-// کاتالوگ مدل‌های ویدیوی Kie.ai — ادمین-قابل‌مدیریت (بخش ۱ سند: «همه‌ی این مدل‌ها رو می‌خوام»)،
+// کاتالوگ مدل‌های ویدیوی این فیچر — ادمین-قابل‌مدیریت (بخش ۱ سند: «همه‌ی این مدل‌ها رو می‌خوام»)،
 // نه هاردکد به یک مدل. اضافه‌کردن مدل ۲۱ام یعنی یک ردیف جدید از پنل ادمین، نه دیپلوی کد تازه.
 // چون هر مدل شکل ورودی متفاوتی دارد (بعضی عکس نمی‌گیرند، بعضی audio_ids دارند و...)، این فیلدها
 // فقط رایج‌ترین ابعاد (تصویر/ویدیو/رزولوشن) را برای فاز اول توصیف می‌کنند — کافی برای مدل‌هایی
 // که فقط prompt+image+video می‌گیرند (Omni و بیشتر مدل‌های GENERATE/EDIT)؛ مدل‌هایی با ورودی
 // کاملاً خاص (مثلاً audio_ids برای dubbing) فعلاً باید با یک فیلد enable/disable ساده اضافه
 // شوند و منطق ویژه‌شان در video-edit.service.ts جداگانه نوشته شود، نه این‌جا حدس زده شود.
+//
+// از این‌جا به بعد یک کاتالوگ چندپروایدری است، نه فقط Kie.ai — provider تعیین می‌کند کدام
+// پردازشگر (kie-provider.service.ts یا openrouter-video-provider.service.ts) صدا زده شود.
+// slug برای هر دو provider دوباره‌استفاده می‌شود: برای KIE همان فیلد "model" در createTask،
+// برای OPENROUTER شناسه‌ی دقیق مدل OpenRouter (مثلاً "bytedance/seedance-2.5") — دو namespace
+// چون از قبل جدا-جدا معنادارند تصادم نمی‌کنند، پس فیلد جدا برای این لازم نبود.
 model KieVideoModel {
-  id                  String           @id @default(uuid())
-  slug                String           @unique // مقدار دقیق فیلد "model" در createTask، مثلاً "gemini-omni-video"
+  id                  String             @id @default(uuid())
+  provider            VideoModelProvider @default(KIE)
+  slug                String           @unique // KIE: فیلد دقیق "model" در createTask؛ OPENROUTER: شناسه‌ی دقیق مدل OpenRouter
   displayName         String
   category            KieVideoCategory
   isActive            Boolean          @default(true)

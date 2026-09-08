@@ -32,6 +32,7 @@ export class KieVideoModelsAdminController {
       throw new BadRequestException('slug/displayName/category اجباری‌اند');
     }
     return this.models.create({
+      provider: dto.provider ?? 'KIE',
       slug: dto.slug,
       displayName: dto.displayName,
       category: dto.category,

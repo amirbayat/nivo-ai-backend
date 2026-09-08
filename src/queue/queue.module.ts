@@ -28,6 +28,7 @@ import { VideoGenerationModule } from '../common/services/video-generation.modul
 import { MediaTranscodeModule } from '../common/services/media-transcode.module';
 import { AsrModule } from '../common/services/asr.module';
 import { KieProviderModule } from '../common/services/kie-provider.module';
+import { OpenRouterVideoProviderModule } from '../common/services/openrouter-video-provider.module';
 
 @Module({
   imports: [
@@ -87,6 +88,7 @@ import { KieProviderModule } from '../common/services/kie-provider.module';
     MediaTranscodeModule,
     AsrModule,
     KieProviderModule,
+    OpenRouterVideoProviderModule,
     CreditsModule,
   ],
   providers: [

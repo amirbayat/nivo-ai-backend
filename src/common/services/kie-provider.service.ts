@@ -90,7 +90,11 @@ export class KieProviderService {
 
   // آپلود فایل مرجع/منبع به فضای موقت Kie (base64) — طبق مستندات، فایل‌ها معمولاً بعد از
   // چند روز پاک می‌شوند، پس فقط برای «همین حالا submit کن» است، نه ذخیره‌سازی دائم؛ نتیجه‌ی
-  // نهایی باید سریع بعد از SUCCEEDED به MinIO خودمان منتقل شود (پردازشگر صف)
+  // نهایی باید سریع بعد از SUCCEEDED به MinIO خودمان منتقل شود (پردازشگر صف).
+  // این متد دیگر Kie-only نیست — چون OpenRouter هم برای input_references (image_url/video_url)
+  // به یک URL واقعی fetchable نیاز دارد (نه base64 embed، مخصوصاً برای ویدیو تا ۱۰۰ مگابایت)،
+  // video-edit.processor.ts از همین آپلودر موقت به‌عنوان یک ابزار عمومی «میزبانی موقت رفرنس»
+  // برای هر دو provider استفاده می‌کند، مستقل از اینکه نتیجه توسط Kie یا OpenRouter مصرف شود.
   async uploadFile(buffer: Buffer, fileName: string): Promise<{ url: string }> {
     const { res, json, text } = await this.request<{
       code: number;

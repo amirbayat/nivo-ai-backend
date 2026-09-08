@@ -298,6 +298,8 @@ export const fa = {
     videoRequiredForEdit: 'برای ادیت باید یک ویدیو آپلود کنید',
     imagesNotSupportedForEdit: 'این مدل در حالت ادیت عکس نمی‌پذیرد',
     videoNotSupportedByModel: 'این مدل ویدیوی مرجع/منبع نمی‌پذیرد',
+    editModeNotSupportedByProvider:
+      'این مدل فقط از حالت «تولید با رفرنس» پشتیبانی می‌کند، نه ویرایش صحنه‌حفظ‌کننده',
     imagesNotSupportedByModel: 'این مدل عکس مرجع نمی‌پذیرد',
     tooManyImages: (max: number) => `این مدل حداکثر ${max} عکس می‌پذیرد`,
     videoWindowRequired: 'باید بازه‌ی زمانی ویدیو (شروع/پایان) را مشخص کنید',
