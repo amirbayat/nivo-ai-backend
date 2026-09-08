@@ -115,14 +115,18 @@ export class VideoEditProcessor {
     },
     durationSec: number,
   ): Promise<Record<string, unknown>> {
+    // نکته‌ی مهم (خطای پروداکشن ۱۴۰۵/۰۶/۱۷): وقتی ویدیوی مرجع داده می‌شود، ByteDance/Seedance
+    // duration مثبت را رد می‌کند («duration must be -1»)، ولی خودِ Zod schema سطح gateway
+    // OpenRouter هم مقدار -1 را رد می‌کند (`duration: too_small, minimum 1`) — یعنی هیچ مقدار
+    // صریحی (نه مثبت، نه -1) از این فیلد برای OpenRouter+ویدیوی مرجع قابل‌قبول نیست. راه‌حل:
+    // فیلد duration کلاً حذف شود (نه هیچ مقداری، نه -1) — دقیقاً همون قراردادی که Kie هم دارد
+    // (buildKieInput بالا)، تا خودِ مدل مدت را از ویدیوی مرجع استنباط کند.
     const input: Record<string, unknown> = {
       prompt: job.prompt,
       resolution: job.resolution,
-      // وقتی ویدیوی مرجع داده شده، Seedance این را ویرایش تشخیص می‌دهد و مدت زمان خروجی را
-      // از خودِ ویدیوی ورودی می‌گیرد — duration باید دقیقاً -1 باشد، نه حذف و نه مقدار تولید
-      // (خطای پروداکشن ۱۴۰۵/۰۶/۱۷: "duration must be -1" برای Seedance 2.5)
-      duration: job.videoKey ? -1 : durationSec,
-      ...(job.videoKey ? {} : { aspect_ratio: job.aspectRatio ?? '16:9' }),
+      ...(job.videoKey
+        ? {}
+        : { duration: durationSec, aspect_ratio: job.aspectRatio ?? '16:9' }),
     };
 
     // همان آپلودر موقت Kie (public URL) برای هر دو نوع رفرنس — OpenRouter برای input_references
@@ -178,8 +182,8 @@ export class VideoEditProcessor {
         });
 
         if (isOpenRouter) {
-          // برخلاف Kie (که duration را کلاً حذف می‌کند)، برای OpenRouter وقتی ویدیوی رفرنس
-          // داده شده duration باید -1 فرستاده شود، نه حذف شود — رجوع کن به buildOpenRouterInput
+          // دقیقاً هم‌قرارداد Kie: duration فقط وقتی ویدیوی رفرنس *نیست* فرستاده می‌شود — رجوع
+          // کن به کامنت داخل buildOpenRouterInput برای دلیل (نه مقدار مثبت، نه -1 قابل‌قبول است)
           const input = await this.buildOpenRouterInput(
             videoJob,
             config.generateFixedDurationSec,
