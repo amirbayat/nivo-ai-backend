@@ -910,6 +910,16 @@ model AiModel {
   imageGenFlatPriceUsd  Float?
   imageGenFlatPriceUnit String? // "image" | "megapixel" — null یعنی مدل token-based است (رفتار فعلی)
 
+  // docs/PRD-image-gen-pricing-and-credit-fix.md بخش A — بعضی مدل‌های عکس OpenRouter اصلاً از
+  // طریق /chat/completions قابل‌فراخوانی نیستند (has_chat_completions=false در کاتالوگ زنده‌ی
+  // OpenRouter) و باید از endpoint اختصاصی POST /images صدا زده شوند. true یعنی این مسیر دوم
+  // استفاده شود؛ false (پیش‌فرض) یعنی رفتار فعلی (/chat/completions با modalities) حفظ شود.
+  imageGenUseDirectApi Boolean @default(false)
+  // تخمین خودکار «نیوو»ی هر تولید — میانگین هزینه‌ی واقعی مصرف اخیر (نه یک فیلد دستی)، توسط
+  // job دوره‌ای محاسبه و overwrite می‌شود (image-model-cost-estimate.processor.ts). فقط برای
+  // نمایش پیش از تولید استفاده می‌شود، نه gating/قفل preflight. null یعنی هنوز داده‌ی کافی نیست.
+  estimatedImageGenCreditCost Float?
+
   // docs/PRD-video-studio-chat-flow.md — قیمت‌گذاری OpenRouter برای ویدیو per-second است، نه
   // per-token/per-image مثل بالا. videoGenPricePerSecondUsd نرخ پایه (پایین‌ترین کیفیت/بدون صدا)
   // است؛ وقتی کاربر صدا را فعال می‌کند، نرخ در videoGenAudioMultiplier ضرب می‌شود

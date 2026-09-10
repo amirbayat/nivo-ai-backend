@@ -394,6 +394,20 @@ export class PricingService {
     return amount;
   }
 
+  // همون فرمول کسر واقعی کیف‌پول (rawCredit → گرد به پله‌ها، بخش پایین‌تر)، بدون خودِ تراکنش —
+  // برای docs/PRD-image-gen-pricing-and-credit-fix.md بخش D (تخمین خودکار «نیوو» پیش از تولید،
+  // صرفاً نمایشی) که باید دقیقاً همین عدد را پیش‌بینی کند، نه یک فرمول جدا که ممکن است واگرا شود.
+  async tomanToCredits(costToman: number, markup: number): Promise<number> {
+    const { tomanPerCredit, roundingSteps } =
+      await this.prisma.creditConfig.upsert({
+        where: { id: 'singleton' },
+        create: { id: 'singleton' },
+        update: {},
+      });
+    const rawCredit = (costToman * markup) / tomanPerCredit;
+    return this.roundCreditToStep(rawCredit, roundingSteps);
+  }
+
   // مبلغ نهایی طبق پله‌های قابل‌تنظیم CreditConfig.roundingSteps گرد می‌شود: مصرف خام کمتر از
   // اولین پله → همان پله؛ بین دو پله → پله‌ی بعدی؛ بالاتر از آخرین پله (یا وقتی پله‌ای تعریف
   // نشده) → گرد به بالا به نزدیک‌ترین نیووی کامل. مثال با پله‌های پیش‌فرض [0.2, 0.5, 0.8]:

@@ -84,6 +84,10 @@ export class UpdateModelDto {
   imageGenFlatPriceUnit?: string;
 
   @IsOptional()
+  @IsBoolean()
+  imageGenUseDirectApi?: boolean;
+
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)

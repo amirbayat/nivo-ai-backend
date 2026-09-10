@@ -93,6 +93,12 @@ export class CreateModelDto {
   @IsIn(['image', 'megapixel'])
   imageGenFlatPriceUnit?: string;
 
+  // docs/PRD-image-gen-pricing-and-credit-fix.md بخش A — true یعنی این مدل باید از OpenRouter
+  // POST /images (نه /chat/completions) فراخوانی شود
+  @IsOptional()
+  @IsBoolean()
+  imageGenUseDirectApi?: boolean;
+
   // docs/PRD-video-studio-chat-flow.md — قیمت پایه (بدون صدا) هر ثانیه‌ی ویدیو + ضریب صدا
   @IsOptional()
   @Type(() => Number)

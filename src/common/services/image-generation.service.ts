@@ -52,14 +52,24 @@ export class ImageGenerationService {
     apiKey: string;
     size?: string;
     quality?: string;
+    useDirectApi?: boolean;
     onPartial?: (base64: string) => void;
   }) {
     if (this.aiProvider.isOpenRouter) {
-      return this.callOpenRouterImageChat(
-        params.modelId,
-        params.prompt,
-        params.apiKey,
-      );
+      return params.useDirectApi
+        ? this.callOpenRouterImagesApi(
+            params.modelId,
+            params.prompt,
+            params.apiKey,
+            undefined,
+            { size: params.size, quality: params.quality },
+            params.onPartial,
+          )
+        : this.callOpenRouterImageChat(
+            params.modelId,
+            params.prompt,
+            params.apiKey,
+          );
     }
     return this.callImagesApi(
       '/images/generations',
@@ -85,15 +95,25 @@ export class ImageGenerationService {
     apiKey: string;
     size?: string;
     quality?: string;
+    useDirectApi?: boolean;
     onPartial?: (base64: string) => void;
   }) {
     if (this.aiProvider.isOpenRouter) {
-      return this.callOpenRouterImageChat(
-        params.modelId,
-        params.prompt,
-        params.apiKey,
-        params.images,
-      );
+      return params.useDirectApi
+        ? this.callOpenRouterImagesApi(
+            params.modelId,
+            params.prompt,
+            params.apiKey,
+            params.images,
+            { size: params.size, quality: params.quality },
+            params.onPartial,
+          )
+        : this.callOpenRouterImageChat(
+            params.modelId,
+            params.prompt,
+            params.apiKey,
+            params.images,
+          );
     }
     const form = new FormData();
     form.append('model', params.modelId);
@@ -129,6 +149,8 @@ export class ImageGenerationService {
     onPartial?: (base64: string) => void,
   ): Promise<{
     base64: string;
+    // لیارا همیشه PNG برمی‌گرداند (بر خلاف OpenRouter Images API که media_type واقعی می‌دهد)
+    mediaType: string;
     usage: {
       textInputTokens: number;
       imageInputTokens: number;
@@ -238,6 +260,7 @@ export class ImageGenerationService {
         throw new Error(`Liara images API ${path} returned no image data`);
       return {
         base64,
+        mediaType: 'image/png',
         // اگر provider اصلاً usage برنگرداند (بعضی مدل‌ها/gatewayها ممکن است ندهند)، صفر می‌شود —
         // یعنی آن بخش هزینه صفر حساب می‌شود؛ بهتر از crash کردن، ولی باید توی لاگ مشخص باشد
         usage: {
@@ -251,15 +274,42 @@ export class ImageGenerationService {
 
     // حالت streaming — docs: هر خط SSE یک JSON با فیلد type است:
     // "image_generation.partial_image" (پیش‌نمایش تدریجی، هر بار واضح‌تر) و در پایان
-    // "image_generation.completed" (تصویر و usage نهایی)
+    // "image_generation.completed" (تصویر و usage نهایی). دقیقاً همین فرمت SSE توسط OpenRouter
+    // Images API مستقیم هم استفاده می‌شود (callOpenRouterImagesApi پایین‌تر) — این متد مشترک است.
     if (!res.body)
       throw new Error(
         `Liara images API ${path} streaming response has no body`,
       );
-    const reader = res.body.getReader();
+    return this.parseImageGenerationSseStream(
+      res.body,
+      onPartial,
+      `Liara images API ${path}`,
+    );
+  }
+
+  // پارسر مشترک SSE استریم تولید عکس — بخش ۲.۲: همون فرمت رویداد (type/partial_image/completed)
+  // چه از لیارا بیاد چه از OpenRouter Images API مستقیم. usage.input_tokens_details (لیارا) و
+  // usage.prompt_tokens/completion_tokens/cost (OpenRouter) هر دو پشتیبانی می‌شوند چون نام
+  // فیلدهای usage بین دو provider فرق دارد، فقط پوسته‌ی SSE یکسان است.
+  private async parseImageGenerationSseStream(
+    body: ReadableStream<Uint8Array>,
+    onPartial: ((base64: string) => void) | undefined,
+    errorLabel: string,
+  ): Promise<{
+    base64: string;
+    mediaType: string;
+    usage: {
+      textInputTokens: number;
+      imageInputTokens: number;
+      outputTokens: number;
+      realCostUsdMicros: number | null;
+    };
+  }> {
+    const reader = body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
     let finalBase64: string | null = null;
+    let mediaType = 'image/png';
     let usage = {
       textInputTokens: 0,
       imageInputTokens: 0,
@@ -282,41 +332,63 @@ export class ImageGenerationService {
           const evt = JSON.parse(raw) as {
             type?: string;
             b64_json?: string;
+            media_type?: string;
             usage?: {
               input_tokens_details?: {
                 text_tokens?: number;
                 image_tokens?: number;
               };
               output_tokens?: number;
+              prompt_tokens?: number;
+              completion_tokens?: number;
+              cost?: number;
             };
+            error?: { code?: string | number; type?: string; message?: string };
           };
           if (evt.type === 'image_generation.partial_image' && evt.b64_json) {
             onPartial?.(evt.b64_json);
+          } else if (evt.type === 'error') {
+            const code = evt.error?.code ?? evt.error?.type ?? null;
+            const message = evt.error?.message ?? errorLabel;
+            const isPolicyViolation = /moderation|policy|safety/i.test(
+              `${code ?? ''} ${message}`,
+            );
+            throw new ImageApiError(
+              message,
+              code == null ? null : String(code),
+              isPolicyViolation,
+            );
           } else if (
             evt.type === 'image_generation.completed' &&
             evt.b64_json
           ) {
             finalBase64 = evt.b64_json;
+            mediaType = evt.media_type ?? 'image/png';
             usage = {
               textInputTokens:
-                evt.usage?.input_tokens_details?.text_tokens ?? 0,
+                evt.usage?.input_tokens_details?.text_tokens ??
+                evt.usage?.prompt_tokens ??
+                0,
               imageInputTokens:
                 evt.usage?.input_tokens_details?.image_tokens ?? 0,
-              outputTokens: evt.usage?.output_tokens ?? 0,
-              realCostUsdMicros: null,
+              outputTokens:
+                evt.usage?.output_tokens ?? evt.usage?.completion_tokens ?? 0,
+              realCostUsdMicros:
+                typeof evt.usage?.cost === 'number'
+                  ? Math.round(evt.usage.cost * 1_000_000)
+                  : null,
             };
           }
-        } catch {
+        } catch (err) {
+          if (err instanceof ImageApiError) throw err;
           // یک خط ناقص/نامعتبر — نادیده بگیر، خط بعدی می‌رسه
         }
       }
     }
 
     if (!finalBase64)
-      throw new Error(
-        `Liara images API ${path} streaming ended without a completed image`,
-      );
-    return { base64: finalBase64, usage };
+      throw new Error(`${errorLabel} streaming ended without a completed image`);
+    return { base64: finalBase64, mediaType, usage };
   }
 
   // مسیر OpenRouter — همون توضیح بالای فایل: از /chat/completions با modalities:['image','text']
@@ -329,6 +401,7 @@ export class ImageGenerationService {
     inputImages?: Buffer[],
   ): Promise<{
     base64: string;
+    mediaType: string;
     usage: {
       textInputTokens: number;
       imageInputTokens: number;
@@ -439,6 +512,7 @@ export class ImageGenerationService {
 
     return {
       base64,
+      mediaType: 'image/png',
       usage: {
         // OpenRouter چت‌کامپلیشن‌ها usage را per-modality تفکیک نمی‌کنند (بر خلاف لیارا) — تا
         // تفکیک دقیق‌تر لازم بشه، همه‌ی ورودی زیر textInputTokens حساب می‌شود؛
@@ -446,6 +520,142 @@ export class ImageGenerationService {
         // بیش‌برآورد — عمداً محافظه‌کارانه به نفع کاربر. realCostUsdMicros واقعی جبرانش می‌کند
         // چون از کل هزینه‌ی دلاری واقعی provider (usage.cost، تست‌شده روی API واقعی) می‌آید،
         // نه از این تخمین توکنی
+        textInputTokens: json.usage?.prompt_tokens ?? 0,
+        imageInputTokens: 0,
+        outputTokens: json.usage?.completion_tokens ?? 0,
+        realCostUsdMicros:
+          typeof json.usage?.cost === 'number'
+            ? Math.round(json.usage.cost * 1_000_000)
+            : null,
+      },
+    };
+  }
+
+  // مسیر دوم OpenRouter — برای ۲۶ مدلی که has_chat_completions=false دارند (Recraft، Qwen-Image،
+  // Flux.2، Seedream، Krea، Riverflow، Grok-Imagine، MAI-Image، خانواده‌ی خالص gpt-image، ...) و
+  // فقط از طریق endpoint اختصاصی زیر قابل‌فراخوانی‌اند، نه /chat/completions (docs/PRD-image-gen-
+  // pricing-and-credit-fix.md بخش A). یک endpoint واحد برای generate/edit — ویرایش با
+  // input_references در همون بدنه انجام می‌شود.
+  private async callOpenRouterImagesApi(
+    modelId: string,
+    prompt: string,
+    apiKey: string,
+    inputImages: Buffer[] | undefined,
+    options: { size?: string; quality?: string },
+    onPartial?: (base64: string) => void,
+  ): Promise<{
+    base64: string;
+    mediaType: string;
+    usage: {
+      textInputTokens: number;
+      imageInputTokens: number;
+      outputTokens: number;
+      realCostUsdMicros: number | null;
+    };
+  }> {
+    const streaming = Boolean(onPartial);
+    const body = {
+      model: modelId,
+      prompt,
+      n: 1,
+      ...(options.size ? { size: options.size } : {}),
+      ...(options.quality ? { quality: options.quality } : {}),
+      stream: streaming,
+      ...(inputImages?.length
+        ? {
+            input_references: inputImages.map((buf) => ({
+              type: 'image_url',
+              image_url: {
+                url: `data:image/png;base64,${buf.toString('base64')}`,
+              },
+            })),
+          }
+        : {}),
+    };
+
+    const doFetch = () =>
+      (this.aiProvider.fetch ?? fetch)(`${this.aiProvider.baseURL}/images`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          ...(this.aiProvider.extraHeaders ?? {}),
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(120_000),
+      });
+
+    let res: Awaited<ReturnType<typeof doFetch>>;
+    try {
+      res = await doFetch();
+      if (!res.ok && res.status >= 500) {
+        this.logger.warn(
+          `OpenRouter /images (model=${modelId}) returned ${res.status}, retrying once`,
+        );
+        res = await doFetch();
+      }
+    } catch (err) {
+      this.logger.warn(
+        `OpenRouter /images (model=${modelId}) network error, retrying once: ${(err as Error).message}`,
+      );
+      res = await doFetch();
+    }
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      let code: string | null = null;
+      let message = text.slice(0, 300);
+      try {
+        const errJson = JSON.parse(text) as {
+          error?: { code?: string; type?: string; message?: string };
+        };
+        code = errJson.error?.code ?? errJson.error?.type ?? null;
+        message = errJson.error?.message ?? message;
+      } catch {
+        // بدنه‌ی خطا JSON نبود — همون متن خام کافیه
+      }
+      const isPolicyViolation = /moderation|policy|safety/i.test(
+        `${code ?? ''} ${message}`,
+      );
+      throw new ImageApiError(message, code, isPolicyViolation);
+    }
+
+    if (streaming) {
+      if (!res.body)
+        throw new Error(
+          `OpenRouter /images (model=${modelId}) streaming response has no body`,
+        );
+      return this.parseImageGenerationSseStream(
+        res.body,
+        onPartial,
+        `OpenRouter /images (model=${modelId})`,
+      );
+    }
+
+    const json = (await res.json()) as {
+      data?: Array<{ b64_json?: string; media_type?: string }>;
+      usage?: {
+        prompt_tokens?: number;
+        completion_tokens?: number;
+        cost?: number;
+      };
+    };
+    const base64 = json.data?.[0]?.b64_json;
+    if (!base64)
+      throw new Error(
+        `OpenRouter /images (model=${modelId}) returned no image data`,
+      );
+
+    if (typeof json.usage?.cost !== 'number') {
+      this.logger.warn(
+        `OpenRouter /images (model=${modelId}) returned no usage.cost — falling back to token estimate. raw usage=${JSON.stringify(json.usage ?? null)}`,
+      );
+    }
+
+    return {
+      base64,
+      mediaType: json.data?.[0]?.media_type ?? 'image/png',
+      usage: {
         textInputTokens: json.usage?.prompt_tokens ?? 0,
         imageInputTokens: 0,
         outputTokens: json.usage?.completion_tokens ?? 0,

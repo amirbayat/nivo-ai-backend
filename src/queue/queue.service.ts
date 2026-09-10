@@ -17,6 +17,9 @@ const LIARA_USAGE_SYNC_CRON = '*/5 * * * *';
 // docs/PRD-liara-usage-reconciliation.md — کاربرانی که ساخت کلید اختصاصی‌شان قبلاً fail شده را
 // دوره‌ای دوباره امتحان می‌کند (مثلاً بعد از تمدید JWT مدیریتی در Hamravesh)
 const LIARA_KEY_RETRY_CRON = '*/15 * * * *';
+// docs/PRD-image-gen-pricing-and-credit-fix.md بخش D.1 — روزانه کافیه، قیمت‌ها به این کندی
+// تغییر نمی‌کنن که نیاز به بازه‌ی کوتاه‌تر باشه
+const IMAGE_MODEL_COST_ESTIMATE_CRON = '0 4 * * *';
 
 @Injectable()
 export class QueueService implements OnApplicationBootstrap {
@@ -40,6 +43,8 @@ export class QueueService implements OnApplicationBootstrap {
     private readonly liaraUsageSyncQueue: Queue,
     @InjectQueue('liara-key-retry')
     private readonly liaraKeyRetryQueue: Queue,
+    @InjectQueue('image-model-cost-estimate')
+    private readonly imageModelCostEstimateQueue: Queue,
     private readonly aiProvider: AiProviderService,
   ) {}
 
@@ -171,5 +176,19 @@ export class QueueService implements OnApplicationBootstrap {
       );
       this.logger.log(`Liara key retry job scheduled: ${LIARA_KEY_RETRY_CRON}`);
     }
+
+    const imageModelCostEstimateRepeatables =
+      await this.imageModelCostEstimateQueue.getRepeatableJobs();
+    for (const job of imageModelCostEstimateRepeatables) {
+      await this.imageModelCostEstimateQueue.removeRepeatableByKey(job.key);
+    }
+    await this.imageModelCostEstimateQueue.add(
+      'estimate',
+      {},
+      { repeat: { cron: IMAGE_MODEL_COST_ESTIMATE_CRON } },
+    );
+    this.logger.log(
+      `Image model cost estimate job scheduled: ${IMAGE_MODEL_COST_ESTIMATE_CRON}`,
+    );
   }
 }

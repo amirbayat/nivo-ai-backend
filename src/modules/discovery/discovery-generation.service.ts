@@ -427,6 +427,7 @@ export class DiscoveryGenerationService {
               apiKey,
               size: model.imageGenSize ?? prompt.aspectRatio ?? undefined,
               quality: model.imageGenQuality ?? undefined,
+              useDirectApi: model.imageGenUseDirectApi,
             })
           : await this.imageGen.generateImage({
               modelId: model.name,
@@ -434,11 +435,12 @@ export class DiscoveryGenerationService {
               apiKey,
               size: model.imageGenSize ?? prompt.aspectRatio ?? undefined,
               quality: model.imageGenQuality ?? undefined,
+              useDirectApi: model.imageGenUseDirectApi,
             });
 
         return {
           outputType: CreativeOutputType.IMAGE,
-          outputImageDataUrl: `data:image/png;base64,${result.base64}`,
+          outputImageDataUrl: `data:${result.mediaType};base64,${result.base64}`,
         };
       }
 
@@ -610,6 +612,7 @@ export class DiscoveryGenerationService {
           apiKey,
           size: model.imageGenSize ?? prompt.aspectRatio ?? undefined,
           quality: model.imageGenQuality ?? undefined,
+          useDirectApi: model.imageGenUseDirectApi,
         })
       : await this.imageGen.generateImage({
           modelId: model.name,
@@ -617,13 +620,18 @@ export class DiscoveryGenerationService {
           apiKey,
           size: model.imageGenSize ?? prompt.aspectRatio ?? undefined,
           quality: model.imageGenQuality ?? undefined,
+          useDirectApi: model.imageGenUseDirectApi,
         });
 
     const costCalc = model.imageGenFlatPriceUnit
       ? await this.pricing.calcImageGenFlatCost(model)
       : await this.pricing.calcImageGenCost(result.usage, model);
     const outputBuffer = Buffer.from(result.base64, 'base64');
-    const outputImageKey = await this.storage.uploadImage(outputBuffer, 'png');
+    const mediaExt = result.mediaType.replace(/^image\//, '') || 'png';
+    const outputImageKey = await this.storage.uploadImage(
+      outputBuffer,
+      mediaExt,
+    );
 
     // کسر واقعی فقط الان — بعد از موفقیت تولید. markup=1 چون ۱.۳ قبلاً لحظه‌ی خرید بسته اعمال شده
     const debited = await this.pricing.debitWallet(

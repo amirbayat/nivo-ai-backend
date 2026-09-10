@@ -15,6 +15,7 @@ import { CaptionTranscribeProcessor } from './processors/caption-transcribe.proc
 import { CaptionRenderProcessor } from './processors/caption-render.processor';
 import { CaptionSourceCleanupProcessor } from './processors/caption-source-cleanup.processor';
 import { VideoEditProcessor } from './processors/video-edit.processor';
+import { ImageModelCostEstimateProcessor } from './processors/image-model-cost-estimate.processor';
 import { PrismaModule } from '../prisma/prisma.module';
 import { MessageFeedbackModule } from '../modules/message-feedback/message-feedback.module';
 import { CampaignModule } from '../modules/campaign/campaign.module';
@@ -76,6 +77,8 @@ import { OpenRouterVideoProviderModule } from '../common/services/openrouter-vid
       name: 'video-edit',
       settings: { lockDuration: 35 * 60 * 1000 },
     }),
+    // docs/PRD-image-gen-pricing-and-credit-fix.md بخش D — job روزانه‌ی محاسبه‌ی تخمین «نیوو»
+    BullModule.registerQueue({ name: 'image-model-cost-estimate' }),
     PrismaModule,
     MessageFeedbackModule,
     CampaignModule,
@@ -106,6 +109,7 @@ import { OpenRouterVideoProviderModule } from '../common/services/openrouter-vid
     CaptionRenderProcessor,
     CaptionSourceCleanupProcessor,
     VideoEditProcessor,
+    ImageModelCostEstimateProcessor,
   ],
 })
 export class QueueModule {}

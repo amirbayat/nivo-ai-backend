@@ -72,6 +72,9 @@ export class PlansService {
         videoGenAudioMultiplier: true,
         // دستور صریح کاربر — استودیوی ویدیو فقط مدل‌های علامت‌خورده‌ی ادمین را در چیپ چت/عکس نشان می‌دهد
         videoStudioEligible: true,
+        // docs/PRD-image-gen-pricing-and-credit-fix.md بخش D — تخمین خودکار «نیوو» برای نمایش
+        // پیش از تولید (پیامد: تصمیم‌گیری/قفل preflight بر اساس این عدد نیست)
+        estimatedImageGenCreditCost: true,
       },
     });
   }

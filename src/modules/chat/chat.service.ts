@@ -1484,6 +1484,7 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
             apiKey,
             size: requestedSize,
             quality: modelRecord.imageGenQuality ?? undefined,
+            useDirectApi: modelRecord.imageGenUseDirectApi,
             onPartial,
           })
         : await this.imageGen.generateImage({
@@ -1492,9 +1493,13 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
             apiKey,
             size: requestedSize,
             quality: modelRecord.imageGenQuality ?? undefined,
+            useDirectApi: modelRecord.imageGenUseDirectApi,
             onPartial,
           });
       const modelId = modelRecord.name;
+      // مسیر Images API مستقیم media_type واقعی برمی‌گرداند (ممکن است webp/jpeg باشد) — مسیرهای
+      // چت/لیارا همیشه 'image/png' برمی‌گردانند (بخش A.2/A.4 پلن)
+      const mediaExt = result.mediaType.replace(/^image\//, '') || 'png';
       this.liveStats
         .recordLiaraCall('chat', true, Date.now() - callStart)
         .catch(() => {});
@@ -1522,7 +1527,7 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
       try {
         imageKey = await this.storageService.uploadImage(
           buffer,
-          'png',
+          mediaExt,
           conversationId,
         );
       } catch (err) {
@@ -1535,7 +1540,7 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
       // می‌کنیم (فرمت قدیمی که کد خواندنش رو از قبل پشتیبانی می‌کند، isStorageKey تشخیصش می‌ده)؛
       // وگرنه پیام دستیار با content خالی و بدون عکس، کاملاً نامرئی می‌شد (نه متن نه عکس)
       const persistedImage =
-        imageKey ?? `data:image/png;base64,${result.base64}`;
+        imageKey ?? `data:${result.mediaType};base64,${result.base64}`;
 
       const assistantMessage = await this.prisma.message.create({
         data: {
@@ -1599,7 +1604,7 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
           );
       }
 
-      const dataUrl = `data:image/png;base64,${result.base64}`;
+      const dataUrl = `data:${result.mediaType};base64,${result.base64}`;
       res.write(
         `data: ${JSON.stringify({ info: 'image-generated', image: dataUrl, messageId: assistantMessage.id })}\n\n`,
       );
@@ -1610,6 +1615,7 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
         const title = await this.generateImageBasedTitle(
           conversationId,
           result.base64,
+          result.mediaType,
           apiKey,
         );
         if (title) {
@@ -1707,6 +1713,7 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
   private async generateImageBasedTitle(
     conversationId: string,
     imageBase64: string,
+    imageMediaType: string,
     apiKey: string,
   ): Promise<string | null> {
     try {
@@ -1728,7 +1735,7 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
       const visionMessage: UserModelMessage = {
         role: 'user',
         content: [
-          { type: 'image', image: `data:image/png;base64,${imageBase64}` },
+          { type: 'image', image: `data:${imageMediaType};base64,${imageBase64}` },
           {
             type: 'text',
             text:

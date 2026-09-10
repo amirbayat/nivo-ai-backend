@@ -39,6 +39,7 @@ const MODEL_IMPORT_COLUMNS = [
   'imageGenSize',
   'imageGenFlatPriceUsd',
   'imageGenFlatPriceUnit',
+  'imageGenUseDirectApi',
   'videoGenPricePerSecondUsd',
   'videoGenAudioMultiplier',
   'videoGenSupportedDurationsSec',
@@ -121,6 +122,7 @@ function parseModelRow(raw: Record<string, unknown>) {
     imageGenSize: cellToString(raw.imageGenSize),
     imageGenFlatPriceUsd: cellToNumber(raw.imageGenFlatPriceUsd),
     imageGenFlatPriceUnit: cellToString(raw.imageGenFlatPriceUnit),
+    imageGenUseDirectApi: cellToBoolean(raw.imageGenUseDirectApi, false),
     videoGenPricePerSecondUsd: cellToNumber(raw.videoGenPricePerSecondUsd),
     videoGenAudioMultiplier: cellToNumber(raw.videoGenAudioMultiplier),
     videoGenSupportedDurationsSec: cellToNumberArray(
