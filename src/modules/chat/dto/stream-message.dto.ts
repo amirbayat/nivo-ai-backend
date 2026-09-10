@@ -6,8 +6,22 @@ import {
   IsArray,
   ArrayMaxSize,
   MaxLength,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { fa } from '../../../i18n/fa';
+
+// docs/PRD-chat-files-and-pdf.md بخش ۳ — یک فایل غیرعکس پیوست‌شده از فرانت. data یک data URL
+// خام است (مثل images)؛ filename فقط برای نمایش/چیپ و انتخاب پارسر استفاده می‌شود (magic bytes
+// واقعی سمت سرور دوباره چک می‌شود، chat-file.validator.ts — به filename اعتماد امنیتی نمی‌شود)
+export class ChatFileInputDto {
+  @IsString({ message: fa.validation.required })
+  data: string;
+
+  @IsString({ message: fa.validation.required })
+  @MaxLength(255, { message: fa.validation.stringTooLong })
+  filename: string;
+}
 
 export class StreamMessageDto {
   @IsString({ message: fa.validation.required })
@@ -40,6 +54,22 @@ export class StreamMessageDto {
   @ArrayMaxSize(5)
   @IsString({ each: true })
   images?: string[];
+
+  // docs/PRD-chat-models-web-search-and-files.md — توگل globe کنار دکمه‌ی ارسال؛ پیش‌فرض
+  // false/خالی (خاموش). فقط وقتی مدل نهایی‌شده supportsWebSearch=true دارد واقعاً اعمال می‌شود
+  // (chat.service.ts) — اگر مدل انتخابی پشتیبانی نکند، بی‌صدا نادیده گرفته می‌شود (نه خطا)
+  @IsOptional()
+  @IsBoolean({ message: fa.validation.mustBeBoolean })
+  webSearch?: boolean;
+
+  // docs/PRD-chat-files-and-pdf.md بخش ۳ — پیوست فایل غیرعکس (PDF/DOCX/TXT/CSV/XLSX/کد).
+  // هر آیتم یک data URL خام (مثل images بالا) + نام اصلی فایل برای نمایش/چیپ در پیام
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(3)
+  @ValidateNested({ each: true })
+  @Type(() => ChatFileInputDto)
+  files?: ChatFileInputDto[];
 
   // docs/PRD-chat-images.md بخش ۵.۵ — حالت صریح تولید عکس؛ content همان prompt تولید است.
   // وقتی true است، imageModel (یا در غیاب آن، model) باید یک مدل supportsImageGen مشخص باشد

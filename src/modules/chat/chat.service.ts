@@ -53,6 +53,14 @@ import {
   normalizeHeicDataUrls,
 } from '../../common/validators/chat-image.validator';
 import {
+  validateChatFiles,
+  mimeTypeForFileExt,
+} from '../../common/validators/chat-file.validator';
+import {
+  extractChatFileText,
+  formatExtractedFileBlock,
+} from '../../common/utils/chat-file-extraction.util';
+import {
   detectImageGenIntent,
   detectImageEditIntent,
 } from './image-gen-intent';
@@ -84,6 +92,22 @@ const PRE_ROUTING_REFERENCE_MODEL = 'openai/gpt-5.4-nano';
 // تیتر مکالمه یک تولید کوتاه و کم‌ریسک است — همیشه با ارزان‌ترین مدل ساخته می‌شود، صرف‌نظر از
 // این‌که Router برای پاسخ اصلی همین پیام چه مدلی انتخاب کرده
 const TITLE_GENERATION_MODEL = 'openai/gpt-5-nano';
+
+// docs/PRD-chat-models-web-search-and-files.md §۳.۲ — دقیقاً همان shape که PRD مشخص کرده
+// (نه پسوند `:online` قدیمی/منسوخ، نه `plugins: [{id:'web'}]`). engine:'auto' برای مدل‌های
+// GPT-5+/Gemini 3+/Grok 4+ از جستجوی بومی همان provider استفاده می‌کند، وگرنه Exa.
+const OPENROUTER_WEB_SEARCH_TOOLS = [
+  {
+    type: 'openrouter:web_search',
+    parameters: {
+      engine: 'auto',
+      max_results: 5,
+      max_uses: 3,
+      max_total_results: 15,
+    },
+  },
+  { type: 'openrouter:datetime' },
+];
 
 // همان union که 'ai' برای LanguageModelCallOptions.reasoning می‌خواهد — به‌صورت type export
 // شده نیست، پس اینجا تکرارش می‌کنیم. مقدار Plan.reasoningEffort/PlanRoutingStep.reasoningEffort
@@ -157,8 +181,11 @@ export class ChatService {
     }
   }
 
-  private buildProvider(apiKey: string) {
-    return this.aiProvider.buildClient(apiKey);
+  private buildProvider(
+    apiKey: string,
+    extraBodyFields?: Record<string, unknown>,
+  ) {
+    return this.aiProvider.buildClient(apiKey, undefined, extraBodyFields);
   }
 
   // برای درخواست‌های کوچک/یک‌باره‌ی داخلی (عنوان‌سازی، خلاصه‌سازی) به‌جای generateText.
@@ -465,6 +492,11 @@ export class ChatService {
     const validManualModel =
       manualModel && allowed.includes(manualModel) ? manualModel : undefined;
 
+    // docs/PRD-chat-models-web-search-and-files.md §۳.۵ — همان الگوی hasImages: وقتی روشن است،
+    // Router کاندیدها را به مدل‌های supportsWebSearch=true محدود می‌کند (حالت‌های خودکار). برای
+    // انتخاب دستی کاربر، چک صریح پایین‌تر (کنار چک vision) انجام می‌شود.
+    const wantsWebSearch = dto.webSearch === true;
+
     const lastAssistant = await this.prisma.message.findFirst({
       where: { conversationId, role: 'ASSISTANT' },
       orderBy: { createdAt: 'desc' },
@@ -475,6 +507,7 @@ export class ChatService {
       userId,
       content: dto.content,
       hasImages: Boolean(dto.images?.length),
+      wantsWebSearch,
       allowedModels: allowed,
       manualModel: validManualModel,
       lastAssistantMessageLength: lastAssistant?.content.length,
@@ -489,6 +522,21 @@ export class ChatService {
       ? PRE_ROUTING_REFERENCE_MODEL
       : routed.modelId;
     this.modelRouter.log({ userId, conversationId, ...routed }).catch(() => {});
+
+    // مدل نهایی واقعاً اجراشونده ممکن است با rawModelChoice فرق کند (Auto/forcedNanoMode) —
+    // تزریق tools جستجوی وب فقط بر اساس همین مدل نهایی تصمیم گرفته می‌شود، نه انتخاب خام کاربر
+    const finalModelRecord = wantsWebSearch
+      ? await this.prisma.aiModel.findFirst({
+          where: {
+            name: modelId,
+            isActive: true,
+            platform: { has: this.aiProvider.platform },
+          },
+          select: { supportsWebSearch: true },
+        })
+      : null;
+    const useWebSearch =
+      wantsWebSearch && Boolean(finalModelRecord?.supportsWebSearch);
 
     // دراپ‌دون «سریع/هوشمند» کنار ارسال پیام — فقط reasoning effort را override می‌کند، انتخاب
     // مدل (routed.modelId) دست‌نخورده می‌ماند. بدون انتخاب کاربر، رفتار قبلی (reasoningEffort
@@ -534,10 +582,53 @@ export class ChatService {
       }
     }
 
+    // ── جستجوی وب: چک صریح روی انتخاب دستی کاربر ────────────────────────────
+    // برای حالت‌های خودکار (Auto)، wantsWebSearch از قبل به Router پاس داده شده (فیلتر کاندیدها)
+    // — این چک فقط زمانی معنا دارد که کاربر خودش یک مدل مشخص انتخاب کرده باشد که آن مدل صریحاً
+    // جستجوی وب را پشتیبانی نمی‌کند؛ toggle بی‌اثر و گمراه‌کننده نباید بی‌صدا نادیده گرفته شود.
+    if (wantsWebSearch && validManualModel && !forcedNanoMode) {
+      const manualModelRecord = await this.prisma.aiModel.findFirst({
+        where: {
+          name: validManualModel,
+          isActive: true,
+          platform: { has: this.aiProvider.platform },
+        },
+        select: { supportsWebSearch: true },
+      });
+      if (manualModelRecord && !manualModelRecord.supportsWebSearch) {
+        throw new BadRequestException(fa.chat.webSearchNotSupported);
+      }
+    }
+
+    // ── فایل‌های غیرعکس: اعتبارسنجی + استخراج متن (docs/PRD-chat-files-and-pdf.md بخش ۳) ────
+    const parsedFiles = validateChatFiles(dto.files, {
+      maxSizeMb: chatConfig.maxFileSizeMb,
+    });
+    const extractedFiles = await Promise.all(
+      parsedFiles.map((f) =>
+        extractChatFileText(f, chatConfig.maxExtractedChars),
+      ),
+    );
+    // همیشه با قالب یکسان «--- فایل: name --- ... --- پایان فایل ---» (حتی وقتی متنی استخراج
+    // نشده، پیام «متنی نبود» به‌جای متن می‌آید) — فرانت (MessageList.tsx stripFileBlocks) دقیقاً
+    // همین marker را برای پنهان‌کردن بلوک خام از حباب پیام (نمایش فقط چیپ فایل) می‌شناسد
+    const fileBlocks = extractedFiles.map((e) =>
+      formatExtractedFileBlock(
+        e.text ? e : { ...e, text: fa.chatFiles.emptyExtractedText(e.filename) },
+      ),
+    );
+    // متن استخراج‌شده به همان پیام کاربر اضافه می‌شود (نه یک پیام جدا) — دقیقاً مثل کپی‌پیست
+    // دستی کاربر؛ چون این محتوای نهایی در DB ذخیره می‌شود (پایین‌تر)، تاریخچه‌ی مکالمه هم آن را
+    // برای پیام‌های بعدی نگه می‌دارد (بدون نیاز به تزریق دوباره در هر turn)
+    const contentWithFiles = fileBlocks.length
+      ? `${dto.content}\n\n${fileBlocks.join('\n\n')}`
+      : dto.content;
+
     // تخمین واقعی پیام (نه پیش‌فرض ثابت ۵۰۰) برای همان مدلی که واقعاً انتخاب شده
-    // (docs/PRD-global-budget-gateway.md بخش ۹.۱)
+    // (docs/PRD-global-budget-gateway.md بخش ۹.۱) — از contentWithFiles (شامل متن استخراج‌شده‌ی
+    // فایل‌های پیوست، اگر بود) نه dto.content خام، چون آن متن هم واقعاً به مدل می‌رود
     const estimatedForQuota = await this.tokenEstimator.estimateTokens(
-      dto.content,
+      contentWithFiles,
       modelId,
     );
     // [DISABLED ۱۴۰۵/۰۵/۳۰ — سهمیه‌ی توکن روزانه/ماهانه‌ی قدیمی (dailyFreeTokens/monthlyTotalTokens)
@@ -592,6 +683,15 @@ export class ChatService {
       );
     }
 
+    // کاربر toggle جستجوی وب را روشن کرده ولی مدل نهایی (دستی یا Auto-فال‌بک‌شده) پشتیبانی
+    // نمی‌کند — طبق تصمیم محصول، به‌جای ارتقای خودکار به مدل دیگر (که به منطق حذف‌شده‌ی
+    // «بهترین پاسخ» وابسته بود)، فقط یک اطلاع کوتاه به فرانت داده می‌شود؛ پیام بدون جستجو ادامه می‌یابد
+    if (wantsWebSearch && !useWebSearch) {
+      res.write(
+        `data: ${JSON.stringify({ info: 'web-search-unavailable' })}\n\n`,
+      );
+    }
+
     // برای بنر «چند نفر الان دارن چت می‌کنن» توی ادمین — فقط شمارنده، بدون هیچ محتوایی
     const streamToken = await this.liveStats.trackStreamStart();
     // این مقدار اولیه فقط برای خطاهای زودهنگام (قبل از رسیدن به streamText) استفاده می‌شود؛
@@ -633,14 +733,46 @@ export class ChatService {
           ).filter((key): key is string => key !== null)
         : [];
 
+      // docs/PRD-chat-files-and-pdf.md بخش ۳.۳ — فایل خام (نه فقط متن استخراج‌شده) هم در MinIO
+      // ذخیره می‌شود، دقیقاً مثل عکس؛ همان cron پاک‌سازی ۲۴ساعته (بر اساس پیشوند conversationId،
+      // نه پسوند فرمت) بدون تغییر روی این‌ها هم اعمال می‌شود
+      const persistedAttachments = (
+        await Promise.all(
+          parsedFiles.map(async (f) => {
+            try {
+              const key = await this.storageService.uploadImage(
+                f.buffer,
+                f.ext,
+                conversationId,
+              );
+              return {
+                key,
+                filename: f.filename,
+                mime: mimeTypeForFileExt(f.ext),
+              };
+            } catch (err) {
+              this.logger.warn(
+                `MinIO upload failed, file will not be persisted: ${(err as Error).message}`,
+              );
+              return null;
+            }
+          }),
+        )
+      ).filter(
+        (a): a is { key: string; filename: string; mime: string } => a !== null,
+      );
+
       await this.prisma.message.create({
         data: {
           conversationId,
           userId,
           role: 'USER',
-          content: dto.content,
+          content: contentWithFiles,
           ...(topicId ? { topicId } : {}),
           ...(persistedImageKeys.length ? { images: persistedImageKeys } : {}),
+          ...(persistedAttachments.length
+            ? { attachments: persistedAttachments }
+            : {}),
         },
       });
 
@@ -712,7 +844,12 @@ export class ChatService {
 
       chatCallStart = Date.now();
       const result = streamText({
-        model: this.buildProvider(apiKey)(modelId),
+        model: this.buildProvider(
+          apiKey,
+          useWebSearch
+            ? { tools: OPENROUTER_WEB_SEARCH_TOOLS, max_tool_calls: 5 }
+            : undefined,
+        )(modelId),
         system: systemParts.join('\n\n') || undefined,
         messages: coreMessages,
         maxOutputTokens: maxOut,
@@ -804,12 +941,30 @@ export class ChatService {
               .costToman
           : null;
 
+      // docs/PRD-chat-models-web-search-and-files.md §۳.۳/۳.۴ — همان مکانیزم extractMetadata
+      // بالا (cost)، این‌بار برای citations/تعداد جستجو؛ فقط وقتی useWebSearch بوده معنا دارد
+      const citations = useWebSearch
+        ? (providerMetadata?.[OPENROUTER_METADATA_KEY]?.['citations'] as
+            { url: string; title: string }[] | undefined)
+        : undefined;
+      const webSearchRequests = useWebSearch
+        ? (providerMetadata?.[OPENROUTER_METADATA_KEY]?.[
+            'webSearchRequests'
+          ] as number | undefined)
+        : undefined;
+      if (citations?.length) {
+        res.write(
+          `data: ${JSON.stringify({ info: 'sources', sources: citations })}\n\n`,
+        );
+      }
+
       const assistantMessage = await this.prisma.message.create({
         data: {
           conversationId,
           userId,
           role: 'ASSISTANT',
           content: fullContent,
+          ...(citations?.length ? { citations } : {}),
           tokensInput: usage.inputTokens ?? 0,
           tokensOutput: usage.outputTokens ?? 0,
           costToman,
@@ -867,8 +1022,15 @@ export class ChatService {
       // موجودی منفی هر پیام رایگان بازهم منفی‌تر می‌شد).
       if (plan.isPayAsYouGo && !forcedNanoMode) {
         // هزینه‌ی واقعی OpenRouter (اگر برگشت) جایگزین تخمین توکن‌محور می‌شود؛ روی لیارا
-        // که این متادیتا همیشه null است، همان تخمین (costToman) به‌عنوان fallback می‌ماند
-        const debitCostToman = openrouterRealCostToman ?? costToman;
+        // که این متادیتا همیشه null است، همان تخمین (costToman) به‌عنوان fallback می‌ماند.
+        // docs/PRD-chat-models-web-search-and-files.md §۳.۴ — هزینه‌ی جستجوی وب اضافه/جدا از
+        // توکن است؛ فقط وقتی واقعاً جستجو رخ داده (webSearchRequests از usage واقعی provider)
+        // کسر می‌شود، نه صرفاً به‌خاطر روشن‌بودن toggle
+        const webSearchExtraCostToman = webSearchRequests
+          ? webSearchRequests * chatConfig.webSearchCreditCostToman
+          : 0;
+        const debitCostToman =
+          (openrouterRealCostToman ?? costToman) + webSearchExtraCostToman;
         const markup = await this.pricingTiers.getMarkup(
           PricingGenerationType.TEXT,
           debitCostToman,

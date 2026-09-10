@@ -21,6 +21,11 @@ export class AppConfigController {
         this.config.get<string>('SHOW_MONTHLY_TOKEN_USAGE', 'true') === 'true',
       maxImagesPerMessage: chatConfig.maxImagesPerMessage,
       maxImageSizeMb: chatConfig.maxImageSizeMb,
+      // docs/PRD-chat-files-and-pdf.md بخش ۳ — تعداد فایل هر پیام همان سقف @ArrayMaxSize روی
+      // StreamMessageDto.files است (۳)، عمداً ثابت در کد نه ChatConfig (بحث جدایی نگرانی‌ها:
+      // maxFileSizeMb سیاست هزینه/امنیت است، تعداد آرایه یک محدودیت ورودی ساده)
+      maxFilesPerMessage: 3,
+      maxFileSizeMb: chatConfig.maxFileSizeMb,
     };
   }
 }

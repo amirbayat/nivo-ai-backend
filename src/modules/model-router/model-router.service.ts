@@ -57,6 +57,9 @@ export interface RouteInput {
   userId: string;
   content: string;
   hasImages: boolean;
+  // docs/PRD-chat-models-web-search-and-files.md §۳.۵ — همان الگوی hasImages: وقتی true،
+  // کاندیدها به مدل‌های supportsWebSearch=true محدود می‌شوند (هم مسیر PAYG هم مسیر پله‌ای قدیمی)
+  wantsWebSearch?: boolean;
   allowedModels: string[];
   manualModel?: string;
   lastAssistantMessageLength?: number;
@@ -145,6 +148,7 @@ export class ModelRouterService {
         modelType: 'CHAT', // مدل‌های embedding و IMAGE_GEN (که اصلاً قابلیت تولید متن ندارند) هرگز نباید برای پاسخ چت معمولی انتخاب شوند
         platform: { has: this.aiProvider.platform },
         ...(input.hasImages ? { supportsVision: true } : {}),
+        ...(input.wantsWebSearch ? { supportsWebSearch: true } : {}),
       },
       orderBy: { sortOrder: 'asc' },
     });
@@ -189,6 +193,7 @@ export class ModelRouterService {
         modelType: 'CHAT',
         platform: { has: this.aiProvider.platform },
         ...(input.hasImages ? { supportsVision: true } : {}),
+        ...(input.wantsWebSearch ? { supportsWebSearch: true } : {}),
       },
     });
 

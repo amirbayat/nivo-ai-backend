@@ -53,6 +53,9 @@ export class PlansService {
         tier: true,
         supportsVision: true,
         supportsImageGen: true,
+        // docs/PRD-chat-models-web-search-and-files.md §۳.۵ — فرانت برای غیرفعال‌کردن toggle
+        // جستجوی وب با تولتیپ، وقتی مدل انتخابی این را ساپورت نمی‌کند
+        supportsWebSearch: true,
         sortOrder: true,
         // docs/PRD-openrouter-migration.md §۱۳.۴/۱۴.۴ — صفحه‌ی انتخاب مدل بازطراحی‌شده: توضیح
         // کوتاه + برچسب برای فیلتر (ترند/محبوب/...) + قیمت خام برای فیلتر ارزان/گران سمت فرانت

@@ -204,7 +204,7 @@ model Conversation {
   summarizedUntilCreatedAt DateTime?
   // docs/PRD-openrouter-migration.md §۱۴.۲/۱۴.۶ — شمارنده‌ی denormalized تعداد عکس تولیدشده‌ی
   // موفق در این گفتگو؛ برای سقف توصیه‌ای استودیوی عکس + فیلتر «فقط گفتگوهای عکس» بدون JOIN گران
-  imageGenCount Int @default(0)
+  imageGenCount            Int       @default(0)
 
   user                User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
   project             Project?             @relation(fields: [projectId], references: [id], onDelete: SetNull)
@@ -217,27 +217,33 @@ model Conversation {
 }
 
 model Message {
-  id                  String      @id @default(uuid())
-  conversationId      String
-  userId              String? // denormalized از conversation.userId — برای groupBy تجمیعی آنالیز مصرف (بخش ۱۷) بدون join
-  role                MessageRole
-  content             String
-  images              Json?
-  tokensInput         Int         @default(0)
-  tokensOutput        Int         @default(0)
-  costToman           Int         @default(0) // هزینه‌ی دقیق همین پیام (تومان)، در لحظه‌ی ایجاد محاسبه‌شده — نه بازمحاسبه‌ی بعدی با نرخ/قیمت فعلی
-  costUsdMicros       Int         @default(0)
-  costInputUsdMicros  Int         @default(0) // سهم توکن ورودی از costUsdMicros — برای میانگین وزنی قیمت ورودی/خروجی در آنالیز (بدون بازمحاسبه با قیمت فعلی مدل)
-  costOutputUsdMicros Int         @default(0)
+  id                          String      @id @default(uuid())
+  conversationId              String
+  userId                      String? // denormalized از conversation.userId — برای groupBy تجمیعی آنالیز مصرف (بخش ۱۷) بدون join
+  role                        MessageRole
+  content                     String
+  images                      Json?
+  tokensInput                 Int         @default(0)
+  tokensOutput                Int         @default(0)
+  costToman                   Int         @default(0) // هزینه‌ی دقیق همین پیام (تومان)، در لحظه‌ی ایجاد محاسبه‌شده — نه بازمحاسبه‌ی بعدی با نرخ/قیمت فعلی
+  costUsdMicros               Int         @default(0)
+  costInputUsdMicros          Int         @default(0) // سهم توکن ورودی از costUsdMicros — برای میانگین وزنی قیمت ورودی/خروجی در آنالیز (بدون بازمحاسبه با قیمت فعلی مدل)
+  costOutputUsdMicros         Int         @default(0)
   // docs/EXECUTION-PLAN.md قدم ۴ — usage.cost واقعی OpenRouter (دلار × ۱e6)، در کنار تخمین
   // داخلی بالا نه جایگزینش؛ null یعنی روی لیارا بوده یا provider این‌بار cost برنگردانده
   openrouterRealCostUsdMicros Int?
   // تبدیل‌شده به تومان با نرخ همون لحظه (مثل costToman) — نه بازمحاسبه‌ی بعدی در آنالیز با
   // نرخ فعلی، که رشد/افت نرخ ارز را با «واقعی‌تر شدن match%» قاطی می‌کند
-  openrouterRealCostToman Int?
-  model               String?
-  topicId             String?
-  createdAt           DateTime    @default(now())
+  openrouterRealCostToman     Int?
+  model                       String?
+  topicId                     String?
+  // docs/PRD-chat-models-web-search-and-files.md §۳.۳ — [{url, title}]، فقط وقتی جستجوی وب
+  // روشن بوده و نتیجه‌ای برگشته؛ از پاسخ OpenRouter tool «openrouter:web_search» پر می‌شود
+  citations                   Json?
+  // docs/PRD-chat-files-and-pdf.md بخش ۶ — [{key, filename, mime}]، فایل‌های غیرعکس پیوست‌شده
+  // (PDF/DOCX/...)؛ برخلاف images این‌ها inline رندر نمی‌شوند، فقط چیپ نام/نوع فایل نمایش داده می‌شود
+  attachments                 Json?
+  createdAt                   DateTime    @default(now())
 
   conversation Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   user         User?            @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -734,10 +740,10 @@ model CreativeGeneration {
   failureReason  String?
   createdAt      DateTime                 @default(now())
 
-  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   prompt       CreativePrompt @relation(fields: [promptId], references: [id])
-  project      Project?      @relation(fields: [projectId], references: [id], onDelete: SetNull)
-  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  project      Project?       @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  conversation Conversation?  @relation(fields: [conversationId], references: [id], onDelete: SetNull)
 
   @@index([userId, createdAt])
   @@index([projectId, createdAt]) // برای فیلتر گالری بر اساس پروژه
@@ -912,7 +918,7 @@ model AiModel {
   // فرق دارند، پس UI باید بر اساس مدل انتخابی فیلتر کند، نه یک لیست ثابت ۱۶:۹/۱:۱/۹:۱۶.
   videoGenPricePerSecondUsd     Float?
   videoGenAudioMultiplier       Float?
-  videoGenSupportedDurationsSec Int[]   @default([])
+  videoGenSupportedDurationsSec Int[]    @default([])
   videoGenSupportedSizes        String[] @default([])
 
   // دستور صریح کاربر — استودیوی ویدیو نباید کل کاتالوگ چت/عکس سایت را نشان بدهد، ولی این انتخاب
@@ -927,10 +933,15 @@ model AiModel {
   asrPricePerMinuteUsd      Float?
   asrSupportsWordTimestamps Boolean @default(false)
 
-  isActive                     Boolean     @default(true)
-  sortOrder                    Int         @default(0)
-  tier                         ModelTier   @default(MEDIUM)
-  createdAt                    DateTime    @default(now())
+  // docs/PRD-chat-models-web-search-and-files.md §۳.۵ — فقط مدل‌هایی که ادمین تایید کرده
+  // OpenRouter tool-calling/`openrouter:web_search` را واقعاً پشتیبانی می‌کنند؛ پیش‌فرض false
+  // تا toggle جستجوی وب برای هیچ مدل قدیمی خودکار روشن نشود (باید صریحاً تست/تایید شود)
+  supportsWebSearch Boolean @default(false)
+
+  isActive  Boolean   @default(true)
+  sortOrder Int       @default(0)
+  tier      ModelTier @default(MEDIUM)
+  createdAt DateTime  @default(now())
 
   // docs/PRD-openrouter-migration.md §۱۳.۴/۱۴.۶ — صفحه‌ی انتخاب مدل بازطراحی‌شده: توضیح کوتاه
   // کاربرد مدل (متن آزاد، ادمین از فرم موجود ModelsPage پر می‌کند) + برچسب‌های فیلتر
@@ -1069,16 +1080,26 @@ model SalesBotConfig {
 
 // singleton — context عمومی + تنظیمات خلاصه‌سازی مبتنی بر توکن برای چت اصلی (دقیقاً الگوی SalesBotConfig)
 model ChatConfig {
-  id                      String   @id @default("singleton")
-  globalContextMd         String   @default("") @db.Text
-  summaryTriggerTokens    Int      @default(5000) // هر چند توکن از آخرین خلاصه‌سازی، دوباره خلاصه شود
-  summaryMaxTokens        Int      @default(200) // حداکثر طول خروجی خلاصه — کوتاه نگه داشته می‌شود
-  projectContextMaxChars  Int      @default(3000) // سقف طول خلاصه‌ی تجمیعی هر پروژه (کاراکتر) — با پیشرفت چت‌های داخل پروژه خودکار به‌روز می‌شود
-  maxImagesPerMessage     Int      @default(4) // docs/PRD-chat-images.md بخش ۵.۶
-  maxImageSizeMb          Int      @default(8) // سقف سایز هر عکس بعد از decode
-  allowedImageFormats     Json     @default("[\"png\",\"jpeg\",\"webp\",\"gif\"]") // string[] — فقط از این چهارتا که magic-byte برایشان چک می‌شود
-  implicitImageGenEnabled Boolean  @default(true) // تشخیص خودکار نیت تولید عکس وسط چت معمولی (بدون toggle صریح) — heuristic، نه قطعی
-  updatedAt               DateTime @updatedAt
+  id                      String  @id @default("singleton")
+  globalContextMd         String  @default("") @db.Text
+  summaryTriggerTokens    Int     @default(5000) // هر چند توکن از آخرین خلاصه‌سازی، دوباره خلاصه شود
+  summaryMaxTokens        Int     @default(200) // حداکثر طول خروجی خلاصه — کوتاه نگه داشته می‌شود
+  projectContextMaxChars  Int     @default(3000) // سقف طول خلاصه‌ی تجمیعی هر پروژه (کاراکتر) — با پیشرفت چت‌های داخل پروژه خودکار به‌روز می‌شود
+  maxImagesPerMessage     Int     @default(4) // docs/PRD-chat-images.md بخش ۵.۶
+  maxImageSizeMb          Int     @default(8) // سقف سایز هر عکس بعد از decode
+  allowedImageFormats     Json    @default("[\"png\",\"jpeg\",\"webp\",\"gif\"]") // string[] — فقط از این چهارتا که magic-byte برایشان چک می‌شود
+  implicitImageGenEnabled Boolean @default(true) // تشخیص خودکار نیت تولید عکس وسط چت معمولی (بدون toggle صریح) — heuristic، نه قطعی
+
+  // docs/PRD-chat-models-web-search-and-files.md §۳.۴ — هر واحد جستجوی وب چند نیوو (تومان) جدا
+  // از توکن معمولی کم می‌کند؛ ۰ یعنی هنوز ادمین قیمت‌گذاری نکرده (جستجو در این حالت رایگان است،
+  // نه غیرفعال — قبل از فعال‌سازی عمومی toggle باید این مقدار را در ادمین پنل تنظیم کرد)
+  webSearchCreditCostToman Int @default(0)
+
+  // docs/PRD-chat-files-and-pdf.md بخش ۶ — پیوست فایل غیرعکس (PDF/DOCX/TXT/CSV/XLSX/کد)
+  maxFileSizeMb     Int @default(10)
+  maxExtractedChars Int @default(80000)
+
+  updatedAt DateTime @updatedAt
 
   @@map("chat_config")
 }
@@ -1154,14 +1175,14 @@ model StudioProject {
 // intent/suggestedActions فقط روی پیام‌های role="assistant" پر می‌شوند — نتیجه‌ی طبقه‌بندی
 // video-studio.service.ts/sendMessage روی پیام کاربر که این پاسخ را تولید کرده.
 model StudioMessage {
-  id                String        @id @default(uuid())
-  projectId         String
-  project           StudioProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  role              String // "user" | "assistant"
-  content           String
-  intent            String? // فقط assistant: "generate_character"|"generate_storyboard"|"generate_quick_video"|"general"
-  suggestedActions  String[]      @default([]) // فقط assistant، وقتی intent="general" — پیشنهاد قدم بعدی برای UI (چیپ قابل‌کلیک)
-  createdAt         DateTime      @default(now())
+  id               String        @id @default(uuid())
+  projectId        String
+  project          StudioProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  role             String // "user" | "assistant"
+  content          String
+  intent           String? // فقط assistant: "generate_character"|"generate_storyboard"|"generate_quick_video"|"general"
+  suggestedActions String[]      @default([]) // فقط assistant، وقتی intent="general" — پیشنهاد قدم بعدی برای UI (چیپ قابل‌کلیک)
+  createdAt        DateTime      @default(now())
 
   @@index([projectId, createdAt])
   @@map("studio_messages")
@@ -1185,20 +1206,20 @@ model StudioCharacterOption {
 // هر شات = یک صحنه‌ی استوری‌برد؛ videoStatus/videoJobId/videoKey توسط صف async
 // (studio-video-generation.processor.ts) آپدیت می‌شوند، نه synchronous.
 model StudioShot {
-  id               String                 @id @default(uuid())
-  projectId        String
-  project          StudioProject          @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  order            Int
-  title            String
-  scenario         String
-  previewImageKey  String?
-  audioEnabled     Boolean                @default(false)
-  moderationStatus StudioModerationStatus @default(PENDING)
-  videoStatus      StudioShotVideoStatus  @default(NOT_STARTED)
-  videoJobId       String?
-  videoKey         String?
-  creditCost       Float?
-  createdAt        DateTime               @default(now())
+  id                 String                 @id @default(uuid())
+  projectId          String
+  project            StudioProject          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  order              Int
+  title              String
+  scenario           String
+  previewImageKey    String?
+  audioEnabled       Boolean                @default(false)
+  moderationStatus   StudioModerationStatus @default(PENDING)
+  videoStatus        StudioShotVideoStatus  @default(NOT_STARTED)
+  videoJobId         String?
+  videoKey           String?
+  creditCost         Float?
+  createdAt          DateTime               @default(now())
   // لحظه‌ای که پردازشگر ویدیو، videoStatus را به SUCCEEDED/FAILED رساند — مبنای نوتیف هدر وب
   videoCompletedAt   DateTime?
   // وقتی کاربر نوتیف این شات را در دراپ‌داون هدر دیده/باز کرده؛ null یعنی هنوز ندیده (badge)
@@ -1840,9 +1861,9 @@ enum NutritionGoal {
 // حدس مدل — این‌جا فقط cache می‌شوند تا هر بار re-compute نشوند. وزن روی این مدل نگه داشته
 // نمی‌شود (نه یک عدد ثابت)؛ تاریخچه‌ی وزن در WeightLog جداگانه است تا نمودار روند ممکن باشد.
 model NutritionProfile {
-  id            String        @id @default(uuid())
-  userId        String        @unique
-  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   gender        Gender
   age           Int
@@ -1865,9 +1886,9 @@ model NutritionProfile {
 // docs/PRD-nivo-cal.md فاز ۲ — یک رکورد به‌ازای هر ثبت وزن (آنبوردینگ اولیه + ثبت‌های
 // دوره‌ای بعدی از داشبورد)؛ منبع نمودار روند وزن و «وزن فعلی» (آخرین رکورد)
 model WeightLog {
-  id       String   @id @default(uuid())
+  id       String @id @default(uuid())
   userId   String
-  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   weightKg Float
 
   createdAt DateTime @default(now())
@@ -1930,39 +1951,39 @@ enum KieVideoCategory {
 // برای OPENROUTER شناسه‌ی دقیق مدل OpenRouter (مثلاً "bytedance/seedance-2.5") — دو namespace
 // چون از قبل جدا-جدا معنادارند تصادم نمی‌کنند، پس فیلد جدا برای این لازم نبود.
 model KieVideoModel {
-  id                  String             @id @default(uuid())
-  provider            VideoModelProvider @default(KIE)
-  slug                String           @unique // KIE: فیلد دقیق "model" در createTask؛ OPENROUTER: شناسه‌ی دقیق مدل OpenRouter
-  displayName         String
-  category            KieVideoCategory
-  isActive            Boolean          @default(true)
-  sortOrder           Int              @default(0)
+  id          String             @id @default(uuid())
+  provider    VideoModelProvider @default(KIE)
+  slug        String             @unique // KIE: فیلد دقیق "model" در createTask؛ OPENROUTER: شناسه‌ی دقیق مدل OpenRouter
+  displayName String
+  category    KieVideoCategory
+  isActive    Boolean            @default(true)
+  sortOrder   Int                @default(0)
 
-  supportsImages      Boolean          @default(false)
+  supportsImages      Boolean  @default(false)
   maxImages           Int?
-  supportsVideo       Boolean          @default(false)
+  supportsVideo       Boolean  @default(false)
   maxVideoDurationSec Int? // حداکثر طول کل فایل مبدأ قابل‌قبول (نه پنجره‌ی انتخابی)
   maxVideoWindowSec   Int? // حداکثر پهنای پنجره‌ی start/end قابل‌انتخاب داخل آن فایل
-  supportsAspectRatio Boolean          @default(true)
-  supportsDuration    Boolean          @default(true) // نادیده گرفته می‌شود وقتی ویدیویی داده شده (بخش ۲.۱ سند)
-  resolutions         String[]        @default(["720p"])
+  supportsAspectRatio Boolean  @default(true)
+  supportsDuration    Boolean  @default(true) // نادیده گرفته می‌شود وقتی ویدیویی داده شده (بخش ۲.۱ سند)
+  resolutions         String[] @default(["720p"])
 
-  kieInputSchema      KieInputSchema  @default(OMNI) // فقط برای provider=KIE معنا دارد؛ کدام builder در video-edit.processor.ts صدا زده شود
+  kieInputSchema              KieInputSchema @default(OMNI) // فقط برای provider=KIE معنا دارد؛ کدام builder در video-edit.processor.ts صدا زده شود
   // جایگزین دقیق‌تر گیت قبلی («provider===KIE یعنی edit می‌تواند»)؛ الان می‌دانیم بعضی مدل‌های
   // KIE (Seedance/Wan-R2V/Wan-V2V) فقط GENERATE-with-reference دارند، نه ادیت صحنه‌حفظ‌کننده‌ی
   // واقعی — فقط Omni و Wan-VideoEdit این را دارند
-  supportsScenePreservingEdit Boolean @default(false)
+  supportsScenePreservingEdit Boolean        @default(false)
   // خالی = بدون گزینه‌ی ثابت (duration محاسبه‌شده/پیوسته)؛ پر = چیپ‌های انتخاب مدت با همین مقادیر
   // دقیق (مثلاً Wan V2V: [5,10] — enum رشته‌ای ثابت سمت Kie، نه بازه‌ی آزاد)
-  fixedDurations      Int[]           @default([])
+  fixedDurations              Int[]          @default([])
 
   // فقط بعد از یک تست واقعی پر می‌شود (دقیقاً مثل بخش ۶.۲ سند — Kie قیمت را از قبل منتشر
   // نمی‌کند)؛ null یعنی «هنوز تست نشده»، preflight باید این حالت را جدا مدیریت کند
   pricePerSecondUsdConfirmed Float?
   pricingNote                String? // یادداشت آزاد ادمین، مثلاً «تست‌شده ۱۴۰۵/۰۶/۱۵ با ۴ث/۷۲۰p»
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
   jobs      VideoEditJob[]
 
   @@map("kie_video_models")
@@ -2013,23 +2034,23 @@ model VideoEditSession {
 // یک‌شاته (نه چندصحنه‌ای مثل StudioProject) چون این فیچر «یک ورودی → یک ویدیوی خروجی» است —
 // گروه‌بندی چندتایی‌اش را VideoEditSession انجام می‌دهد، نه خودِ این مدل
 model VideoEditJob {
-  id              String        @id @default(uuid())
+  id              String           @id @default(uuid())
   userId          String
-  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   sessionId       String
   session         VideoEditSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   kieVideoModelId String
-  kieVideoModel   KieVideoModel @relation(fields: [kieVideoModelId], references: [id])
+  kieVideoModel   KieVideoModel    @relation(fields: [kieVideoModelId], references: [id])
   mode            VideoEditMode
   prompt          String
 
-  referenceImageKeys String[] @default([]) // کلید‌های MinIO، فقط GENERATE
+  referenceImageKeys  String[] @default([]) // کلید‌های MinIO، فقط GENERATE
   videoKey            String? // GENERATE: مرجع اختیاری؛ EDIT: منبع اجباری — هر دو حالت حداکثر یکی
   videoWindowStartSec Float? // فقط اگر videoKey پر باشد
   videoWindowEndSec   Float? // (videoWindowEndSec - videoWindowStartSec) باید ≤ kieVideoModel.maxVideoWindowSec باشد
 
-  aspectRatio    String? @default("16:9") // فقط معنادار وقتی videoKey خالی است
-  resolution     String  @default("720p")
+  aspectRatio String? @default("16:9") // فقط معنادار وقتی videoKey خالی است
+  resolution  String  @default("720p")
 
   status             VideoJobStatus @default(PENDING)
   kieTaskId          String? // taskId از createTask، برای resume بعد از restart worker (الگوی videoJobId موجود)
@@ -2037,8 +2058,8 @@ model VideoEditJob {
   errorMessage       String?
   creditsConsumedRaw Float? // مقدار خام creditsConsumed از پاسخ Kie — مبنای واقعی کسر (بخش ۶.۵ سند)
   creditCost         Int? // تومان، فقط بعد از کسر واقعی
-  createdAt          DateTime  @default(now())
-  completedAt         DateTime?
+  createdAt          DateTime       @default(now())
+  completedAt        DateTime?
 
   @@index([userId])
   @@index([sessionId])

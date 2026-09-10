@@ -92,6 +92,10 @@ export class ConversationsService {
             role: true,
             content: true,
             images: true,
+            // docs/PRD-chat-models-web-search-and-files.md §۳.۳ / docs/PRD-chat-files-and-pdf.md
+            // بخش ۶ — منابع جستجوی وب و چیپ فایل پیوست‌شده، هر دو فقط-خواندنی برای فرانت
+            citations: true,
+            attachments: true,
             tokensInput: true,
             tokensOutput: true,
             createdAt: true,

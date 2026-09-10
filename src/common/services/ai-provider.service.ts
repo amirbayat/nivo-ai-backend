@@ -18,40 +18,89 @@ type OpenRouterUsage = {
     upstream_inference_prompt_cost?: number;
     upstream_inference_completions_cost?: number;
   };
+  server_tool_use?: { web_search_requests?: number };
 };
+
+// docs/PRD-chat-models-web-search-and-files.md §۳.۳ — شکل annotation ادعاشده توسط PRD
+// (شبیه فرمت url_citation استاندارد OpenAI-compatible). این شکل هنوز روی یک پاسخ واقعی
+// OpenRouter تست نشده — قبل از اتکای کامل UI به آن، در فاز ۶ (پیش از عرضه) با یک پیام واقعی
+// جستجوی وب تایید شود؛ اگر شکل واقعی فرق داشت، فقط همین تابع/تایپ نیاز به اصلاح دارد، نه
+// بقیه‌ی مسیر (SSE/DB/فرانت همگی از خروجی همین تابع تغذیه می‌شوند)
+type OpenRouterAnnotation = {
+  type?: string;
+  url_citation?: { url?: string; title?: string };
+};
+
+function extractCitations(
+  annotations: unknown,
+): { url: string; title: string }[] | undefined {
+  if (!Array.isArray(annotations)) return undefined;
+  const citations = (annotations as OpenRouterAnnotation[])
+    .filter((a) => a?.type === 'url_citation' && a.url_citation?.url)
+    .map((a) => ({
+      url: a.url_citation!.url!,
+      title: a.url_citation!.title ?? a.url_citation!.url!,
+    }));
+  return citations.length ? citations : undefined;
+}
 
 // هزینه‌ی واقعی per-request OpenRouter (usage.cost، دلار) — در کنار تخمین داخلی فعلی ذخیره
 // می‌شود، نه به‌جای آن (طبق §۶.۲.۲ سند اصلی). ساخته‌شده و تست‌شده مستقیم روی API واقعی
 // OpenRouter: هم مسیر non-streaming (extractMetadata) هم streaming (createStreamExtractor) —
-// usage با cost فقط در آخرین chunk استریم می‌آید، نه هر chunk
+// usage با cost فقط در آخرین chunk استریم می‌آید، نه هر chunk.
+// citations/webSearchRequests (فاز ۳ جستجوی وب) همان مکانیزم را دوباره استفاده می‌کنند: چون
+// @ai-sdk/openai-compatible هیچ تایپ استریم‌پارت اختصاصی برای annotation/citation ندارد، این‌ها
+// هم از parsedBody/chunk خام (نه از fullStream تایپ‌شده‌ی SDK) استخراج می‌شوند.
 function createOpenRouterMetadataExtractor(): MetadataExtractor {
-  const toMetadata = (usage: OpenRouterUsage | undefined) => {
-    if (!usage || typeof usage.cost !== 'number') return undefined;
+  const toMetadata = (
+    usage: OpenRouterUsage | undefined,
+    annotations: unknown,
+  ) => {
+    if (!usage && !annotations) return undefined;
     return {
       [OPENROUTER_METADATA_KEY]: {
-        cost: usage.cost,
-        costDetails: usage.cost_details,
+        ...(usage && typeof usage.cost === 'number'
+          ? { cost: usage.cost, costDetails: usage.cost_details }
+          : {}),
+        ...(usage?.server_tool_use?.web_search_requests
+          ? { webSearchRequests: usage.server_tool_use.web_search_requests }
+          : {}),
+        ...(extractCitations(annotations)
+          ? { citations: extractCitations(annotations) }
+          : {}),
       },
     };
   };
   return {
     extractMetadata({ parsedBody }) {
-      const usage = (parsedBody as { usage?: OpenRouterUsage } | undefined)
-        ?.usage;
-      return Promise.resolve(toMetadata(usage));
+      const body = parsedBody as
+        | {
+            usage?: OpenRouterUsage;
+            choices?: { message?: { annotations?: unknown } }[];
+          }
+        | undefined;
+      return Promise.resolve(
+        toMetadata(body?.usage, body?.choices?.[0]?.message?.annotations),
+      );
     },
     createStreamExtractor() {
       let usage: OpenRouterUsage | undefined;
+      let annotations: unknown;
       return {
         processChunk(parsedChunk: unknown) {
-          const chunkUsage = (
-            parsedChunk as { usage?: OpenRouterUsage } | undefined
-          )?.usage;
-          if (chunkUsage && typeof chunkUsage.cost === 'number')
-            usage = chunkUsage;
+          const chunk = parsedChunk as
+            | {
+                usage?: OpenRouterUsage;
+                choices?: { delta?: { annotations?: unknown } }[];
+              }
+            | undefined;
+          if (chunk?.usage) usage = chunk.usage;
+          const chunkAnnotations = chunk?.choices?.[0]?.delta?.annotations;
+          if (Array.isArray(chunkAnnotations) && chunkAnnotations.length)
+            annotations = chunkAnnotations;
         },
         buildMetadata() {
-          return toMetadata(usage);
+          return toMetadata(usage, annotations);
         },
       };
     },
@@ -173,7 +222,15 @@ export class AiProviderService {
   // apiKey اختیاری برای caller هایی که کلید اختصاصی خودشان را resolve کرده‌اند (مثل
   // resolveUserApiKey در chat.service.ts)؛ اگر پاس داده نشود، کلید مشترک provider فعال استفاده
   // می‌شود. extraOptions برای موارد خاص مثل supportsStructuredOutputs (nivo-cal.service.ts).
-  buildClient(apiKey?: string, extraOptions?: Record<string, unknown>) {
+  // extraBodyFields (docs/PRD-chat-models-web-search-and-files.md §۳.۲) — فقط روی OpenRouter:
+  // فیلدهای خام اضافه که باید مستقیم توی بادی درخواست OpenRouter بمانند (مثل `tools`/`max_tool_calls`
+  // برای جستجوی وب) — همان مکانیزم transformRequestBody زیر که از قبل برای reasoning_effort
+  // استفاده می‌شود، فقط این‌بار per-call به‌جای per-client (چون جستجوی وب سطح پیام است، نه کلاینت)
+  buildClient(
+    apiKey?: string,
+    extraOptions?: Record<string, unknown>,
+    extraBodyFields?: Record<string, unknown>,
+  ) {
     return createOpenAICompatible({
       name: this.name,
       baseURL: this.baseURL,
@@ -199,6 +256,7 @@ export class AiProviderService {
                   ? { reasoning: { effort: reasoning_effort } }
                   : {}),
                 usage: { include: true },
+                ...extraBodyFields,
               };
             },
             metadataExtractor: createOpenRouterMetadataExtractor(),

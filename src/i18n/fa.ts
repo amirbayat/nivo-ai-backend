@@ -57,6 +57,8 @@ export const fa = {
       'این درخواست به‌خاطر سیاست‌های ایمنی محتوا رد شد. لطفاً توصیف دیگری امتحان کنید.',
     imageGenRateLimited:
       'به سقف تعداد درخواست تولید/ویرایش عکس این پلن رسیده‌اید. کمی بعد دوباره امتحان کنید.',
+    webSearchNotSupported:
+      'این مدل جستجوی وب را پشتیبانی نمی‌کند. لطفاً مدل دیگری انتخاب کنید یا جستجو را خاموش کنید.',
   },
   payment: {
     pending: 'در انتظار پرداخت',
@@ -204,6 +206,20 @@ export const fa = {
     contentMismatch: 'محتوای عکس با فرمت اعلام‌شده مطابقت ندارد',
     formatNotAllowed: (allowed: string) =>
       `فرمت این عکس مجاز نیست — فقط ${allowed} پذیرفته می‌شود`,
+  },
+  // docs/PRD-chat-files-and-pdf.md بخش ۳ — پیوست فایل غیرعکس در چت (PDF/DOCX/TXT/CSV/XLSX/کد)
+  chatFiles: {
+    invalidFormat:
+      'فرمت این فایل پشتیبانی نمی‌شود — فقط PDF, DOCX, TXT, MD, CSV, XLSX و فایل‌های کد رایج',
+    tooLarge: (maxMb: number) =>
+      `حجم فایل نباید بیشتر از ${maxMb.toLocaleString('fa-IR')} مگابایت باشد`,
+    contentMismatch: 'محتوای فایل با فرمت اعلام‌شده مطابقت ندارد',
+    tooMany: (max: number) =>
+      `حداکثر ${max.toLocaleString('fa-IR')} فایل در هر پیام مجاز است`,
+    emptyExtractedText: (filename: string) =>
+      `این فایل («${filename}») متنی نبود یا نتوانستیم چیزی از آن بخوانیم`,
+    truncated: (filename: string) =>
+      `فایل «${filename}» بزرگ بود — فقط بخش اول آن خوانده شد`,
   },
   // docs/PRD-discovery-and-credits.md — دیسکاوری (سبک‌های آماده‌ی عکس/متن) + پروژه‌ها + اعتبار «نیوو»
   discovery: {
