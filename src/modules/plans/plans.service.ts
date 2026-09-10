@@ -1,8 +1,9 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, PricingGenerationType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RedisService } from '../../redis/redis.service';
 import { AiProviderService } from '../../common/services/ai-provider.service';
+import { PricingService } from '../usage/pricing.service';
 import { fa } from '../../i18n/fa';
 import { CreatePlanDto } from './dto/create-plan.dto';
 import { UpdatePlanDto } from './dto/update-plan.dto';
@@ -13,6 +14,7 @@ export class PlansService {
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
     private readonly aiProvider: AiProviderService,
+    private readonly pricing: PricingService,
   ) {}
 
   findAll() {
@@ -33,8 +35,8 @@ export class PlansService {
   // گزینه نمایش داده شوند (docs/PRD-sales-kb-rag-and-plan-context.md بخش الف)، اما مدل‌های IMAGE_GEN
   // باید اینجا باشند تا حالت «تولید عکس» فرانت (بر اساس supportsImageGen) آن‌ها را ببیند —
   // مسیریاب مدل (model-router.service.ts) جدا و همچنان فقط modelType:'CHAT' فیلتر می‌کند.
-  findModelCatalog() {
-    return this.prisma.aiModel.findMany({
+  async findModelCatalog() {
+    const models = await this.prisma.aiModel.findMany({
       where: {
         isActive: true,
         // docs/PRD-video-studio-chat-flow.md — VIDEO_GEN اضافه شد تا استودیوی ویدیو هم از همین
@@ -70,11 +72,31 @@ export class PlansService {
         // برای دسته‌بندی ارزان/متوسط/گران مدل‌های ویدیو سمت فرانت (دستور صریح کاربر)
         videoGenPricePerSecondUsd: true,
         videoGenAudioMultiplier: true,
-        // docs/PRD-image-gen-pricing-and-credit-fix.md بخش D — تخمین خودکار «نیوو» برای نمایش
-        // پیش از تولید (پیامد: تصمیم‌گیری/قفل preflight بر اساس این عدد نیست)
-        estimatedImageGenCreditCost: true,
+        // docs/PRD-image-gen-usd-estimate.md — USD on the row; credits derived below at read time
+        estimatedImageGenCostUsd: true,
       },
     });
+
+    const usdValues = models
+      .map((m) => m.estimatedImageGenCostUsd)
+      .filter((usd): usd is number => usd != null && usd > 0);
+    const uniqueUsd = [...new Set(usdValues)];
+    const creditsByUsd = new Map<number, number>();
+    if (uniqueUsd.length) {
+      const credits = await this.pricing.usdCostsToCredits(
+        uniqueUsd,
+        PricingGenerationType.IMAGE,
+      );
+      uniqueUsd.forEach((usd, i) => creditsByUsd.set(usd, credits[i]));
+    }
+
+    return models.map(({ estimatedImageGenCostUsd, ...rest }) => ({
+      ...rest,
+      estimatedImageGenCreditCost:
+        estimatedImageGenCostUsd != null && estimatedImageGenCostUsd > 0
+          ? (creditsByUsd.get(estimatedImageGenCostUsd) ?? null)
+          : null,
+    }));
   }
 
   async findOne(id: string) {

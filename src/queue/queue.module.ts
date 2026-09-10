@@ -65,7 +65,7 @@ import { RunwayProviderModule } from '../common/services/runway-provider.module'
       name: 'video-edit',
       settings: { lockDuration: 35 * 60 * 1000 },
     }),
-    // docs/PRD-image-gen-pricing-and-credit-fix.md بخش D — job روزانه‌ی محاسبه‌ی تخمین «نیوو»
+    // docs/PRD-image-gen-usd-estimate.md — daily job stores provider USD per image model
     BullModule.registerQueue({ name: 'image-model-cost-estimate' }),
     PrismaModule,
     MessageFeedbackModule,

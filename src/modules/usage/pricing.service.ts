@@ -1,10 +1,11 @@
 import { HttpException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Prisma } from '@prisma/client';
+import { Prisma, PricingGenerationType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RedisService } from '../../redis/redis.service';
 import { ExchangeRateService } from '../../exchange-rate/exchange-rate.service';
 import { AiModelRegistryService } from './ai-model-registry.service';
+import { PricingTiersService } from './pricing-tiers.service';
 import { fa } from '../../i18n/fa';
 
 export type BudgetWarningLevel =
@@ -49,6 +50,22 @@ export function megapixelsFromSize(size: string | null | undefined): number {
   return (Number(w) * Number(h)) / 1_000_000;
 }
 
+export function imageGenFlatCostUsd(
+  model: {
+    imageGenFlatPriceUsd: number | null;
+    imageGenFlatPriceUnit: string | null;
+    imageGenSize: string | null;
+  },
+  imageCount = 1,
+): number {
+  const perImageUsd =
+    model.imageGenFlatPriceUnit === 'megapixel'
+      ? (model.imageGenFlatPriceUsd ?? 0) *
+        megapixelsFromSize(model.imageGenSize)
+      : (model.imageGenFlatPriceUsd ?? 0);
+  return perImageUsd * imageCount;
+}
+
 function monthlyCostKey(userId: string) {
   const m = new Date().toISOString().slice(0, 7);
   return `cost:monthly:${userId}:${m}`;
@@ -80,6 +97,7 @@ export class PricingService {
     private readonly redis: RedisService,
     private readonly exchangeRate: ExchangeRateService,
     private readonly modelRegistry: AiModelRegistryService,
+    private readonly pricingTiers: PricingTiersService,
   ) {
     this.aiShare = Number(this.config.get('AI_BUDGET_SHARE', '0.70'));
     this.warnPct = Number(this.config.get('BUDGET_WARN_PCT', '60')) / 100;
@@ -174,12 +192,7 @@ export class PricingService {
     },
     imageCount = 1,
   ): Promise<CostCalc> {
-    const perImageUsd =
-      model.imageGenFlatPriceUnit === 'megapixel'
-        ? (model.imageGenFlatPriceUsd ?? 0) *
-          megapixelsFromSize(model.imageGenSize)
-        : (model.imageGenFlatPriceUsd ?? 0);
-    const usdCost = perImageUsd * imageCount;
+    const usdCost = imageGenFlatCostUsd(model, imageCount);
     const rate = await this.exchangeRate.getUsdtToman();
     const costToman = Math.ceil(usdCost * rate);
     return {
@@ -379,6 +392,38 @@ export class PricingService {
       });
     const rawCredit = (costToman * markup) / tomanPerCredit;
     return this.roundCreditToStep(rawCredit, roundingSteps);
+  }
+
+  // Display estimate: live FX + IMAGE markup + tomanPerCredit. Same formula as debitWallet.
+  async usdToCredits(
+    usdCost: number,
+    type: PricingGenerationType,
+  ): Promise<number> {
+    const [converted] = await this.usdCostsToCredits([usdCost], type);
+    return converted;
+  }
+
+  async usdCostsToCredits(
+    usdCosts: number[],
+    type: PricingGenerationType,
+  ): Promise<number[]> {
+    if (!usdCosts.length) return [];
+    const [{ tomanPerCredit, roundingSteps }, rate] = await Promise.all([
+      this.prisma.creditConfig.upsert({
+        where: { id: 'singleton' },
+        create: { id: 'singleton' },
+        update: {},
+      }),
+      this.exchangeRate.getUsdtToman(),
+    ]);
+    const out: number[] = [];
+    for (const usd of usdCosts) {
+      const costToman = Math.ceil(usd * rate);
+      const markup = await this.pricingTiers.getMarkup(type, costToman);
+      const rawCredit = (costToman * markup) / tomanPerCredit;
+      out.push(this.roundCreditToStep(rawCredit, roundingSteps));
+    }
+    return out;
   }
 
   // مبلغ نهایی طبق پله‌های قابل‌تنظیم CreditConfig.roundingSteps گرد می‌شود: مصرف خام کمتر از

@@ -3,9 +3,10 @@ import { PlansService } from './plans.service';
 import { PlansController } from './plans.controller';
 import { PlanRoutingController } from './plan-routing.controller';
 import { ModelRouterModule } from '../model-router/model-router.module';
+import { UsageModule } from '../usage/usage.module';
 
 @Module({
-  imports: [ModelRouterModule],
+  imports: [ModelRouterModule, UsageModule],
   controllers: [PlansController, PlanRoutingController],
   providers: [PlansService],
   exports: [PlansService],

@@ -1,14 +1,10 @@
 import { Process, Processor } from '@nestjs/bull';
 import { Logger } from '@nestjs/common';
-import { PricingGenerationType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { PricingService } from '../../modules/usage/pricing.service';
-import { PricingTiersService } from '../../modules/usage/pricing-tiers.service';
+import { imageGenFlatCostUsd } from '../../modules/usage/pricing.service';
 
-// docs/PRD-image-gen-pricing-and-credit-fix.md بخش D — «~N نیوو» روی دکمه‌ی تولید عکس. منبع عدد:
-// میانگین خودکار هزینه‌ی واقعی مصرف اخیر (نه یک فیلد دستی که ادمین ست کند). فقط برای *نمایش*
-// پیش از تولید استفاده می‌شود — بخش ۲.۴/۷ پلن: هیچ‌وقت نباید preflight بک‌اند بر پایه‌ی این عدد
-// gate/قفل بسازد.
+// docs/PRD-image-gen-usd-estimate.md — store provider USD only. Catalog converts to نیوو
+// at read time. Display-only; never used as a preflight gate.
 const RECENT_MESSAGE_WINDOW_DAYS = 7;
 const RECENT_MESSAGE_LIMIT = 50;
 
@@ -16,11 +12,7 @@ const RECENT_MESSAGE_LIMIT = 50;
 export class ImageModelCostEstimateProcessor {
   private readonly logger = new Logger(ImageModelCostEstimateProcessor.name);
 
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly pricing: PricingService,
-    private readonly pricingTiers: PricingTiersService,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   @Process('estimate')
   async handleEstimate() {
@@ -34,30 +26,22 @@ export class ImageModelCostEstimateProcessor {
 
     for (const model of models) {
       try {
-        const costToman = model.imageGenFlatPriceUnit
-          ? (await this.pricing.calcImageGenFlatCost(model)).costToman
-          : await this.averageRecentCostToman(model.name);
+        const usd = model.imageGenFlatPriceUnit
+          ? imageGenFlatCostUsd(model)
+          : await this.averageRecentCostUsd(model.name);
 
-        if (costToman === null) {
+        if (usd == null || usd <= 0) {
           await this.prisma.aiModel.update({
             where: { id: model.id },
-            data: { estimatedImageGenCreditCost: null },
+            data: { estimatedImageGenCostUsd: null },
           });
           clearedForNoData++;
           continue;
         }
 
-        const markup = await this.pricingTiers.getMarkup(
-          PricingGenerationType.IMAGE,
-          costToman,
-        );
-        const estimatedImageGenCreditCost = await this.pricing.tomanToCredits(
-          costToman,
-          markup,
-        );
         await this.prisma.aiModel.update({
           where: { id: model.id },
-          data: { estimatedImageGenCreditCost },
+          data: { estimatedImageGenCostUsd: usd },
         });
         updated++;
       } catch (err) {
@@ -72,12 +56,7 @@ export class ImageModelCostEstimateProcessor {
     );
   }
 
-  // مدل‌های token-based (imageGenFlatPriceUnit=null) — میانگین هزینه‌ی واقعی همون چیزیه که
-  // debitWallet واقعاً کسر کرده: openrouterRealCostToman (هزینه‌ی واقعی OpenRouter)، fallback به
-  // costToman تخمینی وقتی OpenRouter آن‌بار cost برنگردانده (یا روی لیارا که همیشه null است).
-  // اول createdAt فیلتر می‌شود (بازه‌ی ۷ روزه) چون Message.model ایندکس ندارد — بدون این فیلتر
-  // کوئری روی کل تاریخچه‌ی پیام‌ها سنگین می‌شد.
-  private async averageRecentCostToman(modelName: string): Promise<number | null> {
+  private async averageRecentCostUsd(modelName: string): Promise<number | null> {
     const since = new Date(
       Date.now() - RECENT_MESSAGE_WINDOW_DAYS * 24 * 60 * 60 * 1000,
     );
@@ -85,14 +64,15 @@ export class ImageModelCostEstimateProcessor {
       where: { model: modelName, role: 'ASSISTANT', createdAt: { gte: since } },
       orderBy: { createdAt: 'desc' },
       take: RECENT_MESSAGE_LIMIT,
-      select: { costToman: true, openrouterRealCostToman: true },
+      select: { costUsdMicros: true, openrouterRealCostUsdMicros: true },
     });
     if (!messages.length) return null;
 
-    const total = messages.reduce(
-      (sum, m) => sum + (m.openrouterRealCostToman ?? m.costToman),
-      0,
-    );
-    return Math.ceil(total / messages.length);
+    const amounts = messages
+      .map((m) => (m.openrouterRealCostUsdMicros ?? m.costUsdMicros) / 1_000_000)
+      .filter((usd) => usd > 0);
+    if (!amounts.length) return null;
+
+    return amounts.reduce((sum, usd) => sum + usd, 0) / amounts.length;
   }
 }

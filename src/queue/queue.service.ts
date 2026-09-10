@@ -17,8 +17,7 @@ const LIARA_USAGE_SYNC_CRON = '*/5 * * * *';
 // docs/PRD-liara-usage-reconciliation.md — کاربرانی که ساخت کلید اختصاصی‌شان قبلاً fail شده را
 // دوره‌ای دوباره امتحان می‌کند (مثلاً بعد از تمدید JWT مدیریتی در Hamravesh)
 const LIARA_KEY_RETRY_CRON = '*/15 * * * *';
-// docs/PRD-image-gen-pricing-and-credit-fix.md بخش D.1 — روزانه کافیه، قیمت‌ها به این کندی
-// تغییر نمی‌کنن که نیاز به بازه‌ی کوتاه‌تر باشه
+// docs/PRD-image-gen-usd-estimate.md — daily USD refresh; FX is applied at catalog read
 const IMAGE_MODEL_COST_ESTIMATE_CRON = '0 4 * * *';
 
 @Injectable()
@@ -190,5 +189,11 @@ export class QueueService implements OnApplicationBootstrap {
     this.logger.log(
       `Image model cost estimate job scheduled: ${IMAGE_MODEL_COST_ESTIMATE_CRON}`,
     );
+    await this.imageModelCostEstimateQueue.add(
+      'estimate',
+      {},
+      { removeOnComplete: true, removeOnFail: true },
+    );
+    this.logger.log('Image model cost estimate job enqueued (one-shot on boot)');
   }
 }

@@ -914,9 +914,12 @@ model AiModel {
   // OpenRouter) و باید از endpoint اختصاصی POST /images صدا زده شوند. true یعنی این مسیر دوم
   // استفاده شود؛ false (پیش‌فرض) یعنی رفتار فعلی (/chat/completions با modalities) حفظ شود.
   imageGenUseDirectApi Boolean @default(false)
-  // تخمین خودکار «نیوو»ی هر تولید — میانگین هزینه‌ی واقعی مصرف اخیر (نه یک فیلد دستی)، توسط
-  // job دوره‌ای محاسبه و overwrite می‌شود (image-model-cost-estimate.processor.ts). فقط برای
-  // نمایش پیش از تولید استفاده می‌شود، نه gating/قفل preflight. null یعنی هنوز داده‌ی کافی نیست.
+  // Provider USD per image. Written only by image-model-cost-estimate.processor.ts.
+  // Catalog converts this to نیوو at read time (live FX + IMAGE markup + tomanPerCredit).
+  // null = not enough data yet. Display-only — never used as a preflight gate.
+  estimatedImageGenCostUsd Float?
+  // Legacy job-written credits. Job no longer writes this; catalog derives credits from USD.
+  // Keep until a later migration drops the column. Do not read for display.
   estimatedImageGenCreditCost Float?
 
   // docs/PRD-video-studio-chat-flow.md — قیمت‌گذاری OpenRouter برای ویدیو per-second است، نه
