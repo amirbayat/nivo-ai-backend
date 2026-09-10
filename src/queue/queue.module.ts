@@ -28,6 +28,8 @@ import { MediaTranscodeModule } from '../common/services/media-transcode.module'
 import { AsrModule } from '../common/services/asr.module';
 import { KieProviderModule } from '../common/services/kie-provider.module';
 import { OpenRouterVideoProviderModule } from '../common/services/openrouter-video-provider.module';
+import { VeoProviderModule } from '../common/services/veo-provider.module';
+import { RunwayProviderModule } from '../common/services/runway-provider.module';
 
 @Module({
   imports: [
@@ -77,6 +79,8 @@ import { OpenRouterVideoProviderModule } from '../common/services/openrouter-vid
     AsrModule,
     KieProviderModule,
     OpenRouterVideoProviderModule,
+    VeoProviderModule,
+    RunwayProviderModule,
     CreditsModule,
   ],
   providers: [

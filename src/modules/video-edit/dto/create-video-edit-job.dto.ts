@@ -63,4 +63,12 @@ export class CreateVideoEditJobDto {
   @IsOptional()
   @IsString()
   resolution?: string;
+
+  // معماری data-driven (kieVideoModel.inputFields غیر-null): values-by-field-key که فرم عمومی
+  // فرانت می‌سازد — جایگزین referenceImageKeys/videoKey/.../resolution بالا برای این مدل‌ها.
+  // شکل دقیق مقدار هر کلید به type همان field در inputFields بستگی دارد (رجوع کن به کامنت
+  // FieldValues در generic-payload-builder.ts). ساختار عمیق/متغیر است، پس اینجا فقط unknown —
+  // اعتبارسنجی واقعی با validateInputValues داخل VideoEditService انجام می‌شود.
+  @IsOptional()
+  valuesJson?: Record<string, unknown>;
 }

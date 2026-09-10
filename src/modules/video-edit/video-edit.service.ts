@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
 import type { Queue } from 'bull';
-import { VideoJobStatus, type KieVideoModel } from '@prisma/client';
+import { Prisma, VideoJobStatus, type KieVideoModel } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
 import { MediaTranscodeService } from '../../common/services/media-transcode.service';
@@ -16,12 +16,19 @@ import { KieVideoModelsService } from '../kie-video-models/kie-video-models.serv
 import { VideoEditConfigService } from '../video-edit-config/video-edit-config.service';
 import { CreateVideoEditJobDto } from './dto/create-video-edit-job.dto';
 import { fa } from '../../i18n/fa';
+import { parseInputFields } from '../kie-video-models/input-fields.schema';
+import {
+  resolveEffectiveDurationSec,
+  validateInputValues,
+  type FieldValues,
+} from '../kie-video-models/generic-payload-builder';
 
 // حدهای واقعی Kie.ai برای gemini-omni-video (بخش ۲ سند)؛ چون مدل‌های بعدی کاتالوگ ممکن است
 // حد متفاوتی داشته باشند، اینها فقط سقف حجمی محافظه‌کارانه‌ی رد سریع پیش از صف‌شدن‌اند —
 // سقف واقعی طول/تعداد از خودِ KieVideoModel خوانده می‌شود (اعتبارسنجی پایین‌تر همین فایل)
 const MAX_IMAGE_UPLOAD_BYTES = 20 * 1024 * 1024;
 const MAX_VIDEO_UPLOAD_BYTES = 100 * 1024 * 1024;
+const MAX_AUDIO_UPLOAD_BYTES = 30 * 1024 * 1024;
 
 const ALLOWED_VIDEO_MIME_EXT: Record<string, string> = {
   'video/mp4': 'mp4',
@@ -49,6 +56,21 @@ function detectImageExt(buffer: Buffer): string | null {
   ) {
     return 'webp';
   }
+  return null;
+}
+
+// MP3: ID3 تگ یا فریم‌سینک خام (FF Ex/Fx) — WAV: 'RIFF'....'WAVE' — M4A/AAC: جعبه‌ی ftyp (مثل mp4)
+function detectAudioExt(buffer: Buffer): string | null {
+  if (buffer.length < 12) return null;
+  if (buffer.subarray(0, 3).toString('ascii') === 'ID3') return 'mp3';
+  if (buffer[0] === 0xff && (buffer[1] & 0xe0) === 0xe0) return 'mp3';
+  if (
+    buffer.subarray(0, 4).toString('ascii') === 'RIFF' &&
+    buffer.subarray(8, 12).toString('ascii') === 'WAVE'
+  ) {
+    return 'wav';
+  }
+  if (buffer.subarray(4, 8).toString('ascii') === 'ftyp') return 'm4a';
   return null;
 }
 
@@ -114,6 +136,17 @@ export class VideoEditService {
     );
     const key = await this.storage.uploadImage(file.buffer, ext);
     return { key, durationSec };
+  }
+
+  async uploadAudio(file: Express.Multer.File): Promise<{ key: string }> {
+    if (!file) throw new BadRequestException(fa.videoEdit.noFileUploaded);
+    if (file.size > MAX_AUDIO_UPLOAD_BYTES) {
+      throw new BadRequestException(fa.videoEdit.invalidVideoFormat);
+    }
+    const ext = detectAudioExt(file.buffer);
+    if (!ext) throw new BadRequestException(fa.videoEdit.invalidVideoFormat);
+    const key = await this.storage.uploadImage(file.buffer, ext);
+    return { key };
   }
 
   private async getActiveModelOrThrow(id: string): Promise<KieVideoModel> {
@@ -218,7 +251,15 @@ export class VideoEditService {
       throw new BadRequestException(fa.videoEdit.featureDisabled);
 
     const model = await this.getActiveModelOrThrow(dto.kieVideoModelId);
-    this.validateAgainstMode(dto, model);
+    // دیسپچر معماری جدید/قدیمی — طبق پلن بخش ۳.۳: inputFields غیر-null یعنی اعتبارسنجی عمومی
+    // (validateInputValues) جای منطق دستی validateAgainstMode را می‌گیرد
+    const schema = model.inputFields ? parseInputFields(model.inputFields) : null;
+    const valuesJson = (dto.valuesJson ?? {}) as FieldValues;
+    if (schema) {
+      validateInputValues(schema, valuesJson);
+    } else {
+      this.validateAgainstMode(dto, model);
+    }
 
     // session یا موجود (باید مال همین کاربر باشد) یا تازه‌ساز («شروع ویرایش جدید» بی‌عنوان)
     const session = dto.sessionId
@@ -251,9 +292,11 @@ export class VideoEditService {
     // preflight محافظه‌کارانه — رقم واقعی فقط بعد از creditsConsumed در پردازشگر صف مشخص
     // می‌شود (بخش ۶.۵ سند)؛ pricePerSecondUsdConfirmed تا وقتی مدل تست نشده null است، پس
     // نرخ رسمی Google/fal ($۰.۱۰) به‌عنوان تخمین محافظه‌کارانه (نه ارزان) استفاده می‌شود
-    const estimateDurationSec = dto.videoKey
-      ? dto.videoWindowEndSec! - dto.videoWindowStartSec!
-      : config.generateFixedDurationSec;
+    const estimateDurationSec = schema
+      ? resolveEffectiveDurationSec(schema, valuesJson)
+      : dto.videoKey
+        ? dto.videoWindowEndSec! - dto.videoWindowStartSec!
+        : config.generateFixedDurationSec;
     const estimateUsd =
       estimateDurationSec * (model.pricePerSecondUsdConfirmed ?? 0.1);
     const estimate = await this.pricing.calcFlatCostToman(estimateUsd);
@@ -288,19 +331,28 @@ export class VideoEditService {
     }
 
     const job = await this.prisma.videoEditJob.create({
-      data: {
-        userId,
-        sessionId: session.id,
-        kieVideoModelId: model.id,
-        mode: dto.mode,
-        prompt: dto.prompt,
-        referenceImageKeys: dto.referenceImageKeys ?? [],
-        videoKey: dto.videoKey ?? null,
-        videoWindowStartSec: dto.videoWindowStartSec ?? null,
-        videoWindowEndSec: dto.videoWindowEndSec ?? null,
-        aspectRatio: dto.videoKey ? null : (dto.aspectRatio ?? '16:9'),
-        resolution: dto.resolution ?? model.resolutions[0] ?? '720p',
-      },
+      data: schema
+        ? {
+            userId,
+            sessionId: session.id,
+            kieVideoModelId: model.id,
+            mode: dto.mode,
+            prompt: dto.prompt,
+            valuesJson: valuesJson as Prisma.InputJsonValue,
+          }
+        : {
+            userId,
+            sessionId: session.id,
+            kieVideoModelId: model.id,
+            mode: dto.mode,
+            prompt: dto.prompt,
+            referenceImageKeys: dto.referenceImageKeys ?? [],
+            videoKey: dto.videoKey ?? null,
+            videoWindowStartSec: dto.videoWindowStartSec ?? null,
+            videoWindowEndSec: dto.videoWindowEndSec ?? null,
+            aspectRatio: dto.videoKey ? null : (dto.aspectRatio ?? '16:9'),
+            resolution: dto.resolution ?? model.resolutions[0] ?? '720p',
+          },
     });
 
     await this.videoEditQueue.add(
@@ -339,7 +391,7 @@ export class VideoEditService {
     userId: string,
     key: string,
   ): Promise<{ buffer: Buffer; ext: string }> {
-    const owned = await this.prisma.videoEditJob.findFirst({
+    let owned = await this.prisma.videoEditJob.findFirst({
       where: {
         userId,
         OR: [
@@ -350,6 +402,19 @@ export class VideoEditService {
       },
       select: { id: true },
     });
+    // معماری data-driven: کلیدهای فیلدهای image/video/audio/elementGroup داخل valuesJson
+    // (به‌جای ستون‌های flat بالا) تودرتو ذخیره می‌شوند — یک ستون flat جدا برای هرکدام معنا
+    // ندارد (شکل هر فیلد به schema مدل بستگی دارد)، پس اینجا متن خام JSON را جستجو می‌کنیم
+    if (!owned) {
+      const candidates = await this.prisma.videoEditJob.findMany({
+        where: { userId, valuesJson: { not: Prisma.JsonNull } },
+        select: { id: true, valuesJson: true },
+        orderBy: { createdAt: 'desc' },
+        take: 200,
+      });
+      const match = candidates.find((c) => JSON.stringify(c.valuesJson).includes(key));
+      if (match) owned = { id: match.id };
+    }
     if (!owned) throw new NotFoundException(fa.errors.notFound);
     const ext = key.split('.').pop() ?? 'mp4';
     const buffer = await this.storage.downloadImage(key);

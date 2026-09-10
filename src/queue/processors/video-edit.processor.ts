@@ -13,8 +13,18 @@ import { PricingService } from '../../modules/usage/pricing.service';
 import { PricingTiersService } from '../../modules/usage/pricing-tiers.service';
 import { KieProviderService } from '../../common/services/kie-provider.service';
 import { OpenRouterVideoProviderService } from '../../common/services/openrouter-video-provider.service';
+import { VeoProviderService } from '../../common/services/veo-provider.service';
+import { RunwayProviderService } from '../../common/services/runway-provider.service';
+import type { VideoProviderClient } from '../../common/services/video-provider-client.interface';
 import { PushFcmService } from '../../modules/push-notifications/fcm.service';
 import { fa } from '../../i18n/fa';
+import { parseInputFields } from '../../modules/kie-video-models/input-fields.schema';
+import {
+  buildGenericKiePayload,
+  resolveEffectiveDurationSec,
+  type FieldValues,
+  type MediaUploader,
+} from '../../modules/kie-video-models/generic-payload-builder';
 
 const POLL_INTERVAL_MS = 10_000;
 const MAX_POLL_ATTEMPTS = 180; // ۳۰ دقیقه سقف — همون منطق studio-video-generation.processor.ts
@@ -62,6 +72,8 @@ export class VideoEditProcessor {
     private readonly pricingTiers: PricingTiersService,
     private readonly kieProvider: KieProviderService,
     private readonly openRouterProvider: OpenRouterVideoProviderService,
+    private readonly veoProvider: VeoProviderService,
+    private readonly runwayProvider: RunwayProviderService,
     private readonly pushFcm: PushFcmService,
   ) {}
 
@@ -89,6 +101,16 @@ export class VideoEditProcessor {
     const urls: string[] = [];
     for (const key of keys) urls.push(await this.uploadRef(key));
     return urls;
+  }
+
+  // پل بین uploadRef/uploadRefs موجود (که به this.storage/this.kieProvider وابسته‌اند) و
+  // buildGenericKiePayload (که عمداً مستقل از این دو سرویس نوشته شده — کنار مدل‌های
+  // KIE، همین uploader برای Veo/Runway هم قابل بازاستفاده است)
+  private mediaUploader(): MediaUploader {
+    return {
+      uploadOne: (key: string) => this.uploadRef(key),
+      uploadMany: (keys: string[]) => this.uploadRefs(keys),
+    };
   }
 
   // Omni: video_list آبجکتی با پنجره‌ی start/ends (تنها مدل با trim واقعی)؛ duration وقتی
@@ -296,6 +318,14 @@ export class VideoEditProcessor {
     });
 
     const isOpenRouter = videoJob.kieVideoModel.provider === 'OPENROUTER';
+    // Veo/Runway هر دو endpoint اختصاصی خودشان را دارند (نه jobs/createTask عمومی Kie) — طبق
+    // پلن بخش ۳.۶، این ۴-۵ مدل همیشه data-driven‌اند (inputFields هرگز null نیست برایشان)
+    const externalProvider: VideoProviderClient | null =
+      videoJob.kieVideoModel.provider === 'VEO'
+        ? this.veoProvider
+        : videoJob.kieVideoModel.provider === 'RUNWAY'
+          ? this.runwayProvider
+          : null;
     let taskId: string | null = null;
     try {
       // resume به‌جای resubmit — دقیقاً همون گارد idempotency studio-video-generation.processor.ts
@@ -312,7 +342,18 @@ export class VideoEditProcessor {
           update: {},
         });
 
-        if (isOpenRouter) {
+        if (externalProvider) {
+          const input = await buildGenericKiePayload(
+            parseInputFields(videoJob.kieVideoModel.inputFields),
+            (videoJob.valuesJson as FieldValues | null) ?? {},
+            this.mediaUploader(),
+          );
+          const submitted = await externalProvider.submit(
+            videoJob.kieVideoModel.slug,
+            input,
+          );
+          taskId = submitted.taskId;
+        } else if (isOpenRouter) {
           // duration مثبت همیشه فرستاده می‌شود، حتی با ویدیوی مرجع — رجوع کن به کامنت داخل
           // buildOpenRouterInput (تست زنده‌ی سه‌سناریویی ۱۴۰۵/۰۶/۱۷) برای دلیل کامل
           const input = await this.buildOpenRouterInput(
@@ -325,13 +366,21 @@ export class VideoEditProcessor {
           );
           taskId = submitted.id;
         } else {
-          // هر builder خودش تصمیم می‌گیرد duration را چطور بفرستد (نادیده‌گرفتن/-1/0/enum/بازه)
-          // — رجوع کن به کامنت هرکدام برای قرارداد دقیق آن خانواده‌ی مدل
-          const input = await this.buildKieInputForModel(
-            videoJob,
-            videoJob.kieVideoModel,
-            config.generateFixedDurationSec,
-          );
+          // دیسپچر معماری جدید/قدیمی: inputFields غیر-null یعنی از generic payload-builder
+          // استفاده کن (کنار ۵ تابع buildXInput فعلی، نه جایگزین فوری — طبق پلن بخش ۳.۳)
+          const input = videoJob.kieVideoModel.inputFields
+            ? await buildGenericKiePayload(
+                parseInputFields(videoJob.kieVideoModel.inputFields),
+                (videoJob.valuesJson as FieldValues | null) ?? {},
+                this.mediaUploader(),
+              )
+            : // هر builder قدیمی خودش تصمیم می‌گیرد duration را چطور بفرستد (نادیده‌گرفتن/-1/0/enum/بازه)
+              // — رجوع کن به کامنت هرکدام برای قرارداد دقیق آن خانواده‌ی مدل
+              await this.buildKieInputForModel(
+                videoJob,
+                videoJob.kieVideoModel,
+                config.generateFixedDurationSec,
+              );
 
           const submitted = await this.kieProvider.createTask(
             videoJob.kieVideoModel.slug,
@@ -350,7 +399,18 @@ export class VideoEditProcessor {
       let realCostUsd: number | undefined; // فقط OpenRouter — دلار مستقیم، نه credit
       for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
         await sleep(POLL_INTERVAL_MS);
-        if (isOpenRouter) {
+        if (externalProvider) {
+          const status = await externalProvider.poll(taskId);
+          if (status.state === 'success') {
+            resultUrl = status.resultUrls[0];
+            break;
+          }
+          if (status.state === 'fail') {
+            throw new Error(
+              status.failMsg ?? `${videoJob.kieVideoModel.provider} job failed on provider side`,
+            );
+          }
+        } else if (isOpenRouter) {
           const status = await this.openRouterProvider.pollVideoJob(taskId);
           if (status.status === 'completed') {
             resultUrl = status.resultUrl;
@@ -387,9 +447,11 @@ export class VideoEditProcessor {
       }
       if (!resultUrl) throw new Error('video-edit job polling timed out');
 
-      const buffer = isOpenRouter
-        ? await this.openRouterProvider.downloadVideoResult(taskId)
-        : await this.kieProvider.downloadResult(resultUrl);
+      const buffer = externalProvider
+        ? await externalProvider.downloadResult(resultUrl)
+        : isOpenRouter
+          ? await this.openRouterProvider.downloadVideoResult(taskId)
+          : await this.kieProvider.downloadResult(resultUrl);
       const resultVideoKey = await this.storage.uploadImage(
         buffer,
         'mp4',
@@ -399,10 +461,19 @@ export class VideoEditProcessor {
       // هزینه‌ی واقعی: Kie از creditsConsumed*نرخ (بخش ۶.۵ سند — نرخ ۰.۰۰۵ $=1000credit، تایید‌شده
       // با حساب واقعی Kie.ai ۱۴۰۵/۰۶/۱۵)؛ OpenRouter مستقیم usage.cost دلاری برمی‌گرداند، نیازی
       // به تبدیل نرخ نیست (تایید‌شده با تست زنده‌ی امروز، مثلاً $0.415481 برای ۴ث/480p).
+      // Veo/Runway هنوز فیلد هزینه‌ی خام تایید‌شده‌ای در پاسخ record-info/record-detail ندارند
+      // (بررسی‌شده از docs.kie.ai ۱۴۰۵/۰۶/۲۰) — تا تایید واقعی (گام ۴)، تخمین محافظه‌کارانه‌ی
+      // مبتنی بر pricePerSecondUsdConfirmed×مدت واقعی استفاده می‌شود، نه یک رقم فرضی خام.
       const KIE_USD_PER_CREDIT = 0.005;
-      const costUsd = isOpenRouter
-        ? (realCostUsd ?? 0)
-        : (creditsConsumed ?? 0) * KIE_USD_PER_CREDIT;
+      const costUsd = externalProvider
+        ? (videoJob.kieVideoModel.pricePerSecondUsdConfirmed ?? 0.1) *
+          resolveEffectiveDurationSec(
+            parseInputFields(videoJob.kieVideoModel.inputFields),
+            (videoJob.valuesJson as FieldValues | null) ?? {},
+          )
+        : isOpenRouter
+          ? (realCostUsd ?? 0)
+          : (creditsConsumed ?? 0) * KIE_USD_PER_CREDIT;
       const costCalc = await this.pricing.calcFlatCostToman(costUsd);
       const markup = await this.pricingTiers.getMarkup(
         PricingGenerationType.VIDEO,
@@ -435,7 +506,13 @@ export class VideoEditProcessor {
           resultVideoKey,
           // OpenRouter: usd واقعی (realCostUsd) در همین فیلد ذخیره می‌شود، نه creditsConsumed —
           // چون مفهوم «رقم خام گزارش‌شده‌ی provider» است، صرفاً واحدش عوض می‌شود
-          creditsConsumedRaw: isOpenRouter ? (realCostUsd ?? null) : (creditsConsumed ?? null),
+          // Veo/Runway: همون تخمین دلاری costUsd بالا (نه یک رقم خام تایید‌شده‌ی provider — رجوع
+          // کن به کامنت محاسبه‌ی costUsd)
+          creditsConsumedRaw: externalProvider
+            ? costUsd
+            : isOpenRouter
+              ? (realCostUsd ?? null)
+              : (creditsConsumed ?? null),
           creditCost: costCalc.costToman,
           completedAt: new Date(),
         },

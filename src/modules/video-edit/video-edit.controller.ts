@@ -64,6 +64,16 @@ export class VideoEditController {
     return this.videoEdit.uploadVideo(file);
   }
 
+  // معماری data-driven — فیلدهای audio (صدای مرجع/درایوینگ آواتار، بخش ۳.۴ پلن) به یک
+  // آپلودر جدا نیاز داشتند؛ upload-image/upload-video قبلی فقط عکس/ویدیو را قبول می‌کنند
+  @Post('upload-audio')
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: 30 * 1024 * 1024 } }),
+  )
+  uploadAudio(@UploadedFile() file: Express.Multer.File) {
+    return this.videoEdit.uploadAudio(file);
+  }
+
   // بازطراحی ۱۴۰۵/۰۶/۱۷ — «Session»: تاریخچه‌ی جلسه‌های ویرایش (هر session چند job دارد).
   // معمولاً لازم نیست صریح صدا زده شود چون POST jobs خودش وقتی sessionId نیامده می‌سازد؛
   // این endpoint برای وقتی UI می‌خواهد قبل از هر job واقعی «شروع ویرایش جدید» بزند مفید است
