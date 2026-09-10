@@ -17,7 +17,9 @@ import type { FieldCondition, InputFieldsSchema, KieField } from './input-fields
 //   imageArray/audioArray → string[]
 //   video              → { key: string; windowStartSec?: number; windowEndSec?: number }
 //   videoArray         → string[] (کلید‌های MinIO؛ بدون پنجره‌ی جداگانه)
-//   elementGroup       → { name: string; imageKey?: string; videoKey?: string; audioKey?: string }[]
+//   elementGroup       → { name, description, imageKeys?, videoKey?, videoWindowStartSec?, videoWindowEndSec?, audioKey? }[]
+//                         (دقیقاً یکی از imageKeys/videoKey — طبق element_input_urls واقعی Kie: یا
+//                         ۲-۴ عکس یا ۱ ویدیو، هرگز هردو؛ audioKey مستقل و اختیاری کنار هرکدام)
 //   shotGroup          → { prompt: string; durationSec?: number }[]
 //   derivedBoolean     → هرگز از کاربر نمی‌آید، همیشه محاسبه می‌شود
 export type FieldValues = Record<string, unknown>;
@@ -30,9 +32,12 @@ export interface VideoFieldSubmission {
 
 export interface ElementMemberSubmission {
   name: string;
-  imageKey?: string;
-  videoKey?: string;
-  audioKey?: string;
+  description: string;
+  imageKeys?: string[]; // element_input_urls وقتی عنصر مبتنی بر تصویر است (۲-۴ عکس، طبق memberShape.imageField)
+  videoKey?: string; // element_input_urls (تک‌عضوی) وقتی عنصر مبتنی بر ویدیوست
+  videoWindowStartSec?: number;
+  videoWindowEndSec?: number;
+  audioKey?: string; // element_input_audio_urls (تک‌عضوی، مستقل و اختیاری کنار تصویر/ویدیو)
 }
 
 export interface ShotSubmission {
@@ -183,6 +188,39 @@ export function validateInputValues(
         for (const member of arr) {
           if (!member.name) {
             throw new BadRequestException(`نام همه‌ی عناصر «${field.label}» اجباری است`);
+          }
+          if (!member.description) {
+            throw new BadRequestException(`توضیح همه‌ی عناصر «${field.label}» اجباری است`);
+          }
+          const hasImages = (member.imageKeys?.length ?? 0) > 0;
+          const hasVideo = !!member.videoKey;
+          // element_input_urls واقعی Kie یا ۲-۴ عکس است یا ۱ ویدیو — هرگز هر دو، هرگز هیچ‌کدام
+          if (hasImages === hasVideo) {
+            throw new BadRequestException(
+              `عنصر «${member.name}» باید دقیقاً یکی از تصویر یا ویدیو را داشته باشد`,
+            );
+          }
+          if (hasImages && field.memberShape.imageField) {
+            const { minCount, maxCount } = field.memberShape.imageField;
+            const n = member.imageKeys!.length;
+            if (minCount != null && n < minCount) {
+              throw new BadRequestException(`عنصر «${member.name}» به حداقل ${minCount} عکس نیاز دارد`);
+            }
+            if (maxCount != null && n > maxCount) {
+              throw new BadRequestException(`عنصر «${member.name}» حداکثر ${maxCount} عکس می‌پذیرد`);
+            }
+          }
+          if (hasVideo) {
+            if (member.videoWindowStartSec == null || member.videoWindowEndSec == null) {
+              throw new BadRequestException(`پنجره‌ی ویدیوی عنصر «${member.name}» اجباری است`);
+            }
+            const widthMs = Math.round((member.videoWindowEndSec - member.videoWindowStartSec) * 1000);
+            // طبق Kie: end_time - start_time باید بین ۳۰۰۰ تا ۸۰۰۰ میلی‌ثانیه باشد
+            if (widthMs < 3000 || widthMs > 8000) {
+              throw new BadRequestException(
+                `طول ویدیوی عنصر «${member.name}» باید بین ۳ تا ۸ ثانیه باشد`,
+              );
+            }
           }
         }
         break;
@@ -345,12 +383,25 @@ export async function buildGenericKiePayload(
       case 'elementGroup': {
         if (!isPresent(raw)) continue;
         const members = raw as ElementMemberSubmission[];
+        // element_input_urls/element_input_audio_urls/description/start_time/end_time هستند
+        // اسم‌های واقعی و ثابت Kie برای این نوع فیلد (تایید‌شده از docs.kie.ai/market/kling/kling-3-0)
+        // — برخلاف بقیه‌ی انواع فیلد، این کلیدها model-configurable نیستند، پس عمداً هاردکدند
         payload[field.kieField] = await Promise.all(
           members.map(async (m) => {
-            const item: Record<string, unknown> = { [field.nameKieField]: m.name };
-            if (m.imageKey) item.image = await uploader.uploadOne(m.imageKey);
-            if (m.videoKey) item.video = await uploader.uploadOne(m.videoKey);
-            if (m.audioKey) item.audio = await uploader.uploadOne(m.audioKey);
+            const item: Record<string, unknown> = {
+              [field.nameKieField]: m.name,
+              description: m.description,
+            };
+            if (m.imageKeys?.length) {
+              item.element_input_urls = await uploader.uploadMany(m.imageKeys);
+            } else if (m.videoKey) {
+              item.element_input_urls = [await uploader.uploadOne(m.videoKey)];
+              item.start_time = Math.round((m.videoWindowStartSec ?? 0) * 1000);
+              item.end_time = Math.round((m.videoWindowEndSec ?? 8) * 1000);
+            }
+            if (m.audioKey) {
+              item.element_input_audio_urls = [await uploader.uploadOne(m.audioKey)];
+            }
             return item;
           }),
         );

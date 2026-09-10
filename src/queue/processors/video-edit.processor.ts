@@ -11,8 +11,14 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
 import { PricingService } from '../../modules/usage/pricing.service';
 import { PricingTiersService } from '../../modules/usage/pricing-tiers.service';
-import { KieProviderService } from '../../common/services/kie-provider.service';
-import { OpenRouterVideoProviderService } from '../../common/services/openrouter-video-provider.service';
+import {
+  KieProviderService,
+  type KieJobState,
+} from '../../common/services/kie-provider.service';
+import {
+  OpenRouterVideoProviderService,
+  type OpenRouterVideoJobStatus,
+} from '../../common/services/openrouter-video-provider.service';
 import { VeoProviderService } from '../../common/services/veo-provider.service';
 import { RunwayProviderService } from '../../common/services/runway-provider.service';
 import type { VideoProviderClient } from '../../common/services/video-provider-client.interface';
@@ -31,6 +37,24 @@ const MAX_POLL_ATTEMPTS = 180; // ۳۰ دقیقه سقف — همون منطق s
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// پراگرس واقعی (گام ۵): هر سه مسیر provider (Kie/Veo/Runway مشترکاً KieJobState، OpenRouter
+// جداگانه) روی یک state-machine مشترک نگاشت می‌شوند تا فرانت (VideoEditGallery.tsx) بدون آگاهی
+// از provider، فقط یک stepper وضعیت‌محور رندر کند — نه یک درصد جعلی (هیچ‌کدام از این providerها
+// عدد پراگرس واقعی برنمی‌گردانند، پس progressPercent عمداً دست‌نخورده/null می‌ماند).
+function normalizeOpenRouterState(status: OpenRouterVideoJobStatus): KieJobState {
+  switch (status) {
+    case 'pending':
+      return 'waiting';
+    case 'processing':
+      return 'generating';
+    case 'completed':
+      return 'success';
+    default:
+      // failed / cancelled / expired — جزئیات دقیق خطا از errorMessage جدا مصرف می‌شود
+      return 'fail';
+  }
 }
 
 // فیلدهای مشترکی که هر ۵ input-builder از روی ردیف VideoEditJob لازم دارند
@@ -76,6 +100,22 @@ export class VideoEditProcessor {
     private readonly runwayProvider: RunwayProviderService,
     private readonly pushFcm: PushFcmService,
   ) {}
+
+  // پراگرس واقعی — نوشتن state بعد از هر poll (نه فقط شروع/پایان)، طوری که Gallery بتونه
+  // stepper وضعیت‌محور واقعی نشون بده. خطای نوشتن (مثلاً DB لحظه‌ای در دسترس نبود) نباید کل
+  // job رو fail کنه — فقط warn و ادامه‌ی polling.
+  private async updateKieState(jobId: string, state: KieJobState) {
+    try {
+      await this.prisma.videoEditJob.update({
+        where: { id: jobId },
+        data: { kieState: state },
+      });
+    } catch (err) {
+      this.logger.warn(
+        `video-edit: failed to persist kieState for job=${jobId}: ${(err as Error).message}`,
+      );
+    }
+  }
 
   private async notifyUser(userId: string, title: string, body: string) {
     const tokens = await this.prisma.deviceToken.findMany({
@@ -392,6 +432,9 @@ export class VideoEditProcessor {
           where: { id: jobId },
           data: { kieTaskId: taskId },
         });
+        // اولین state قابل‌نمایش بلافاصله بعد از submit — قبل از این، Gallery چیزی جز
+        // status:PROCESSING خام نداره تا اولین poll (تا ۱۰ ثانیه بعد) برسه
+        await this.updateKieState(jobId, 'waiting');
       }
 
       let resultUrl: string | undefined;
@@ -401,6 +444,7 @@ export class VideoEditProcessor {
         await sleep(POLL_INTERVAL_MS);
         if (externalProvider) {
           const status = await externalProvider.poll(taskId);
+          await this.updateKieState(jobId, status.state);
           if (status.state === 'success') {
             resultUrl = status.resultUrls[0];
             break;
@@ -412,6 +456,7 @@ export class VideoEditProcessor {
           }
         } else if (isOpenRouter) {
           const status = await this.openRouterProvider.pollVideoJob(taskId);
+          await this.updateKieState(jobId, normalizeOpenRouterState(status.status));
           if (status.status === 'completed') {
             resultUrl = status.resultUrl;
             realCostUsd = status.realCostUsd;
@@ -435,6 +480,7 @@ export class VideoEditProcessor {
           }
         } else {
           const status = await this.kieProvider.pollTask(taskId);
+          await this.updateKieState(jobId, status.state);
           if (status.state === 'success') {
             resultUrl = status.resultUrls[0];
             creditsConsumed = status.creditsConsumed;
