@@ -10,7 +10,6 @@ import { ChatImageCleanupProcessor } from './processors/chat-image-cleanup.proce
 import { AdminAlertsProcessor } from './processors/admin-alerts.processor';
 import { LiaraUsageSyncProcessor } from './processors/liara-usage-sync.processor';
 import { LiaraKeyRetryProcessor } from './processors/liara-key-retry.processor';
-import { StudioVideoGenerationProcessor } from './processors/studio-video-generation.processor';
 import { CaptionTranscribeProcessor } from './processors/caption-transcribe.processor';
 import { CaptionRenderProcessor } from './processors/caption-render.processor';
 import { CaptionSourceCleanupProcessor } from './processors/caption-source-cleanup.processor';
@@ -25,7 +24,6 @@ import { LiaraModule } from '../modules/liara/liara.module';
 import { UsageModule } from '../modules/usage/usage.module';
 import { CreditsModule } from '../modules/credits/credits.module';
 import { PushNotificationsModule } from '../modules/push-notifications/push-notifications.module';
-import { VideoGenerationModule } from '../common/services/video-generation.module';
 import { MediaTranscodeModule } from '../common/services/media-transcode.module';
 import { AsrModule } from '../common/services/asr.module';
 import { KieProviderModule } from '../common/services/kie-provider.module';
@@ -48,18 +46,6 @@ import { OpenRouterVideoProviderModule } from '../common/services/openrouter-vid
     BullModule.registerQueue({ name: 'admin-alerts' }),
     BullModule.registerQueue({ name: 'liara-usage-sync' }),
     BullModule.registerQueue({ name: 'liara-key-retry' }),
-    // docs/PRD-video-studio-chat-flow.md §۸.۶ — همون صف که video-studio.module.ts هم رجیستر
-    // می‌کند (تولیدکننده‌ی job)؛ پردازشگرش همین‌جاست، دقیقاً الگوی بقیه‌ی صف‌های این ماژول.
-    // lockDuration دیفالت Bull (۳۰ ثانیه) برای این job که تا ۳۰ دقیقه sleep می‌کند خیلی کمه —
-    // Bull خودش لاک را هر lockRenewTime تمدید می‌کند، ولی هر وقفه‌ی گذرا (GC pause، کندی موقت
-    // اتصال Redis) در همون بازه‌ی ۳۰ ثانیه‌ای باعث «stalled» تشخیص دادن و اجرای دوباره‌ی کل
-    // handleRender می‌شد (submitVideoJob دوم با jobId متفاوت روی همون shot). این مقدار را با
-    // حاشیه‌ی امن بزرگ‌تر از سقف واقعی پولینگ (۳۰ دقیقه) ست می‌کنیم؛ گارد idempotency در
-    // studio-video-generation.processor.ts هم مکمل این است، برای وقتی واقعاً worker از بین برود.
-    BullModule.registerQueue({
-      name: 'studio-video-generation',
-      settings: { lockDuration: 35 * 60 * 1000 },
-    }),
     // docs/PRD-video-auto-captions.md §۱۱/§۱۶.۴ — تولیدکننده در caption-studio.module.ts
     BullModule.registerQueue({
       name: 'caption-transcribe',
@@ -87,7 +73,6 @@ import { OpenRouterVideoProviderModule } from '../common/services/openrouter-vid
     LiaraModule,
     UsageModule,
     PushNotificationsModule,
-    VideoGenerationModule,
     MediaTranscodeModule,
     AsrModule,
     KieProviderModule,
@@ -104,7 +89,6 @@ import { OpenRouterVideoProviderModule } from '../common/services/openrouter-vid
     AdminAlertsProcessor,
     LiaraUsageSyncProcessor,
     LiaraKeyRetryProcessor,
-    StudioVideoGenerationProcessor,
     CaptionTranscribeProcessor,
     CaptionRenderProcessor,
     CaptionSourceCleanupProcessor,

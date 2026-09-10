@@ -1,14 +1,17 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import * as XLSX from 'xlsx';
 import { PrismaService } from '../../prisma/prisma.service';
-import { KieVideoCategory, VideoModelProvider } from '@prisma/client';
+import { KieVideoCategory, Prisma, VideoModelProvider } from '@prisma/client';
 import type { KieVideoModel } from '@prisma/client';
 import { fa } from '../../i18n/fa';
+import { parseInputFields, safeParseInputFields, type InputFieldsSchema } from './input-fields.schema';
 
+// inputFields عمداً unknown است، نه InputFieldsSchema — از کنترلر (DTO) خام می‌رسد و فقط
+// داخل create/update/importFromXlsx همین سرویس با parseInputFields اعتبارسنجی می‌شود
 export type CreateKieVideoModelData = Omit<
   KieVideoModel,
-  'id' | 'createdAt' | 'updatedAt'
->;
+  'id' | 'createdAt' | 'updatedAt' | 'inputFields'
+> & { inputFields?: unknown };
 export type UpdateKieVideoModelData = Partial<CreateKieVideoModelData>;
 
 // دقیقاً هم‌الگوی MODEL_IMPORT_COLUMNS در admin.service.ts (import اکسل AiModel) — همون
@@ -30,6 +33,7 @@ const KIE_VIDEO_MODEL_IMPORT_COLUMNS = [
   'resolutions',
   'pricePerSecondUsdConfirmed',
   'pricingNote',
+  'inputFields', // JSON رشته‌ای، طبق input-fields.schema.ts — ستون خالی یعنی «دست‌نخورده بماند»
 ] as const;
 
 function cellToString(value: unknown): string | undefined {
@@ -63,7 +67,25 @@ function cellToStringArray(value: unknown): string[] | undefined {
     .filter(Boolean);
 }
 
+// ستون inputFields خالی یعنی «دست‌نخورده بماند» (undefined، نه null) — چون بیشتر ردیف‌های
+// اکسل هنوز این ستون را پر نکرده‌اند و نباید یک ایمپورت جزئی (مثلاً فقط برای آپدیت قیمت)
+// عمداً inputFields مدل‌های قبلاً کامل‌شده را null کند
+function cellToJsonInputFields(value: unknown): { value?: InputFieldsSchema | null; error?: string } {
+  const s = cellToString(value);
+  if (s === undefined) return { value: undefined };
+  if (s.toLowerCase() === 'null') return { value: null };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(s);
+  } catch {
+    return { error: 'JSON قابل‌پارس نیست' };
+  }
+  const result = safeParseInputFields(parsed);
+  return result.error ? { error: result.error } : { value: result.data };
+}
+
 function parseKieVideoModelImportRow(raw: Record<string, unknown>) {
+  const inputFieldsCell = cellToJsonInputFields(raw.inputFields);
   return {
     provider: (cellToString(raw.provider)?.toUpperCase() ??
       'KIE') as VideoModelProvider,
@@ -85,6 +107,8 @@ function parseKieVideoModelImportRow(raw: Record<string, unknown>) {
     pricePerSecondUsdConfirmed:
       cellToNumber(raw.pricePerSecondUsdConfirmed) ?? null,
     pricingNote: cellToString(raw.pricingNote) ?? null,
+    inputFields: inputFieldsCell.value,
+    inputFieldsError: inputFieldsCell.error,
   };
 }
 
@@ -116,8 +140,22 @@ export class KieVideoModelsService {
     return model;
   }
 
+  // Prisma نمی‌گذارد null خام را مستقیم به یک ستون Json بدهیم (باید Prisma.JsonNull باشد)؛
+  // undefined یعنی «این فیلد اصلاً در payload نباشد» (create: پیش‌فرض دیتابیس، update: دست‌نخورده)
+  private toPrismaInputFields(
+    value: InputFieldsSchema | null | undefined,
+  ): Prisma.InputJsonValue | typeof Prisma.JsonNull | undefined {
+    if (value === undefined) return undefined;
+    if (value === null) return Prisma.JsonNull;
+    return value as unknown as Prisma.InputJsonValue;
+  }
+
   async create(data: CreateKieVideoModelData): Promise<KieVideoModel> {
-    return this.prisma.kieVideoModel.create({ data });
+    const { inputFields, ...rest } = data;
+    const validated = inputFields != null ? parseInputFields(inputFields) : inputFields;
+    return this.prisma.kieVideoModel.create({
+      data: { ...rest, inputFields: this.toPrismaInputFields(validated) },
+    });
   }
 
   async update(
@@ -125,7 +163,12 @@ export class KieVideoModelsService {
     data: UpdateKieVideoModelData,
   ): Promise<KieVideoModel> {
     await this.getById(id);
-    return this.prisma.kieVideoModel.update({ where: { id }, data });
+    const { inputFields, ...rest } = data;
+    const validated = inputFields != null ? parseInputFields(inputFields) : inputFields;
+    return this.prisma.kieVideoModel.update({
+      where: { id },
+      data: { ...rest, inputFields: this.toPrismaInputFields(validated) },
+    });
   }
 
   async delete(id: string): Promise<void> {
@@ -189,15 +232,21 @@ export class KieVideoModelsService {
         errors.push({ row: rowNumber, message: `category نامعتبر: ${data.category}` });
         continue;
       }
+      if (data.inputFieldsError) {
+        errors.push({ row: rowNumber, message: `ستون inputFields نامعتبر: ${data.inputFieldsError}` });
+        continue;
+      }
 
+      const { inputFieldsError: _inputFieldsError, ...rowData } = data;
       try {
         const existing = await this.prisma.kieVideoModel.findUnique({
-          where: { slug: data.slug },
+          where: { slug: rowData.slug },
         });
+        const inputFieldsForWrite = this.toPrismaInputFields(rowData.inputFields);
         await this.prisma.kieVideoModel.upsert({
-          where: { slug: data.slug },
-          create: data as CreateKieVideoModelData,
-          update: data,
+          where: { slug: rowData.slug },
+          create: { ...rowData, inputFields: inputFieldsForWrite } as Prisma.KieVideoModelCreateInput,
+          update: { ...rowData, inputFields: inputFieldsForWrite },
         });
         if (existing) updated++;
         else created++;

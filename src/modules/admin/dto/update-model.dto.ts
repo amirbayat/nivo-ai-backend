@@ -110,12 +110,6 @@ export class UpdateModelDto {
   @IsString({ each: true })
   videoGenSupportedSizes?: string[];
 
-  // دستور صریح کاربر — سوییچ ستون «استودیوی ویدیو» توی جدول ادمین از همین DTO (نه CreateModelDto)
-  // رد می‌شود چون آپدیت‌های تک‌فیلدی از PATCH استفاده می‌کنند
-  @IsOptional()
-  @IsBoolean()
-  videoStudioEligible?: boolean;
-
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;

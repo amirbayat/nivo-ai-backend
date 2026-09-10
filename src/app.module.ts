@@ -42,8 +42,6 @@ import { ProjectsModule } from './modules/projects/projects.module';
 import { DiscoveryModule } from './modules/discovery/discovery.module';
 import { AdminCreativeModule } from './modules/admin-creative/admin-creative.module';
 import { NivoCalModule } from './modules/nivo-cal/nivo-cal.module';
-import { VideoStudioModule } from './modules/video-studio/video-studio.module';
-import { VideoStudioConfigModule } from './modules/video-studio-config/video-studio-config.module';
 import { CaptionStudioModule } from './modules/caption-studio/caption-studio.module';
 import { VideoEditModule } from './modules/video-edit/video-edit.module';
 import { VideoEditConfigModule } from './modules/video-edit-config/video-edit-config.module';
@@ -91,9 +89,7 @@ import { KieVideoModelsModule } from './modules/kie-video-models/kie-video-model
     DiscoveryModule,
     AdminCreativeModule,
     NivoCalModule,
-    VideoStudioModule,
     CaptionStudioModule,
-    VideoStudioConfigModule,
     VideoEditModule,
     VideoEditConfigModule,
     KieVideoModelsModule,

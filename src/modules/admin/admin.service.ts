@@ -44,7 +44,6 @@ const MODEL_IMPORT_COLUMNS = [
   'videoGenAudioMultiplier',
   'videoGenSupportedDurationsSec',
   'videoGenSupportedSizes',
-  'videoStudioEligible',
   'isActive',
   'sortOrder',
   'tier',
@@ -129,7 +128,6 @@ function parseModelRow(raw: Record<string, unknown>) {
       raw.videoGenSupportedDurationsSec,
     ),
     videoGenSupportedSizes: cellToStringArray(raw.videoGenSupportedSizes),
-    videoStudioEligible: cellToBoolean(raw.videoStudioEligible, false),
     isActive: cellToBoolean(raw.isActive, true),
     sortOrder: cellToNumber(raw.sortOrder) ?? 0,
     tier:

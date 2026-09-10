@@ -54,6 +54,7 @@ export class KieVideoModelsAdminController {
       kieInputSchema: dto.kieInputSchema ?? 'OMNI',
       supportsScenePreservingEdit: dto.supportsScenePreservingEdit ?? false,
       fixedDurations: dto.fixedDurations ?? [],
+      inputFields: dto.inputFields ?? null,
     });
   }
 

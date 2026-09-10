@@ -55,7 +55,6 @@ model User {
   foodLogs                  FoodLog[]
   nutritionProfile          NutritionProfile?
   weightLogs                WeightLog[]
-  studioProjects            StudioProject[]
   captionProjects           CaptionProject[]
   videoEditJobs             VideoEditJob[]
   videoEditSessions         VideoEditSession[]
@@ -1114,131 +1113,6 @@ model ChatConfig {
   @@map("chat_config")
 }
 
-// docs/PRD-video-studio-chat-flow.md — سینگلتون تنظیمات استودیوی ویدیو، دقیقاً الگوی ChatConfig.
-// characterOptionCount عمداً DB-backed و ادمین-قابل‌تغییر است (نه هاردکد ۴/env) — طبق تصمیم صریح
-// کاربر، چون تعداد گزینه‌ی کاراکتر مستقیم روی هزینه‌ی هر پروژه اثر می‌گذارد (هر ۴ عکس شمارش و
-// کسر می‌شود، نه فقط عکس انتخاب‌شده — video-studio.service.ts).
-model VideoStudioConfig {
-  id                                String   @id @default("singleton")
-  characterOptionCount              Int      @default(4)
-  maxCharacterRegeneratesPerProject Int      @default(10)
-  maxConcurrentVideoJobsPerUser     Int      @default(4)
-  maxVideoGenPerDayPerUser          Int? // null = بدون سقف روزانه
-  defaultAudioEnabled               Boolean  @default(false)
-  updatedAt                         DateTime @updatedAt
-
-  @@map("video_studio_config")
-}
-
-// ─── استودیوی ویدیو (docs/PRD-video-studio-chat-flow.md) ──────────────────────
-
-enum StudioProjectStatus {
-  DRAFT
-  CHARACTER_SELECTED
-  STORYBOARD_READY
-  COMPLETED
-}
-
-enum StudioShotVideoStatus {
-  NOT_STARTED
-  PENDING
-  PROCESSING
-  SUCCEEDED
-  FAILED
-}
-
-enum StudioModerationStatus {
-  PENDING
-  APPROVED
-  REJECTED
-}
-
-// یک پروژه‌ی تولید ویدیو = یک گفتگوی پیوسته (بدون wizard/استپر، طبق §۲ PRD). سه مدل جدا
-// (چت/عکس/ویدیو) و دو ابعاد جدا (تصویر/ویدیو) روی خود پروژه نگه داشته می‌شوند چون در تمام
-// مراحل قابل‌تغییرند، نه فقط یک‌بار در ابتدا.
-model StudioProject {
-  id               String              @id @default(uuid())
-  userId           String
-  user             User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  initialPrompt    String
-  visualStyle      String?
-  status           StudioProjectStatus @default(DRAFT)
-  chatModelId      String?
-  photoModelId     String?
-  videoModelId     String?
-  imageAspectRatio String? // "1:1" | "16:9" | "9:16"
-  videoAspectRatio String?
-  // انتخاب اختیاری کاربر (SimpleVideoForm) — باید عضو AiModel.videoGenSupportedDurationsSec مدل
-  // انتخابی باشد؛ null یعنی رفتار قبلی (اولین مقدار پشتیبانی‌شده‌ی مدل، یا ۴ ثانیه در نبود آن)
-  videoDurationSec Int?
-  createdAt        DateTime            @default(now())
-
-  characterOptions StudioCharacterOption[]
-  shots            StudioShot[]
-  messages         StudioMessage[]
-
-  @@map("studio_projects")
-}
-
-// تاریخچه‌ی واقعی گفتگو — پیام‌های کاربر + پاسخ/تصمیم دستیار، برای این‌که چت واقعاً یک
-// گفتگوی پیوسته باشد (طبق §۲ PRD: «بدون wizard/استپر»)، نه یک اسکریپت ثابت driven by مرحله.
-// intent/suggestedActions فقط روی پیام‌های role="assistant" پر می‌شوند — نتیجه‌ی طبقه‌بندی
-// video-studio.service.ts/sendMessage روی پیام کاربر که این پاسخ را تولید کرده.
-model StudioMessage {
-  id               String        @id @default(uuid())
-  projectId        String
-  project          StudioProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  role             String // "user" | "assistant"
-  content          String
-  intent           String? // فقط assistant: "generate_character"|"generate_storyboard"|"generate_quick_video"|"general"
-  suggestedActions String[]      @default([]) // فقط assistant، وقتی intent="general" — پیشنهاد قدم بعدی برای UI (چیپ قابل‌کلیک)
-  createdAt        DateTime      @default(now())
-
-  @@index([projectId, createdAt])
-  @@map("studio_messages")
-}
-
-// هر پروژه چند گزینه‌ی هم‌زمان دارد (تعداد از VideoStudioConfig.characterOptionCount) — کاربر
-// یکی را انتخاب می‌کند یا «بازطراحی کن» می‌زند (رکوردهای جدید، قدیمی‌ها می‌مانند برای تاریخچه).
-model StudioCharacterOption {
-  id               String                 @id @default(uuid())
-  projectId        String
-  project          StudioProject          @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  imageKey         String
-  selected         Boolean                @default(false)
-  moderationStatus StudioModerationStatus @default(PENDING)
-  createdAt        DateTime               @default(now())
-
-  @@index([projectId])
-  @@map("studio_character_options")
-}
-
-// هر شات = یک صحنه‌ی استوری‌برد؛ videoStatus/videoJobId/videoKey توسط صف async
-// (studio-video-generation.processor.ts) آپدیت می‌شوند، نه synchronous.
-model StudioShot {
-  id                 String                 @id @default(uuid())
-  projectId          String
-  project            StudioProject          @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  order              Int
-  title              String
-  scenario           String
-  previewImageKey    String?
-  audioEnabled       Boolean                @default(false)
-  moderationStatus   StudioModerationStatus @default(PENDING)
-  videoStatus        StudioShotVideoStatus  @default(NOT_STARTED)
-  videoJobId         String?
-  videoKey           String?
-  creditCost         Float?
-  createdAt          DateTime               @default(now())
-  // لحظه‌ای که پردازشگر ویدیو، videoStatus را به SUCCEEDED/FAILED رساند — مبنای نوتیف هدر وب
-  videoCompletedAt   DateTime?
-  // وقتی کاربر نوتیف این شات را در دراپ‌داون هدر دیده/باز کرده؛ null یعنی هنوز ندیده (badge)
-  notificationSeenAt DateTime?
-
-  @@index([projectId])
-  @@map("studio_shots")
-}
-
 // ─── Auto Captions Studio (docs/PRD-video-auto-captions.md) ───────────────────
 
 enum CaptionProjectStatus {
@@ -1917,6 +1791,8 @@ model WeightLog {
 enum VideoModelProvider {
   KIE
   OPENROUTER
+  VEO // endpoint اختصاصی /api/v1/veo/* — نه jobs/createTask عمومی
+  RUNWAY // endpoint اختصاصی /api/v1/runway/* — نه jobs/createTask عمومی
 }
 
 // شکل input که video-edit.processor.ts باید برای این مدل بسازد — چون هر خانواده‌ی مدل Kie
@@ -1992,6 +1868,14 @@ model KieVideoModel {
   pricePerSecondUsdConfirmed Float?
   pricingNote                String? // یادداشت آزاد ادمین، مثلاً «تست‌شده ۱۴۰۵/۰۶/۱۵ با ۴ث/۷۲۰p»
 
+  // معماری data-driven (جایگزین تدریجی kieInputSchema+builder دستی برای پوشش ۷۱ مدل — هندآف
+  // docs/RESEARCH-kie-video-models-catalog.md بخش ۰.۲): توصیف دقیق فیلدهای ورودی واقعی این مدل.
+  // null = معماری قدیمی (dispatch با kieInputSchema، همون ۵ تابع buildXInput دستی)؛ غیر-null =
+  // پردازشگر از payload-builder عمومی و فرانت از فرم‌رندرر عمومی استفاده می‌کند. شکل دقیق:
+  // { version:1, fields:KieField[], exclusivityGroups?, uiGroups? } — هر ادمین می‌تواند این را
+  // از پنل مدیریت مدل‌ها ویرایش کند (بدون نیاز به دیپلوی کد وقتی Kie فیلد یک مدل را تغییر می‌دهد).
+  inputFields Json?
+
   createdAt DateTime       @default(now())
   updatedAt DateTime       @updatedAt
   jobs      VideoEditJob[]
@@ -2062,8 +1946,17 @@ model VideoEditJob {
   aspectRatio String? @default("16:9") // فقط معنادار وقتی videoKey خالی است
   resolution  String  @default("720p")
 
+  // معماری data-driven (kieVideoModel.inputFields غیر-null): values-by-field-key که فرم عمومی
+  // فرانت ساخته — جایگزین ستون‌های flat بالا (prompt/referenceImageKeys/videoKey/...) برای این
+  // مدل‌ها. null = جاب قدیمی/مدلی که هنوز به معماری جدید منتقل نشده؛ همون ستون‌های flat معتبرند.
+  valuesJson Json?
+
   status             VideoJobStatus @default(PENDING)
   kieTaskId          String? // taskId از createTask، برای resume بعد از restart worker (الگوی videoJobId موجود)
+  // پراگرس واقعی (نه فیک) — هر بار poll، آخرین state خام provider اینجا ذخیره می‌شود تا UI
+  // یک stepper وضعیت‌محور نشان دهد؛ progressPercent فقط وقتی provider واقعاً عدد می‌دهد پر می‌شود.
+  kieState           String?
+  progressPercent    Int?
   resultVideoKey     String? // فقط بعد از SUCCEEDED، در MinIO خصوصی
   errorMessage       String?
   creditsConsumedRaw Float? // مقدار خام creditsConsumed از پاسخ Kie — مبنای واقعی کسر (بخش ۶.۵ سند)

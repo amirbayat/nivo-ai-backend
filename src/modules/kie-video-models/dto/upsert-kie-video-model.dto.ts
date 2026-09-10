@@ -100,4 +100,11 @@ export class UpsertKieVideoModelDto {
   @IsArray()
   @IsInt({ each: true })
   fixedDurations?: number[];
+
+  // معماری data-driven (input-fields.schema.ts) — عمداً اینجا فقط unknown و IsOptional است؛
+  // اعتبارسنجی کامل ساختاری (zod) داخل KieVideoModelsService انجام می‌شود، نه اینجا، چون
+  // shape واقعی یک union عمیق و بازگشتی است که class-validator برایش مناسب نیست.
+  // null = پاک‌کردن عمدی (بازگشت به معماری قدیمی)؛ undefined = این فیلد اصلاً دست‌نخورده بماند.
+  @IsOptional()
+  inputFields?: unknown;
 }

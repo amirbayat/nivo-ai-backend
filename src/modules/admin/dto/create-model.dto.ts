@@ -123,12 +123,6 @@ export class CreateModelDto {
   @IsString({ each: true })
   videoGenSupportedSizes?: string[];
 
-  // دستور صریح کاربر — استودیوی ویدیو کدام مدل‌های CHAT/IMAGE_GEN را در چیپ چت/عکس نشان بدهد
-  // را ادمین اینجا مشخص می‌کند (نه یک allowlist هاردکد در فرانت). برای VIDEO_GEN بی‌معنی است.
-  @IsOptional()
-  @IsBoolean()
-  videoStudioEligible?: boolean;
-
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
