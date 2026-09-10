@@ -553,8 +553,8 @@ export class ImageGenerationService {
       realCostUsdMicros: number | null;
     };
   }> {
-    const streaming = Boolean(onPartial);
-    const body = {
+    let streaming = Boolean(onPartial);
+    const body: Record<string, unknown> = {
       model: modelId,
       prompt,
       n: 1,
@@ -602,22 +602,40 @@ export class ImageGenerationService {
     }
 
     if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      let code: string | null = null;
-      let message = text.slice(0, 300);
-      try {
-        const errJson = JSON.parse(text) as {
-          error?: { code?: string; type?: string; message?: string };
-        };
-        code = errJson.error?.code ?? errJson.error?.type ?? null;
-        message = errJson.error?.message ?? message;
-      } catch {
-        // بدنه‌ی خطا JSON نبود — همون متن خام کافیه
+      let text = await res.text().catch(() => '');
+      // بعضی مدل‌ها (مثل gpt-image-2.5-sunburst/flare) وقتی input_references برای ویرایش
+      // فرستاده می‌شود اصلاً stream را قبول نمی‌کنند — به‌جای fail کردن کل تولید عکس، بدون
+      // streaming دوباره تلاش می‌کنیم (پیش‌نمایش تدریجی را از دست می‌دهیم، ولی خودِ ویرایش کار می‌کند)
+      if (
+        streaming &&
+        /does not support streaming|streaming.*not supported/i.test(text)
+      ) {
+        this.logger.warn(
+          `OpenRouter /images (model=${modelId}): model doesn't support streaming for this request, retrying without it`,
+        );
+        streaming = false;
+        body.stream = false;
+        res = await doFetch();
+        if (!res.ok) text = await res.text().catch(() => '');
       }
-      const isPolicyViolation = /moderation|policy|safety/i.test(
-        `${code ?? ''} ${message}`,
-      );
-      throw new ImageApiError(message, code, isPolicyViolation);
+
+      if (!res.ok) {
+        let code: string | null = null;
+        let message = text.slice(0, 300);
+        try {
+          const errJson = JSON.parse(text) as {
+            error?: { code?: string; type?: string; message?: string };
+          };
+          code = errJson.error?.code ?? errJson.error?.type ?? null;
+          message = errJson.error?.message ?? message;
+        } catch {
+          // بدنه‌ی خطا JSON نبود — همون متن خام کافیه
+        }
+        const isPolicyViolation = /moderation|policy|safety/i.test(
+          `${code ?? ''} ${message}`,
+        );
+        throw new ImageApiError(message, code, isPolicyViolation);
+      }
     }
 
     if (streaming) {
