@@ -20,6 +20,7 @@ import {
 import { VideoEditService } from './video-edit.service';
 import { CreateVideoEditJobDto } from './dto/create-video-edit-job.dto';
 import { CreateVideoEditSessionDto } from './dto/create-video-edit-session.dto';
+import { CreatePromptReviewDto } from './dto/create-prompt-review.dto';
 
 function mimeTypeForVideoEditExt(ext: string): string {
   if (ext.toLowerCase() === 'mov') return 'video/quicktime';
@@ -106,6 +107,17 @@ export class VideoEditController {
   @Get('jobs/:id')
   getJobStatus(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     return this.videoEdit.getJobStatus(user.sub, id);
+  }
+
+  // «بررسی پرامپت» (docs/PRD-video-prompt-coach.md) — رایگان/بدون کسر کیف‌پول، بدون throttle
+  // اضافه (برخلاف assets/*key پایین‌تر که @SkipThrottle دارد، این یکی از throttler عمومی استفاده
+  // می‌کند)؛ عمداً قبل از getAsset گذاشته شده تا آن دکوریتور اشتباهی به این متد سرایت نکند
+  @Post('prompt-review')
+  reviewPrompt(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: CreatePromptReviewDto,
+  ) {
+    return this.videoEdit.reviewPrompt(user.sub, dto);
   }
 
   // الگوی video-studio.controller.ts/getAsset — wildcard چندسگمنتی چون کلید MinIO گاهی

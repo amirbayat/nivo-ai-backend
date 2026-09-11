@@ -333,5 +333,6 @@ export const fa = {
     jobReadyPushBody: 'ویدیوی شما آماده‌ی دانلود است',
     jobFailedPushTitle: 'پردازش ویدیو ناموفق بود',
     jobFailedPushBody: 'پردازش ویدیوی شما ناموفق بود — اعتبار شما کسر نشد',
+    promptReviewFailed: 'بررسی پرامپت الان جواب نداد، دوباره امتحان کن',
   },
 } as const;

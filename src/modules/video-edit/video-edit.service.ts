@@ -1,4 +1,5 @@
 import {
+  BadGatewayException,
   BadRequestException,
   ForbiddenException,
   Injectable,
@@ -8,6 +9,7 @@ import {
 import { InjectQueue } from '@nestjs/bull';
 import type { Queue } from 'bull';
 import { generateText } from 'ai';
+import type { ModelMessage, UserModelMessage } from 'ai';
 import {
   Prisma,
   PricingGenerationType,
@@ -23,6 +25,7 @@ import { KieVideoModelsService } from '../kie-video-models/kie-video-models.serv
 import { VideoEditConfigService } from '../video-edit-config/video-edit-config.service';
 import { AiProviderService } from '../../common/services/ai-provider.service';
 import { CreateVideoEditJobDto } from './dto/create-video-edit-job.dto';
+import { CreatePromptReviewDto } from './dto/create-prompt-review.dto';
 import { fa } from '../../i18n/fa';
 import { snapDisplayAspectRatio } from '../../common/utils/video-display-aspect';
 import { parseInputFields } from '../kie-video-models/input-fields.schema';
@@ -41,6 +44,25 @@ const MAX_AUDIO_UPLOAD_BYTES = 30 * 1024 * 1024;
 const FALLBACK_USD_PER_SEC = 0.1;
 const MIN_VIDEO_BALANCE_USD = 0.8;
 const TITLE_GENERATION_MODEL = 'openai/gpt-5-nano';
+
+// docs/PRD-video-prompt-coach.md بخش ۱ — فقط این مدل، هاردکد (بدون انتخاب‌گر/تنظیم ادمین)
+const PROMPT_REVIEW_MODEL = 'google/gemini-3.8-flash';
+
+const PROMPT_REVIEW_SYSTEM_PROMPT = `تو یک دستیار متخصص نوشتن پرامپت برای تولید ویدیو با هوش مصنوعی هستی.
+کارت این است: پرامپت کاربر (و در صورت وجود، ویدیو/عکس مرجعش) را ببینی و به او کمک کنی پرامپت
+بهتری بنویسد تا نتیجه‌ی تولید ویدیو باکیفیت‌تر و قابل‌پیش‌بینی‌تر باشد.
+
+قوانین:
+- فقط درباره‌ی بهبود پرامپت ویدیو صحبت کن؛ اگر کاربر موضوع نامرتبط پرسید (مثلاً درخواست چت عمومی)،
+  مؤدبانه بگو این گفتگو فقط برای بهبود پرامپت ویدیوست.
+- نقدت را کوتاه و مشخص بنویس: چه چیزهایی مبهم یا ناقص است (نور، حرکت دوربین، سبک، زمان‌بندی صحنه،
+  جزئیات ظاهری سوژه، فضای صدا/موسیقی) — نه یک لیست طولانی، فقط نکات واقعاً مهم.
+- در پایانِ هر پاسخ، همیشه دقیقاً همین مارکر را در یک خط جدا بنویس: ---پیشنهاد نهایی---
+  و بلافاصله بعدش، در یک پاراگراف، خودِ پرامپت نهاییِ پیشنهادی را بنویس — فقط متن پرامپت،
+  بدون هیچ توضیح یا مقدمه‌ی اضافه. این پرامپت باید همان زبان و اسلوب پرامپت‌های تولید ویدیو باشد
+  (توصیفی، یک یا چند جمله، نه لیست).
+- اگر کاربر در ادامه‌ی گفتگو خواست چیزی را عوض کنی (مثلاً «به‌جای صبح غروب باشه»)، پرامپت پیشنهادی
+  را با همان تغییر دوباره کامل بنویس (نه فقط توضیح تغییر) — همیشه بعد از مارکر، نسخه‌ی کامل و به‌روز.`;
 
 const ALLOWED_VIDEO_MIME_EXT: Record<string, string> = {
   'video/mp4': 'mp4',
@@ -523,5 +545,88 @@ export class VideoEditService {
     const ext = key.split('.').pop() ?? 'mp4';
     const buffer = await this.storage.downloadImage(key);
     return { buffer, ext };
+  }
+
+  // docs/PRD-video-prompt-coach.md بخش ۳.۳ — این کلیدها هنوز به هیچ jobـی وصل نشده‌اند (بررسی
+  // پیش از اولین «تولید ویدیو»)، پس چک مالکیت job-محورِ getAsset این‌جا کاربرد ندارد. کلیدهای
+  // MinIO این ماژول UUID تصادفیِ حدس‌نزدنی‌اند و createJob هم از قبل بدون چک اضافه به کلیدهای
+  // ورودی کلاینت اعتماد می‌کند — همون سطح اعتماد این‌جا هم تکرار شده، نه یک حفره‌ی جدید.
+  //
+  // ویدیو برخلاف عکس/صدا نمی‌تواند مستقیم داخل content یک ModelMessage گذاشته شود — تایپ
+  // UserContent پکیج «ai» فقط TextPart/ImagePart/FilePart را می‌شناسد، هیچ video part ندارد.
+  // به همین دلیل چت اصلی (chat.service.ts) هم ویدیو را از طریق extraUserContentParts/buildClient
+  // (تزریق خام روی بادی HTTP، فقط مسیر OpenRouter) می‌فرستد، نه در آرایه‌ی content — همان الگو
+  // اینجا هم تکرار شده.
+  async reviewPrompt(userId: string, dto: CreatePromptReviewDto) {
+    const inlineContentParts: Array<Record<string, unknown>> = [];
+    const videoContentParts: Array<Record<string, unknown>> = [];
+
+    for (const asset of dto.referenceAssets ?? []) {
+      const buffer = await this.storage.downloadImage(asset.key);
+      const ext = asset.key.split('.').pop() ?? 'bin';
+      if (asset.type === 'image') {
+        const base64 = buffer.toString('base64');
+        inlineContentParts.push({
+          type: 'image',
+          image: `data:image/${ext};base64,${base64}`,
+        });
+      } else if (asset.type === 'video') {
+        const mime = ext === 'mov' ? 'quicktime' : 'mp4';
+        const base64 = buffer.toString('base64');
+        videoContentParts.push({
+          type: 'video_url',
+          video_url: { url: `data:video/${mime};base64,${base64}` },
+        });
+      } else {
+        inlineContentParts.push({
+          type: 'file',
+          data: buffer,
+          mediaType: `audio/${ext}`,
+          filename: `reference.${ext}`,
+        });
+      }
+    }
+
+    // inlineContentParts (عکس/صدا) فقط به اولین پیام کاربر (messages[0]) چسبانده می‌شود — طبق
+    // تصمیم بخش ۱: کلاینت هم فقط در همان اولین درخواست این آرایه را پر می‌فرستد
+    const messages: ModelMessage[] = dto.messages.map((m, idx) => {
+      if (idx === 0 && m.role === 'user' && inlineContentParts.length) {
+        return {
+          role: 'user',
+          content: [{ type: 'text', text: m.content }, ...inlineContentParts],
+        } as unknown as UserModelMessage;
+      }
+      return { role: m.role, content: m.content };
+    });
+
+    try {
+      const client = this.aiProvider.buildClient(
+        undefined,
+        undefined,
+        undefined,
+        videoContentParts,
+      );
+      const { text } = await generateText({
+        model: client(PROMPT_REVIEW_MODEL),
+        system: PROMPT_REVIEW_SYSTEM_PROMPT,
+        messages,
+        maxOutputTokens: 1200,
+      });
+
+      const marker = '---پیشنهاد نهایی---';
+      const markerIdx = text.indexOf(marker);
+      if (markerIdx === -1) {
+        return { critique: text.trim(), suggestedPrompt: null };
+      }
+      return {
+        critique: text.slice(0, markerIdx).trim(),
+        suggestedPrompt: text.slice(markerIdx + marker.length).trim(),
+      };
+    } catch (err) {
+      this.logger.warn(
+        `prompt review failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      throw new BadGatewayException(fa.videoEdit.promptReviewFailed);
+    }
   }
 }
