@@ -1,4 +1,5 @@
 import {
+  BadGatewayException,
   BadRequestException,
   ForbiddenException,
   HttpException,
@@ -47,6 +48,7 @@ import {
 import { fa } from '../../i18n/fa';
 import type { Response } from 'express';
 import { StreamMessageDto } from './dto/stream-message.dto';
+import { CreateImagePromptReviewDto } from './dto/create-image-prompt-review.dto';
 import {
   validateChatImages,
   parseChatImageDataUrl,
@@ -98,6 +100,31 @@ const PRE_ROUTING_REFERENCE_MODEL = 'openai/gpt-5.4-nano';
 // تیتر مکالمه یک تولید کوتاه و کم‌ریسک است — همیشه با ارزان‌ترین مدل ساخته می‌شود، صرف‌نظر از
 // این‌که Router برای پاسخ اصلی همین پیام چه مدلی انتخاب کرده
 const TITLE_GENERATION_MODEL = 'openai/gpt-5-nano';
+
+// docs/PRD-image-prompt-coach.md بخش ۱ — فقط این مدل، هاردکد (بدون انتخاب‌گر/تنظیم ادمین).
+// عمداً همون شناسه‌ی PROMPT_REVIEW_MODEL در video-edit.service.ts — تکرار مستقل، نه یک import
+// مشترک (همون الگوی TITLE_GENERATION_MODEL که همین حالا هم بین دو فایل تکرار شده)
+const IMAGE_PROMPT_REVIEW_MODEL = 'google/gemini-3.8-flash';
+
+const IMAGE_PROMPT_REVIEW_SYSTEM_PROMPT = `تو یک دستیار متخصص نوشتن پرامپت برای تولید/ویرایش عکس با هوش مصنوعی هستی.
+کارت این است: پرامپت کاربر (و در صورت وجود، عکس مرجعی که می‌خواهد ویرایش شود) را ببینی و به او کمک کنی
+پرامپت بهتری بنویسد تا نتیجه‌ی تولید/ویرایش عکس باکیفیت‌تر و قابل‌پیش‌بینی‌تر باشد.
+
+قوانین:
+- فقط درباره‌ی بهبود پرامپت عکس صحبت کن؛ اگر کاربر موضوع نامرتبط پرسید (مثلاً درخواست چت عمومی)،
+  مؤدبانه بگو این گفتگو فقط برای بهبود پرامپت عکس است.
+- اگر عکس مرجع فرستاده شده (یعنی کاربر می‌خواهد یک عکس موجود را ویرایش کند، نه تولید از صفر)، نقدت
+  باید مشخص کند دستور ویرایش چقدر واضح است (چه بخشی از عکس باید تغییر کند، چه چیزی باید دست‌نخورده
+  بماند) — نه فقط توصیف یک عکس تازه.
+- نقدت را کوتاه و مشخص بنویس: چه چیزهایی مبهم یا ناقص است (ترکیب‌بندی/فریم، نور و سایه، زاویه‌ی
+  دوربین/لنز، سبک هنری مثل عکاسی/نقاشی/انیمیشن، پالت رنگ، جزئیات ظاهری سوژه، پس‌زمینه/محیط) — نه یک
+  لیست طولانی، فقط نکات واقعاً مهم.
+- در پایانِ هر پاسخ، همیشه دقیقاً همین مارکر را در یک خط جدا بنویس: ---پیشنهاد نهایی---
+  و بلافاصله بعدش، در یک پاراگراف، خودِ پرامپت نهاییِ پیشنهادی را بنویس — فقط متن پرامپت،
+  بدون هیچ توضیح یا مقدمه‌ی اضافه. این پرامپت باید همان زبان و اسلوب پرامپت‌های تولید عکس باشد
+  (توصیفی، یک یا چند جمله، نه لیست).
+- اگر کاربر در ادامه‌ی گفتگو خواست چیزی را عوض کنی (مثلاً «رنگ پس‌زمینه آبی باشه»)، پرامپت پیشنهادی
+  را با همان تغییر دوباره کامل بنویس (نه فقط توضیح تغییر) — همیشه بعد از مارکر، نسخه‌ی کامل و به‌روز.`;
 
 // docs/PRD-chat-models-web-search-and-files.md §۳.۲ — دقیقاً همان shape که PRD مشخص کرده
 // (نه پسوند `:online` قدیمی/منسوخ، نه `plugins: [{id:'web'}]`). engine:'auto' برای مدل‌های
@@ -243,6 +270,101 @@ export class ChatService {
       throw capturedProviderError ?? err;
     }
     return text;
+  }
+
+  // نسخه‌ی عمومی‌شده‌ی generateTextViaStream بالا — همون دلیل (باگ Liara روی generateText برای
+  // بعضی مدل‌ها، خط ۲۰۲-۲۰۶)، فقط این‌جا چون ورودی چندنوبتی/چندبخشی (متن+عکس) لازم است، به‌جای
+  // یک userContent رشته‌ای، آرایه‌ی کامل messages گرفته می‌شود
+  private async generateMessagesViaStream(params: {
+    modelId: string;
+    system: string;
+    messages: ModelMessage[];
+    maxOutputTokens: number;
+    apiKey: string;
+  }): Promise<string> {
+    let capturedProviderError: unknown;
+    const result = streamText({
+      model: this.buildProvider(params.apiKey)(params.modelId),
+      system: params.system,
+      messages: params.messages,
+      maxOutputTokens: params.maxOutputTokens,
+      timeout: 30_000,
+      onError: ({ error }) => {
+        capturedProviderError = error;
+      },
+    });
+    let text = '';
+    try {
+      for await (const chunk of result.textStream) {
+        text += chunk;
+      }
+    } catch (err) {
+      throw capturedProviderError ?? err;
+    }
+    return text;
+  }
+
+  // docs/PRD-image-prompt-coach.md — «بررسی پرامپت» استودیوی عکس. برخلاف video-edit.service.ts
+  // (که کلید MinIO می‌گیرد و باید از storage دانلود/base64 کند)، اینجا referenceImages همین حالا
+  // data URL خام‌اند (همون چیزی که StreamMessageDto.images هم قبول می‌کند) — نیازی به دانلود از
+  // MinIO نیست، مستقیم به‌عنوان ImagePart به پیام مدل چسبانده می‌شوند.
+  async reviewImagePrompt(userId: string, dto: CreateImagePromptReviewDto) {
+    const chatConfig = await this.chatConfigService.getConfig();
+
+    let referenceImages = dto.referenceImages ?? [];
+    if (referenceImages.length) {
+      // همون ترتیب چت اصلی: اول نرمال‌سازی HEIC/HEIF، بعد اعتبارسنجی فرمت/حجم/تعداد+magic bytes
+      // (chat.service.ts خط ۴۳۴-۴۴۱ و ۵۸۳-۵۸۶)
+      referenceImages = await normalizeHeicDataUrls(referenceImages);
+      validateChatImages(referenceImages, {
+        maxCount: chatConfig.maxImagesPerMessage,
+        maxSizeMb: chatConfig.maxImageSizeMb,
+        allowedFormats: chatConfig.allowedImageFormats as string[],
+      });
+    }
+
+    const imageParts = referenceImages.map((image) => ({
+      type: 'image' as const,
+      image,
+    }));
+
+    // imageParts فقط به اولین پیام کاربر (messages[0]) چسبانده می‌شود — طبق تصمیم بخش ۱: کلاینت
+    // هم فقط در همان اولین درخواست referenceImages را پر می‌فرستد
+    const messages: ModelMessage[] = dto.messages.map((m, idx) => {
+      if (idx === 0 && m.role === 'user' && imageParts.length) {
+        return {
+          role: 'user',
+          content: [{ type: 'text', text: m.content }, ...imageParts],
+        } as unknown as UserModelMessage;
+      }
+      return { role: m.role, content: m.content };
+    });
+
+    try {
+      const apiKey = await this.resolveUserApiKey(userId);
+      const text = await this.generateMessagesViaStream({
+        modelId: IMAGE_PROMPT_REVIEW_MODEL,
+        system: IMAGE_PROMPT_REVIEW_SYSTEM_PROMPT,
+        messages,
+        maxOutputTokens: 1200,
+        apiKey,
+      });
+
+      const marker = '---پیشنهاد نهایی---';
+      const markerIdx = text.indexOf(marker);
+      if (markerIdx === -1) {
+        return { critique: text.trim(), suggestedPrompt: null };
+      }
+      return {
+        critique: text.slice(0, markerIdx).trim(),
+        suggestedPrompt: text.slice(markerIdx + marker.length).trim(),
+      };
+    } catch (err) {
+      this.logger.warn(
+        `image prompt review failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      throw new BadGatewayException(fa.chat.promptReviewFailed);
+    }
   }
 
   async streamChat(
