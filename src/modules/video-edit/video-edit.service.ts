@@ -2,11 +2,18 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
 import type { Queue } from 'bull';
-import { Prisma, VideoJobStatus, type KieVideoModel } from '@prisma/client';
+import { generateText } from 'ai';
+import {
+  Prisma,
+  PricingGenerationType,
+  VideoJobStatus,
+  type KieVideoModel,
+} from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
 import { MediaTranscodeService } from '../../common/services/media-transcode.service';
@@ -14,6 +21,7 @@ import { PricingService } from '../usage/pricing.service';
 import { CreditsService } from '../credits/credits.service';
 import { KieVideoModelsService } from '../kie-video-models/kie-video-models.service';
 import { VideoEditConfigService } from '../video-edit-config/video-edit-config.service';
+import { AiProviderService } from '../../common/services/ai-provider.service';
 import { CreateVideoEditJobDto } from './dto/create-video-edit-job.dto';
 import { fa } from '../../i18n/fa';
 import { parseInputFields } from '../kie-video-models/input-fields.schema';
@@ -29,6 +37,9 @@ import {
 const MAX_IMAGE_UPLOAD_BYTES = 20 * 1024 * 1024;
 const MAX_VIDEO_UPLOAD_BYTES = 100 * 1024 * 1024;
 const MAX_AUDIO_UPLOAD_BYTES = 30 * 1024 * 1024;
+const FALLBACK_USD_PER_SEC = 0.1;
+const MIN_VIDEO_BALANCE_USD = 0.8;
+const TITLE_GENERATION_MODEL = 'openai/gpt-5-nano';
 
 const ALLOWED_VIDEO_MIME_EXT: Record<string, string> = {
   'video/mp4': 'mp4',
@@ -80,6 +91,8 @@ function detectAudioExt(buffer: Buffer): string | null {
 // preflight اینجا، submit واقعی در processor).
 @Injectable()
 export class VideoEditService {
+  private readonly logger = new Logger(VideoEditService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
@@ -88,12 +101,28 @@ export class VideoEditService {
     private readonly credits: CreditsService,
     private readonly kieModels: KieVideoModelsService,
     private readonly videoEditConfig: VideoEditConfigService,
+    private readonly aiProvider: AiProviderService,
     @InjectQueue('video-edit')
     private readonly videoEditQueue: Queue,
   ) {}
 
   async listModels() {
-    return this.kieModels.listActive();
+    const models = await this.kieModels.listActive();
+    const usdPerSec = models.map(
+      (m) => m.pricePerSecondUsdConfirmed ?? FALLBACK_USD_PER_SEC,
+    );
+    const uniqueUsd = [...new Set(usdPerSec)];
+    const credits = await this.pricing.usdCostsToCredits(
+      uniqueUsd,
+      PricingGenerationType.VIDEO,
+    );
+    const creditsByUsd = new Map<number, number>();
+    uniqueUsd.forEach((usd, i) => creditsByUsd.set(usd, credits[i]));
+    return models.map((model, i) => ({
+      ...model,
+      estimatedCostPerSecondUsd: usdPerSec[i],
+      estimatedCreditCostPerSecond: creditsByUsd.get(usdPerSec[i]) ?? null,
+    }));
   }
 
   // فرانت برای نمایش عدد واقعی «مدت ثابت تولید» (به‌جای یک برچسب مبهم) به این نیاز دارد —
@@ -130,11 +159,23 @@ export class VideoEditService {
     if (!ext || !matchesVideoMagicBytes(file.buffer)) {
       throw new BadRequestException(fa.videoEdit.invalidVideoFormat);
     }
+    let storeBuffer = file.buffer;
+    let storeExt = ext;
+    try {
+      const normalized = await this.mediaTranscode.normalizeVideoForProviders(
+        file.buffer,
+        ext,
+      );
+      storeBuffer = normalized.buffer;
+      storeExt = normalized.ext;
+    } catch {
+      throw new BadRequestException(fa.videoEdit.videoTranscodeFailed);
+    }
     const durationSec = await this.mediaTranscode.getVideoDuration(
-      file.buffer,
-      ext,
+      storeBuffer,
+      storeExt,
     );
-    const key = await this.storage.uploadImage(file.buffer, ext);
+    const key = await this.storage.uploadImage(storeBuffer, storeExt);
     return { key, durationSec };
   }
 
@@ -298,11 +339,27 @@ export class VideoEditService {
         ? dto.videoWindowEndSec! - dto.videoWindowStartSec!
         : config.generateFixedDurationSec;
     const estimateUsd =
-      estimateDurationSec * (model.pricePerSecondUsdConfirmed ?? 0.1);
+      estimateDurationSec *
+      (model.pricePerSecondUsdConfirmed ?? FALLBACK_USD_PER_SEC);
     const estimate = await this.pricing.calcFlatCostToman(estimateUsd);
-    // «نیوو» واحد نمایشی-به-کاربر است (بخش کامنت CreditsService)، نه تومان خام — کاربر
-    // صریحاً خواست پیام خطا هم با همین واحد باشد، نه تومان
+    const minBalance = await this.pricing.calcFlatCostToman(
+      MIN_VIDEO_BALANCE_USD,
+    );
     const balance = await this.credits.getBalance(userId);
+    if (balance.balanceToman < minBalance.costToman) {
+      const neededCredits = Math.ceil(
+        minBalance.costToman / balance.tomanPerCredit,
+      );
+      throw new BadRequestException({
+        message: fa.videoEdit.insufficientMinBalance(
+          neededCredits,
+          balance.credits,
+        ),
+        code: 'INSUFFICIENT_CREDITS',
+        neededCredits,
+        balanceCredits: balance.credits,
+      });
+    }
     if (balance.balanceToman < estimate.costToman) {
       const neededCredits = Math.ceil(
         estimate.costToman / balance.tomanPerCredit,
@@ -321,9 +378,8 @@ export class VideoEditService {
       });
     }
 
-    // اولین job یک session بی‌عنوان → عنوان از ۴۰ کاراکتر اول همین پرامپت (دقیقاً الگوی
-    // backfill در manual-migrations/20260908b — کاربر هیچ فرم «تغییر نام» جداگانه نمی‌بیند)
-    if (session.title == null) {
+    const needsTitle = session.title == null;
+    if (needsTitle) {
       await this.prisma.videoEditSession.update({
         where: { id: session.id },
         data: { title: dto.prompt.slice(0, 40) },
@@ -361,7 +417,38 @@ export class VideoEditService {
       { attempts: 1, removeOnComplete: true, removeOnFail: false },
     );
 
+    if (needsTitle) {
+      const title = await this.generateSessionTitle(dto.prompt);
+      if (title) {
+        await this.prisma.videoEditSession.update({
+          where: { id: session.id },
+          data: { title },
+        });
+      }
+    }
+
     return job;
+  }
+
+  private async generateSessionTitle(prompt: string): Promise<string | null> {
+    try {
+      const client = this.aiProvider.buildClient();
+      const { text } = await generateText({
+        model: client(TITLE_GENERATION_MODEL),
+        system:
+          'بر اساس پرامپت کاربر برای ساخت یا ویرایش ویدیو، یک عنوان کوتاه فارسی ' +
+          '(حداکثر ۵ کلمه) بنویس. فقط عنوان، بدون توضیح یا نقل‌قول.',
+        prompt: prompt.slice(0, 500),
+        maxOutputTokens: 300,
+      });
+      const title = text.trim().replace(/^["'«»\n]+|["'«»\n]+$/g, '');
+      return title || null;
+    } catch (err) {
+      this.logger.warn(
+        `video session title failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return null;
+    }
   }
 
   async listMyJobs(userId: string) {

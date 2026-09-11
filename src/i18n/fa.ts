@@ -283,6 +283,8 @@ export const fa = {
     // createJob هم amounts خام را در بدنه‌ی خطا (neededCredits/balanceCredits) برمی‌گرداند
     insufficientCredits: (neededCredits: number, balanceCredits: number) =>
       `برای این کار حدود ${neededCredits.toLocaleString('fa-IR')} نیوو لازم است؛ موجودی فعلی شما ${balanceCredits.toLocaleString('fa-IR')} نیوو است. لطفاً کیف‌پول خود را شارژ کنید.`,
+    insufficientMinBalance: (neededCredits: number, balanceCredits: number) =>
+      `برای ساخت ویدیو حداقل ${neededCredits.toLocaleString('fa-IR')} نیوو لازم است؛ موجودی فعلی شما ${balanceCredits.toLocaleString('fa-IR')} نیوو است. لطفاً کیف‌پول خود را شارژ کنید.`,
     tooManyConcurrentJobs:
       'شما چند ویدیوی دیگر در صف دارید — صبر کنید تا تمام شوند',
     dailyLimitReached: 'به سقف روزانه‌ی این فیچر رسیده‌اید',
@@ -307,6 +309,8 @@ export const fa = {
     videoTooLong: (max: number) =>
       `این ویدیو طولانی‌تر از حداکثر مجاز (${max} ثانیه) است`,
     invalidVideoFormat: 'فرمت ویدیو پشتیبانی نمی‌شود (فقط MP4/MOV)',
+    videoTranscodeFailed:
+      'این ویدیو قابل تبدیل نبود. یک فایل MP4 معمولی بفرست، نه حالت سینمایی خراب یا فایل ناقص.',
     noFileUploaded: 'فایلی ارسال نشده',
     jobReadyPushTitle: 'ویدیوی شما آماده شد',
     jobReadyPushBody: 'ویدیوی شما آماده‌ی دانلود است',

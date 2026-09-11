@@ -23,6 +23,7 @@ import { VeoProviderService } from '../../common/services/veo-provider.service';
 import { RunwayProviderService } from '../../common/services/runway-provider.service';
 import type { VideoProviderClient } from '../../common/services/video-provider-client.interface';
 import { PushFcmService } from '../../modules/push-notifications/fcm.service';
+import { MediaTranscodeService } from '../../common/services/media-transcode.service';
 import { fa } from '../../i18n/fa';
 import { parseInputFields } from '../../modules/kie-video-models/input-fields.schema';
 import {
@@ -68,6 +69,15 @@ type JobFields = {
   resolution: string;
 };
 
+function isVideoStorageKey(key: string): boolean {
+  return /\.(mp4|mov)$/i.test(key);
+}
+
+function extFromStorageKey(key: string): string {
+  const match = /\.([a-z0-9]+)$/i.exec(key);
+  return match?.[1]?.toLowerCase() ?? 'mp4';
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
@@ -99,6 +109,7 @@ export class VideoEditProcessor {
     private readonly veoProvider: VeoProviderService,
     private readonly runwayProvider: RunwayProviderService,
     private readonly pushFcm: PushFcmService,
+    private readonly mediaTranscode: MediaTranscodeService,
   ) {}
 
   // پراگرس واقعی — نوشتن state بعد از هر poll (نه فقط شروع/پایان)، طوری که Gallery بتونه
@@ -132,9 +143,22 @@ export class VideoEditProcessor {
 
   // ابزار مشترک هر ۵ builder — دانلود از MinIO + آپلود موقت Kie، برای یک کلید تکی
   private async uploadRef(key: string): Promise<string> {
-    const buffer = await this.storage.downloadImage(key);
-    const { url } = await this.kieProvider.uploadFile(buffer, key);
+    const buffer = await this.loadProviderVideoBuffer(key);
+    const { url } = await this.kieProvider.uploadFile(
+      buffer,
+      isVideoStorageKey(key) ? key.replace(/\.[^.]+$/, '.mp4') : key,
+    );
     return url;
+  }
+
+  private async loadProviderVideoBuffer(key: string): Promise<Buffer> {
+    const buffer = await this.storage.downloadImage(key);
+    if (!isVideoStorageKey(key)) return buffer;
+    const normalized = await this.mediaTranscode.normalizeVideoForProviders(
+      buffer,
+      extFromStorageKey(key),
+    );
+    return normalized.buffer;
   }
 
   private async uploadRefs(keys: string[]): Promise<string[]> {
@@ -331,8 +355,11 @@ export class VideoEditProcessor {
       references.push({ type: 'image_url', image_url: { url } });
     }
     if (job.videoKey) {
-      const buffer = await this.storage.downloadImage(job.videoKey);
-      const { url } = await this.kieProvider.uploadFile(buffer, job.videoKey);
+      const buffer = await this.loadProviderVideoBuffer(job.videoKey);
+      const { url } = await this.kieProvider.uploadFile(
+        buffer,
+        job.videoKey.replace(/\.[^.]+$/, '.mp4'),
+      );
       references.push({ type: 'video_url', video_url: { url } });
     }
     if (references.length) input.input_references = references;

@@ -5,6 +5,7 @@ import Piscina from 'piscina';
 import type {
   BurnCaptionsTask,
   ExtractAudioTask,
+  NormalizedVideo,
   TranscodeVideoTask,
   VideoDimensions,
 } from './media-transcode.worker';
@@ -46,6 +47,17 @@ export class MediaTranscodeService implements OnModuleDestroy {
     const task: TranscodeVideoTask = { inputBuffer, inputExt };
     const result = await this.pool.run(task, { name: 'transcodeVideo' });
     return Buffer.from(result);
+  }
+
+  async normalizeVideoForProviders(
+    inputBuffer: Buffer,
+    inputExt: string,
+  ): Promise<NormalizedVideo> {
+    const task: TranscodeVideoTask = { inputBuffer, inputExt };
+    const result = (await this.pool.run(task, {
+      name: 'normalizeVideoForProviders',
+    })) as { buffer: Uint8Array; ext: 'mp4' };
+    return { buffer: Buffer.from(result.buffer), ext: result.ext };
   }
 
   async getVideoDimensions(

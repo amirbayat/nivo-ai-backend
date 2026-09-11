@@ -20,6 +20,11 @@ export interface TranscodeVideoTask {
   inputExt: string;
 }
 
+export interface NormalizedVideo {
+  buffer: Buffer;
+  ext: 'mp4';
+}
+
 export interface BurnCaptionsTask {
   inputBuffer: Buffer;
   inputExt: string;
@@ -169,33 +174,143 @@ export async function extractAudio({
   });
 }
 
-// نرمال‌سازی HEVC/.mov آیفون → H.264/.mp4 — سازگاری تضمین‌شده پیش از ارسال به هر provider
-// (docs/PRD-video-auto-captions.md §۷ / docs/PRD-video-studio-editing.md §۷)
+interface ProbedVideoStream {
+  codec_name?: string;
+  pix_fmt?: string;
+  color_transfer?: string;
+}
+
+interface VideoProbe {
+  videoStreams: ProbedVideoStream[];
+  hasAudio: boolean;
+}
+
+function isHdrTransfer(transfer?: string): boolean {
+  return transfer === 'smpte2084' || transfer === 'arib-std-b67';
+}
+
+async function probeVideo(inPath: string): Promise<VideoProbe> {
+  const out = await runFfprobe([
+    '-v',
+    'error',
+    '-show_entries',
+    'stream=index,codec_type,codec_name,pix_fmt,color_transfer',
+    '-of',
+    'json',
+    inPath,
+  ]);
+  const parsed = JSON.parse(out) as {
+    streams?: Array<{
+      codec_type?: string;
+      codec_name?: string;
+      pix_fmt?: string;
+      color_transfer?: string;
+    }>;
+  };
+  const streams = parsed.streams ?? [];
+  return {
+    videoStreams: streams
+      .filter((s) => s.codec_type === 'video')
+      .map((s) => ({
+        codec_name: s.codec_name,
+        pix_fmt: s.pix_fmt,
+        color_transfer: s.color_transfer,
+      })),
+    hasAudio: streams.some((s) => s.codec_type === 'audio'),
+  };
+}
+
+function isProviderCompatible(probe: VideoProbe, inputExt: string): boolean {
+  if (inputExt !== 'mp4') return false;
+  if (probe.videoStreams.length !== 1) return false;
+  const main = probe.videoStreams[0];
+  if (main.codec_name !== 'h264') return false;
+  if (main.pix_fmt && main.pix_fmt !== 'yuv420p') return false;
+  if (isHdrTransfer(main.color_transfer)) return false;
+  return true;
+}
+
+// Map only the first video stream (iPhone Cinematic extra disparity/depth tracks are dropped)
+// and the first audio stream. Bake rotation, convert HEVC/HDR/10-bit to H.264 yuv420p.
+async function transcodeForProviders(
+  inPath: string,
+  outPath: string,
+  opts: { hasAudio: boolean; hdr: boolean },
+): Promise<void> {
+  const vf = opts.hdr
+    ? 'zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p,scale=trunc(iw/2)*2:trunc(ih/2)*2'
+    : 'scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p';
+  const args = [
+    '-y',
+    '-i',
+    inPath,
+    '-map',
+    '0:v:0',
+    ...(opts.hasAudio ? ['-map', '0:a:0'] : ['-an']),
+    '-sn',
+    '-dn',
+    '-c:v',
+    'libx264',
+    '-preset',
+    'veryfast',
+    '-crf',
+    '23',
+    '-pix_fmt',
+    'yuv420p',
+    '-profile:v',
+    'high',
+    '-vf',
+    vf,
+    ...(opts.hasAudio
+      ? ['-c:a', 'aac', '-ac', '2', '-ar', '44100', '-b:a', '128k']
+      : []),
+    '-movflags',
+    '+faststart',
+    '-max_muxing_queue_size',
+    '4096',
+    outPath,
+  ];
+  await runFfmpeg(args);
+}
+
+// HEVC/.mov/iPhone Cinematic/HDR → H.264/.mp4 before sending to any provider
 export async function transcodeVideo({
   inputBuffer,
   inputExt,
 }: TranscodeVideoTask): Promise<Buffer> {
+  const normalized = await normalizeVideoForProviders({ inputBuffer, inputExt });
+  return normalized.buffer;
+}
+
+export async function normalizeVideoForProviders({
+  inputBuffer,
+  inputExt,
+}: TranscodeVideoTask): Promise<NormalizedVideo> {
   return withTempDir(async (dir) => {
     const inPath = join(dir, `${randomUUID()}.${inputExt}`);
-    const outPath = join(dir, `${randomUUID()}.mp4`);
     await writeFile(inPath, inputBuffer);
-    await runFfmpeg([
-      '-y',
-      '-i',
-      inPath,
-      '-c:v',
-      'libx264',
-      '-preset',
-      'veryfast',
-      '-crf',
-      '23',
-      '-c:a',
-      'aac',
-      '-movflags',
-      '+faststart',
-      outPath,
-    ]);
-    return readFile(outPath);
+    const probe = await probeVideo(inPath);
+    if (!probe.videoStreams.length) {
+      throw new Error('no video stream in uploaded file');
+    }
+    if (isProviderCompatible(probe, inputExt)) {
+      return { buffer: inputBuffer, ext: 'mp4' };
+    }
+    const outPath = join(dir, `${randomUUID()}.mp4`);
+    const hdr = isHdrTransfer(probe.videoStreams[0]?.color_transfer);
+    try {
+      await transcodeForProviders(inPath, outPath, {
+        hasAudio: probe.hasAudio,
+        hdr,
+      });
+    } catch (err) {
+      if (!hdr) throw err;
+      await transcodeForProviders(inPath, outPath, {
+        hasAudio: probe.hasAudio,
+        hdr: false,
+      });
+    }
+    return { buffer: await readFile(outPath), ext: 'mp4' };
   });
 }
 

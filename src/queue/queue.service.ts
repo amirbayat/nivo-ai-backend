@@ -19,6 +19,7 @@ const LIARA_USAGE_SYNC_CRON = '*/5 * * * *';
 const LIARA_KEY_RETRY_CRON = '*/15 * * * *';
 // docs/PRD-image-gen-usd-estimate.md — daily USD refresh; FX is applied at catalog read
 const IMAGE_MODEL_COST_ESTIMATE_CRON = '0 4 * * *';
+const VIDEO_MODEL_COST_ESTIMATE_CRON = '15 4 * * *';
 
 @Injectable()
 export class QueueService implements OnApplicationBootstrap {
@@ -44,6 +45,8 @@ export class QueueService implements OnApplicationBootstrap {
     private readonly liaraKeyRetryQueue: Queue,
     @InjectQueue('image-model-cost-estimate')
     private readonly imageModelCostEstimateQueue: Queue,
+    @InjectQueue('video-model-cost-estimate')
+    private readonly videoModelCostEstimateQueue: Queue,
     private readonly aiProvider: AiProviderService,
   ) {}
 
@@ -195,5 +198,25 @@ export class QueueService implements OnApplicationBootstrap {
       { removeOnComplete: true, removeOnFail: true },
     );
     this.logger.log('Image model cost estimate job enqueued (one-shot on boot)');
+
+    const videoModelCostEstimateRepeatables =
+      await this.videoModelCostEstimateQueue.getRepeatableJobs();
+    for (const job of videoModelCostEstimateRepeatables) {
+      await this.videoModelCostEstimateQueue.removeRepeatableByKey(job.key);
+    }
+    await this.videoModelCostEstimateQueue.add(
+      'estimate',
+      {},
+      { repeat: { cron: VIDEO_MODEL_COST_ESTIMATE_CRON } },
+    );
+    this.logger.log(
+      `Video model cost estimate job scheduled: ${VIDEO_MODEL_COST_ESTIMATE_CRON}`,
+    );
+    await this.videoModelCostEstimateQueue.add(
+      'estimate',
+      {},
+      { removeOnComplete: true, removeOnFail: true },
+    );
+    this.logger.log('Video model cost estimate job enqueued (one-shot on boot)');
   }
 }
