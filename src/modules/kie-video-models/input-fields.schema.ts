@@ -246,6 +246,48 @@ function formatZodError(error: z.ZodError): string {
 
 // اعتبارسنجی کامل ساختاری، شامل چک تکراری‌نبودن key بین فیلدها (چون key هم شناسه‌ی داخلی
 // state فرانت است هم کلید valuesJson سمت بک‌اند — تصادم اینجا باعث بی‌صداشدن یک فیلد می‌شود)
+export function keepAspectRatioVisibleWithVideo(
+  schema: InputFieldsSchema,
+): InputFieldsSchema {
+  const videoKeys = new Set(
+    schema.fields
+      .filter((f) => f.type === 'video' || f.type === 'videoArray')
+      .map((f) => f.key),
+  );
+  if (videoKeys.size === 0) return schema;
+
+  let changed = false;
+  const fields = schema.fields.map((field) => {
+    if (field.type !== 'enum' || field.semantic !== 'aspectRatio') return field;
+    const hideVisible = hidesWhenVideoAbsent(field.visibleWhen, videoKeys);
+    const hideAllowed = hidesWhenVideoAbsent(field.allowedOnlyWhen, videoKeys);
+    if (!hideVisible && !hideAllowed) return field;
+    changed = true;
+    const next = { ...field };
+    if (hideVisible) delete next.visibleWhen;
+    if (hideAllowed) delete next.allowedOnlyWhen;
+    return next;
+  });
+  return changed ? { ...schema, fields } : schema;
+}
+
+function hidesWhenVideoAbsent(
+  condition: FieldCondition | undefined,
+  videoKeys: Set<string>,
+): boolean {
+  if (!condition) return false;
+  if (condition.kind === 'fieldAbsent') {
+    return !!condition.fieldKey && videoKeys.has(condition.fieldKey);
+  }
+  if (condition.kind === 'and') {
+    return (condition.all ?? []).some((c) => hidesWhenVideoAbsent(c, videoKeys));
+  }
+  if (condition.kind === 'or') {
+    return (condition.any ?? []).every((c) => hidesWhenVideoAbsent(c, videoKeys));
+  }
+  return false;
+}
+
 export function parseInputFields(raw: unknown): InputFieldsSchema {
   const result = InputFieldsSchemaZod.safeParse(raw);
   if (!result.success) {
@@ -256,7 +298,7 @@ export function parseInputFields(raw: unknown): InputFieldsSchema {
   if (dupes.length > 0) {
     throw new BadRequestException(`inputFields نامعتبر: کلید(های) تکراری در fields: ${dupes.join('، ')}`);
   }
-  return result.data;
+  return keepAspectRatioVisibleWithVideo(result.data);
 }
 
 // نسخه‌ی نرم برای مسیر ایمپورت اکسل — خطا را throw نمی‌کند، برای گزارش row-level برمی‌گرداند

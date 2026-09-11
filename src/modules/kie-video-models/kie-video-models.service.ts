@@ -121,10 +121,11 @@ export class KieVideoModelsService {
 
   // فرانت/preflight فقط مدل‌های فعال را می‌بینند، مرتب‌شده طبق ترتیب دلخواه ادمین
   async listActive(): Promise<KieVideoModel[]> {
-    return this.prisma.kieVideoModel.findMany({
+    const models = await this.prisma.kieVideoModel.findMany({
       where: { isActive: true },
       orderBy: { sortOrder: 'asc' },
     });
+    return models.map((m) => this.withSanitizedInputFields(m));
   }
 
   // پنل ادمین همه را می‌بیند، حتی غیرفعال‌ها (برای toggle کردن دوباره)
@@ -137,7 +138,17 @@ export class KieVideoModelsService {
   async getById(id: string): Promise<KieVideoModel> {
     const model = await this.prisma.kieVideoModel.findUnique({ where: { id } });
     if (!model) throw new NotFoundException(fa.videoEdit.modelNotFound);
-    return model;
+    return this.withSanitizedInputFields(model);
+  }
+
+  private withSanitizedInputFields(model: KieVideoModel): KieVideoModel {
+    if (model.inputFields == null) return model;
+    const parsed = safeParseInputFields(model.inputFields);
+    if (!parsed.data) return model;
+    return {
+      ...model,
+      inputFields: parsed.data as unknown as Prisma.JsonValue,
+    };
   }
 
   // Prisma نمی‌گذارد null خام را مستقیم به یک ستون Json بدهیم (باید Prisma.JsonNull باشد)؛

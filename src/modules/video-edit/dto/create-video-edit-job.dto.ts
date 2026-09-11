@@ -53,7 +53,7 @@ export class CreateVideoEditJobDto {
   @IsNumber()
   videoWindowEndSec?: number;
 
-  // فقط معنادار وقتی videoKey خالی است (بخش ۲.۲ سند)
+  // فقط معنادار برای مدل‌هایی که فیلد aspect_ratio دارند — با ویدیوی منبع هم ارسال می‌شود
   @IsOptional()
   @IsIn(ASPECT_RATIOS)
   aspectRatio?: (typeof ASPECT_RATIOS)[number];

@@ -22,6 +22,12 @@ function makeProcessor(): VideoEditProcessor {
       url: `https://mock/${fileName}`,
     })),
   };
+  const mediaTranscode = {
+    normalizeVideoForProviders: jest.fn(async (buffer: Buffer) => ({
+      buffer,
+      ext: 'mp4',
+    })),
+  };
   return new VideoEditProcessor(
     {} as any,
     storage as any,
@@ -32,6 +38,7 @@ function makeProcessor(): VideoEditProcessor {
     {} as any,
     {} as any,
     {} as any,
+    mediaTranscode as any,
   );
 }
 
@@ -72,7 +79,7 @@ describe('buildGenericKiePayload — byte-identical parity with legacy buildXInp
         {
           key: 'aspectRatio', kieField: 'aspect_ratio', label: 'ابعاد', type: 'enum',
           options: [{ value: '16:9', label: '16:9' }], wireValueType: 'string', semantic: 'aspectRatio',
-          allowedOnlyWhen: { kind: 'fieldAbsent', fieldKey: 'video' }, required: false, order: 4,
+          required: false, order: 4,
         },
         {
           key: 'images', kieField: 'image_urls', label: 'تصاویر مرجع', type: 'imageArray',
@@ -93,7 +100,7 @@ describe('buildGenericKiePayload — byte-identical parity with legacy buildXInp
       videoKey: 'vid.mp4',
       videoWindowStartSec: 2,
       videoWindowEndSec: 6,
-      aspectRatio: null,
+      aspectRatio: '16:9',
       resolution: '720p',
     };
     const legacy = await (processor as any).buildOmniInput(job, 4);
@@ -119,7 +126,7 @@ describe('buildGenericKiePayload — byte-identical parity with legacy buildXInp
         {
           key: 'aspectRatio', kieField: 'aspect_ratio', label: 'ابعاد', type: 'enum',
           options: [{ value: '16:9', label: '16:9' }], wireValueType: 'string', semantic: 'aspectRatio',
-          allowedOnlyWhen: { kind: 'fieldAbsent', fieldKey: 'video' }, required: false, order: 4,
+          required: false, order: 4,
         },
         {
           key: 'images', kieField: 'image_urls', label: 'تصاویر مرجع', type: 'imageArray',
@@ -127,9 +134,10 @@ describe('buildGenericKiePayload — byte-identical parity with legacy buildXInp
         },
       ],
     };
-    const values = { prompt: 'edit prompt', resolution: '720p', video: { key: 'vid.mp4', windowStartSec: 2, windowEndSec: 6 } };
+    const values = { prompt: 'edit prompt', resolution: '720p', aspectRatio: '16:9', video: { key: 'vid.mp4', windowStartSec: 2, windowEndSec: 6 } };
     const generic = await buildGenericKiePayload(schema, values, uploader);
 
+    expect(legacy.aspect_ratio).toBe('16:9');
     expect(generic).toEqual(legacy);
   });
 
@@ -153,9 +161,9 @@ describe('buildGenericKiePayload — byte-identical parity with legacy buildXInp
         required: false, order: 3,
       },
       {
-        key: 'aspectRatio', kieField: 'aspect_ratio', label: 'ابعاد', type: 'enum',
-        options: [{ value: '9:16', label: '9:16' }], wireValueType: 'string', semantic: 'aspectRatio',
-        allowedOnlyWhen: { kind: 'fieldAbsent', fieldKey: 'video' }, required: false, order: 4,
+          key: 'aspectRatio', kieField: 'aspect_ratio', label: 'ابعاد', type: 'enum',
+          options: [{ value: '9:16', label: '9:16' }], wireValueType: 'string', semantic: 'aspectRatio',
+          required: false, order: 4,
       },
       {
         key: 'images', kieField: 'reference_image_urls', label: 'تصاویر مرجع', type: 'imageArray',
@@ -178,10 +186,10 @@ describe('buildGenericKiePayload — byte-identical parity with legacy buildXInp
   it('SEEDANCE: video-ref branch (sentinel -1)', async () => {
     const job = {
       prompt: 'p2', referenceImageKeys: [], videoKey: 'ref.mp4',
-      videoWindowStartSec: null, videoWindowEndSec: null, aspectRatio: null, resolution: '720p',
+      videoWindowStartSec: null, videoWindowEndSec: null, aspectRatio: '9:16', resolution: '720p',
     };
     const legacy = await (processor as any).buildSeedanceInput(job, 6);
-    const values = { prompt: 'p2', resolution: '720p', video: { key: 'ref.mp4' } };
+    const values = { prompt: 'p2', resolution: '720p', aspectRatio: '9:16', video: { key: 'ref.mp4' } };
     const generic = await buildGenericKiePayload(seedanceSchema, values, uploader);
     expect(generic).toEqual(legacy);
   });
@@ -206,7 +214,7 @@ describe('buildGenericKiePayload — byte-identical parity with legacy buildXInp
         {
           key: 'aspectRatio', kieField: 'aspect_ratio', label: 'ابعاد', type: 'enum',
           options: [{ value: '16:9', label: '16:9' }], wireValueType: 'string', semantic: 'aspectRatio',
-          allowedOnlyWhen: { kind: 'fieldAbsent', fieldKey: 'video' }, required: false, order: 4,
+          required: false, order: 4,
         },
       ],
     };
@@ -227,11 +235,11 @@ describe('buildGenericKiePayload — byte-identical parity with legacy buildXInp
   it('WAN_V2V: video branch', async () => {
     const job = {
       prompt: 'p4', referenceImageKeys: [], videoKey: 'v2.mp4',
-      videoWindowStartSec: null, videoWindowEndSec: null, aspectRatio: null, resolution: '720p',
+      videoWindowStartSec: null, videoWindowEndSec: null, aspectRatio: '16:9', resolution: '720p',
     };
     const model = { fixedDurations: [5, 10] } as any;
     const legacy = await (processor as any).buildWanV2VInput(job, model, 7);
-    const values = { prompt: 'p4', resolution: '720p', duration: 7, video: { key: 'v2.mp4' } };
+    const values = { prompt: 'p4', resolution: '720p', duration: 7, aspectRatio: '16:9', video: { key: 'v2.mp4' } };
     const generic = await buildGenericKiePayload(wanV2VSchema(), values, uploader);
     expect(generic).toEqual(legacy);
   });
@@ -256,7 +264,7 @@ describe('buildGenericKiePayload — byte-identical parity with legacy buildXInp
       {
         key: 'aspectRatio', kieField: 'aspect_ratio', label: 'ابعاد', type: 'enum',
         options: [{ value: '16:9', label: '16:9' }], wireValueType: 'string', semantic: 'aspectRatio',
-        allowedOnlyWhen: { kind: 'fieldAbsent', fieldKey: 'video' }, required: false, order: 4,
+        required: false, order: 4,
       },
       {
         key: 'images', kieField: 'reference_image', label: 'تصاویر مرجع', type: 'imageArray',
@@ -279,10 +287,10 @@ describe('buildGenericKiePayload — byte-identical parity with legacy buildXInp
   it('WAN_R2V: video branch (duration clamped to min)', async () => {
     const job = {
       prompt: 'p6', referenceImageKeys: [], videoKey: 'v3.mp4',
-      videoWindowStartSec: null, videoWindowEndSec: null, aspectRatio: null, resolution: '720p',
+      videoWindowStartSec: null, videoWindowEndSec: null, aspectRatio: '16:9', resolution: '720p',
     };
     const legacy = await (processor as any).buildWanR2VInput(job, 1);
-    const values = { prompt: 'p6', resolution: '720p', duration: 1, video: { key: 'v3.mp4' } };
+    const values = { prompt: 'p6', resolution: '720p', duration: 1, aspectRatio: '16:9', video: { key: 'v3.mp4' } };
     const generic = await buildGenericKiePayload(wanR2VSchema, values, uploader);
     expect(generic).toEqual(legacy);
   });
@@ -307,9 +315,9 @@ describe('buildGenericKiePayload — byte-identical parity with legacy buildXInp
         required: false, order: 3,
       },
       {
-        key: 'aspectRatio', kieField: 'aspect_ratio', label: 'ابعاد', type: 'enum',
-        options: [{ value: '9:16', label: '9:16' }], wireValueType: 'string', semantic: 'aspectRatio',
-        allowedOnlyWhen: { kind: 'fieldAbsent', fieldKey: 'video' }, required: false, order: 4,
+          key: 'aspectRatio', kieField: 'aspect_ratio', label: 'ابعاد', type: 'enum',
+          options: [{ value: '9:16', label: '9:16' }], wireValueType: 'string', semantic: 'aspectRatio',
+          required: false, order: 4,
       },
       {
         key: 'images', kieField: 'reference_image', label: 'تصاویر مرجع', type: 'imageArray',
@@ -332,10 +340,10 @@ describe('buildGenericKiePayload — byte-identical parity with legacy buildXInp
   it('WAN_VIDEO_EDIT: video branch (sentinel 0, scalar video_url)', async () => {
     const job = {
       prompt: 'p8', referenceImageKeys: [], videoKey: 'v4.mp4',
-      videoWindowStartSec: null, videoWindowEndSec: null, aspectRatio: null, resolution: '720p',
+      videoWindowStartSec: null, videoWindowEndSec: null, aspectRatio: '9:16', resolution: '720p',
     };
     const legacy = await (processor as any).buildWanVideoEditInput(job, 8);
-    const values = { prompt: 'p8', resolution: '720p', video: { key: 'v4.mp4' } };
+    const values = { prompt: 'p8', resolution: '720p', aspectRatio: '9:16', video: { key: 'v4.mp4' } };
     const generic = await buildGenericKiePayload(wanVideoEditSchema, values, uploader);
     expect(generic).toEqual(legacy);
   });

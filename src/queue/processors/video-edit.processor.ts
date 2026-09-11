@@ -186,6 +186,7 @@ export class VideoEditProcessor {
     const input: Record<string, unknown> = {
       prompt: job.prompt,
       resolution: job.resolution,
+      aspect_ratio: job.aspectRatio ?? '16:9',
     };
     if (job.videoKey) {
       input.video_list = [
@@ -197,7 +198,6 @@ export class VideoEditProcessor {
       ];
     } else {
       input.duration = String(durationSec);
-      input.aspect_ratio = job.aspectRatio ?? '16:9';
     }
     if (job.referenceImageKeys.length) {
       input.image_urls = await this.uploadRefs(job.referenceImageKeys);
@@ -216,7 +216,7 @@ export class VideoEditProcessor {
       prompt: job.prompt,
       resolution: job.resolution,
       duration: job.videoKey ? -1 : durationSec,
-      ...(job.videoKey ? {} : { aspect_ratio: job.aspectRatio ?? '16:9' }),
+      aspect_ratio: job.aspectRatio ?? '16:9',
     };
     if (job.referenceImageKeys.length) {
       input.reference_image_urls = await this.uploadRefs(
@@ -240,7 +240,7 @@ export class VideoEditProcessor {
       prompt: job.prompt,
       resolution: job.resolution,
       duration: String(pickClosestFixedDuration(model.fixedDurations, durationSec)),
-      ...(job.videoKey ? {} : { aspect_ratio: job.aspectRatio ?? '16:9' }),
+      aspect_ratio: job.aspectRatio ?? '16:9',
     };
     if (job.videoKey) input.video_urls = [await this.uploadRef(job.videoKey)];
     return input;
@@ -255,7 +255,7 @@ export class VideoEditProcessor {
       prompt: job.prompt,
       resolution: job.resolution,
       duration: clamp(durationSec, 2, 10),
-      ...(job.videoKey ? {} : { aspect_ratio: job.aspectRatio ?? '16:9' }),
+      aspect_ratio: job.aspectRatio ?? '16:9',
     };
     if (job.referenceImageKeys.length) {
       input.reference_image = await this.uploadRefs(job.referenceImageKeys);
@@ -274,7 +274,7 @@ export class VideoEditProcessor {
       prompt: job.prompt,
       resolution: job.resolution,
       duration: job.videoKey ? 0 : durationSec,
-      ...(job.videoKey ? {} : { aspect_ratio: job.aspectRatio ?? '16:9' }),
+      aspect_ratio: job.aspectRatio ?? '16:9',
     };
     if (job.videoKey) input.video_url = await this.uploadRef(job.videoKey);
     if (job.referenceImageKeys.length) {
@@ -343,7 +343,7 @@ export class VideoEditProcessor {
       prompt: job.prompt,
       resolution: job.resolution,
       duration: durationSec,
-      ...(job.videoKey ? {} : { aspect_ratio: job.aspectRatio ?? '16:9' }),
+      aspect_ratio: job.aspectRatio ?? '16:9',
     };
 
     // همان آپلودر موقت Kie (public URL) برای هر دو نوع رفرنس — OpenRouter برای input_references

@@ -9,6 +9,11 @@ import type {
   CaptionSegment,
   CaptionStyleOverrides,
 } from './caption-style-catalog';
+import {
+  displaySizeAfterRotation,
+  isQuarterTurnRotation,
+  rotationFromProbeStream,
+} from '../utils/video-display-aspect';
 
 export interface ExtractAudioTask {
   inputBuffer: Buffer;
@@ -178,6 +183,7 @@ interface ProbedVideoStream {
   codec_name?: string;
   pix_fmt?: string;
   color_transfer?: string;
+  rotation: number;
 }
 
 interface VideoProbe {
@@ -194,7 +200,7 @@ async function probeVideo(inPath: string): Promise<VideoProbe> {
     '-v',
     'error',
     '-show_entries',
-    'stream=index,codec_type,codec_name,pix_fmt,color_transfer',
+    'stream=index,codec_type,codec_name,pix_fmt,color_transfer:stream_tags=rotate:stream_side_data=rotation',
     '-of',
     'json',
     inPath,
@@ -205,6 +211,8 @@ async function probeVideo(inPath: string): Promise<VideoProbe> {
       codec_name?: string;
       pix_fmt?: string;
       color_transfer?: string;
+      tags?: { rotate?: string };
+      side_data_list?: Array<{ rotation?: number }>;
     }>;
   };
   const streams = parsed.streams ?? [];
@@ -215,6 +223,7 @@ async function probeVideo(inPath: string): Promise<VideoProbe> {
         codec_name: s.codec_name,
         pix_fmt: s.pix_fmt,
         color_transfer: s.color_transfer,
+        rotation: rotationFromProbeStream(s),
       })),
     hasAudio: streams.some((s) => s.codec_type === 'audio'),
   };
@@ -227,6 +236,9 @@ function isProviderCompatible(probe: VideoProbe, inputExt: string): boolean {
   if (main.codec_name !== 'h264') return false;
   if (main.pix_fmt && main.pix_fmt !== 'yuv420p') return false;
   if (isHdrTransfer(main.color_transfer)) return false;
+  // Phone clips are often already h264/mp4 but still carry rotate=90. Passing
+  // them through leaves the tag on the file; Kie/Gemini then see landscape.
+  if (isQuarterTurnRotation(main.rotation)) return false;
   return true;
 }
 
@@ -266,6 +278,8 @@ async function transcodeForProviders(
       : []),
     '-movflags',
     '+faststart',
+    '-metadata:s:v:0',
+    'rotate=0',
     '-max_muxing_queue_size',
     '4096',
     outPath,
@@ -353,16 +367,11 @@ export async function getVideoDimensions({
     if (!stream?.width || !stream?.height) {
       throw new Error(`could not determine video dimensions: "${out}"`);
     }
-    let { width, height } = stream;
-    const tagRotate = Number(stream.tags?.rotate ?? 0);
-    const sideDataRotate = stream.side_data_list?.find(
-      (d) => typeof d.rotation === 'number',
-    )?.rotation;
-    const rotation = ((tagRotate || sideDataRotate || 0) % 360 + 360) % 360;
-    if (rotation === 90 || rotation === 270) {
-      [width, height] = [height, width];
-    }
-    return { width, height };
+    return displaySizeAfterRotation(
+      stream.width,
+      stream.height,
+      rotationFromProbeStream(stream),
+    );
   });
 }
 

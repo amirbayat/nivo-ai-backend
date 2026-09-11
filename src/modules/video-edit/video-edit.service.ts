@@ -24,6 +24,7 @@ import { VideoEditConfigService } from '../video-edit-config/video-edit-config.s
 import { AiProviderService } from '../../common/services/ai-provider.service';
 import { CreateVideoEditJobDto } from './dto/create-video-edit-job.dto';
 import { fa } from '../../i18n/fa';
+import { snapDisplayAspectRatio } from '../../common/utils/video-display-aspect';
 import { parseInputFields } from '../kie-video-models/input-fields.schema';
 import {
   resolveEffectiveDurationSec,
@@ -150,7 +151,13 @@ export class VideoEditService {
   // پنجره‌ی start/end استفاده می‌کند (بخش ۵.۴ سند)، preflight هزینه هم از همین مقدار استفاده می‌کند
   async uploadVideo(
     file: Express.Multer.File,
-  ): Promise<{ key: string; durationSec: number }> {
+  ): Promise<{
+    key: string;
+    durationSec: number;
+    width: number;
+    height: number;
+    aspectRatio: string;
+  }> {
     if (!file) throw new BadRequestException(fa.videoEdit.noFileUploaded);
     if (file.size > MAX_VIDEO_UPLOAD_BYTES) {
       throw new BadRequestException(fa.videoEdit.invalidVideoFormat);
@@ -175,8 +182,18 @@ export class VideoEditService {
       storeBuffer,
       storeExt,
     );
+    const dims = await this.mediaTranscode.getVideoDimensions(
+      storeBuffer,
+      storeExt,
+    );
     const key = await this.storage.uploadImage(storeBuffer, storeExt);
-    return { key, durationSec };
+    return {
+      key,
+      durationSec,
+      width: dims.width,
+      height: dims.height,
+      aspectRatio: snapDisplayAspectRatio(dims.width, dims.height),
+    };
   }
 
   async uploadAudio(file: Express.Multer.File): Promise<{ key: string }> {
@@ -406,7 +423,7 @@ export class VideoEditService {
             videoKey: dto.videoKey ?? null,
             videoWindowStartSec: dto.videoWindowStartSec ?? null,
             videoWindowEndSec: dto.videoWindowEndSec ?? null,
-            aspectRatio: dto.videoKey ? null : (dto.aspectRatio ?? '16:9'),
+            aspectRatio: dto.aspectRatio ?? '16:9',
             resolution: dto.resolution ?? model.resolutions[0] ?? '720p',
           },
     });
