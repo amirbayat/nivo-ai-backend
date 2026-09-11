@@ -950,6 +950,11 @@ model AiModel {
   // تا toggle جستجوی وب برای هیچ مدل قدیمی خودکار روشن نشود (باید صریحاً تست/تایید شود)
   supportsWebSearch Boolean @default(false)
 
+  // docs/PRD-chat-input-modalities-and-web-search.md — OpenRouter architecture.input_modalities
+  supportsFileInput  Boolean @default(false)
+  supportsVideoInput Boolean @default(false)
+  supportsAudioInput Boolean @default(false)
+
   isActive  Boolean   @default(true)
   sortOrder Int       @default(0)
   tier      ModelTier @default(MEDIUM)
@@ -1110,6 +1115,9 @@ model ChatConfig {
   // docs/PRD-chat-files-and-pdf.md بخش ۶ — پیوست فایل غیرعکس (PDF/DOCX/TXT/CSV/XLSX/کد)
   maxFileSizeMb     Int @default(10)
   maxExtractedChars Int @default(80000)
+  // docs/PRD-chat-input-modalities-and-web-search.md — native video/audio on chat completions
+  maxVideoSizeMb Int @default(12)
+  maxAudioSizeMb Int @default(10)
 
   updatedAt DateTime @updatedAt
 

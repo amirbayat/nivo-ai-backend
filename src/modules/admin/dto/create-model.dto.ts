@@ -59,6 +59,22 @@ export class CreateModelDto {
   @IsBoolean()
   supportsImageGen?: boolean;
 
+  @IsOptional()
+  @IsBoolean()
+  supportsWebSearch?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  supportsFileInput?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  supportsVideoInput?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  supportsAudioInput?: boolean;
+
   // قیمت‌گذاری تولید عکس بر اساس توکن واقعی است — متن ورودی از همون inputPricePerM بالا
   // حساب می‌شود؛ این دو فقط برای توکن‌های عکس (ورودی حالت ویرایش / خروجی) هستند
   @IsOptional()

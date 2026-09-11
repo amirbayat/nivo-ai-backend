@@ -221,6 +221,23 @@ export const fa = {
     truncated: (filename: string) =>
       `فایل «${filename}» بزرگ بود — فقط بخش اول آن خوانده شد`,
   },
+  chatMedia: {
+    invalidVideo: 'فرمت ویدیو پشتیبانی نمی‌شود — فقط MP4، WEBM، MOV',
+    invalidAudio: 'فرمت صدا پشتیبانی نمی‌شود — فقط MP3، WAV، M4A، OGG',
+    videoTooLarge: (maxMb: number) =>
+      `حجم ویدیو نباید بیشتر از ${maxMb.toLocaleString('fa-IR')} مگابایت باشد`,
+    audioTooLarge: (maxMb: number) =>
+      `حجم فایل صدا نباید بیشتر از ${maxMb.toLocaleString('fa-IR')} مگابایت باشد`,
+    contentMismatch: 'محتوای فایل با فرمت اعلام‌شده مطابقت ندارد',
+    tooManyVideos: (max: number) =>
+      `حداکثر ${max.toLocaleString('fa-IR')} ویدیو در هر پیام مجاز است`,
+    tooManyAudios: (max: number) =>
+      `حداکثر ${max.toLocaleString('fa-IR')} فایل صدا در هر پیام مجاز است`,
+    videoNotSupported:
+      'این مدل ویدیو را پشتیبانی نمی‌کند. یک مدل جمینای، Qwen یا Kimi انتخاب کنید.',
+    audioNotSupported:
+      'این مدل ورودی صدا را پشتیبانی نمی‌کند. لطفاً مدل دیگری انتخاب کنید.',
+  },
   // docs/PRD-discovery-and-credits.md — دیسکاوری (سبک‌های آماده‌ی عکس/متن) + پروژه‌ها + اعتبار «نیوو»
   discovery: {
     promptNotFound: 'این سبک یافت نشد یا دیگر فعال نیست',

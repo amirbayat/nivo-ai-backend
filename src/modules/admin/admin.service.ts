@@ -33,6 +33,10 @@ const MODEL_IMPORT_COLUMNS = [
   'outputPricePerM',
   'supportsVision',
   'supportsImageGen',
+  'supportsWebSearch',
+  'supportsFileInput',
+  'supportsVideoInput',
+  'supportsAudioInput',
   'imageGenInputImagePricePerM',
   'imageGenOutputImagePricePerM',
   'imageGenQuality',
@@ -113,6 +117,10 @@ function parseModelRow(raw: Record<string, unknown>) {
     outputPricePerM: cellToNumber(raw.outputPricePerM),
     supportsVision: cellToBoolean(raw.supportsVision, false),
     supportsImageGen: cellToBoolean(raw.supportsImageGen, false),
+    supportsWebSearch: cellToBoolean(raw.supportsWebSearch, false),
+    supportsFileInput: cellToBoolean(raw.supportsFileInput, false),
+    supportsVideoInput: cellToBoolean(raw.supportsVideoInput, false),
+    supportsAudioInput: cellToBoolean(raw.supportsAudioInput, false),
     imageGenInputImagePricePerM: cellToNumber(raw.imageGenInputImagePricePerM),
     imageGenOutputImagePricePerM: cellToNumber(
       raw.imageGenOutputImagePricePerM,
@@ -129,7 +137,7 @@ function parseModelRow(raw: Record<string, unknown>) {
     ),
     videoGenSupportedSizes: cellToStringArray(raw.videoGenSupportedSizes),
     isActive: cellToBoolean(raw.isActive, true),
-    sortOrder: cellToNumber(raw.sortOrder) ?? 0,
+    sortOrder: cellToNumber(raw.sortOrder),
     tier:
       (cellToString(raw.tier)?.toUpperCase() as
         (typeof MODEL_TIERS)[number] | undefined) ?? undefined,

@@ -26,6 +26,8 @@ export class AppConfigController {
       // maxFileSizeMb سیاست هزینه/امنیت است، تعداد آرایه یک محدودیت ورودی ساده)
       maxFilesPerMessage: 3,
       maxFileSizeMb: chatConfig.maxFileSizeMb,
+      maxVideoSizeMb: chatConfig.maxVideoSizeMb,
+      maxAudioSizeMb: chatConfig.maxAudioSizeMb,
     };
   }
 }

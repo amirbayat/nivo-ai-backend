@@ -66,7 +66,7 @@ export class StreamMessageDto {
   // هر آیتم یک data URL خام (مثل images بالا) + نام اصلی فایل برای نمایش/چیپ در پیام
   @IsOptional()
   @IsArray()
-  @ArrayMaxSize(3)
+  @ArrayMaxSize(5)
   @ValidateNested({ each: true })
   @Type(() => ChatFileInputDto)
   files?: ChatFileInputDto[];

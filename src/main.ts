@@ -7,7 +7,7 @@ import { AppModule } from './app.module';
 // express روی این مقدار نبود، بدون هیچ هماهنگی مشخصی با سقف ۲۰ مگابایتی nginx در پروداکشن)؛
 // عکس‌های چت base64 هستند (~۳۳٪ حجم بیشتر از بایت واقعی) پس باید زیر سقف nginx ولی
 // به‌اندازه‌ی کافی بزرگ برای چند عکس در یک پیام باشد.
-const BODY_SIZE_LIMIT = '15mb';
+const BODY_SIZE_LIMIT = '20mb';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {

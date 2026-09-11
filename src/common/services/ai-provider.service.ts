@@ -51,6 +51,29 @@ function extractCitations(
 // citations/webSearchRequests (فاز ۳ جستجوی وب) همان مکانیزم را دوباره استفاده می‌کنند: چون
 // @ai-sdk/openai-compatible هیچ تایپ استریم‌پارت اختصاصی برای annotation/citation ندارد، این‌ها
 // هم از parsedBody/chunk خام (نه از fullStream تایپ‌شده‌ی SDK) استخراج می‌شوند.
+function injectUserContentParts(
+  body: Record<string, unknown>,
+  parts: Record<string, unknown>[],
+): Record<string, unknown> {
+  if (!parts.length) return body;
+  const messages = body.messages;
+  if (!Array.isArray(messages)) return body;
+  const next = messages.map((msg) => ({ ...(msg as Record<string, unknown>) }));
+  for (let i = next.length - 1; i >= 0; i--) {
+    if (next[i].role !== 'user') continue;
+    const content = next[i].content;
+    const asArray = Array.isArray(content)
+      ? content
+      : typeof content === 'string'
+        ? [{ type: 'text', text: content }]
+        : null;
+    if (!asArray) break;
+    next[i] = { ...next[i], content: [...parts, ...asArray] };
+    break;
+  }
+  return { ...body, messages: next };
+}
+
 function createOpenRouterMetadataExtractor(): MetadataExtractor {
   const toMetadata = (
     usage: OpenRouterUsage | undefined,
@@ -230,6 +253,7 @@ export class AiProviderService {
     apiKey?: string,
     extraOptions?: Record<string, unknown>,
     extraBodyFields?: Record<string, unknown>,
+    extraUserContentParts?: Record<string, unknown>[],
   ) {
     return createOpenAICompatible({
       name: this.name,
@@ -250,8 +274,11 @@ export class AiProviderService {
                 reasoning_effort?: string;
                 [key: string]: unknown;
               };
+              const withMedia = extraUserContentParts?.length
+                ? injectUserContentParts(rest, extraUserContentParts)
+                : rest;
               return {
-                ...rest,
+                ...withMedia,
                 ...(reasoning_effort
                   ? { reasoning: { effort: reasoning_effort } }
                   : {}),

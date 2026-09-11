@@ -54,6 +54,22 @@ export class UpdateModelDto {
   supportsImageGen?: boolean;
 
   @IsOptional()
+  @IsBoolean()
+  supportsWebSearch?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  supportsFileInput?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  supportsVideoInput?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  supportsAudioInput?: boolean;
+
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)

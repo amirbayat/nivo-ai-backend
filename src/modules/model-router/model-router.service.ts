@@ -60,6 +60,8 @@ export interface RouteInput {
   // docs/PRD-chat-models-web-search-and-files.md §۳.۵ — همان الگوی hasImages: وقتی true،
   // کاندیدها به مدل‌های supportsWebSearch=true محدود می‌شوند (هم مسیر PAYG هم مسیر پله‌ای قدیمی)
   wantsWebSearch?: boolean;
+  hasVideo?: boolean;
+  hasAudio?: boolean;
   allowedModels: string[];
   manualModel?: string;
   lastAssistantMessageLength?: number;
@@ -149,6 +151,8 @@ export class ModelRouterService {
         platform: { has: this.aiProvider.platform },
         ...(input.hasImages ? { supportsVision: true } : {}),
         ...(input.wantsWebSearch ? { supportsWebSearch: true } : {}),
+        ...(input.hasVideo ? { supportsVideoInput: true } : {}),
+        ...(input.hasAudio ? { supportsAudioInput: true } : {}),
       },
       orderBy: { sortOrder: 'asc' },
     });
@@ -194,6 +198,8 @@ export class ModelRouterService {
         platform: { has: this.aiProvider.platform },
         ...(input.hasImages ? { supportsVision: true } : {}),
         ...(input.wantsWebSearch ? { supportsWebSearch: true } : {}),
+        ...(input.hasVideo ? { supportsVideoInput: true } : {}),
+        ...(input.hasAudio ? { supportsAudioInput: true } : {}),
       },
     });
 

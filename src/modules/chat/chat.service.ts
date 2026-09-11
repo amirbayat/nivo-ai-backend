@@ -57,6 +57,12 @@ import {
   mimeTypeForFileExt,
 } from '../../common/validators/chat-file.validator';
 import {
+  isAudioFilename,
+  isVideoFilename,
+  validateChatAudios,
+  validateChatVideos,
+} from '../../common/validators/chat-media.validator';
+import {
   extractChatFileText,
   formatExtractedFileBlock,
 } from '../../common/utils/chat-file-extraction.util';
@@ -184,8 +190,14 @@ export class ChatService {
   private buildProvider(
     apiKey: string,
     extraBodyFields?: Record<string, unknown>,
+    extraUserContentParts?: Record<string, unknown>[],
   ) {
-    return this.aiProvider.buildClient(apiKey, undefined, extraBodyFields);
+    return this.aiProvider.buildClient(
+      apiKey,
+      undefined,
+      extraBodyFields,
+      extraUserContentParts,
+    );
   }
 
   // برای درخواست‌های کوچک/یک‌باره‌ی داخلی (عنوان‌سازی، خلاصه‌سازی) به‌جای generateText.
@@ -497,6 +509,24 @@ export class ChatService {
     // انتخاب دستی کاربر، چک صریح پایین‌تر (کنار چک vision) انجام می‌شود.
     const wantsWebSearch = dto.webSearch === true;
 
+    const incomingFiles = dto.files ?? [];
+    const videoInputs = incomingFiles.filter((f) => isVideoFilename(f.filename));
+    const audioInputs = incomingFiles.filter((f) => isAudioFilename(f.filename));
+    const docInputs = incomingFiles.filter(
+      (f) => !isVideoFilename(f.filename) && !isAudioFilename(f.filename),
+    );
+    const parsedVideos = validateChatVideos(videoInputs, {
+      maxSizeMb: chatConfig.maxVideoSizeMb,
+      maxCount: 1,
+    });
+    const parsedAudios = validateChatAudios(audioInputs, {
+      maxSizeMb: chatConfig.maxAudioSizeMb,
+      maxCount: 1,
+    });
+    const parsedFiles = validateChatFiles(docInputs, {
+      maxSizeMb: chatConfig.maxFileSizeMb,
+    });
+
     const lastAssistant = await this.prisma.message.findFirst({
       where: { conversationId, role: 'ASSISTANT' },
       orderBy: { createdAt: 'desc' },
@@ -508,6 +538,8 @@ export class ChatService {
       content: dto.content,
       hasImages: Boolean(dto.images?.length),
       wantsWebSearch,
+      hasVideo: parsedVideos.length > 0,
+      hasAudio: parsedAudios.length > 0,
       allowedModels: allowed,
       manualModel: validManualModel,
       lastAssistantMessageLength: lastAssistant?.content.length,
@@ -523,24 +555,23 @@ export class ChatService {
       : routed.modelId;
     this.modelRouter.log({ userId, conversationId, ...routed }).catch(() => {});
 
-    // مدل نهایی واقعاً اجراشونده ممکن است با rawModelChoice فرق کند (Auto/forcedNanoMode) —
-    // تزریق tools جستجوی وب فقط بر اساس همین مدل نهایی تصمیم گرفته می‌شود، نه انتخاب خام کاربر
-    const finalModelRecord = wantsWebSearch
-      ? await this.prisma.aiModel.findFirst({
-          where: {
-            name: modelId,
-            isActive: true,
-            platform: { has: this.aiProvider.platform },
-          },
-          select: { supportsWebSearch: true },
-        })
-      : null;
+    const finalModelRecord = await this.prisma.aiModel.findFirst({
+      where: {
+        name: modelId,
+        isActive: true,
+        platform: { has: this.aiProvider.platform },
+      },
+      select: {
+        supportsWebSearch: true,
+        supportsFileInput: true,
+        supportsVideoInput: true,
+        supportsAudioInput: true,
+        supportsVision: true,
+      },
+    });
     const useWebSearch =
       wantsWebSearch && Boolean(finalModelRecord?.supportsWebSearch);
 
-    // دراپ‌دون «سریع/هوشمند» کنار ارسال پیام — فقط reasoning effort را override می‌کند، انتخاب
-    // مدل (routed.modelId) دست‌نخورده می‌ماند. بدون انتخاب کاربر، رفتار قبلی (reasoningEffort
-    // پیش‌فرض پلن/استپ بودجه‌ای که ModelRouterService برگردانده) ادامه دارد.
     const reasoningEffort =
       dto.thinkingMode === 'fast'
         ? (plan.fastReasoningEffort ?? 'none')
@@ -548,22 +579,13 @@ export class ChatService {
           ? (plan.smartReasoningEffort ?? 'low')
           : routed.reasoningEffort;
 
-    // ── تصاویر: اعتبارسنجی امنیتی + چک vision (preflight) ──────────────────
-    // docs/PRD-chat-images.md بخش ۵.۱ — قبل از این، هیچ چک فرمت/حجم/magic-bytes ای
-    // روی dto.images نبود؛ سقف‌ها هم از تنظیمات ادمین (ChatConfig) خوانده می‌شوند، نه ثابت در کد.
-    // (chatConfig بالاتر گرفته شده)
     if (dto.images?.length) {
-      // dto.images بالاتر (کنار چک explicitImageToggle/imageIntent) از HEIC/HEIF نرمال شده — اینجا
-      // فقط همان اعتبارسنجی فرمت/حجم/magic-bytes همیشگی است
       validateChatImages(dto.images, {
         maxCount: chatConfig.maxImagesPerMessage,
         maxSizeMb: chatConfig.maxImageSizeMb,
         allowedFormats: chatConfig.allowedImageFormats as string[],
       });
 
-      // نکته: وقتی rawModelChoice یکی از سه سنتینل خودکار باشد، aiModel با این نام پیدا نمی‌شود
-      // (modelRecord=null) و این چک بی‌اثر می‌ماند — Router خودش تضمین می‌کند مدل انتخابی از vision
-      // پشتیبانی کند (بخش hasImages بالا).
       const modelRecord = await this.prisma.aiModel.findFirst({
         where: {
           name: rawModelChoice,
@@ -572,9 +594,6 @@ export class ChatService {
         },
         select: { supportsVision: true },
       });
-      // forcedNanoMode یعنی مدل واقعی که اجرا می‌شود PRE_ROUTING_REFERENCE_MODEL است، نه
-      // rawModelChoice — و آن مدل vision دارد، پس این چک (که روی انتخاب اصلی کاربر است) اینجا
-      // نامربوط می‌شود
       if (modelRecord && !modelRecord.supportsVision && !forcedNanoMode) {
         throw new BadRequestException(
           'این مدل از تصویر پشتیبانی نمی‌کند. لطفاً یک مدل Vision‌دار انتخاب کنید.',
@@ -582,44 +601,34 @@ export class ChatService {
       }
     }
 
-    // ── جستجوی وب: چک صریح روی انتخاب دستی کاربر ────────────────────────────
-    // برای حالت‌های خودکار (Auto)، wantsWebSearch از قبل به Router پاس داده شده (فیلتر کاندیدها)
-    // — این چک فقط زمانی معنا دارد که کاربر خودش یک مدل مشخص انتخاب کرده باشد که آن مدل صریحاً
-    // جستجوی وب را پشتیبانی نمی‌کند؛ toggle بی‌اثر و گمراه‌کننده نباید بی‌صدا نادیده گرفته شود.
     if (wantsWebSearch && validManualModel && !forcedNanoMode) {
-      const manualModelRecord = await this.prisma.aiModel.findFirst({
-        where: {
-          name: validManualModel,
-          isActive: true,
-          platform: { has: this.aiProvider.platform },
-        },
-        select: { supportsWebSearch: true },
-      });
-      if (manualModelRecord && !manualModelRecord.supportsWebSearch) {
+      if (finalModelRecord && !finalModelRecord.supportsWebSearch) {
         throw new BadRequestException(fa.chat.webSearchNotSupported);
       }
     }
+    if (parsedVideos.length && !finalModelRecord?.supportsVideoInput) {
+      throw new BadRequestException(fa.chatMedia.videoNotSupported);
+    }
+    if (parsedAudios.length && !finalModelRecord?.supportsAudioInput) {
+      throw new BadRequestException(fa.chatMedia.audioNotSupported);
+    }
 
-    // ── فایل‌های غیرعکس: اعتبارسنجی + استخراج متن (docs/PRD-chat-files-and-pdf.md بخش ۳) ────
-    const parsedFiles = validateChatFiles(dto.files, {
-      maxSizeMb: chatConfig.maxFileSizeMb,
-    });
+    const nativePdfFiles = finalModelRecord?.supportsFileInput
+      ? parsedFiles.filter((f) => f.kind === 'pdf')
+      : [];
+    const extractableFiles = parsedFiles.filter(
+      (f) => !nativePdfFiles.includes(f),
+    );
     const extractedFiles = await Promise.all(
-      parsedFiles.map((f) =>
+      extractableFiles.map((f) =>
         extractChatFileText(f, chatConfig.maxExtractedChars),
       ),
     );
-    // همیشه با قالب یکسان «--- فایل: name --- ... --- پایان فایل ---» (حتی وقتی متنی استخراج
-    // نشده، پیام «متنی نبود» به‌جای متن می‌آید) — فرانت (MessageList.tsx stripFileBlocks) دقیقاً
-    // همین marker را برای پنهان‌کردن بلوک خام از حباب پیام (نمایش فقط چیپ فایل) می‌شناسد
     const fileBlocks = extractedFiles.map((e) =>
       formatExtractedFileBlock(
         e.text ? e : { ...e, text: fa.chatFiles.emptyExtractedText(e.filename) },
       ),
     );
-    // متن استخراج‌شده به همان پیام کاربر اضافه می‌شود (نه یک پیام جدا) — دقیقاً مثل کپی‌پیست
-    // دستی کاربر؛ چون این محتوای نهایی در DB ذخیره می‌شود (پایین‌تر)، تاریخچه‌ی مکالمه هم آن را
-    // برای پیام‌های بعدی نگه می‌دارد (بدون نیاز به تزریق دوباره در هر turn)
     const contentWithFiles = fileBlocks.length
       ? `${dto.content}\n\n${fileBlocks.join('\n\n')}`
       : dto.content;
@@ -736,9 +745,34 @@ export class ChatService {
       // docs/PRD-chat-files-and-pdf.md بخش ۳.۳ — فایل خام (نه فقط متن استخراج‌شده) هم در MinIO
       // ذخیره می‌شود، دقیقاً مثل عکس؛ همان cron پاک‌سازی ۲۴ساعته (بر اساس پیشوند conversationId،
       // نه پسوند فرمت) بدون تغییر روی این‌ها هم اعمال می‌شود
+      const mediaToPersist: Array<{
+        buffer: Buffer;
+        ext: string;
+        filename: string;
+        mime: string;
+      }> = [
+        ...parsedFiles.map((f) => ({
+          buffer: f.buffer,
+          ext: f.ext,
+          filename: f.filename,
+          mime: mimeTypeForFileExt(f.ext),
+        })),
+        ...parsedVideos.map((f) => ({
+          buffer: f.buffer,
+          ext: f.ext,
+          filename: f.filename,
+          mime: f.mime,
+        })),
+        ...parsedAudios.map((f) => ({
+          buffer: f.buffer,
+          ext: f.ext,
+          filename: f.filename,
+          mime: f.mime,
+        })),
+      ];
       const persistedAttachments = (
         await Promise.all(
-          parsedFiles.map(async (f) => {
+          mediaToPersist.map(async (f) => {
             try {
               const key = await this.storageService.uploadImage(
                 f.buffer,
@@ -748,7 +782,7 @@ export class ChatService {
               return {
                 key,
                 filename: f.filename,
-                mime: mimeTypeForFileExt(f.ext),
+                mime: f.mime,
               };
             } catch (err) {
               this.logger.warn(
@@ -816,15 +850,29 @@ export class ChatService {
       });
 
       const hasImages = Boolean(dto.images?.length);
+      const hasNativeFiles =
+        nativePdfFiles.length > 0 || parsedAudios.length > 0;
       const coreMessages: ModelMessage[] = recentMessages.map((m, idx) => {
         const isLast = idx === recentMessages.length - 1;
-        if (isLast && m.role === 'USER' && hasImages) {
+        if (isLast && m.role === 'USER' && (hasImages || hasNativeFiles)) {
           const visionMsg: UserModelMessage = {
             role: 'user',
             content: [
-              ...dto.images!.map((img) => ({
+              ...(dto.images ?? []).map((img) => ({
                 type: 'image' as const,
                 image: img,
+              })),
+              ...nativePdfFiles.map((f) => ({
+                type: 'file' as const,
+                data: f.buffer,
+                mediaType: 'application/pdf',
+                filename: f.filename,
+              })),
+              ...parsedAudios.map((f) => ({
+                type: 'file' as const,
+                data: f.buffer,
+                mediaType: f.mime,
+                filename: f.filename,
               })),
               { type: 'text' as const, text: m.content },
             ],
@@ -842,6 +890,11 @@ export class ChatService {
         };
       });
 
+      const extraUserContentParts = parsedVideos.map((v) => ({
+        type: 'video_url',
+        video_url: { url: v.dataUrl },
+      }));
+
       chatCallStart = Date.now();
       const result = streamText({
         model: this.buildProvider(
@@ -849,6 +902,7 @@ export class ChatService {
           useWebSearch
             ? { tools: OPENROUTER_WEB_SEARCH_TOOLS, max_tool_calls: 5 }
             : undefined,
+          extraUserContentParts,
         )(modelId),
         system: systemParts.join('\n\n') || undefined,
         messages: coreMessages,
