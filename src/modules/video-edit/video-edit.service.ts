@@ -48,6 +48,10 @@ const TITLE_GENERATION_MODEL = 'openai/gpt-5-nano';
 // docs/PRD-video-prompt-coach.md بخش ۱ — فقط این مدل، هاردکد (بدون انتخاب‌گر/تنظیم ادمین)
 const PROMPT_REVIEW_MODEL = 'google/gemini-3.8-flash';
 
+// docs/PRD-prompt-review-expected-output.md — مارکر دوم برای جدا کردن باکس «خروجی مورد انتظار»
+// از انتهای پرامپت پیشنهادی
+const EXPECTED_OUTPUT_MARKER = '---خروجی مورد انتظار---';
+
 const PROMPT_REVIEW_SYSTEM_PROMPT = `تو یک دستیار متخصص نوشتن پرامپت برای تولید ویدیو با هوش مصنوعی هستی.
 کارت این است: پرامپت کاربر (و در صورت وجود، ویدیو/عکس مرجعش) را ببینی و به او کمک کنی پرامپت
 بهتری بنویسد تا نتیجه‌ی تولید ویدیو باکیفیت‌تر و قابل‌پیش‌بینی‌تر باشد.
@@ -57,12 +61,23 @@ const PROMPT_REVIEW_SYSTEM_PROMPT = `تو یک دستیار متخصص نوشت�
   مؤدبانه بگو این گفتگو فقط برای بهبود پرامپت ویدیوست.
 - نقدت را کوتاه و مشخص بنویس: چه چیزهایی مبهم یا ناقص است (نور، حرکت دوربین، سبک، زمان‌بندی صحنه،
   جزئیات ظاهری سوژه، فضای صدا/موسیقی) — نه یک لیست طولانی، فقط نکات واقعاً مهم.
-- در پایانِ هر پاسخ، همیشه دقیقاً همین مارکر را در یک خط جدا بنویس: ---پیشنهاد نهایی---
+- در پایانِ نقد، همیشه دقیقاً همین مارکر را در یک خط جدا بنویس: ---پیشنهاد نهایی---
   و بلافاصله بعدش، در یک پاراگراف، خودِ پرامپت نهاییِ پیشنهادی را بنویس — فقط متن پرامپت،
   بدون هیچ توضیح یا مقدمه‌ی اضافه. این پرامپت باید همان زبان و اسلوب پرامپت‌های تولید ویدیو باشد
   (توصیفی، یک یا چند جمله، نه لیست).
 - اگر کاربر در ادامه‌ی گفتگو خواست چیزی را عوض کنی (مثلاً «به‌جای صبح غروب باشه»)، پرامپت پیشنهادی
-  را با همان تغییر دوباره کامل بنویس (نه فقط توضیح تغییر) — همیشه بعد از مارکر، نسخه‌ی کامل و به‌روز.`;
+  را با همان تغییر دوباره کامل بنویس (نه فقط توضیح تغییر) — همیشه بعد از مارکر، نسخه‌ی کامل و به‌روز.
+- بلافاصله بعد از پرامپت پیشنهادی، همیشه دقیقاً همین مارکر را در یک خط جدا بنویس:
+  ---خروجی مورد انتظار---
+  و بعدش، مثل کسی که واقعاً این ویدیو را جلوی چشمش دارد و دارد برای یک نفر که نمی‌بیندش تعریف
+  می‌کند، با جزئیات کامل توضیح بده که اگر همین پرامپت پیشنهادی برای تولید ویدیو استفاده شود، کاربر
+  دقیقاً چه چیزی را می‌بیند. حتماً این موارد را با جزئیات واقعی (نه اسم بردن مقوله) پوشش بده:
+  تعداد و نوع سوژه(ها) و ظاهر دقیقشان (سن حدودی، پوشش، حالت چهره/بدن)، صحنه/محیط و زمان روز یا
+  آب‌وهوا، اندازه‌ی نما و ترکیب‌بندی (کلوزآپ/مدیوم/وایید، مرکز کادر)، حرکت دقیق سوژه در طول صحنه،
+  حرکت/زاویه‌ی دوربین (پن/تیلت/دالی/ثابت)، نور و پالت رنگ دقیق، بافت و جزئیات ریز قابل‌مشاهده،
+  ریتم/سرعت و حس‌وحال کلی صحنه، و در صورت وجود فضای صدا/موسیقی. در دو تا چهار پاراگراف کوتاه بنویس
+  (نه لیست، نه یک جمله‌ی کلی)، و در پایان با یک جمله‌ی کوتاه یادآوری کن که خروجی واقعی مدل تولید
+  می‌تواند اندکی متفاوت باشد.`;
 
 const ALLOWED_VIDEO_MIME_EXT: Record<string, string> = {
   'video/mp4': 'mp4',
@@ -610,17 +625,27 @@ export class VideoEditService {
         model: client(PROMPT_REVIEW_MODEL),
         system: PROMPT_REVIEW_SYSTEM_PROMPT,
         messages,
-        maxOutputTokens: 1200,
+        maxOutputTokens: 2000,
       });
 
       const marker = '---پیشنهاد نهایی---';
       const markerIdx = text.indexOf(marker);
       if (markerIdx === -1) {
-        return { critique: text.trim(), suggestedPrompt: null };
+        return { critique: text.trim(), suggestedPrompt: null, expectedOutput: null };
+      }
+      const critique = text.slice(0, markerIdx).trim();
+      const afterSuggestion = text.slice(markerIdx + marker.length);
+
+      const expectedMarkerIdx = afterSuggestion.indexOf(EXPECTED_OUTPUT_MARKER);
+      if (expectedMarkerIdx === -1) {
+        return { critique, suggestedPrompt: afterSuggestion.trim(), expectedOutput: null };
       }
       return {
-        critique: text.slice(0, markerIdx).trim(),
-        suggestedPrompt: text.slice(markerIdx + marker.length).trim(),
+        critique,
+        suggestedPrompt: afterSuggestion.slice(0, expectedMarkerIdx).trim(),
+        expectedOutput: afterSuggestion
+          .slice(expectedMarkerIdx + EXPECTED_OUTPUT_MARKER.length)
+          .trim(),
       };
     } catch (err) {
       this.logger.warn(

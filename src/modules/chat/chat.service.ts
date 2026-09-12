@@ -106,6 +106,10 @@ const TITLE_GENERATION_MODEL = 'openai/gpt-5-nano';
 // مشترک (همون الگوی TITLE_GENERATION_MODEL که همین حالا هم بین دو فایل تکرار شده)
 const IMAGE_PROMPT_REVIEW_MODEL = 'google/gemini-3.8-flash';
 
+// docs/PRD-prompt-review-expected-output.md — مارکر دوم برای جدا کردن باکس «خروجی مورد انتظار»
+// از انتهای پرامپت پیشنهادی
+const EXPECTED_OUTPUT_MARKER = '---خروجی مورد انتظار---';
+
 const IMAGE_PROMPT_REVIEW_SYSTEM_PROMPT = `تو یک دستیار متخصص نوشتن پرامپت برای تولید/ویرایش عکس با هوش مصنوعی هستی.
 کارت این است: پرامپت کاربر (و در صورت وجود، عکس مرجعی که می‌خواهد ویرایش شود) را ببینی و به او کمک کنی
 پرامپت بهتری بنویسد تا نتیجه‌ی تولید/ویرایش عکس باکیفیت‌تر و قابل‌پیش‌بینی‌تر باشد.
@@ -119,12 +123,22 @@ const IMAGE_PROMPT_REVIEW_SYSTEM_PROMPT = `تو یک دستیار متخصص ن�
 - نقدت را کوتاه و مشخص بنویس: چه چیزهایی مبهم یا ناقص است (ترکیب‌بندی/فریم، نور و سایه، زاویه‌ی
   دوربین/لنز، سبک هنری مثل عکاسی/نقاشی/انیمیشن، پالت رنگ، جزئیات ظاهری سوژه، پس‌زمینه/محیط) — نه یک
   لیست طولانی، فقط نکات واقعاً مهم.
-- در پایانِ هر پاسخ، همیشه دقیقاً همین مارکر را در یک خط جدا بنویس: ---پیشنهاد نهایی---
+- در پایانِ نقد، همیشه دقیقاً همین مارکر را در یک خط جدا بنویس: ---پیشنهاد نهایی---
   و بلافاصله بعدش، در یک پاراگراف، خودِ پرامپت نهاییِ پیشنهادی را بنویس — فقط متن پرامپت،
   بدون هیچ توضیح یا مقدمه‌ی اضافه. این پرامپت باید همان زبان و اسلوب پرامپت‌های تولید عکس باشد
   (توصیفی، یک یا چند جمله، نه لیست).
 - اگر کاربر در ادامه‌ی گفتگو خواست چیزی را عوض کنی (مثلاً «رنگ پس‌زمینه آبی باشه»)، پرامپت پیشنهادی
-  را با همان تغییر دوباره کامل بنویس (نه فقط توضیح تغییر) — همیشه بعد از مارکر، نسخه‌ی کامل و به‌روز.`;
+  را با همان تغییر دوباره کامل بنویس (نه فقط توضیح تغییر) — همیشه بعد از مارکر، نسخه‌ی کامل و به‌روز.
+- بلافاصله بعد از پرامپت پیشنهادی، همیشه دقیقاً همین مارکر را در یک خط جدا بنویس:
+  ---خروجی مورد انتظار---
+  و بعدش، مثل کسی که واقعاً این عکس را جلوی چشمش دارد و دارد برای یک نفر که نمی‌بیندش تعریف
+  می‌کند، با جزئیات کامل توضیح بده که اگر همین پرامپت پیشنهادی برای تولید/ویرایش عکس استفاده شود،
+  کاربر دقیقاً چه چیزی را می‌بیند. حتماً این موارد را با جزئیات واقعی (نه اسم بردن مقوله) پوشش
+  بده: تعداد و نوع سوژه(ها) و ظاهر دقیقشان (پوشش، حالت/ژست، حالت چهره)، ترکیب‌بندی/فریم و زاویه‌ی
+  دوربین، سبک هنری و کیفیت بصری (عکاسی/نقاشی/انیمیشن، شارپ یا نرم)، نور و سایه، پالت رنگ دقیق،
+  بافت/متریال قابل‌مشاهده، پس‌زمینه/محیط و عمق میدان (چه چیزی فوکوس است، چه چیزی بلور). در دو تا
+  چهار پاراگراف کوتاه بنویس (نه لیست، نه یک جمله‌ی کلی)، و در پایان با یک جمله‌ی کوتاه یادآوری کن
+  که خروجی واقعی مدل تولید می‌تواند اندکی متفاوت باشد.`;
 
 // docs/PRD-chat-models-web-search-and-files.md §۳.۲ — دقیقاً همان shape که PRD مشخص کرده
 // (نه پسوند `:online` قدیمی/منسوخ، نه `plugins: [{id:'web'}]`). engine:'auto' برای مدل‌های
@@ -346,18 +360,28 @@ export class ChatService {
         modelId: IMAGE_PROMPT_REVIEW_MODEL,
         system: IMAGE_PROMPT_REVIEW_SYSTEM_PROMPT,
         messages,
-        maxOutputTokens: 1200,
+        maxOutputTokens: 2000,
         apiKey,
       });
 
       const marker = '---پیشنهاد نهایی---';
       const markerIdx = text.indexOf(marker);
       if (markerIdx === -1) {
-        return { critique: text.trim(), suggestedPrompt: null };
+        return { critique: text.trim(), suggestedPrompt: null, expectedOutput: null };
+      }
+      const critique = text.slice(0, markerIdx).trim();
+      const afterSuggestion = text.slice(markerIdx + marker.length);
+
+      const expectedMarkerIdx = afterSuggestion.indexOf(EXPECTED_OUTPUT_MARKER);
+      if (expectedMarkerIdx === -1) {
+        return { critique, suggestedPrompt: afterSuggestion.trim(), expectedOutput: null };
       }
       return {
-        critique: text.slice(0, markerIdx).trim(),
-        suggestedPrompt: text.slice(markerIdx + marker.length).trim(),
+        critique,
+        suggestedPrompt: afterSuggestion.slice(0, expectedMarkerIdx).trim(),
+        expectedOutput: afterSuggestion
+          .slice(expectedMarkerIdx + EXPECTED_OUTPUT_MARKER.length)
+          .trim(),
       };
     } catch (err) {
       this.logger.warn(
