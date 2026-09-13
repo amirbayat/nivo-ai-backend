@@ -30,8 +30,14 @@ import { computeNutritionTargets } from './nivo-cal-targets';
 // بر انعطاف مدل ارجحیت دارد. این مدل هم‌اکنون هم extractionEconomicalModel پیش‌فرض
 // (vision-capable) کاتالوگ است، پس نیازی به migration جدید روی AiModel نیست.
 const NIVO_CAL_MODEL = 'openai/gpt-5.4-mini';
-// اگر مدل اصلی جواب نداد (خطا/تایم‌اوت)، یک تلاش دوم با این مدل قبل از شکست نهایی انجام می‌شود
-const NIVO_CAL_FALLBACK_MODEL = 'openai/gpt-5-mini';
+// اگر مدل اصلی جواب نداد (خطا/تایم‌اوت)، یک تلاش دوم با این مدل قبل از شکست نهایی انجام می‌شود.
+// عمداً از یک provider جدا (Google، نه یک مدل دیگر از OpenAI) انتخاب شده — طبق
+// docs/RESEARCH-nivo-cal-model-comparison.md: openai/gpt-5.4-mini روی دقت عدد کالری و
+// latency برای مسیر اصلی بهتر ماند (به همین دلیل عوض نشد)، اما fallback قبلی
+// (openai/gpt-5-mini) هم یک مدل OpenAI بود — یعنی در برابر مشکل/outage خود OpenAI محافظتی
+// نداشت. google/gemini-3.8-flash یک provider واقعاً متفاوت است و طبق همان تحقیق دقتش برای
+// یک مسیر fallback (فقط در خطای مدل اصلی فعال می‌شود، نه هر اسکن) به‌اندازه‌ی کافی قابل‌قبول بود.
+const NIVO_CAL_FALLBACK_MODEL = 'google/gemini-3.8-flash';
 
 const EXTRACTION_TIMEOUT_MS = 15_000;
 
