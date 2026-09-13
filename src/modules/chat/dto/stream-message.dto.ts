@@ -90,4 +90,10 @@ export class StreamMessageDto {
   @IsOptional()
   @IsIn(['1:1', '16:9', '9:16'], { message: fa.validation.required })
   imageAspectRatio?: '1:1' | '16:9' | '9:16';
+
+  // ویرایش‌وارسال‌مجدد — id یک پیام USER قبلی همین مکالمه. وقتی ست باشد، سرور قبل از تولید
+  // پاسخ تازه، آن پیام و همه‌ی پیام‌های بعدش (پاسخ‌های دستیار/پیام‌های بعدی) را حذف می‌کند
+  @IsOptional()
+  @IsString({ message: fa.validation.required })
+  editMessageId?: string;
 }

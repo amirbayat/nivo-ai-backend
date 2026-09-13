@@ -1,5 +1,5 @@
-import { Body, Controller, Param, Post, Res, UseGuards } from '@nestjs/common';
-import type { Response } from 'express';
+import { Body, Controller, Param, Post, Req, Res, UseGuards } from '@nestjs/common';
+import type { Request, Response } from 'express';
 import { JwtGuard } from '../../common/guards/jwt.guard';
 import {
   CurrentUser,
@@ -29,8 +29,9 @@ export class ChatController {
     @Param('conversationId') conversationId: string,
     @Body() dto: StreamMessageDto,
     @CurrentUser() user: JwtPayload,
+    @Req() req: Request,
     @Res() res: Response,
   ) {
-    return this.chatService.streamChat(conversationId, user.sub, dto, res);
+    return this.chatService.streamChat(conversationId, user.sub, dto, req, res);
   }
 }

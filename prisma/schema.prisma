@@ -242,6 +242,10 @@ model Message {
   // docs/PRD-chat-files-and-pdf.md بخش ۶ — [{key, filename, mime}]، فایل‌های غیرعکس پیوست‌شده
   // (PDF/DOCX/...)؛ برخلاف images این‌ها inline رندر نمی‌شوند، فقط چیپ نام/نوع فایل نمایش داده می‌شود
   attachments                 Json?
+  // docs/PRD چت — دکمه‌ی «توقف تولید پاسخ»: true یعنی این پیام دستیار قبل از پایان طبیعی
+  // استریم (کلیک کاربر روی توقف یا قطع اتصال) نیمه‌کاره ذخیره شده — هزینه‌اش هم تخمینی است
+  // (TokenEstimatorService)، نه usage واقعی provider
+  wasInterrupted              Boolean     @default(false)
   createdAt                   DateTime    @default(now())
 
   conversation Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)

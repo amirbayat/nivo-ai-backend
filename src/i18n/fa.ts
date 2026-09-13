@@ -60,6 +60,10 @@ export const fa = {
     webSearchNotSupported:
       'این مدل جستجوی وب را پشتیبانی نمی‌کند. لطفاً مدل دیگری انتخاب کنید یا جستجو را خاموش کنید.',
     promptReviewFailed: 'بررسی پرامپت الان جواب نداد، دوباره امتحان کن',
+    editMessageNotFound: 'پیام مورد نظر برای ویرایش یافت نشد',
+    editOnlyUserMessage: 'فقط پیام‌های خودتان قابل ویرایش‌اند',
+    editAttachmentNotSupported:
+      'ویرایش پیام‌های دارای عکس/فایل پیوست هنوز پشتیبانی نمی‌شود',
   },
   payment: {
     pending: 'در انتظار پرداخت',

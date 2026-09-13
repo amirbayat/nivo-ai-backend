@@ -46,7 +46,7 @@ import {
   FACE_PRESERVATION_INSTRUCTION,
 } from '../../common/services/image-generation.service';
 import { fa } from '../../i18n/fa';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { StreamMessageDto } from './dto/stream-message.dto';
 import { CreateImagePromptReviewDto } from './dto/create-image-prompt-review.dto';
 import {
@@ -395,6 +395,7 @@ export class ChatService {
     conversationId: string,
     userId: string,
     dto: StreamMessageDto,
+    req: Request,
     res: Response,
   ) {
     // ── PREFLIGHT: all limit checks BEFORE committing to SSE stream ────────
@@ -531,6 +532,39 @@ export class ChatService {
     if (estimatedInput > effectiveInputLimit) {
       this.usageAnalytics.logLimitHit(userId, 'INPUT_TOO_LONG').catch(() => {});
       throw new BadRequestException(fa.chat.inputTooLong(effectiveInputLimit));
+    }
+
+    // ── ویرایش‌وارسال‌مجدد (edit & resend) ──────────────────────────────────
+    // همین‌جا، نه زودتر: تا این‌جا هر preflight که می‌توانست throw کند (کیف‌پول/طول ورودی) رد
+    // شده، پس اگر تاریخچه را کوتاه کنیم دیگر ریسک «حذف بدون تولید جایگزین» نداریم. همین‌جا، نه
+    // دیرتر: چون شاخه‌ی handleImageGeneration چند خط پایین‌تر پیام کاربر را خودش جدا می‌سازد و از
+    // پایین این تابع رد نمی‌شود — باید قبل از آن فورک باشد تا هر دو مسیر را پوشش دهد.
+    if (dto.editMessageId) {
+      const editedMessage = await this.prisma.message.findUnique({
+        where: { id: dto.editMessageId },
+        select: {
+          id: true,
+          conversationId: true,
+          role: true,
+          createdAt: true,
+          images: true,
+          attachments: true,
+        },
+      });
+      if (!editedMessage || editedMessage.conversationId !== conversationId) {
+        throw new NotFoundException(fa.chat.editMessageNotFound);
+      }
+      if (editedMessage.role !== 'USER') {
+        throw new BadRequestException(fa.chat.editOnlyUserMessage);
+      }
+      if (editedMessage.images || editedMessage.attachments) {
+        throw new BadRequestException(fa.chat.editAttachmentNotSupported);
+      }
+      // مالکیت conversation بالای همین متد چک شده؛ خود پیام هم حذف و با یک ردیف تازه از همین
+      // درخواست جایگزین می‌شود — مرز gte هر پیام ناتمام/interrupted بعدی را هم همین‌طور پاک می‌کند
+      await this.prisma.message.deleteMany({
+        where: { conversationId, createdAt: { gte: editedMessage.createdAt } },
+      });
     }
 
     // ── budget check + usage percentage (برای مسیریابی استپی Router) ────────
@@ -859,6 +893,18 @@ export class ChatService {
     // دیگه قابل unwrap نیست
     let capturedProviderError: unknown;
 
+    // دکمه‌ی «توقف تولید پاسخ» / قطع اتصال کاربر — 'close' روی هر بسته‌شدن اتصال (موفق یا
+    // ناموفق) fire می‌شود؛ چک writableEnded این را از پایان طبیعی استریم (res.end() در finally)
+    // جدا می‌کند و فقط قطع زودهنگام واقعی را abortController را trigger می‌کند
+    const abortController = new AbortController();
+    let clientAborted = false;
+    req.on('close', () => {
+      if (!res.writableEnded) {
+        clientAborted = true;
+        abortController.abort();
+      }
+    });
+
     try {
       const topicId = await this.topicService.classify(dto.content);
 
@@ -1056,6 +1102,7 @@ export class ChatService {
         // chunkMs نه totalMs — پاسخ‌های بلند مجازند طول بکشند، فقط اگر بین دو chunk بیش از
         // این مدت سکوت شد (گیرکردن واقعی اتصال) قطع شود (docs/PERFORMANCE-AND-CONCURRENCY.md بخش ۸)
         timeout: { chunkMs: 30_000 },
+        abortSignal: abortController.signal,
         // میزان reasoning effort قابل‌تنظیم در ادمین — پیش‌فرض پلن، با امکان override به‌ازای
         // استپ بودجه‌ای (مسیریابی مدل) یا انتخاب کاربر (دراپ‌دون سریع/هوشمند، بالاتر). null یعنی
         // از پیش‌فرض provider استفاده شود (کلید ست نمی‌شود)
@@ -1105,6 +1152,94 @@ export class ChatService {
           fullContent += part.text;
           res.write(`data: ${JSON.stringify({ chunk: part.text })}\n\n`);
         }
+      }
+
+      // روی abort، خود حلقه‌ی بالا throw نمی‌کند (فقط یک part از نوع abort می‌آید و استریم
+      // می‌بندد) اما result.usage/providerMetadata پایین‌تر روی abort throw می‌کنند (یا در
+      // سناریوی چندمرحله‌ای صفر resolve می‌شوند) — پس باید قبل از رسیدن به آن‌ها این مسیر جدا شود
+      if (clientAborted) {
+        if (!fullContent.trim()) return; // چیزی برای ذخیره تولید نشده بود
+
+        const promptText =
+          (systemParts.join('\n\n') || '') +
+          '\n\n' +
+          coreMessages
+            .map((m) => (typeof m.content === 'string' ? m.content : ''))
+            .join('\n\n');
+        const estIn = await this.tokenEstimator.estimateTokens(
+          promptText,
+          modelId,
+        );
+        const estOut = await this.tokenEstimator.estimateTokens(
+          fullContent,
+          modelId,
+        );
+        const {
+          costToman: interruptedCostToman,
+          costUsdMicros: interruptedCostUsdMicros,
+          costInputUsdMicros: interruptedCostInputUsdMicros,
+          costOutputUsdMicros: interruptedCostOutputUsdMicros,
+        } = await this.pricingService.calcCost(estIn, estOut, modelId);
+
+        const interruptedMessage = await this.prisma.message.create({
+          data: {
+            conversationId,
+            userId,
+            role: 'ASSISTANT',
+            content: fullContent,
+            tokensInput: estIn,
+            tokensOutput: estOut,
+            costToman: interruptedCostToman,
+            costUsdMicros: interruptedCostUsdMicros,
+            costInputUsdMicros: interruptedCostInputUsdMicros,
+            costOutputUsdMicros: interruptedCostOutputUsdMicros,
+            model: modelId,
+            wasInterrupted: true,
+          },
+        });
+
+        await Promise.all([
+          this.tokenService.increment(userId, estIn + estOut, quota.source),
+          this.pricingService.trackCost(
+            userId,
+            interruptedCostToman,
+            interruptedCostUsdMicros,
+          ),
+          this.prisma.conversation.update({
+            where: { id: conversationId },
+            data: {
+              totalTokens: { increment: estIn + estOut },
+              lastMessageAt: new Date(),
+            },
+          }),
+        ]);
+
+        if (plan.isPayAsYouGo && !forcedNanoMode) {
+          const markup = await this.pricingTiers.getMarkup(
+            PricingGenerationType.TEXT,
+            interruptedCostToman,
+          );
+          this.pricingService
+            .debitWallet(
+              userId,
+              interruptedCostToman,
+              markup,
+              fa.payAsYouGo.messageDebitDescription,
+              { messageId: interruptedMessage.id, conversationId },
+            )
+            .catch((err) =>
+              this.logger.error(
+                `debitWallet (interrupted) failed for user=${userId}`,
+                err,
+              ),
+            );
+        }
+
+        this.logger.log(
+          `streamChat interrupted: conversation=${conversationId} contentLen=${fullContent.length}`,
+        );
+        // عنوان‌سازی/خلاصه‌سازی برای پیام ناقص skip می‌شود؛ finally{} همچنان res.end() می‌زند
+        return;
       }
 
       const usage = await result.usage;

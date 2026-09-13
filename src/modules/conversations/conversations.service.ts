@@ -98,6 +98,7 @@ export class ConversationsService {
             attachments: true,
             tokensInput: true,
             tokensOutput: true,
+            wasInterrupted: true,
             createdAt: true,
             feedback: { select: { vote: true, comment: true } },
           },
