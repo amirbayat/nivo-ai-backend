@@ -46,6 +46,7 @@ import { CaptionStudioModule } from './modules/caption-studio/caption-studio.mod
 import { VideoEditModule } from './modules/video-edit/video-edit.module';
 import { VideoEditConfigModule } from './modules/video-edit-config/video-edit-config.module';
 import { KieVideoModelsModule } from './modules/kie-video-models/kie-video-models.module';
+import { ContentAgentModule } from './modules/content-agent/content-agent.module';
 
 @Module({
   imports: [
@@ -93,6 +94,7 @@ import { KieVideoModelsModule } from './modules/kie-video-models/kie-video-model
     VideoEditModule,
     VideoEditConfigModule,
     KieVideoModelsModule,
+    ContentAgentModule,
   ],
   providers: [{ provide: APP_FILTER, useClass: AllExceptionsFilter }],
 })

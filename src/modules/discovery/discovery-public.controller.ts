@@ -11,7 +11,11 @@ import {
   Res,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import { CreativeOutputType, CreativeSegment } from '@prisma/client';
+import {
+  CreativeOutputType,
+  CreativePromptSourceType,
+  CreativeSegment,
+} from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
 import { mimeTypeForExt } from '../../common/validators/chat-image.validator';
@@ -42,6 +46,7 @@ export class DiscoveryPublicController {
     @Query('trending') trending?: string,
     @Query('categoryId') categoryId?: string,
     @Query('sort') sort?: 'newest' | 'cheapest' | 'priciest' | 'sortOrder',
+    @Query('sourceType') sourceType?: CreativePromptSourceType,
   ) {
     return this.discoveryService.listCatalog({
       outputType,
@@ -49,6 +54,7 @@ export class DiscoveryPublicController {
       trending: trending === 'true',
       categoryId,
       sort,
+      sourceType,
     });
   }
 

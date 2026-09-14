@@ -645,6 +645,7 @@ enum CreativeSegment {
 enum CreativePromptSourceType {
   CURATED
   USER_EXTRACTED
+  AGENT_DISCOVERED
 }
 
 enum CreativePromptReviewStatus {
@@ -703,6 +704,7 @@ model CreativePrompt {
   submittedByUserId String? // فقط برای sourceType=USER_EXTRACTED
   reviewStatus      CreativePromptReviewStatus? // null برای ردیف‌های CURATED
   sourceImageKey    String? // کلید MinIO عکس اصلی کاربر — حتی بعد از تعویض exampleImageUrl توسط ادمین نگه داشته می‌شود
+  agentSourceUrl    String? // فقط برای sourceType=AGENT_DISCOVERED — docs/PRD-daily-content-prompt-agent.md
 
   category         CreativeCategory?       @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   submittedBy      User?                   @relation("CreativePromptSubmittedBy", fields: [submittedByUserId], references: [id], onDelete: SetNull)
@@ -1485,11 +1487,26 @@ model Article {
   publishedAt      DateTime?
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
+  isAgentGenerated Boolean       @default(false) // docs/PRD-daily-content-prompt-agent.md
+  agentSourceUrls  Json? // [{url, name}] — فقط وقتی isAgentGenerated=true
 
   category ArticleCategory? @relation(fields: [categoryId], references: [id])
 
   @@index([status, publishedAt])
   @@map("articles")
+}
+
+// docs/PRD-daily-content-prompt-agent.md بخش ۴ — کلید محلی که از سیستم کاربر (Claude Code)
+// محتوای تاییدشده را به این بک‌اند می‌فرستد؛ چند کلید مجاز (نه singleton)
+model ContentAgentApiKey {
+  id         String    @id @default(uuid())
+  label      String
+  keyHash    String    @unique
+  isActive   Boolean   @default(true)
+  lastUsedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@map("content_agent_api_keys")
 }
 
 // docs/PRD-admin-notifications-and-mobile.md — نوتیف داخلی ادمین (پرداخت/تیکت/مشکل سیستمی/نرخ خطای Liara)

@@ -51,7 +51,11 @@ const EXTRACTION_WORST_CASE_OUTPUT_TOKENS = 500;
 const OPTIMAL_MODE = 'optimal';
 const COST_OPTIMIZED_MODE = 'cost_optimized';
 const BEST_ANSWER_MODE = 'best_answer';
-const AUTO_MODE_SENTINELS = [OPTIMAL_MODE, COST_OPTIMIZED_MODE, BEST_ANSWER_MODE];
+const AUTO_MODE_SENTINELS = [
+  OPTIMAL_MODE,
+  COST_OPTIMIZED_MODE,
+  BEST_ANSWER_MODE,
+];
 
 // تصمیم محصول (۱۴۰۵/۰۶) — فعلاً تولید عکس استودیو فقط با همین مدل انجام می‌شود؛ سبک‌های
 // تازه‌استخراج‌شده preferredModel‌شان صراحتاً همین است تا صرف‌نظر از استخر AiModel نوع
@@ -85,7 +89,29 @@ const CATALOG_ITEM_SELECT = {
   tags: true,
   sortOrder: true,
   sourceImageKey: true,
+  sourceType: true,
+  userPromptTemplate: true,
 } as const;
+
+// سبک‌های CURATED عمداً template را به فرانت لو نمی‌دهند (proprietary). پرامپت‌های
+// AGENT_DISCOVERED برعکس — محتوای از‌پیش‌عمومی وب هستند و طبق
+// docs/PRD-daily-content-prompt-agent.md بخش ۷.۳ باید متن کامل + دکمه‌ی کپی داشته باشند.
+function formatCatalogItem(
+  prompt: {
+    sourceImageKey: string | null;
+    sourceType: CreativePromptSourceType;
+    userPromptTemplate: string;
+  } & Record<string, unknown>,
+  sourceImageAccuracyCreditCost: number,
+) {
+  const { sourceImageKey, sourceType, userPromptTemplate, ...rest } = prompt;
+  return {
+    ...rest,
+    hasSourceImage: !!sourceImageKey,
+    sourceImageAccuracyCreditCost,
+    ...(sourceType === 'AGENT_DISCOVERED' ? { userPromptTemplate } : {}),
+  };
+}
 
 // موتور تولید دیسکاوری — بخش ۵.۴ سند فنی. هم عکس هم متن از یک مسیر مشترک رد می‌شوند:
 // انتخاب سبک → مونتاژ context (ChatConfig سراسری → Project اختیاری → CreativePrompt) →
@@ -113,6 +139,9 @@ export class DiscoveryGenerationService {
     trending?: boolean;
     categoryId?: string;
     sort?: 'newest' | 'cheapest' | 'priciest' | 'sortOrder';
+    // docs/PRD-daily-content-prompt-agent.md بخش ۷ — صفحه‌ی /prompts فقط پرامپت‌های
+    // کشف‌شده‌ی ایجنت را می‌خواهد، نه کل کاتالوگ CURATED ادمین
+    sourceType?: CreativePromptSourceType;
   }) {
     const orderBy =
       params.sort === 'newest'
@@ -132,16 +161,15 @@ export class DiscoveryGenerationService {
           ...(params.segment ? { segment: params.segment } : {}),
           ...(params.trending ? { isTrending: true } : {}),
           ...(params.categoryId ? { categoryId: params.categoryId } : {}),
+          ...(params.sourceType ? { sourceType: params.sourceType } : {}),
         },
         orderBy,
         select: CATALOG_ITEM_SELECT,
       }),
     ]);
-    return prompts.map(({ sourceImageKey, ...p }) => ({
-      ...p,
-      hasSourceImage: !!sourceImageKey,
-      sourceImageAccuracyCreditCost: creditConfig.sourceImageAccuracyCreditCost,
-    }));
+    return prompts.map((p) =>
+      formatCatalogItem(p, creditConfig.sourceImageAccuracyCreditCost),
+    );
   }
 
   // یک آیتم کاتالوگ با id — برای دیپ‌لینک عمومی (مثلاً nivoai.ir/studio?id=...) که کاربر را
@@ -156,12 +184,10 @@ export class DiscoveryGenerationService {
       }),
     ]);
     if (!prompt) throw new NotFoundException(fa.discovery.promptNotFound);
-    const { sourceImageKey, ...p } = prompt;
-    return {
-      ...p,
-      hasSourceImage: !!sourceImageKey,
-      sourceImageAccuracyCreditCost: creditConfig.sourceImageAccuracyCreditCost,
-    };
+    return formatCatalogItem(
+      prompt,
+      creditConfig.sourceImageAccuracyCreditCost,
+    );
   }
 
   // درخت دسته‌بندی فعال — برای سایدبار استودیوی محتوا در فرانت
@@ -498,11 +524,7 @@ export class DiscoveryGenerationService {
       const m = await this.prisma.aiModel.findUnique({
         where: { name: preferredModel },
       });
-      if (
-        m &&
-        m.isActive &&
-        m.platform.includes(this.aiProvider.platform)
-      )
+      if (m && m.isActive && m.platform.includes(this.aiProvider.platform))
         return m;
     }
 
@@ -1093,6 +1115,9 @@ export class DiscoveryGenerationService {
       take: 20,
       select: { userInput: true, createdAt: true },
     });
-    return rows.map((r) => ({ text: r.userInput as string, createdAt: r.createdAt }));
+    return rows.map((r) => ({
+      text: r.userInput as string,
+      createdAt: r.createdAt,
+    }));
   }
 }
