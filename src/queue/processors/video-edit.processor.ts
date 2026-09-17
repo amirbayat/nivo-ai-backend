@@ -35,6 +35,10 @@ import {
 
 const POLL_INTERVAL_MS = 10_000;
 const MAX_POLL_ATTEMPTS = 180; // ۳۰ دقیقه سقف — همون منطق studio-video-generation.processor.ts
+// اگر بعد از ۳۰ دقیقه هنوز نتیجه نیومد، قبل از fail کردن job چند دقیقه‌ی دیگه هم چک کن —
+// صف Kie/OpenRouter گاهی همون حوالی شلوغه و ویدیو واقعاً ساخته شده ولی poll اول جا زده
+const EXTRA_GRACE_POLL_ATTEMPTS = 8;
+const EXTRA_GRACE_POLL_INTERVAL_MS = 60_000; // ۸ دقیقه‌ی اضافه (جمعاً ۳۸ دقیقه، هم‌راستا با lockDuration)
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -467,14 +471,14 @@ export class VideoEditProcessor {
       let resultUrl: string | undefined;
       let creditsConsumed: number | undefined; // فقط Kie
       let realCostUsd: number | undefined; // فقط OpenRouter — دلار مستقیم، نه credit
-      for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
-        await sleep(POLL_INTERVAL_MS);
+      const activeTaskId = taskId;
+      const pollOnce = async (): Promise<boolean> => {
         if (externalProvider) {
-          const status = await externalProvider.poll(taskId);
+          const status = await externalProvider.poll(activeTaskId);
           await this.updateKieState(jobId, status.state);
           if (status.state === 'success') {
             resultUrl = status.resultUrls[0];
-            break;
+            return true;
           }
           if (status.state === 'fail') {
             throw new Error(
@@ -482,12 +486,12 @@ export class VideoEditProcessor {
             );
           }
         } else if (isOpenRouter) {
-          const status = await this.openRouterProvider.pollVideoJob(taskId);
+          const status = await this.openRouterProvider.pollVideoJob(activeTaskId);
           await this.updateKieState(jobId, normalizeOpenRouterState(status.status));
           if (status.status === 'completed') {
             resultUrl = status.resultUrl;
             realCostUsd = status.realCostUsd;
-            break;
+            return true;
           }
           if (
             status.status === 'failed' ||
@@ -506,16 +510,30 @@ export class VideoEditProcessor {
             );
           }
         } else {
-          const status = await this.kieProvider.pollTask(taskId);
+          const status = await this.kieProvider.pollTask(activeTaskId);
           await this.updateKieState(jobId, status.state);
           if (status.state === 'success') {
             resultUrl = status.resultUrls[0];
             creditsConsumed = status.creditsConsumed;
-            break;
+            return true;
           }
           if (status.state === 'fail') {
             throw new Error(status.failMsg ?? 'Kie job failed on provider side');
           }
+        }
+        return false;
+      };
+
+      for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
+        await sleep(POLL_INTERVAL_MS);
+        if (await pollOnce()) break;
+      }
+      // سقف اصلی رد شد ولی هنوز نتیجه نیومد — قبل از fail، چند بار دیگه با فاصله‌ی
+      // بیشتر چک کن که آیا ویدیو دیرتر روی Kie/OpenRouter آماده شده یا نه
+      if (!resultUrl) {
+        for (let attempt = 0; attempt < EXTRA_GRACE_POLL_ATTEMPTS; attempt++) {
+          await sleep(EXTRA_GRACE_POLL_INTERVAL_MS);
+          if (await pollOnce()) break;
         }
       }
       if (!resultUrl) throw new Error('video-edit job polling timed out');

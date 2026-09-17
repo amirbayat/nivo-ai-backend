@@ -128,6 +128,18 @@ export function validateInputValues(
     if (!isPresent(raw)) continue;
 
     switch (field.type) {
+      case 'text': {
+        const s = raw as string;
+        if (typeof s !== 'string') {
+          throw new BadRequestException(`فیلد «${field.label}» باید متن باشد`);
+        }
+        if (field.maxLength != null && s.length > field.maxLength) {
+          throw new BadRequestException(
+            `فیلد «${field.label}» حداکثر ${field.maxLength} کاراکتر می‌پذیرد`,
+          );
+        }
+        break;
+      }
       case 'number': {
         const n = raw as number;
         if (typeof n !== 'number' || Number.isNaN(n)) {
@@ -236,6 +248,14 @@ export function validateInputValues(
         for (const shot of arr) {
           if (!shot.prompt) {
             throw new BadRequestException('پرامپت همه‌ی شات‌ها اجباری است');
+          }
+          if (
+            field.shotPromptField.maxLength != null &&
+            shot.prompt.length > field.shotPromptField.maxLength
+          ) {
+            throw new BadRequestException(
+              `پرامپت هر شات حداکثر ${field.shotPromptField.maxLength} کاراکتر می‌پذیرد`,
+            );
           }
         }
         break;

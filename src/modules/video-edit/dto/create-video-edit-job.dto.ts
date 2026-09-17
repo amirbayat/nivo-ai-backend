@@ -29,9 +29,14 @@ export class CreateVideoEditJobDto {
   @IsString()
   kieVideoModelId: string;
 
+  // این فقط یک سقف عمومی محافظه‌کارانه است (نه سقف واقعی هیچ مدل خاصی) — مطابق مستندات
+  // واقعی docs.kie.ai حد پرامپت به‌ازای مدل فرق می‌کند (مثلاً Hailuo ~۱۵۰۰، Runway ۱۸۰۰،
+  // Kling ۲۵۰۰، Wan2.6 ۵۰۰۰، Wan3.0 تا ۲۰۰۰۰ کاراکتر)؛ عدد ۲۰۰۰۰ اینجا فقط جلوی payload
+  // نامعقول بزرگ را می‌گیرد. سقف واقعی/دقیق هر مدل از KieVideoModel.inputFields[].maxLength
+  // خوانده و در validateInputValues (generic-payload-builder.ts) چک می‌شود.
   @IsString()
   @MinLength(1, { message: fa.validation.required })
-  @MaxLength(2000, { message: fa.validation.stringTooLong })
+  @MaxLength(20_000, { message: fa.validation.stringTooLong })
   prompt: string;
 
   // فقط GENERATE — کلیدهای MinIO از POST /video-edit/upload-image
