@@ -625,8 +625,12 @@ export class ChatService {
     // SIMPLE/MEDIUM/COMPLEX بی‌معنی است)، نه vision-preflight، نه سهمیه‌ی توکنی خروجی. مدل یا
     // صراحتاً انتخاب شده (toggle فرانت) یا از روی نیت پیام (LLM classifier) تشخیص داده می‌شود.
     const explicitImageToggle = dto.generateImage === true;
+    // dto.generateImage === false یعنی این پیام قبلاً یک‌بار implicit کلاسیفای شده و کاربر
+    // در مدال انتخاب مدل («این عکس نبود») آن را رد کرده — دیگر دوباره از AI نپرس (هزینه/تأخیر
+    // تکراری برای چیزی که همین الان جوابش را گرفته‌ایم)
+    const declinedImageGen = dto.generateImage === false;
     let imageIntent: { wantsImage: boolean; isEdit: boolean } | null = null;
-    if (!explicitImageToggle && chatConfig.implicitImageGenEnabled) {
+    if (!explicitImageToggle && !declinedImageGen && chatConfig.implicitImageGenEnabled) {
       const hasAttachedImage = Boolean(dto.images?.length);
       const hasRecentConversationImage =
         !hasAttachedImage &&
@@ -645,6 +649,24 @@ export class ChatService {
       );
     }
     if (explicitImageToggle || imageIntent?.wantsImage) {
+      // AI (implicit) تشخیص داده کاربر عکس می‌خواهد ولی هنوز مدل تولید عکس پیش‌فرضی pin
+      // نکرده (dto.imageModel خالی) — به‌جای انتخاب خودکار بی‌صدای مدل، از فرانت می‌خواهیم
+      // اول از کاربر بپرسد کدام مدل، و بعد با generateImage:true + imageModel صریح دوباره
+      // بفرستد. هیچ پیامی هنوز ذخیره نشده (handleImageGeneration خودش پایین‌تر ذخیره می‌کند)،
+      // پس این مسیر کاملاً بی‌اثر/idempotent است. وقتی مدل از قبل pin شده یا این خودِ همان
+      // درخواست دوم (explicitImageToggle) است، رفتار مثل قبل بی‌صدا می‌ماند.
+      if (!explicitImageToggle && !dto.imageModel) {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        res.setHeader('X-Accel-Buffering', 'no');
+        res.flushHeaders();
+        res.write(
+          `data: ${JSON.stringify({ info: 'image-model-choice-needed', isEdit: imageIntent?.isEdit ?? false })}\n\n`,
+        );
+        res.end();
+        return;
+      }
       return this.handleImageGeneration(
         res,
         conversationId,
@@ -1508,7 +1530,10 @@ export class ChatService {
 wantsImage: آیا این پیام واقعاً درخواست تولید یا ویرایش عکس است؟
 isEdit: اگر wantsImage=true، آیا منظورش ویرایش/ادامه‌ی یک عکس موجود است (نه ساختن یک عکس کاملاً تازه از صفر)؟
 فقط JSON برگردان.`,
-        messages: [{ role: 'user', content: content.slice(0, 500) }],
+        // ۵۰۰ کاراکتر قبلی باعث می‌شد درخواست عکس در انتهای پیام‌های بلندتر اصلاً به مدل
+        // نرسد (false negative) — ۲۰۰۰ کاراکتر همان سقفی است که chat.controller در جاهای
+        // دیگر هم برای این مدل سبک به کار می‌برد
+        messages: [{ role: 'user', content: content.slice(0, 2_000) }],
         abortSignal: AbortSignal.timeout(6_000),
       });
       if (usage) {
@@ -1686,6 +1711,11 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
     // imageModel (فیلد جدا برای مدل عکس) در اولویت است — dto.model مدل متنی بالای چت است
     // (مثلاً cost_optimized) و هیچ‌وقت supportsImageGen ندارد؛ fallback به dto.model فقط برای
     // سازگاری با کلاینت‌های قدیمی/toggle صریحی که هنوز فقط model می‌فرستند
+    // نکته: فرانت وقتی کاربر یک‌بار مدال انتخاب مدل را با «خودکار» جواب داده (نه هیچ‌وقت نپرسیده)،
+    // به‌جای خالی گذاشتن imageModel، صراحتاً 'auto' می‌فرستد (تا streamChat دیگر implicit دوباره
+    // نپرسد — بخش بالاتر: `!explicitImageToggle && !dto.imageModel`). این رشته عمداً به هیچ
+    // AiModel واقعی نمی‌خورد، پس explicitModelRecord پایین‌تر همیشه null می‌ماند و همان مسیر
+    // رتبه‌بندی خودکار زیر اجرا می‌شود — نیازی به سنتینل جداگانه در AUTO_MODE_SENTINELS نیست
     const requestedModelRaw = dto.imageModel ?? dto.model;
     const requestedModel =
       requestedModelRaw && !AUTO_MODE_SENTINELS.includes(requestedModelRaw)
