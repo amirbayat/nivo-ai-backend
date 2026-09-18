@@ -92,10 +92,20 @@ const AUTO_MODE_SENTINELS = [
 // yet — o200k_base is the shared encoding for the whole gpt-4o/gpt-5 family
 // and a close-enough reference for this pre-routing safety check; real
 // billing always uses the SDK's actual usage.inputTokens/outputTokens for
-// the model that ends up running. همچنین همان مدلی که برای دو تماس classify
-// سبک (classifyImageIntent/classifyImagePrompt) استفاده می‌شود — gpt-5.4-nano
-// (به‌جای gpt-4o-mini قدیمی) چون در roster فعلی پلن‌ها (models.seed.ts) است.
+// the model that ends up running. همچنین همین ثابت وقتی موجودی PAYG صفر/منفی
+// است مدل واقعی پاسخ را بی‌صدا قفل می‌کند (forcedNanoMode پایین‌تر) — یعنی عمداً
+// همیشه ارزان‌ترین مدل (nano) باید بماند، حتی اگر مدل‌های classify زیر جدا شوند.
 const PRE_ROUTING_REFERENCE_MODEL = 'openai/gpt-5.4-nano';
+
+// ۱۴۰۵/۰۶/۲۷ — قبلاً همین دو تماس classify سبک (classifyImageIntent/classifyImagePrompt) هم
+// از PRE_ROUTING_REFERENCE_MODEL (nano) استفاده می‌کردند؛ بدون supportsStructuredOutputs (که
+// nivo-cal.service.ts برای مدل‌های واقعی OpenAI ست می‌کند)، @ai-sdk/openai-compatible روی nano
+// یک warning می‌دهد («responseFormat is not supported») و به یک fallback نه‌چندان قابل‌اعتماد
+// برمی‌گردد — در پروداکشن باعث شد یک پیام واضح («عکس کتاب می‌خوام») اصلاً به‌عنوان درخواست عکس
+// تشخیص داده نشود. اینجا یک ثابت مستقل از PRE_ROUTING_REFERENCE_MODEL (نه همان ثابت، چون آن یکی
+// برای forcedNanoMode بالا باید nano بماند) + supportsStructuredOutputs:true — دقیقاً همان الگوی
+// nivo-cal.service.ts، تا واقعاً روی response_format نوع json_schema سخت‌گیرانه تکیه کند.
+const IMAGE_INTENT_CLASSIFIER_MODEL = 'openai/gpt-5.4-mini';
 
 // تیتر مکالمه یک تولید کوتاه و کم‌ریسک است — همیشه با ارزان‌ترین مدل ساخته می‌شود، صرف‌نظر از
 // این‌که Router برای پاسخ اصلی همین پیام چه مدلی انتخاب کرده
@@ -1513,7 +1523,9 @@ export class ChatService {
     });
     try {
       const { object, usage } = await generateObject({
-        model: this.buildProvider(apiKey)(PRE_ROUTING_REFERENCE_MODEL),
+        model: this.aiProvider.buildClient(apiKey, {
+          supportsStructuredOutputs: true,
+        })(IMAGE_INTENT_CLASSIFIER_MODEL),
         schema: z.object({
           wantsImage: z.boolean(),
           isEdit: z.boolean(),
@@ -1540,7 +1552,7 @@ isEdit: اگر wantsImage=true، آیا منظورش ویرایش/ادامه‌�
         const { costToman, costUsdMicros } = await this.pricingService.calcCost(
           usage.inputTokens ?? 0,
           usage.outputTokens ?? 0,
-          PRE_ROUTING_REFERENCE_MODEL,
+          IMAGE_INTENT_CLASSIFIER_MODEL,
         );
         this.pricingService
           .trackCost(userId, costToman, costUsdMicros)
@@ -1570,7 +1582,9 @@ isEdit: اگر wantsImage=true، آیا منظورش ویرایش/ادامه‌�
     const fallback = { tier: ModelTier.MEDIUM, size: '1024x1024' as const };
     try {
       const { object, usage } = await generateObject({
-        model: this.buildProvider(apiKey)(PRE_ROUTING_REFERENCE_MODEL),
+        model: this.aiProvider.buildClient(apiKey, {
+          supportsStructuredOutputs: true,
+        })(IMAGE_INTENT_CLASSIFIER_MODEL),
         schema: z.object({
           tier: z.enum(['SIMPLE', 'MEDIUM', 'COMPLEX']),
           size: z.enum(['1024x1024', '1024x1536', '1536x1024']),
@@ -1591,7 +1605,7 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
         const { costToman, costUsdMicros } = await this.pricingService.calcCost(
           usage.inputTokens ?? 0,
           usage.outputTokens ?? 0,
-          PRE_ROUTING_REFERENCE_MODEL,
+          IMAGE_INTENT_CLASSIFIER_MODEL,
         );
         this.pricingService
           .trackCost(userId, costToman, costUsdMicros)
