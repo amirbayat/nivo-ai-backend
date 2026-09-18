@@ -61,11 +61,12 @@ import { RunwayProviderModule } from '../common/services/runway-provider.module'
     // safety-net حذف خودکار سورس بعد از ۷ روز بی‌فعالیتی — caption-source-cleanup.processor.ts
     BullModule.registerQueue({ name: 'caption-source-cleanup' }),
     // docs/PRD-video-edit-omni-kie.md §۵.۲ — تولیدکننده در video-edit.module.ts؛ همون
-    // lockDuration بزرگ ویدیوی موجود (job تا ۳۰ دقیقه poll + تا ۸ دقیقه grace بعد از تایم‌اوت
-    // اول می‌کند — رجوع کن به EXTRA_GRACE_POLL_ATTEMPTS در video-edit.processor.ts)
+    // lockDuration بزرگ ویدیوی موجود (job تا ۳۰ دقیقه poll + grace بعد از تایم‌اوت اول —
+    // ۸ دقیقه برای بقیه‌ی providerها، ~۸۰ دقیقه برای Veo که کندتر است — رجوع کن به
+    // EXTRA_GRACE_POLL_ATTEMPTS/EXTRA_GRACE_POLL_ATTEMPTS_VEO در video-edit.processor.ts)
     BullModule.registerQueue({
       name: 'video-edit',
-      settings: { lockDuration: 45 * 60 * 1000 },
+      settings: { lockDuration: 120 * 60 * 1000 },
     }),
     // docs/PRD-image-gen-usd-estimate.md — daily job stores provider USD per image model
     BullModule.registerQueue({ name: 'image-model-cost-estimate' }),

@@ -14,6 +14,7 @@ export interface VideoProviderClient {
   submit(
     modelSlug: string,
     input: Record<string, unknown>,
+    callbackUrl?: string,
   ): Promise<{ taskId: string }>;
   poll(taskId: string): Promise<{
     state: VideoProviderState;

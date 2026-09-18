@@ -39,6 +39,7 @@ function makeProcessor(): VideoEditProcessor {
     {} as any,
     {} as any,
     mediaTranscode as any,
+    {} as any,
   );
 }
 

@@ -76,6 +76,7 @@ export class VeoProviderService implements VideoProviderClient {
   async submit(
     modelSlug: string,
     input: Record<string, unknown>,
+    callbackUrl?: string,
   ): Promise<{ taskId: string }> {
     const { res, json, text } = await this.request<{
       code: number;
@@ -90,7 +91,11 @@ export class VeoProviderService implements VideoProviderClient {
           'Content-Type': 'application/json',
           ...this.relayHeaders,
         },
-        body: JSON.stringify({ ...input, model: modelSlug }),
+        body: JSON.stringify({
+          ...input,
+          model: modelSlug,
+          ...(callbackUrl ? { callBackUrl: callbackUrl } : {}),
+        }),
         signal: AbortSignal.timeout(60_000),
       },
       'Veo generate',

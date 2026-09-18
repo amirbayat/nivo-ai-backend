@@ -78,6 +78,7 @@ export class RunwayProviderService implements VideoProviderClient {
   async submit(
     _modelSlug: string,
     input: Record<string, unknown>,
+    callbackUrl?: string,
   ): Promise<{ taskId: string }> {
     const { res, json, text } = await this.request<{
       code: number;
@@ -92,7 +93,10 @@ export class RunwayProviderService implements VideoProviderClient {
           'Content-Type': 'application/json',
           ...this.relayHeaders,
         },
-        body: JSON.stringify(input),
+        body: JSON.stringify({
+          ...input,
+          ...(callbackUrl ? { callBackUrl: callbackUrl } : {}),
+        }),
         signal: AbortSignal.timeout(60_000),
       },
       'Runway generate',

@@ -1,5 +1,6 @@
 import { Process, Processor } from '@nestjs/bull';
 import { Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import type { Job } from 'bull';
 import {
   KieInputSchema,
@@ -28,10 +29,11 @@ import { fa } from '../../i18n/fa';
 import { parseInputFields } from '../../modules/kie-video-models/input-fields.schema';
 import {
   buildGenericKiePayload,
-  resolveEffectiveDurationSec,
+  resolveExternalProviderCostUsd,
   type FieldValues,
   type MediaUploader,
 } from '../../modules/kie-video-models/generic-payload-builder';
+import { buildKieWebhookCallbackUrl } from '../../modules/video-edit/kie-webhook.constants';
 
 const POLL_INTERVAL_MS = 10_000;
 const MAX_POLL_ATTEMPTS = 180; // ۳۰ دقیقه سقف — همون منطق studio-video-generation.processor.ts
@@ -39,6 +41,12 @@ const MAX_POLL_ATTEMPTS = 180; // ۳۰ دقیقه سقف — همون منطق s
 // صف Kie/OpenRouter گاهی همون حوالی شلوغه و ویدیو واقعاً ساخته شده ولی poll اول جا زده
 const EXTRA_GRACE_POLL_ATTEMPTS = 8;
 const EXTRA_GRACE_POLL_INTERVAL_MS = 60_000; // ۸ دقیقه‌ی اضافه (جمعاً ۳۸ دقیقه، هم‌راستا با lockDuration)
+// Veo (روی Kie) قابل‌اتکا کندتر از بقیه‌ی providerهاست — زیر بار صف گاهی از ۳۸ دقیقه‌ی
+// بالا هم رد می‌شود (مشاهده‌شده ۱۴۰۵/۰۶/۲۷: job با «polling timed out» fail شد ولی چند
+// دقیقه بعد Kie واقعاً موفق شده بود). به‌جای بمباران Kie با پول هر ۱۰ ثانیه در این پنجره‌ی
+// طولانی، grace-phase مخصوص Veo با همون فاصله‌ی ۶۰ثانیه‌ای ولی خیلی بیشتر ادامه پیدا می‌کند —
+// جمعاً ~۱۱۰ دقیقه (۳۰ اصلی + ۸۰ grace)، هم‌راستا با lockDuration جدید صف video-edit.
+const EXTRA_GRACE_POLL_ATTEMPTS_VEO = 80;
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -114,7 +122,16 @@ export class VideoEditProcessor {
     private readonly runwayProvider: RunwayProviderService,
     private readonly pushFcm: PushFcmService,
     private readonly mediaTranscode: MediaTranscodeService,
+    private readonly config: ConfigService,
   ) {}
+
+  // اگر API_URL ست نشده (مثلاً محیط لوکال بدون دامنه‌ی عمومی)، callBackUrl اصلاً فرستاده
+  // نمی‌شود — polling (که همیشه فعال است) تنها مسیر می‌ماند، این webhook صرفاً یک fast-path/
+  // safety-net اضافه است، نه جایگزین کامل polling
+  private kieWebhookCallbackUrl(): string | undefined {
+    const apiUrl = this.config.get<string>('API_URL');
+    return apiUrl ? buildKieWebhookCallbackUrl(apiUrl) : undefined;
+  }
 
   // پراگرس واقعی — نوشتن state بعد از هر poll (نه فقط شروع/پایان)، طوری که Gallery بتونه
   // stepper وضعیت‌محور واقعی نشون بده. خطای نوشتن (مثلاً DB لحظه‌ای در دسترس نبود) نباید کل
@@ -422,6 +439,7 @@ export class VideoEditProcessor {
           const submitted = await externalProvider.submit(
             videoJob.kieVideoModel.slug,
             input,
+            this.kieWebhookCallbackUrl(),
           );
           taskId = submitted.taskId;
         } else if (isOpenRouter) {
@@ -529,9 +547,14 @@ export class VideoEditProcessor {
         if (await pollOnce()) break;
       }
       // سقف اصلی رد شد ولی هنوز نتیجه نیومد — قبل از fail، چند بار دیگه با فاصله‌ی
-      // بیشتر چک کن که آیا ویدیو دیرتر روی Kie/OpenRouter آماده شده یا نه
+      // بیشتر چک کن که آیا ویدیو دیرتر روی Kie/OpenRouter آماده شده یا نه. Veo این پنجره‌ی
+      // grace را خیلی بیشتر لازم دارد (رجوع کن به کامنت EXTRA_GRACE_POLL_ATTEMPTS_VEO بالا)
       if (!resultUrl) {
-        for (let attempt = 0; attempt < EXTRA_GRACE_POLL_ATTEMPTS; attempt++) {
+        const graceAttempts =
+          videoJob.kieVideoModel.provider === 'VEO'
+            ? EXTRA_GRACE_POLL_ATTEMPTS_VEO
+            : EXTRA_GRACE_POLL_ATTEMPTS;
+        for (let attempt = 0; attempt < graceAttempts; attempt++) {
           await sleep(EXTRA_GRACE_POLL_INTERVAL_MS);
           if (await pollOnce()) break;
         }
@@ -557,11 +580,7 @@ export class VideoEditProcessor {
       // مبتنی بر pricePerSecondUsdConfirmed×مدت واقعی استفاده می‌شود، نه یک رقم فرضی خام.
       const KIE_USD_PER_CREDIT = 0.005;
       const costUsd = externalProvider
-        ? (videoJob.kieVideoModel.pricePerSecondUsdConfirmed ?? 0.1) *
-          resolveEffectiveDurationSec(
-            parseInputFields(videoJob.kieVideoModel.inputFields),
-            (videoJob.valuesJson as FieldValues | null) ?? {},
-          )
+        ? resolveExternalProviderCostUsd(videoJob.kieVideoModel, videoJob.valuesJson)
         : isOpenRouter
           ? (realCostUsd ?? 0)
           : (creditsConsumed ?? 0) * KIE_USD_PER_CREDIT;

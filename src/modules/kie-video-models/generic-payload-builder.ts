@@ -1,5 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
+import type { KieVideoModel } from '@prisma/client';
 import type { FieldCondition, InputFieldsSchema, KieField } from './input-fields.schema';
+import { parseInputFields } from './input-fields.schema';
 
 // لایه‌ی عمومی معماری data-driven — طرف‌مقابل input-fields.schema.ts (که فقط شکل توصیفی
 // مدل را تعریف می‌کند). این فایل سه چیز را عمومی (نه هاردکد به‌ازای هر مدل) پیاده می‌کند:
@@ -297,6 +299,23 @@ export function resolveEffectiveDurationSec(
   }
   const raw = values[durationField.key];
   return typeof raw === 'number' ? raw : durationField.default;
+}
+
+// Veo/Runway هنوز فیلد هزینه‌ی خام تایید‌شده‌ای در پاسخ (poll یا callback) ندارند — تخمین
+// محافظه‌کارانه‌ی pricePerSecondUsdConfirmed×مدت واقعی، دقیقاً همون فرمول قبلاً inline در
+// video-edit.processor.ts. اینجا استخراج شده تا مسیر webhook recovery هم بدون کپی همین
+// فرمول به همون نتیجه برسد (drift بین دو مسیر یعنی مبلغ کسرشده از کیف‌پول جای دیگری فرق کند).
+export function resolveExternalProviderCostUsd(
+  model: Pick<KieVideoModel, 'inputFields' | 'pricePerSecondUsdConfirmed'>,
+  valuesJson: unknown,
+): number {
+  return (
+    (model.pricePerSecondUsdConfirmed ?? 0.1) *
+    resolveEffectiveDurationSec(
+      parseInputFields(model.inputFields),
+      (valuesJson as FieldValues | null) ?? {},
+    )
+  );
 }
 
 // ============================== Payload build ==============================
