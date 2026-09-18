@@ -5,7 +5,6 @@ import {
   IsOptional,
   IsString,
   MaxLength,
-  MinLength,
 } from 'class-validator';
 import { VideoEditMode } from '@prisma/client';
 import { fa } from '../../../i18n/fa';
@@ -34,8 +33,10 @@ export class CreateVideoEditJobDto {
   // Kling ۲۵۰۰، Wan2.6 ۵۰۰۰، Wan3.0 تا ۲۰۰۰۰ کاراکتر)؛ عدد ۲۰۰۰۰ اینجا فقط جلوی payload
   // نامعقول بزرگ را می‌گیرد. سقف واقعی/دقیق هر مدل از KieVideoModel.inputFields[].maxLength
   // خوانده و در validateInputValues (generic-payload-builder.ts) چک می‌شود.
+  // عمداً MinLength ندارد — الزامی/اختیاری بودن واقعی پرامپت به‌ازای هر مدل فرق می‌کند (مثلاً
+  // Kling Motion Control پرامپت را اختیاری می‌داند) و همان‌جا با inputFields[].required چک
+  // می‌شود؛ یک قید ثابت اینجا آن منطق per-model را دور می‌زد.
   @IsString()
-  @MinLength(1, { message: fa.validation.required })
   @MaxLength(20_000, { message: fa.validation.stringTooLong })
   prompt: string;
 
