@@ -56,7 +56,9 @@ export class VeoProviderService implements VideoProviderClient {
     try {
       res = await fetch(url, init);
     } catch (err) {
-      throw new VeoApiError(`${label} network error: ${(err as Error).message}`);
+      throw new VeoApiError(
+        `${label} network error: ${(err as Error).message}`,
+      );
     }
     const text = await res.text();
     let json: T;
@@ -119,12 +121,16 @@ export class VeoProviderService implements VideoProviderClient {
       data?: {
         successFlag?: number;
         errorMessage?: string | null;
-        response?: { fullResultUrls?: string[] };
+        response?: { fullResultUrls?: string[]; resultUrls?: string[] };
+        info?: { resultUrls?: string[]; result_urls?: string[] };
       };
     }>(
       `${this.baseURL}/api/v1/veo/record-info?taskId=${encodeURIComponent(taskId)}`,
       {
-        headers: { Authorization: `Bearer ${this.apiKey}`, ...this.relayHeaders },
+        headers: {
+          Authorization: `Bearer ${this.apiKey}`,
+          ...this.relayHeaders,
+        },
         signal: AbortSignal.timeout(30_000),
       },
       'Veo record-info',
@@ -136,9 +142,25 @@ export class VeoProviderService implements VideoProviderClient {
     }
     const flag = json.data.successFlag ?? 0;
     const state = flag === 1 ? 'success' : flag === 0 ? 'generating' : 'fail';
+    // باگ تایید‌شده ۱۴۰۵/۰۶/۲۸: کد قبلی فقط data.response.fullResultUrls را می‌خواند، ولی پاسخ
+    // واقعی record-info (دقیقاً مثل بدنه‌ی webhook) نتیجه را زیر data.info.resultUrls می‌گذارد —
+    // یعنی successFlag=1 می‌شد ولی resultUrls همیشه خالی برمی‌گشت و job با «polling timed out»
+    // fail می‌شد با اینکه Kie همون لحظه موفق شده بود. هر دو شکل را چک می‌کنیم که اگر Kie دوباره
+    // فرمت را عوض کرد، این باگ ساکت تکرار نشود.
+    const resultUrls =
+      json.data.info?.resultUrls ??
+      json.data.info?.result_urls ??
+      json.data.response?.fullResultUrls ??
+      json.data.response?.resultUrls ??
+      [];
+    if (state === 'success' && resultUrls.length === 0) {
+      this.logger.error(
+        `Veo record-info: successFlag=1 ولی هیچ resultUrl‌ای در هیچ‌کدام از فیلدهای شناخته‌شده پیدا نشد — raw=${text.slice(0, 1000)}`,
+      );
+    }
     return {
       state,
-      resultUrls: json.data.response?.fullResultUrls ?? [],
+      resultUrls,
       failMsg: json.data.errorMessage,
     };
   }
@@ -146,7 +168,9 @@ export class VeoProviderService implements VideoProviderClient {
   async downloadResult(url: string): Promise<Buffer> {
     const res = await fetch(url, { signal: AbortSignal.timeout(120_000) });
     if (!res.ok) {
-      throw new VeoApiError(`Failed to download Veo result (status=${res.status}): ${url}`);
+      throw new VeoApiError(
+        `Failed to download Veo result (status=${res.status}): ${url}`,
+      );
     }
     return Buffer.from(await res.arrayBuffer());
   }
