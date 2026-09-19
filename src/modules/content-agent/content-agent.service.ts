@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { CreativeSegment } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -7,6 +11,7 @@ import { ArticlesService } from '../articles/articles.service';
 import { CreateAgentArticleDto } from './dto/create-agent-article.dto';
 import { CreateAgentImageDto } from './dto/create-agent-image.dto';
 import { CreateAgentPromptDto } from './dto/create-agent-prompt.dto';
+import { UpdateAgentArticleDto } from './dto/update-agent-article.dto';
 
 // همه‌ی عکس‌های عمومی این ایجنت زیر همین پیشوند مجازی در باکت مشترک MinIO ذخیره می‌شوند —
 // جداسازی صرفاً با prefix، نه باکت جدا (بدون زیرساخت اضافه)؛ GET عمومی content-agent-public.controller.ts
@@ -70,6 +75,19 @@ export class ContentAgentService {
         isAgentGenerated: true,
         agentSourceUrls: [{ url: dto.sourceUrl, name: dto.sourceName }],
       },
+    });
+  }
+
+  // ─── ویرایش مقاله‌ای که همین ایجنت قبلاً منتشر کرده (مثلاً افزودن عکس بعد از انتشار) ───
+  async updateAgentArticle(slug: string, dto: UpdateAgentArticleDto) {
+    const existing = await this.prisma.article.findUnique({ where: { slug } });
+    if (!existing) throw new NotFoundException('مقاله پیدا نشد');
+
+    return this.articlesService.updateArticle(existing.id, {
+      title: dto.title,
+      contentMd: dto.summaryMd,
+      coverImageUrl: dto.coverImageUrl,
+      metaDescription: dto.metaDescription,
     });
   }
 
