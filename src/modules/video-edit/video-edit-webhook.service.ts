@@ -250,6 +250,7 @@ export class VideoEditWebhookService {
           jobId: videoJob.id,
           kieVideoModelId: videoJob.kieVideoModelId,
           costToman: costCalc.costToman,
+          costUsdMicros: costCalc.costUsdMicros,
           recoveredViaWebhook: true,
         },
       );

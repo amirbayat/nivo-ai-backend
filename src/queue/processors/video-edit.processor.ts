@@ -657,6 +657,10 @@ export class VideoEditProcessor {
           creditsConsumed,
           realCostUsd,
           costToman: costCalc.costToman,
+          costUsdMicros: costCalc.costUsdMicros,
+          ...(isOpenRouter && realCostUsd != null
+            ? { openrouterRealCostUsdMicros: Math.round(realCostUsd * 1_000_000) }
+            : {}),
         },
       );
       if (!debited) {
