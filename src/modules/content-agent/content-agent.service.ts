@@ -1,9 +1,17 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { CreativeSegment } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { StorageService } from '../../storage/storage.service';
 import { ArticlesService } from '../articles/articles.service';
 import { CreateAgentArticleDto } from './dto/create-agent-article.dto';
+import { CreateAgentImageDto } from './dto/create-agent-image.dto';
 import { CreateAgentPromptDto } from './dto/create-agent-prompt.dto';
+
+// همه‌ی عکس‌های عمومی این ایجنت زیر همین پیشوند مجازی در باکت مشترک MinIO ذخیره می‌شوند —
+// جداسازی صرفاً با prefix، نه باکت جدا (بدون زیرساخت اضافه)؛ GET عمومی content-agent-public.controller.ts
+// فقط همین پیشوند را می‌خواند، پس آپلود دلخواه به بقیه‌ی کلیدهای باکت از این مسیر ممکن نیست.
+export const CONTENT_AGENT_PUBLIC_IMAGE_PREFIX = 'public-content';
 
 // docs/PRD-daily-content-prompt-agent.md بخش ۵ — تحقیق/تایید قبلاً روی سیستم کاربر (Claude)
 // اتفاق افتاده؛ این سرویس فقط چیزی را که از قبل تاییدشده می‌رسد در جدول‌های موجود ثبت می‌کند.
@@ -16,7 +24,23 @@ export class ContentAgentService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly articlesService: ArticlesService,
+    private readonly storageService: StorageService,
+    private readonly config: ConfigService,
   ) {}
+
+  // ─── میزبانی عکس عمومی برای contentMd مقاله/پرامپت — بدون رندر سمت سرور ───────
+  async createAgentImage(dto: CreateAgentImageDto): Promise<{ url: string }> {
+    const ext = dto.ext ?? 'png';
+    const buffer = Buffer.from(dto.imageBase64, 'base64');
+    const key = await this.storageService.uploadImage(
+      buffer,
+      ext,
+      CONTENT_AGENT_PUBLIC_IMAGE_PREFIX,
+    );
+    const filename = key.slice(CONTENT_AGENT_PUBLIC_IMAGE_PREFIX.length + 1);
+    const apiUrl = this.config.get<string>('API_URL');
+    return { url: `${apiUrl}/api/v1/content-agent/images/${filename}` };
+  }
 
   // ─── گام ۳ سند: ingest — پشت ApiKeyGuard ────────────────────────────────────
   async createAgentArticle(dto: CreateAgentArticleDto) {
