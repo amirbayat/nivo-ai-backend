@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import {
+  IsBoolean,
   IsIn,
   IsInt,
   IsOptional,
@@ -45,4 +46,19 @@ export class CreateAgentPromptDto {
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(0, { message: fa.validation.numberPositive })
   creditCost!: number;
+
+  // توضیح کوتاه کاربرپسند — جدا از contextMd (که به سیستم‌پرامپت تولید اضافه می‌شود، نه UI)
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  // نام AiModel پیشنهادی — برای isFreeformPrompt=true فقط پیش‌انتخاب چیپ مدل در کامپوزر است، قفل نیست
+  @IsOptional()
+  @IsString()
+  preferredModel?: string;
+
+  // true یعنی «استفاده» فقط promptText را عیناً توی composer آزاد می‌ریزد، بدون قفل‌شدن مدل/فلوی سبک
+  @IsOptional()
+  @IsBoolean()
+  isFreeformPrompt?: boolean;
 }

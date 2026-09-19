@@ -91,25 +91,33 @@ const CATALOG_ITEM_SELECT = {
   sourceImageKey: true,
   sourceType: true,
   userPromptTemplate: true,
+  isFreeformPrompt: true,
+  preferredModel: true,
 } as const;
 
 // سبک‌های CURATED عمداً template را به فرانت لو نمی‌دهند (proprietary). پرامپت‌های
 // AGENT_DISCOVERED برعکس — محتوای از‌پیش‌عمومی وب هستند و طبق
 // docs/PRD-daily-content-prompt-agent.md بخش ۷.۳ باید متن کامل + دکمه‌ی کپی داشته باشند.
+// preferredModel هم فقط برای isFreeformPrompt لو می‌رود — آنجا فقط پیش‌انتخاب چیپ مدل
+// در composer است (نه یک دستور پشت‌صحنه‌ی محرمانه)، برای بقیه‌ی سبک‌ها همچنان مخفی می‌ماند
 function formatCatalogItem(
   prompt: {
     sourceImageKey: string | null;
     sourceType: CreativePromptSourceType;
     userPromptTemplate: string;
+    isFreeformPrompt: boolean;
+    preferredModel: string | null;
   } & Record<string, unknown>,
   sourceImageAccuracyCreditCost: number,
 ) {
-  const { sourceImageKey, sourceType, userPromptTemplate, ...rest } = prompt;
+  const { sourceImageKey, sourceType, userPromptTemplate, preferredModel, ...rest } =
+    prompt;
   return {
     ...rest,
     hasSourceImage: !!sourceImageKey,
     sourceImageAccuracyCreditCost,
     ...(sourceType === 'AGENT_DISCOVERED' ? { userPromptTemplate } : {}),
+    ...(prompt.isFreeformPrompt ? { preferredModel } : {}),
   };
 }
 

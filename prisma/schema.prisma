@@ -692,6 +692,7 @@ model CreativePrompt {
   requiresUserImage  Boolean            @default(false) // IMAGE: نیاز به آپلود عکس کاربر دارد یا نه
   creditCost         Int // هزینه‌ی ثابت به نیوو — همانی که قبل از تولید به کاربر نشان داده می‌شود
   preferredModel     String? // نام AiModel پیشنهادی؛ اگر خالی، همان زنجیره‌ی fallback فعلی پلن استفاده می‌شود
+  isFreeformPrompt   Boolean            @default(false) // اگر true، «استفاده» فقط userPromptTemplate را بدون تغییر توی composer آزاد می‌ریزد (مدل با preferredModel پیش‌انتخاب می‌شود ولی قفل نیست، کاربر خودش عوض می‌کند) — به‌جای فلوی سبک‌قفل‌شده‌ی selectedCreativePrompt/generateCreative. برای پرامپت‌های دستوری خام (مثل «/subway») که باید عیناً به مدل تصویر ارسال شوند
   isTrending         Boolean            @default(false)
   isActive           Boolean            @default(true)
   sortOrder          Int                @default(0)
