@@ -56,7 +56,9 @@ function sleep(ms: number) {
 // جداگانه) روی یک state-machine مشترک نگاشت می‌شوند تا فرانت (VideoEditGallery.tsx) بدون آگاهی
 // از provider، فقط یک stepper وضعیت‌محور رندر کند — نه یک درصد جعلی (هیچ‌کدام از این providerها
 // عدد پراگرس واقعی برنمی‌گردانند، پس progressPercent عمداً دست‌نخورده/null می‌ماند).
-function normalizeOpenRouterState(status: OpenRouterVideoJobStatus): KieJobState {
+function normalizeOpenRouterState(
+  status: OpenRouterVideoJobStatus,
+): KieJobState {
   switch (status) {
     case 'pending':
       return 'waiting';
@@ -260,7 +262,9 @@ export class VideoEditProcessor {
     const input: Record<string, unknown> = {
       prompt: job.prompt,
       resolution: job.resolution,
-      duration: String(pickClosestFixedDuration(model.fixedDurations, durationSec)),
+      duration: String(
+        pickClosestFixedDuration(model.fixedDurations, durationSec),
+      ),
       aspect_ratio: job.aspectRatio ?? '16:9',
     };
     if (job.videoKey) input.video_urls = [await this.uploadRef(job.videoKey)];
@@ -281,7 +285,8 @@ export class VideoEditProcessor {
     if (job.referenceImageKeys.length) {
       input.reference_image = await this.uploadRefs(job.referenceImageKeys);
     }
-    if (job.videoKey) input.reference_video = [await this.uploadRef(job.videoKey)];
+    if (job.videoKey)
+      input.reference_video = [await this.uploadRef(job.videoKey)];
     return input;
   }
 
@@ -405,6 +410,10 @@ export class VideoEditProcessor {
       data: { status: VideoJobStatus.PROCESSING },
     });
 
+    this.logger.log(
+      `video-edit: start job=${jobId} provider=${videoJob.kieVideoModel.provider} model=${videoJob.kieVideoModel.slug} mode=${videoJob.mode} resumingTaskId=${videoJob.kieTaskId ?? 'none'}`,
+    );
+
     const isOpenRouter = videoJob.kieVideoModel.provider === 'OPENROUTER';
     // Veo/Runway هر دو endpoint اختصاصی خودشان را دارند (نه jobs/createTask عمومی Kie) — طبق
     // پلن بخش ۳.۶، این ۴-۵ مدل همیشه data-driven‌اند (inputFields هرگز null نیست برایشان)
@@ -436,12 +445,16 @@ export class VideoEditProcessor {
             (videoJob.valuesJson as FieldValues | null) ?? {},
             this.mediaUploader(),
           );
+          const callbackUrl = this.kieWebhookCallbackUrl();
           const submitted = await externalProvider.submit(
             videoJob.kieVideoModel.slug,
             input,
-            this.kieWebhookCallbackUrl(),
+            callbackUrl,
           );
           taskId = submitted.taskId;
+          this.logger.log(
+            `video-edit: submitted job=${jobId} provider=${videoJob.kieVideoModel.provider} taskId=${taskId} callbackUrl=${callbackUrl ?? 'MISSING (API_URL ست نشده — webhook غیرفعال، فقط polling)'}`,
+          );
         } else if (isOpenRouter) {
           // duration مثبت همیشه فرستاده می‌شود، حتی با ویدیوی مرجع — رجوع کن به کامنت داخل
           // buildOpenRouterInput (تست زنده‌ی سه‌سناریویی ۱۴۰۵/۰۶/۱۷) برای دلیل کامل
@@ -454,6 +467,9 @@ export class VideoEditProcessor {
             input,
           );
           taskId = submitted.id;
+          this.logger.log(
+            `video-edit: submitted job=${jobId} provider=OPENROUTER taskId=${taskId} (بدون webhook — فقط OpenRouter API خودش پشتیبانی نمی‌کند)`,
+          );
         } else {
           // دیسپچر معماری جدید/قدیمی: inputFields غیر-null یعنی از generic payload-builder
           // استفاده کن (کنار ۵ تابع buildXInput فعلی، نه جایگزین فوری — طبق پلن بخش ۳.۳)
@@ -476,6 +492,12 @@ export class VideoEditProcessor {
             input,
           );
           taskId = submitted.taskId;
+          // callbackUrl عمداً اینجا فرستاده نمی‌شود — webhook فعلاً فقط برای VEO/RUNWAY
+          // وایر شده (video-edit-webhook.service.ts)؛ این مدل‌های عمومی Kie صرفاً با همون
+          // polling معمولی (MAX_POLL_ATTEMPTS + EXTRA_GRACE_POLL_ATTEMPTS) جواب می‌گیرند
+          this.logger.log(
+            `video-edit: submitted job=${jobId} provider=KIE model=${videoJob.kieVideoModel.slug} taskId=${taskId} (بدون webhook — فقط polling، هنوز به این مدل‌ها وایر نشده)`,
+          );
         }
         await this.prisma.videoEditJob.update({
           where: { id: jobId },
@@ -489,10 +511,17 @@ export class VideoEditProcessor {
       let resultUrl: string | undefined;
       let creditsConsumed: number | undefined; // فقط Kie
       let realCostUsd: number | undefined; // فقط OpenRouter — دلار مستقیم، نه credit
+      let pollCount = 0;
+      let lastRawState = 'n/a';
       const activeTaskId = taskId;
       const pollOnce = async (): Promise<boolean> => {
+        pollCount += 1;
         if (externalProvider) {
           const status = await externalProvider.poll(activeTaskId);
+          lastRawState = status.state;
+          this.logger.log(
+            `video-edit: poll#${pollCount} job=${jobId} taskId=${activeTaskId} provider=${videoJob.kieVideoModel.provider} state=${status.state} resultUrls=${status.resultUrls.length}`,
+          );
           await this.updateKieState(jobId, status.state);
           if (status.state === 'success') {
             resultUrl = status.resultUrls[0];
@@ -500,12 +529,21 @@ export class VideoEditProcessor {
           }
           if (status.state === 'fail') {
             throw new Error(
-              status.failMsg ?? `${videoJob.kieVideoModel.provider} job failed on provider side`,
+              status.failMsg ??
+                `${videoJob.kieVideoModel.provider} job failed on provider side`,
             );
           }
         } else if (isOpenRouter) {
-          const status = await this.openRouterProvider.pollVideoJob(activeTaskId);
-          await this.updateKieState(jobId, normalizeOpenRouterState(status.status));
+          const status =
+            await this.openRouterProvider.pollVideoJob(activeTaskId);
+          lastRawState = status.status;
+          this.logger.log(
+            `video-edit: poll#${pollCount} job=${jobId} taskId=${activeTaskId} provider=OPENROUTER status=${status.status}`,
+          );
+          await this.updateKieState(
+            jobId,
+            normalizeOpenRouterState(status.status),
+          );
           if (status.status === 'completed') {
             resultUrl = status.resultUrl;
             realCostUsd = status.realCostUsd;
@@ -524,11 +562,16 @@ export class VideoEditProcessor {
             throw new Error(
               isEditClassificationError
                 ? fa.videoEdit.openRouterEditPromptRejected
-                : (status.errorMessage ?? `OpenRouter video job ${status.status}`),
+                : (status.errorMessage ??
+                    `OpenRouter video job ${status.status}`),
             );
           }
         } else {
           const status = await this.kieProvider.pollTask(activeTaskId);
+          lastRawState = status.state;
+          this.logger.log(
+            `video-edit: poll#${pollCount} job=${jobId} taskId=${activeTaskId} provider=KIE state=${status.state} resultUrls=${status.resultUrls.length}`,
+          );
           await this.updateKieState(jobId, status.state);
           if (status.state === 'success') {
             resultUrl = status.resultUrls[0];
@@ -536,7 +579,9 @@ export class VideoEditProcessor {
             return true;
           }
           if (status.state === 'fail') {
-            throw new Error(status.failMsg ?? 'Kie job failed on provider side');
+            throw new Error(
+              status.failMsg ?? 'Kie job failed on provider side',
+            );
           }
         }
         return false;
@@ -554,12 +599,20 @@ export class VideoEditProcessor {
           videoJob.kieVideoModel.provider === 'VEO'
             ? EXTRA_GRACE_POLL_ATTEMPTS_VEO
             : EXTRA_GRACE_POLL_ATTEMPTS;
+        this.logger.warn(
+          `video-edit: main poll window (${MAX_POLL_ATTEMPTS} attempts) تمام شد بدون نتیجه — job=${jobId} taskId=${activeTaskId} provider=${videoJob.kieVideoModel.provider} lastState=${lastRawState}؛ وارد grace-phase (${graceAttempts} تلاش دیگر) می‌شویم`,
+        );
         for (let attempt = 0; attempt < graceAttempts; attempt++) {
           await sleep(EXTRA_GRACE_POLL_INTERVAL_MS);
           if (await pollOnce()) break;
         }
       }
-      if (!resultUrl) throw new Error('video-edit job polling timed out');
+      if (!resultUrl) {
+        this.logger.error(
+          `video-edit: TIMEOUT — job=${jobId} taskId=${activeTaskId} provider=${videoJob.kieVideoModel.provider} model=${videoJob.kieVideoModel.slug} totalPolls=${pollCount} lastState=${lastRawState} — اگر Kie بعداً موفق شد و provider=VEO/RUNWAY بود، webhook باید این را بازیابی کند (لاگ‌های video-edit-webhook.service.ts را با همین taskId چک کن)`,
+        );
+        throw new Error('video-edit job polling timed out');
+      }
 
       const buffer = externalProvider
         ? await externalProvider.downloadResult(resultUrl)
@@ -580,7 +633,10 @@ export class VideoEditProcessor {
       // مبتنی بر pricePerSecondUsdConfirmed×مدت واقعی استفاده می‌شود، نه یک رقم فرضی خام.
       const KIE_USD_PER_CREDIT = 0.005;
       const costUsd = externalProvider
-        ? resolveExternalProviderCostUsd(videoJob.kieVideoModel, videoJob.valuesJson)
+        ? resolveExternalProviderCostUsd(
+            videoJob.kieVideoModel,
+            videoJob.valuesJson,
+          )
         : isOpenRouter
           ? (realCostUsd ?? 0)
           : (creditsConsumed ?? 0) * KIE_USD_PER_CREDIT;

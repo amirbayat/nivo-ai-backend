@@ -75,28 +75,39 @@ export class VideoEditWebhookService {
     timestampHeader: string | undefined,
     signatureHeader: string | undefined,
   ): Promise<void> {
+    // مهم‌ترین لاگ برای دیباگ — بدنه‌ی خام قبل از هر تصمیمی چاپ می‌شود، چون شکل دقیق فیلدها
+    // فقط از مستندات Kie تخمین زده شده (نه تست زنده)؛ اگر چیزی درست کار نکرد، اول همین‌جا
+    // ببین Kie واقعاً چه چیزی فرستاده
+    this.logger.log(
+      `kie webhook: received raw body=${JSON.stringify(body)} timestamp=${timestampHeader ?? 'missing'} hasSignature=${!!signatureHeader}`,
+    );
+
     const payload = (body ?? {}) as KieWebhookBody;
     const taskId = extractTaskId(payload.data);
     if (!taskId) {
-      this.logger.warn('kie webhook: payload بدون taskId — نادیده گرفته شد');
+      this.logger.warn(
+        'kie webhook: payload بدون taskId قابل‌تشخیص — نادیده گرفته شد',
+      );
       return;
     }
 
     const secret = this.config.get<string>('KIE_WEBHOOK_HMAC_KEY');
     if (!secret) {
       this.logger.warn(
-        'kie webhook: KIE_WEBHOOK_HMAC_KEY ست نشده — callback نادیده گرفته شد (polling همچنان فعال است)',
+        `kie webhook: KIE_WEBHOOK_HMAC_KEY ست نشده — callback برای taskId=${taskId} نادیده گرفته شد (polling همچنان فعال است)`,
       );
       return;
     }
-    if (
-      !verifyKieWebhookSignature(
-        taskId,
-        timestampHeader,
-        signatureHeader,
-        secret,
-      )
-    ) {
+    const signatureValid = verifyKieWebhookSignature(
+      taskId,
+      timestampHeader,
+      signatureHeader,
+      secret,
+    );
+    this.logger.log(
+      `kie webhook: signature valid=${signatureValid} taskId=${taskId}`,
+    );
+    if (!signatureValid) {
       throw new UnauthorizedException('امضای webhook نامعتبر است');
     }
 
@@ -112,14 +123,23 @@ export class VideoEditWebhookService {
       );
       return;
     }
+    this.logger.log(
+      `kie webhook: job=${videoJob.id} taskId=${taskId} status=${videoJob.status} provider=${videoJob.kieVideoModel.provider} resultVideoKey=${videoJob.resultVideoKey ?? 'null'}`,
+    );
     if (
       videoJob.resultVideoKey ||
       videoJob.status === VideoJobStatus.SUCCEEDED
     ) {
-      return; // قبلاً از مسیر عادی poll تمام شده
+      this.logger.log(
+        `kie webhook: job=${videoJob.id} قبلاً SUCCEEDED — no-op`,
+      );
+      return;
     }
     if (videoJob.status !== VideoJobStatus.FAILED) {
       // PROCESSING (یا نظری PENDING) — poll loop فعال خودش صاحب این job است، دست نمی‌زنیم
+      this.logger.log(
+        `kie webhook: job=${videoJob.id} هنوز status=${videoJob.status} — poll loop فعال خودش نتیجه رو می‌گیرد، دست نمی‌زنیم`,
+      );
       return;
     }
 
@@ -129,7 +149,7 @@ export class VideoEditWebhookService {
       provider !== VideoModelProvider.RUNWAY
     ) {
       this.logger.warn(
-        `kie webhook: بازیابی برای provider=${provider} هنوز پیاده نشده (job=${videoJob.id})`,
+        `kie webhook: بازیابی برای provider=${provider} هنوز پیاده نشده (job=${videoJob.id}) — این مدل صرفاً با polling معمولی جواب گرفته یا از دست رفته`,
       );
       return;
     }
@@ -137,6 +157,9 @@ export class VideoEditWebhookService {
     if (payload.code !== 200) {
       // job از قبل به‌خاطر تایم‌اوت ما FAILED شده؛ فقط پیام دقیق‌تر provider را جایگزین پیام
       // عمومی «polling timed out» می‌کنیم — بدون عملیات مالی
+      this.logger.log(
+        `kie webhook: job=${videoJob.id} code=${payload.code} (نه ۲۰۰) — provider هم fail گزارش کرده، فقط errorMessage آپدیت می‌شود`,
+      );
       if (payload.msg) {
         await this.prisma.videoEditJob.update({
           where: { id: videoJob.id },
@@ -149,11 +172,14 @@ export class VideoEditWebhookService {
     const resultUrl = extractResultUrl(payload.data);
     if (!resultUrl) {
       this.logger.warn(
-        `kie webhook: code=200 ولی resultUrl پیدا نشد (job=${videoJob.id}, taskId=${taskId})`,
+        `kie webhook: code=200 ولی resultUrl از هیچ فیلد شناخته‌شده‌ای استخراج نشد (job=${videoJob.id}, taskId=${taskId}) — شکل payload بالا رو چک کن`,
       );
       return;
     }
 
+    this.logger.log(
+      `kie webhook: job=${videoJob.id} در حال بازیابی (status قبلی=FAILED، provider موفق گزارش کرده) resultUrl=${resultUrl}`,
+    );
     await this.recoverSuccess(videoJob, resultUrl, provider);
   }
 
@@ -184,7 +210,12 @@ export class VideoEditWebhookService {
       },
       data: { status: VideoJobStatus.PROCESSING },
     });
-    if (claimed.count === 0) return;
+    if (claimed.count === 0) {
+      this.logger.warn(
+        `kie webhook: claim برای job=${videoJob.id} رد شد (count=0) — احتمالاً همین لحظه یک بار دیگر webhook رسیده یا وضعیت تغییر کرده`,
+      );
+      return;
+    }
 
     try {
       const client =
