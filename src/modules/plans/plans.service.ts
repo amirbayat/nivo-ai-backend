@@ -55,6 +55,9 @@ export class PlansService {
         tier: true,
         supportsVision: true,
         supportsImageGen: true,
+        // فرانت برای غیرفعال‌کردن ارسال/نمایش هشدار «این مدل نیاز به عکس ورودی دارد» وقتی هیچ
+        // عکسی پیوست نشده (مدل‌های edit-only مثل recraft-v4-styles-pro)
+        imageGenRequiresInputImage: true,
         // docs/PRD-chat-models-web-search-and-files.md §۳.۵ — فرانت برای غیرفعال‌کردن toggle
         // جستجوی وب با تولتیپ، وقتی مدل انتخابی این را ساپورت نمی‌کند
         supportsWebSearch: true,
