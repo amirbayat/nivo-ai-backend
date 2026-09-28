@@ -470,6 +470,7 @@ export class DiscoveryGenerationService {
               size: model.imageGenSize ?? prompt.aspectRatio ?? undefined,
               quality: model.imageGenQuality ?? undefined,
               useDirectApi: model.imageGenUseDirectApi,
+              requiresInputImage: model.imageGenRequiresInputImage,
             });
 
         return {

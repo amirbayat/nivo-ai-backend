@@ -921,6 +921,11 @@ model AiModel {
   // OpenRouter) و باید از endpoint اختصاصی POST /images صدا زده شوند. true یعنی این مسیر دوم
   // استفاده شود؛ false (پیش‌فرض) یعنی رفتار فعلی (/chat/completions با modalities) حفظ شود.
   imageGenUseDirectApi Boolean @default(false)
+  // بعضی مدل‌های مسیر /images (مثل Recraft style-transfer variants) اصلاً بدون عکس ورودی کار
+  // نمی‌کنند — تولید «از صفر» با این مدل‌ها با یک ارور خام provider رد می‌شود (مثلاً Recraft:
+  // "input_references: must have between 1 and 10 items"). true یعنی قبل از فراخوانی provider
+  // چک شود که حداقل یک عکس ورودی داده شده، وگرنه یک خطای فارسی روشن به کاربر برگردد
+  imageGenRequiresInputImage Boolean @default(false)
   // Provider USD per image. Written only by image-model-cost-estimate.processor.ts.
   // Catalog converts this to نیوو at read time (live FX + IMAGE markup + tomanPerCredit).
   // null = not enough data yet. Display-only — never used as a preflight gate.

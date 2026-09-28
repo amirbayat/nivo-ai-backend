@@ -115,6 +115,12 @@ export class CreateModelDto {
   @IsBoolean()
   imageGenUseDirectApi?: boolean;
 
+  // true یعنی این مدل بدون عکس ورودی کار نمی‌کند (مثل recraft-v4-styles-pro) — «تولید از صفر»
+  // برایش رد می‌شود با یک خطای فارسی روشن، نه یک ارور خام provider
+  @IsOptional()
+  @IsBoolean()
+  imageGenRequiresInputImage?: boolean;
+
   // docs/PRD-video-studio-chat-flow.md — قیمت پایه (بدون صدا) هر ثانیه‌ی ویدیو + ضریب صدا
   @IsOptional()
   @Type(() => Number)

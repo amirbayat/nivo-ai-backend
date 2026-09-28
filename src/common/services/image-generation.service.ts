@@ -53,8 +53,19 @@ export class ImageGenerationService {
     size?: string;
     quality?: string;
     useDirectApi?: boolean;
+    requiresInputImage?: boolean;
     onPartial?: (base64: string) => void;
   }) {
+    // بعضی مدل‌ها (مثل recraft-v4-styles-pro) فقط برای ویرایش/ترکیب طراحی شده‌اند و بدون عکس
+    // ورودی رد می‌شوند — «تولید از صفر» یعنی این متد بدون عکس صدا زده شده، پس همین‌جا با یک خطای
+    // فارسی روشن جلوی یک درخواست محکوم‌به‌شکست به provider را می‌گیریم (AiModel.imageGenRequiresInputImage)
+    if (params.requiresInputImage) {
+      throw new ImageApiError(
+        'این مدل فقط برای ویرایش عکس است؛ لطفاً یک عکس پیوست کنید',
+        null,
+        false,
+      );
+    }
     if (this.aiProvider.isOpenRouter) {
       return params.useDirectApi
         ? this.callOpenRouterImagesApi(
@@ -554,10 +565,12 @@ export class ImageGenerationService {
     };
   }> {
     let streaming = Boolean(onPartial);
+    // «n» عمداً فرستاده نمی‌شود — اپ هیچ‌وقت بیش از یک تصویر درخواست نمی‌کند و بیشتر providerها
+    // بدون این پارامتر هم پیش‌فرض ۱ تصویر برمی‌گردانند؛ بعضی provider ها (Recraft) اصلاً این
+    // پارامتر را پشتیبانی نمی‌کنند و با ۴۰۰ رد می‌کنند («does not support n "1"»)
     const body: Record<string, unknown> = {
       model: modelId,
       prompt,
-      n: 1,
       ...(options.size ? { size: options.size } : {}),
       ...(options.quality ? { quality: options.quality } : {}),
       stream: streaming,

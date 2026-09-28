@@ -104,6 +104,10 @@ export class UpdateModelDto {
   imageGenUseDirectApi?: boolean;
 
   @IsOptional()
+  @IsBoolean()
+  imageGenRequiresInputImage?: boolean;
+
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)

@@ -44,6 +44,7 @@ const MODEL_IMPORT_COLUMNS = [
   'imageGenFlatPriceUsd',
   'imageGenFlatPriceUnit',
   'imageGenUseDirectApi',
+  'imageGenRequiresInputImage',
   'videoGenPricePerSecondUsd',
   'videoGenAudioMultiplier',
   'videoGenSupportedDurationsSec',

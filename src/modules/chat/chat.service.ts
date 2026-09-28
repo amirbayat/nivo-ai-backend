@@ -1873,6 +1873,7 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
             size: requestedSize,
             quality: modelRecord.imageGenQuality ?? undefined,
             useDirectApi: modelRecord.imageGenUseDirectApi,
+            requiresInputImage: modelRecord.imageGenRequiresInputImage,
             onPartial,
           });
       const modelId = modelRecord.name;
