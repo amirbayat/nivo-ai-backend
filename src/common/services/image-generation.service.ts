@@ -327,6 +327,7 @@ export class ImageGenerationService {
       outputTokens: 0,
       realCostUsdMicros: null as number | null,
     };
+    const seenEventTypes = new Set<string>();
 
     while (true) {
       const { done, value } = await reader.read();
@@ -356,6 +357,7 @@ export class ImageGenerationService {
             };
             error?: { code?: string | number; type?: string; message?: string };
           };
+          if (evt.type) seenEventTypes.add(evt.type);
           if (evt.type === 'image_generation.partial_image' && evt.b64_json) {
             onPartial?.(evt.b64_json);
           } else if (evt.type === 'error') {
@@ -398,7 +400,11 @@ export class ImageGenerationService {
     }
 
     if (!finalBase64)
-      throw new Error(`${errorLabel} streaming ended without a completed image`);
+      throw new Error(
+        `${errorLabel} streaming ended without a completed image (seen event types: ${
+          seenEventTypes.size ? [...seenEventTypes].join(', ') : 'none — connection was idle'
+        })`,
+      );
     return { base64: finalBase64, mediaType, usage };
   }
 
@@ -656,11 +662,49 @@ export class ImageGenerationService {
         throw new Error(
           `OpenRouter /images (model=${modelId}) streaming response has no body`,
         );
-      return this.parseImageGenerationSseStream(
-        res.body,
-        onPartial,
-        `OpenRouter /images (model=${modelId})`,
-      );
+      try {
+        return await this.parseImageGenerationSseStream(
+          res.body,
+          onPartial,
+          `OpenRouter /images (model=${modelId})`,
+        );
+      } catch (err) {
+        // بعضی providerها (مثل Seed/bytedance-seed) هیچ‌وقت image_generation.partial_image
+        // نمی‌فرستن، پس کانکشن SSE برای کل مدت تولید (که می‌تونه ده‌ها ثانیه باشه) کاملاً
+        // بی‌داده می‌مونه — یک پروکسی واسط با idle-timeout می‌تونه این کانکشن رو قبل از
+        // رسیدن event نهایی قطع کنه، حتی وقتی تولید سمت provider موفق تموم شده (قابل تایید
+        // با generation_id در لاگ OpenRouter). این‌جا یک بار بدون streaming دوباره تلاش می‌کنیم.
+        if (
+          !(err instanceof Error) ||
+          !/streaming ended without a completed image/.test(err.message)
+        )
+          throw err;
+
+        this.logger.warn(
+          `OpenRouter /images (model=${modelId}) streaming ended without completed event, retrying without streaming`,
+        );
+        streaming = false;
+        body.stream = false;
+        res = await doFetch();
+        if (!res.ok) {
+          const text = await res.text().catch(() => '');
+          let code: string | null = null;
+          let message = text.slice(0, 300);
+          try {
+            const errJson = JSON.parse(text) as {
+              error?: { code?: string; type?: string; message?: string };
+            };
+            code = errJson.error?.code ?? errJson.error?.type ?? null;
+            message = errJson.error?.message ?? message;
+          } catch {
+            // بدنه‌ی خطا JSON نبود — همون متن خام کافیه
+          }
+          const isPolicyViolation = /moderation|policy|safety/i.test(
+            `${code ?? ''} ${message}`,
+          );
+          throw new ImageApiError(message, code, isPolicyViolation);
+        }
+      }
     }
 
     const json = (await res.json()) as {
