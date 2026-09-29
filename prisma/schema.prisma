@@ -2024,7 +2024,10 @@ model Store {
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
 
-  products Product[]
+  products      Product[]
+  customers     Customer[]
+  conversations SalesConversation[]
+  orders        Order[]
 
   @@index([sellerId])
   @@map("stores")
@@ -2047,4 +2050,102 @@ model Product {
 
   @@index([storeId])
   @@map("products")
+}
+
+// docs/PRD-mvp-launch-plan.md بخش ۳ (گام ۱) — هسته‌ی بدون UI موتور مکالمه‌ی فروش.
+// Customer عمداً User نیست (طبق بخش ۲.۱ سند: «مشتری ناشناس/فرصت‌طلبانه، نه User») — هویتش
+// فقط sessionToken است، نه شماره‌موبایل تأییدشده؛ phone اختیاری و فقط برای نمایش/تماس بعدی است.
+model Customer {
+  id           String   @id @default(uuid())
+  storeId      String
+  store        Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  sessionToken String   @unique
+  phone        String?
+  fullName     String?
+  createdAt    DateTime @default(now())
+
+  salesConversation SalesConversation?
+
+  @@index([storeId])
+  @@map("customers")
+}
+
+enum ConversationState {
+  GREETING
+  BROWSING
+  CART_REVIEW
+  AWAITING_PAYMENT
+  RECEIPT_SUBMITTED
+  AWAITING_SELLER_APPROVAL
+  COMPLETED
+  REJECTED
+  HANDOFF_HUMAN
+}
+
+// اسم مدل عمداً SalesConversation است، نه Conversation — چون Conversation از قبل برای چت
+// اصلی نیوو (بالای همین فایل) گرفته شده و جدول `conversations` را دارد؛ این‌جا کاملاً یک
+// دامنه‌ی جدا (مکالمه‌ی خرید مشتری ناشناس با یک فروشگاه) است.
+model SalesConversation {
+  id              String            @id @default(uuid())
+  storeId         String
+  store           Store             @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  customerId      String            @unique
+  customer        Customer          @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  currentState    ConversationState @default(GREETING)
+  contextData     Json              @default("{}") // { cart: [{productId, name, unitPrice, qty}] }
+  isMutedForHuman Boolean           @default(false)
+  clarifyAttempts Int               @default(0)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  events ConversationEvent[]
+  order  Order?
+
+  @@index([storeId])
+  @@map("sales_conversations")
+}
+
+enum ConversationEventType {
+  CUSTOMER_MESSAGE
+  AGENT_REPLY
+  TOOL_CALL
+  STATE_TRANSITION
+  SYSTEM
+}
+
+model ConversationEvent {
+  id             String                @id @default(uuid())
+  conversationId String
+  conversation   SalesConversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  type           ConversationEventType
+  payload        Json // { text?, uiBlock?, toolName?, fromState?, toState? }
+  createdAt      DateTime              @default(now())
+
+  @@index([conversationId])
+  @@map("conversation_events")
+}
+
+enum OrderStatus {
+  PENDING_PAYMENT
+  RECEIPT_SUBMITTED
+  APPROVED
+  REJECTED
+}
+
+model Order {
+  id              String            @id @default(uuid())
+  storeId         String
+  store           Store             @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  conversationId  String            @unique
+  conversation    SalesConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  items           Json // [{productId, name, unitPrice, qty}]
+  totalAmount     Int
+  status          OrderStatus       @default(PENDING_PAYMENT)
+  receiptImageKey String?
+  rejectReason    String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@index([storeId])
+  @@map("orders")
 }

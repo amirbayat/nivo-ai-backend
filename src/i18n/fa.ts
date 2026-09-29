@@ -129,6 +129,22 @@ export const fa = {
     slugInvalid: 'نام لینک فقط می‌تواند از حروف انگلیسی کوچک، عدد و خط تیره باشد',
     bankCardInvalid: 'شماره کارت باید ۱۶ رقم باشد',
   },
+  salesAgent: {
+    invalidSession: 'نشست معتبر نیست',
+    conversationNotFound: 'مکالمه یافت نشد',
+    orderNotFound: 'سفارش یافت نشد',
+    nothingToConfirm: 'چیزی برای تایید نیست — اول یک محصول به سبد اضافه کن',
+    didNotUnderstand: 'متوجه نشدم، می‌تونی دوباره بگی چی می‌خوای؟',
+    noProductsFound: 'محصولی با این مشخصات پیدا نکردم',
+    productNotFound: 'این محصول رو پیدا نکردم، می‌تونی دوباره اسمش رو بگی؟',
+    insufficientStock: 'موجودی این محصول کافی نیست',
+    cartEmpty: 'سبد خرید خالی است',
+    cartCleared: 'سبد خرید خالی شد',
+    noPendingOrder: 'سفارشی در انتظار پرداخت پیدا نکردم',
+    receiptReceived: 'رسید دریافت شد و برای فروشنده ارسال شد — منتظر تایید باش',
+    faqStub: 'این سؤال رو یادداشت کردم، به‌زودی جواب می‌دم',
+    handoffToHuman: 'الان شما رو به یکی از همکارها وصل می‌کنم',
+  },
   sms: {
     otpText: (code: string) =>
       `کد تأیید دستیار AI: ${code}\nاین کد ۲ دقیقه اعتبار دارد`,

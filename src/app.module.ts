@@ -48,6 +48,7 @@ import { VideoEditConfigModule } from './modules/video-edit-config/video-edit-co
 import { KieVideoModelsModule } from './modules/kie-video-models/kie-video-models.module';
 import { ContentAgentModule } from './modules/content-agent/content-agent.module';
 import { StoreModule } from './modules/store/store.module';
+import { SalesAgentModule } from './modules/sales-agent/sales-agent.module';
 
 @Module({
   imports: [
@@ -97,6 +98,7 @@ import { StoreModule } from './modules/store/store.module';
     KieVideoModelsModule,
     ContentAgentModule,
     StoreModule,
+    SalesAgentModule,
   ],
   providers: [{ provide: APP_FILTER, useClass: AllExceptionsFilter }],
 })

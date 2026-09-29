@@ -1,6 +1,18 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
+import type { OrderStatus } from '@prisma/client';
 import { JwtGuard } from '../../common/guards/jwt.guard';
-import { CurrentUser, JwtPayload } from '../../common/decorators/current-user.decorator';
+import {
+  CurrentUser,
+  JwtPayload,
+} from '../../common/decorators/current-user.decorator';
 import { StoreService } from './store.service';
 import { CreateStoreDto } from './dto/create-store.dto';
 import { CreateProductDto } from './dto/create-product.dto';
@@ -33,5 +45,33 @@ export class StoreController {
     @Body() dto: CreateProductDto,
   ) {
     return this.storeService.createProduct(user.sub, id, dto);
+  }
+
+  @Get(':id/orders')
+  listOrders(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Query('status') status?: OrderStatus,
+  ) {
+    return this.storeService.listOrders(user.sub, id, status);
+  }
+
+  @Post(':id/orders/:orderId/approve')
+  approveOrder(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('orderId') orderId: string,
+  ) {
+    return this.storeService.approveOrder(user.sub, id, orderId);
+  }
+
+  @Post(':id/orders/:orderId/reject')
+  rejectOrder(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('orderId') orderId: string,
+    @Body('reason') reason?: string,
+  ) {
+    return this.storeService.rejectOrder(user.sub, id, orderId, reason);
   }
 }
