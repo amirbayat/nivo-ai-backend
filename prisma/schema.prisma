@@ -2102,11 +2102,13 @@ model SalesConversation {
   order  Order?
 
   @@index([storeId])
+  @@index([storeId, isMutedForHuman])
   @@map("sales_conversations")
 }
 
 enum ConversationEventType {
   CUSTOMER_MESSAGE
+  SELLER_MESSAGE
   AGENT_REPLY
   TOOL_CALL
   STATE_TRANSITION

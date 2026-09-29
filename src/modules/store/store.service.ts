@@ -1,18 +1,52 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import type { OrderStatus } from '@prisma/client';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
+import * as XLSX from 'xlsx';
 import { PrismaService } from '../../prisma/prisma.service';
+import { StorageService } from '../../storage/storage.service';
+import { mimeTypeForExt } from '../../common/validators/chat-image.validator';
 import { CreateStoreDto } from './dto/create-store.dto';
 import { CreateProductDto } from './dto/create-product.dto';
+import { UpdateProductDto } from './dto/update-product.dto';
 import { fa } from '../../i18n/fa';
+
+// هدرهای پذیرفته‌شده‌ی آپلود اکسل محصول (گام ۳) — هم فارسی (چیزی که فروشنده واقعاً می‌نویسد)
+// هم انگلیسی را می‌پذیرد
+const PRODUCT_IMPORT_COLUMNS: Record<string, 'name' | 'basePrice' | 'stock'> = {
+  نام: 'name',
+  name: 'name',
+  قیمت: 'basePrice',
+  baseprice: 'basePrice',
+  price: 'basePrice',
+  موجودی: 'stock',
+  stock: 'stock',
+};
+
+function cellToString(value: unknown): string | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  return String(value).trim();
+}
+
+function cellToNumber(value: unknown): number | undefined {
+  const s = cellToString(value);
+  if (s === undefined) return undefined;
+  const n = Number(s);
+  return Number.isNaN(n) ? undefined : n;
+}
 
 @Injectable()
 export class StoreService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly storage: StorageService,
+  ) {}
 
   list(sellerId: string) {
     return this.prisma.store.findMany({
@@ -54,6 +88,109 @@ export class StoreService {
     return this.prisma.product.create({ data: { ...dto, storeId } });
   }
 
+  async listProducts(sellerId: string, storeId: string) {
+    await this.getOwned(sellerId, storeId);
+    return this.prisma.product.findMany({
+      where: { storeId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  private async getOwnedProduct(
+    sellerId: string,
+    storeId: string,
+    productId: string,
+  ) {
+    await this.getOwned(sellerId, storeId);
+    const product = await this.prisma.product.findUnique({
+      where: { id: productId },
+    });
+    if (!product || product.storeId !== storeId)
+      throw new NotFoundException(fa.store.productNotFound);
+    return product;
+  }
+
+  async updateProduct(
+    sellerId: string,
+    storeId: string,
+    productId: string,
+    dto: UpdateProductDto,
+  ) {
+    await this.getOwnedProduct(sellerId, storeId, productId);
+    return this.prisma.product.update({ where: { id: productId }, data: dto });
+  }
+
+  async deleteProduct(sellerId: string, storeId: string, productId: string) {
+    await this.getOwnedProduct(sellerId, storeId, productId);
+    await this.prisma.product.delete({ where: { id: productId } });
+    return { success: true };
+  }
+
+  // parse-and-commit (نه دو-مرحله‌ای پیش‌نمایش) — فقط محصول جدید می‌سازد، upsert نیست چون
+  // کلید طبیعی (SKU) نداریم؛ الگوی برگرفته از admin.service.ts importModels
+  async importProducts(sellerId: string, storeId: string, buffer: Buffer) {
+    await this.getOwned(sellerId, storeId);
+
+    let workbook: XLSX.WorkBook;
+    try {
+      workbook = XLSX.read(buffer, { type: 'buffer' });
+    } catch {
+      throw new BadRequestException(fa.store.excelUnreadable);
+    }
+
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
+      defval: '',
+    });
+    if (rows.length === 0) throw new BadRequestException(fa.store.excelEmpty);
+
+    const headerMap = new Map<string, 'name' | 'basePrice' | 'stock'>();
+    for (const key of Object.keys(rows[0])) {
+      const normalized =
+        PRODUCT_IMPORT_COLUMNS[key.trim()] ??
+        PRODUCT_IMPORT_COLUMNS[key.trim().toLowerCase()];
+      if (normalized) headerMap.set(key, normalized);
+    }
+    const mappedTargets = new Set(headerMap.values());
+    if (!mappedTargets.has('name') || !mappedTargets.has('basePrice')) {
+      throw new BadRequestException(fa.store.excelUnknownColumns);
+    }
+
+    let created = 0;
+    const errors: { row: number; message: string }[] = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const rowNumber = i + 2; // ردیف ۱ هدر است
+      const raw = rows[i];
+      const data: Record<string, unknown> = {};
+      for (const [key, target] of headerMap) {
+        data[target] =
+          target === 'name' ? cellToString(raw[key]) : cellToNumber(raw[key]);
+      }
+
+      const instance = plainToInstance(CreateProductDto, data);
+      const violations = await validate(instance);
+      if (violations.length > 0) {
+        const message = violations
+          .map((v) => Object.values(v.constraints ?? {}).join('، '))
+          .join(' | ');
+        errors.push({ row: rowNumber, message });
+        continue;
+      }
+
+      try {
+        await this.prisma.product.create({
+          data: { ...instance, storeId },
+        });
+        created++;
+      } catch {
+        errors.push({ row: rowNumber, message: 'خطا در ذخیره‌سازی این ردیف' });
+      }
+    }
+
+    return { created, errors };
+  }
+
   // docs/PRD-mvp-launch-plan.md گام ۱ — حداقلی، بدون UI: فروشنده باید بتواند سفارش‌های
   // در انتظار تایید را ببیند/تایید/رد کند تا حلقه‌ی سفارش با curl قابل تست باشد؛ صف کامل
   // با نمایش تصویر رسید در پنل موبایل، گام ۳ است.
@@ -65,11 +202,7 @@ export class StoreService {
     });
   }
 
-  private async getOwnedOrder(
-    sellerId: string,
-    storeId: string,
-    orderId: string,
-  ) {
+  async getOwnedOrder(sellerId: string, storeId: string, orderId: string) {
     await this.getOwned(sellerId, storeId);
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
@@ -97,6 +230,105 @@ export class StoreService {
     return this.prisma.order.update({
       where: { id: orderId },
       data: { status: 'REJECTED', rejectReason: reason },
+    });
+  }
+
+  // الگوی conversations.service.ts getImage — کلید در storage هیچ‌وقت مستقیم به فرانت داده
+  // نمی‌شود، همیشه از پشت JwtGuard+مالکیت سرو می‌شود
+  async getReceiptImage(sellerId: string, storeId: string, orderId: string) {
+    const order = await this.getOwnedOrder(sellerId, storeId, orderId);
+    if (!order.receiptImageKey)
+      throw new NotFoundException(fa.store.noReceiptImage);
+    const ext = order.receiptImageKey.split('.').pop() ?? '';
+    const buffer = await this.storage.downloadImage(order.receiptImageKey);
+    return { buffer, mimeType: mimeTypeForExt(ext) };
+  }
+
+  async listNeededAttention(sellerId: string, storeId: string) {
+    await this.getOwned(sellerId, storeId);
+    const conversations = await this.prisma.salesConversation.findMany({
+      where: { storeId, isMutedForHuman: true },
+      orderBy: { updatedAt: 'desc' },
+      include: { customer: true },
+    });
+    return conversations.map((c) => ({
+      id: c.id,
+      customerLabel: c.customer.phone ?? c.customer.fullName ?? 'مشتری ناشناس',
+      currentState: c.currentState,
+      updatedAt: c.updatedAt,
+    }));
+  }
+
+  async getOwnedConversation(
+    sellerId: string,
+    storeId: string,
+    conversationId: string,
+  ) {
+    await this.getOwned(sellerId, storeId);
+    const conversation = await this.prisma.salesConversation.findUnique({
+      where: { id: conversationId },
+      include: { customer: true },
+    });
+    if (!conversation || conversation.storeId !== storeId)
+      throw new NotFoundException(fa.salesAgent.conversationNotFound);
+    return conversation;
+  }
+
+  async getConversation(
+    sellerId: string,
+    storeId: string,
+    conversationId: string,
+  ) {
+    const conversation = await this.getOwnedConversation(
+      sellerId,
+      storeId,
+      conversationId,
+    );
+    const events = await this.prisma.conversationEvent.findMany({
+      where: { conversationId },
+      orderBy: { createdAt: 'asc' },
+      take: 50,
+    });
+    return {
+      id: conversation.id,
+      isMutedForHuman: conversation.isMutedForHuman,
+      currentState: conversation.currentState,
+      customerLabel:
+        conversation.customer.phone ??
+        conversation.customer.fullName ??
+        'مشتری ناشناس',
+      events,
+    };
+  }
+
+  async sendSellerMessage(
+    sellerId: string,
+    storeId: string,
+    conversationId: string,
+    text: string,
+  ) {
+    await this.getOwnedConversation(sellerId, storeId, conversationId);
+    return this.prisma.conversationEvent.create({
+      data: { conversationId, type: 'SELLER_MESSAGE', payload: { text } },
+    });
+  }
+
+  // «برگردون به ربات» — دستی، هیچ‌جا خودکار ریست نمی‌شود؛ currentState هم به BROWSING
+  // برمی‌گردد چون دیسپچ موتور مکالمه (doUpdateCart و مشابه) فقط BROWSING/CART_REVIEW را
+  // قبول می‌کند و سبد داخل contextData همچنان دست‌نخورده می‌ماند
+  async unmuteConversation(
+    sellerId: string,
+    storeId: string,
+    conversationId: string,
+  ) {
+    await this.getOwnedConversation(sellerId, storeId, conversationId);
+    return this.prisma.salesConversation.update({
+      where: { id: conversationId },
+      data: {
+        isMutedForHuman: false,
+        currentState: 'BROWSING',
+        clarifyAttempts: 0,
+      },
     });
   }
 }

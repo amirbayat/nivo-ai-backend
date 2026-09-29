@@ -61,6 +61,20 @@ export class SalesAgentService {
     message: string,
   ) {
     const conversation = await this.loadOwned(conversationId, sessionToken);
+
+    // مکالمه‌ای که به انسان سپرده شده دیگر نباید از NLU/موتور مکالمه رد شود — فقط پیام
+    // مشتری لاگ می‌شود تا فروشنده در تب «نیاز به توجه» ببیندش (خودش جواب می‌دهد)
+    if (conversation.isMutedForHuman) {
+      await this.prisma.conversationEvent.create({
+        data: {
+          conversationId: conversation.id,
+          type: 'CUSTOMER_MESSAGE',
+          payload: { text: message },
+        },
+      });
+      return { reply: '', uiBlocks: [], state: conversation.currentState };
+    }
+
     return this.engine.handleMessage(conversation, message);
   }
 
@@ -90,6 +104,10 @@ export class SalesAgentService {
       orderBy: { createdAt: 'asc' },
       take: 50,
     });
-    return { state: conversation.currentState, storeName: conversation.store.name, events };
+    return {
+      state: conversation.currentState,
+      storeName: conversation.store.name,
+      events,
+    };
   }
 }
