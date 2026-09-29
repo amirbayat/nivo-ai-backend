@@ -12,6 +12,7 @@ import { AsrService } from '../../common/services/asr.service';
 import { AiProviderService } from '../../common/services/ai-provider.service';
 import { ConversationEngineService } from './conversation-engine.service';
 import { pickVariant } from './model-variants';
+import { buildAsrVocabHint } from './asr-vocab-hint';
 import { fa } from '../../i18n/fa';
 import type { SendMessageDto } from './dto/send-message.dto';
 import type { EngineResult } from './sales-agent.types';
@@ -182,10 +183,20 @@ export class SalesAgentService {
 
     const ext = file.originalname.split('.').pop() || 'webm';
     const mp3Buffer = await this.mediaTranscode.extractAudio(file.buffer, ext);
+    const products = await this.prisma.product.findMany({
+      where: { storeId: conversation.storeId },
+      select: { name: true },
+      take: 8,
+    });
+    const vocabHint = buildAsrVocabHint(
+      conversation.store.name,
+      products.map((p) => p.name),
+    );
     const transcript = await this.asr.transcribeWithFallback(
       mp3Buffer,
       this.aiProvider.sharedApiKey,
       'fa',
+      vocabHint,
     );
     const result = await this.engine.handleMessage(
       conversation,

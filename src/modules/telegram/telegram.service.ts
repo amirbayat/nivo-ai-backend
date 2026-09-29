@@ -10,6 +10,7 @@ import {
   type ConversationWithStore,
 } from '../sales-agent/conversation-engine.service';
 import { pickVariant } from '../sales-agent/model-variants';
+import { buildAsrVocabHint } from '../sales-agent/asr-vocab-hint';
 import type {
   EngineResult,
   SalesAction,
@@ -198,10 +199,20 @@ export class TelegramService {
 
     const oggBuffer = await this.downloadFile(message.voice.file_id);
     const mp3Buffer = await this.mediaTranscode.extractAudio(oggBuffer, 'ogg');
+    const products = await this.prisma.product.findMany({
+      where: { storeId: conversation.storeId },
+      select: { name: true },
+      take: 8,
+    });
+    const vocabHint = buildAsrVocabHint(
+      conversation.store.name,
+      products.map((p) => p.name),
+    );
     const transcript = await this.asr.transcribeWithFallback(
       mp3Buffer,
       this.aiProvider.sharedApiKey,
       'fa',
+      vocabHint,
     );
     if (!transcript.text.trim()) return;
 

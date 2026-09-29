@@ -34,7 +34,12 @@ interface OpenRouterTranscriptionResponse {
   language?: string;
   duration?: number;
   usage?: { seconds?: number; cost?: number };
-  words?: { word: string; start: number; end: number; speaker?: string | null }[];
+  words?: {
+    word: string;
+    start: number;
+    end: number;
+    speaker?: string | null;
+  }[];
   error?: { message?: string; code?: string | number } | string;
 }
 
@@ -70,18 +75,30 @@ export class AsrService {
     audioBuffer: Buffer,
     apiKey: string,
     language = 'fa',
+    prompt?: string,
   ): Promise<AsrTranscriptResult> {
     let lastErr: Error | null = null;
     for (const model of ASR_FALLBACK_CHAIN) {
       try {
-        return await this.transcribeWithModel(model, audioBuffer, apiKey, language);
+        return await this.transcribeWithModel(
+          model,
+          audioBuffer,
+          apiKey,
+          language,
+          prompt,
+        );
       } catch (err) {
         if (!(err instanceof AsrAvailabilityError)) throw err;
         lastErr = err;
-        this.logger.warn(`ASR model ${model} در دسترس نبود، رفتن به مدل بعدی: ${err.message}`);
+        this.logger.warn(
+          `ASR model ${model} در دسترس نبود، رفتن به مدل بعدی: ${err.message}`,
+        );
       }
     }
-    throw lastErr ?? new Error('ASR fallback chain exhausted with no error captured');
+    throw (
+      lastErr ??
+      new Error('ASR fallback chain exhausted with no error captured')
+    );
   }
 
   async transcribeWithModel(
@@ -89,6 +106,9 @@ export class AsrService {
     audioBuffer: Buffer,
     apiKey: string,
     language: string,
+    // فیدبک کاربر: غلط املایی زیاد روی خروجی واقعی — prompt استاندارد Whisper (بایاس سبک/واژگان،
+    // نه دستور) تنها اهرم موجود برای بهبود بدون عوض‌کردن مدل است؛ اختیاری و کاملاً بی‌اثر اگر خالی باشد
+    prompt?: string,
   ): Promise<AsrTranscriptResult> {
     // base64 در بدنه‌ی JSON، نه multipart/form-data — دقیقاً همان الگوی موجود frame_images در
     // video-generation.service.ts (data:...;base64,...)، هم برای یکدستی با بقیه‌ی کد، هم چون
@@ -99,6 +119,7 @@ export class AsrService {
       language,
       response_format: 'verbose_json',
       timestamp_granularities: ['word'],
+      ...(prompt ? { prompt } : {}),
     };
 
     const url = `${this.aiProvider.baseURL}/audio/transcriptions`;
@@ -111,6 +132,7 @@ export class AsrService {
       `ASR ${model} request → POST ${url} | via=${this.aiProvider.fetch ? 'proxy-fetch(undici+dispatcher)' : 'global-fetch'} | ` +
         `body: model=${model} language=${language} response_format=verbose_json timestamp_granularities=[word] ` +
         `input_audio.format=mp3 audioBytes=${audioBuffer.length} (base64Len=${body.input_audio.data.length}) | ` +
+        `prompt=${prompt ? 'yes' : 'no'} | ` +
         `extraHeaders=${JSON.stringify(Object.keys(this.aiProvider.extraHeaders ?? {}))}`,
     );
 
@@ -129,13 +151,16 @@ export class AsrService {
         signal: AbortSignal.timeout(90_000),
       });
     } catch (err) {
-      throw new AsrAvailabilityError(`ASR ${model} network error: ${(err as Error).message}`);
+      throw new AsrAvailabilityError(
+        `ASR ${model} network error: ${(err as Error).message}`,
+      );
     }
 
     const text = await res.text();
     // شناسه‌ی درخواست OpenRouter برای پیگیری بعدی با پشتیبانی‌شان (خودِ بدنه‌ی خطا چیزی
     // بیشتر از پیام عمومی ندارد، ولی این هدر ممکن است در پنل/پشتیبانی OpenRouter قابل جستجو باشد)
-    const requestId = res.headers.get('x-request-id') ?? res.headers.get('cf-ray');
+    const requestId =
+      res.headers.get('x-request-id') ?? res.headers.get('cf-ray');
 
     if (!res.ok) {
       const detail = `status=${res.status} audioBytes=${audioBuffer.length} requestId=${requestId ?? 'n/a'}: ${text.slice(0, 300)}`;
@@ -149,11 +174,16 @@ export class AsrService {
     try {
       json = JSON.parse(text);
     } catch {
-      throw new AsrAvailabilityError(`ASR ${model} returned non-JSON (status=${res.status})`);
+      throw new AsrAvailabilityError(
+        `ASR ${model} returned non-JSON (status=${res.status})`,
+      );
     }
 
     if (json.error) {
-      const message = typeof json.error === 'string' ? json.error : (json.error.message ?? text.slice(0, 300));
+      const message =
+        typeof json.error === 'string'
+          ? json.error
+          : (json.error.message ?? text.slice(0, 300));
       throw new AsrAvailabilityError(`ASR ${model} error: ${message}`);
     }
 
