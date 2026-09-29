@@ -49,6 +49,7 @@ import { KieVideoModelsModule } from './modules/kie-video-models/kie-video-model
 import { ContentAgentModule } from './modules/content-agent/content-agent.module';
 import { StoreModule } from './modules/store/store.module';
 import { SalesAgentModule } from './modules/sales-agent/sales-agent.module';
+import { TelegramModule } from './modules/telegram/telegram.module';
 
 @Module({
   imports: [
@@ -99,6 +100,7 @@ import { SalesAgentModule } from './modules/sales-agent/sales-agent.module';
     ContentAgentModule,
     StoreModule,
     SalesAgentModule,
+    TelegramModule,
   ],
   providers: [{ provide: APP_FILTER, useClass: AllExceptionsFilter }],
 })

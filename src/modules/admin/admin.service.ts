@@ -1062,6 +1062,25 @@ export class AdminService {
     return { total: rows.length, created, updated, errors };
   }
 
+  // مشترک بین getAbStats و getFailedMessages — کدام مکالمه‌ها نهایتاً به انسان سپرده شدند
+  private async getStuckConversationIds(
+    conversationIds: string[],
+  ): Promise<Set<string>> {
+    if (conversationIds.length === 0) return new Set();
+    const toolCallEvents = await this.prisma.conversationEvent.findMany({
+      where: { conversationId: { in: conversationIds }, type: 'TOOL_CALL' },
+      select: { conversationId: true, payload: true },
+    });
+    return new Set(
+      toolCallEvents
+        .filter(
+          (e) =>
+            (e.payload as { toolName?: string })?.toolName === 'AGENT_STUCK',
+        )
+        .map((e) => e.conversationId),
+    );
+  }
+
   // A/B تست مدل‌های AI ایجنت فروش (فیدبک اول پایلوت) — آمار per-variant؛ فقط JSON، بدون
   // UI جدا (طبق پلن، ساخت dashboard خارج از این دور است)
   async getAbStats() {
@@ -1073,18 +1092,8 @@ export class AdminService {
 
     const conversationIds = conversations.map((c) => c.id);
 
-    const toolCallEvents = await this.prisma.conversationEvent.findMany({
-      where: { conversationId: { in: conversationIds }, type: 'TOOL_CALL' },
-      select: { conversationId: true, payload: true },
-    });
-    const stuckConversationIds = new Set(
-      toolCallEvents
-        .filter(
-          (e) =>
-            (e.payload as { toolName?: string })?.toolName === 'AGENT_STUCK',
-        )
-        .map((e) => e.conversationId),
-    );
+    const stuckConversationIds =
+      await this.getStuckConversationIds(conversationIds);
 
     const approvedOrders = await this.prisma.order.findMany({
       where: { conversationId: { in: conversationIds }, status: 'APPROVED' },
@@ -1158,5 +1167,113 @@ export class AdminService {
         avgLatencyMs: b.aiCalls ? Math.round(b.totalLatencyMs / b.aiCalls) : 0,
       }))
       .sort((a, b) => a.variant.localeCompare(b.variant));
+  }
+
+  // ریپورت پیام‌های نافهم — دو دلیل ممکن روی AGENT_REPLY (docs/PRD-seller-knowledge-base.md
+  // بخش ۴): 'UNCLEAR' (NLU کلاً نفهمید) یا 'NO_KB_MATCH' (فهمید ولی باکس دانش جوابی نداشت).
+  // فیلتر flag در JS انجام می‌شود (نه JSON path پریزما) — طبق پلن، حجم پایلوت کم است
+  async getFailedMessages(params: {
+    storeId?: string;
+    variant?: string;
+    reason?: 'UNCLEAR' | 'NO_KB_MATCH';
+    from?: Date;
+    to?: Date;
+    page?: number;
+  }) {
+    const page = params.page && params.page > 0 ? params.page : 1;
+    const pageSize = 20;
+
+    const events = await this.prisma.conversationEvent.findMany({
+      where: {
+        type: 'AGENT_REPLY',
+        ...((params.from ?? params.to)
+          ? {
+              createdAt: {
+                ...(params.from ? { gte: params.from } : {}),
+                ...(params.to ? { lte: params.to } : {}),
+              },
+            }
+          : {}),
+      },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        conversationId: true,
+        payload: true,
+        createdAt: true,
+      },
+    });
+
+    const failed = events.filter((e) => {
+      const flag = (e.payload as { flag?: string })?.flag;
+      if (flag !== 'UNCLEAR' && flag !== 'NO_KB_MATCH') return false;
+      return params.reason ? flag === params.reason : true;
+    });
+    if (failed.length === 0) return { items: [], total: 0, page };
+
+    const conversationIds = Array.from(
+      new Set(failed.map((e) => e.conversationId)),
+    );
+    const conversations = await this.prisma.salesConversation.findMany({
+      where: { id: { in: conversationIds } },
+      select: {
+        id: true,
+        storeId: true,
+        abVariant: true,
+        store: { select: { name: true } },
+      },
+    });
+    const conversationById = new Map(conversations.map((c) => [c.id, c]));
+
+    let filtered = failed.filter((e) => conversationById.has(e.conversationId));
+    if (params.storeId) {
+      filtered = filtered.filter(
+        (e) =>
+          conversationById.get(e.conversationId)?.storeId === params.storeId,
+      );
+    }
+    if (params.variant) {
+      filtered = filtered.filter(
+        (e) =>
+          conversationById.get(e.conversationId)?.abVariant === params.variant,
+      );
+    }
+
+    const total = filtered.length;
+    const pageItems = filtered.slice((page - 1) * pageSize, page * pageSize);
+
+    const stuckConversationIds = await this.getStuckConversationIds(
+      Array.from(new Set(pageItems.map((e) => e.conversationId))),
+    );
+
+    const items = await Promise.all(
+      pageItems.map(async (e) => {
+        const prevCustomerMessage =
+          await this.prisma.conversationEvent.findFirst({
+            where: {
+              conversationId: e.conversationId,
+              type: 'CUSTOMER_MESSAGE',
+              createdAt: { lt: e.createdAt },
+            },
+            orderBy: { createdAt: 'desc' },
+            select: { payload: true },
+          });
+        const conv = conversationById.get(e.conversationId);
+        return {
+          id: e.id,
+          storeName: conv?.store.name ?? '',
+          customerMessage:
+            (prevCustomerMessage?.payload as { text?: string })?.text ?? '',
+          variant: conv?.abVariant ?? null,
+          reason:
+            (e.payload as { flag?: 'UNCLEAR' | 'NO_KB_MATCH' })?.flag ??
+            'UNCLEAR',
+          endedInHandoff: stuckConversationIds.has(e.conversationId),
+          createdAt: e.createdAt,
+        };
+      }),
+    );
+
+    return { items, total, page };
   }
 }

@@ -72,3 +72,12 @@ export type SalesAction = {
   productId?: string;
   qty?: number;
 };
+
+// docs/PRD-sales-agent-voice.md بخش ۱ — payload صف sales-agent-voice؛ در conversation-engine
+// (producer, logReply) و sales-agent-voice.processor.ts (consumer) هر دو استفاده می‌شود
+export type SalesAgentVoiceJobData = {
+  eventId: string;
+  conversationId: string;
+  text: string;
+  storeCategory: string | null;
+};

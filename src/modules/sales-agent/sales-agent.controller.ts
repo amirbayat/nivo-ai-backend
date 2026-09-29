@@ -69,6 +69,55 @@ export class SalesAgentController {
     return this.salesAgentService.getConversation(conversationId, sessionToken);
   }
 
+  // docs/PRD-sales-agent-voice.md بخش ۲.۲ — وویس ورودی مشتری از وب (ضبط با MediaRecorder)
+  @Post('chat/:conversationId/voice-message')
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: 10 * 1024 * 1024 } }),
+  )
+  submitVoiceMessage(
+    @Param('conversationId') conversationId: string,
+    @Headers('x-session-token') sessionToken: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    return this.salesAgentService.submitVoiceMessage(
+      conversationId,
+      sessionToken,
+      file,
+    );
+  }
+
+  // پول کوتاه بخش ۱.۲ — کلاینت وب فقط وقتی voiceEventId در پاسخ آمده، این را چند بار صدا می‌زند
+  @Get('chat/:conversationId/voice-status/:eventId')
+  getVoiceStatus(
+    @Param('conversationId') conversationId: string,
+    @Headers('x-session-token') sessionToken: string,
+    @Param('eventId') eventId: string,
+  ) {
+    return this.salesAgentService.getVoiceStatus(
+      conversationId,
+      sessionToken,
+      eventId,
+    );
+  }
+
+  // سرو فایل صوتی — عمومی/کلید غیرقابل‌حدس (بخش ۱.۵)، نه session-token، چون سرورهای تلگرام
+  // هم باید بتوانند مستقیم آن را fetch کنند (sendAudio با URL)
+  @SkipThrottle()
+  @Get('chat/:conversationId/voice/:key')
+  async getVoiceAudio(
+    @Param('conversationId') conversationId: string,
+    @Param('key') key: string,
+    @Res() res: Response,
+  ) {
+    const buffer = await this.salesAgentService.getVoiceAudio(
+      conversationId,
+      key,
+    );
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    res.send(buffer);
+  }
+
   // محتوای عمومی ویترین (نه خصوصی مثل رسید) — بدون auth، چون باید در <img> مرورگر مشتری
   // ناشناس هم لود شود؛ مالکیت/تعلق کلید به همین محصول/فروشگاه در سرویس چک می‌شود
   @SkipThrottle()

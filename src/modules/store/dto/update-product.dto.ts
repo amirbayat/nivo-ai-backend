@@ -17,4 +17,9 @@ export class UpdateProductDto {
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(0, { message: fa.validation.numberPositive })
   stock?: number;
+
+  @IsOptional()
+  @IsString({ message: fa.validation.required })
+  @MaxLength(2000, { message: fa.validation.stringTooLong })
+  description?: string;
 }

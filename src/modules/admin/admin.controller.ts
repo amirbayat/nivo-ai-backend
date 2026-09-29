@@ -184,4 +184,24 @@ export class AdminController {
   getSalesAgentAbStats() {
     return this.adminService.getAbStats();
   }
+
+  // ریپورت پیام‌های نافهم (flag: 'UNCLEAR') — فاز۱ داشبورد کیفیت ایجنت فروش
+  @Get('sales-agent/failed-messages')
+  getSalesAgentFailedMessages(
+    @Query('storeId') storeId?: string,
+    @Query('variant') variant?: string,
+    @Query('reason') reason?: 'UNCLEAR' | 'NO_KB_MATCH',
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('page') page?: string,
+  ) {
+    return this.adminService.getFailedMessages({
+      storeId,
+      variant,
+      reason,
+      from: from ? new Date(from) : undefined,
+      to: to ? new Date(to) : undefined,
+      page: page ? parseInt(page, 10) : undefined,
+    });
+  }
 }

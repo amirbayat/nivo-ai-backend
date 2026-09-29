@@ -16,6 +16,7 @@ import { CaptionSourceCleanupProcessor } from './processors/caption-source-clean
 import { VideoEditProcessor } from './processors/video-edit.processor';
 import { ImageModelCostEstimateProcessor } from './processors/image-model-cost-estimate.processor';
 import { VideoModelCostEstimateProcessor } from './processors/video-model-cost-estimate.processor';
+import { SalesAgentVoiceProcessor } from './processors/sales-agent-voice.processor';
 import { PrismaModule } from '../prisma/prisma.module';
 import { MessageFeedbackModule } from '../modules/message-feedback/message-feedback.module';
 import { CampaignModule } from '../modules/campaign/campaign.module';
@@ -31,6 +32,7 @@ import { KieProviderModule } from '../common/services/kie-provider.module';
 import { OpenRouterVideoProviderModule } from '../common/services/openrouter-video-provider.module';
 import { VeoProviderModule } from '../common/services/veo-provider.module';
 import { RunwayProviderModule } from '../common/services/runway-provider.module';
+import { TelegramModule } from '../modules/telegram/telegram.module';
 
 @Module({
   imports: [
@@ -71,6 +73,8 @@ import { RunwayProviderModule } from '../common/services/runway-provider.module'
     // docs/PRD-image-gen-usd-estimate.md — daily job stores provider USD per image model
     BullModule.registerQueue({ name: 'image-model-cost-estimate' }),
     BullModule.registerQueue({ name: 'video-model-cost-estimate' }),
+    // docs/PRD-sales-agent-voice.md — تولیدکننده در sales-agent.module.ts
+    BullModule.registerQueue({ name: 'sales-agent-voice' }),
     PrismaModule,
     MessageFeedbackModule,
     CampaignModule,
@@ -86,6 +90,7 @@ import { RunwayProviderModule } from '../common/services/runway-provider.module'
     VeoProviderModule,
     RunwayProviderModule,
     CreditsModule,
+    TelegramModule,
   ],
   providers: [
     QueueService,
@@ -103,6 +108,7 @@ import { RunwayProviderModule } from '../common/services/runway-provider.module'
     VideoEditProcessor,
     ImageModelCostEstimateProcessor,
     VideoModelCostEstimateProcessor,
+    SalesAgentVoiceProcessor,
   ],
 })
 export class QueueModule {}

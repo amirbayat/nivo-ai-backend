@@ -1,21 +1,26 @@
 import { Injectable } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bull';
+import type { Queue } from 'bull';
 import { generateObject, generateText } from 'ai';
 import { z } from 'zod';
 import type { ConversationState, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AiProviderService } from '../../common/services/ai-provider.service';
+import { StoreKbService } from '../store/store-kb.service';
 import { fa } from '../../i18n/fa';
 import { defaultModel, resolveModel } from './model-variants';
+import { toneForCategory } from './tone-by-category';
 import type {
   CartItem,
   ConversationContext,
   EngineResult,
   ParsedIntent,
   SalesAction,
+  SalesAgentVoiceJobData,
   UiBlock,
 } from './sales-agent.types';
 
-type ConversationWithStore = Prisma.SalesConversationGetPayload<{
+export type ConversationWithStore = Prisma.SalesConversationGetPayload<{
   include: { store: true };
 }>;
 
@@ -34,11 +39,19 @@ type ProductLike = {
 // داده می‌شدند
 const HANDOFF_CLARIFY_THRESHOLD = 4;
 
+// docs/PRD-sales-agent-voice.md بخش ۱.۳/۳ — آستانه‌ی طول پاسخ برای تولید وویس + سقف تعداد
+// وویس به‌ازای هر مکالمه (جلوی مکالمه‌ای که هر پاسخش وویس می‌گیرد)
+const VOICE_MIN_REPLY_CHARS = 200;
+const VOICE_MAX_PER_CONVERSATION = 10;
+
 @Injectable()
 export class ConversationEngineService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly aiProvider: AiProviderService,
+    private readonly storeKb: StoreKbService,
+    @InjectQueue('sales-agent-voice')
+    private readonly voiceQueue: Queue<SalesAgentVoiceJobData>,
   ) {}
 
   private getContext(conversation: ConversationWithStore): ConversationContext {
@@ -175,12 +188,18 @@ intent های ممکن:
     }
   }
 
-  private async callCaption(facts: string, model: string): Promise<string> {
+  private async callCaption(
+    facts: string,
+    model: string,
+    category: string | null,
+  ): Promise<string> {
+    const tone = toneForCategory(category);
     const { text } = await generateText({
       model: this.aiProvider.buildClient()(model),
       system: `تو دستیار فروش یک فروشگاه در دایرکت اینستاگرام هستی. فقط و فقط از «واقعیت‌های»
 داده‌شده یک پیام فارسی کوتاه (حداکثر ۲-۳ جمله)، دوستانه و محاوره‌ای بساز — هیچ عدد/اسم/شماره‌ی
-تازه‌ای که در واقعیت‌ها نیامده اضافه نکن، و پیشنهاد بعدی اختراع نکن.`,
+تازه‌ای که در واقعیت‌ها نیامده اضافه نکن، و پیشنهاد بعدی اختراع نکن.
+لحن نوشتار باید ${tone} باشد.`,
       prompt: facts,
       temperature: 0.3,
     });
@@ -195,9 +214,10 @@ intent های ممکن:
     conversation: ConversationWithStore,
   ): Promise<string> {
     const primaryModel = resolveModel(conversation.abVariant);
+    const category = conversation.store.category;
     const started = Date.now();
     try {
-      const text = await this.callCaption(facts, primaryModel);
+      const text = await this.callCaption(facts, primaryModel, category);
       await this.logAiCall(conversation, 'CAPTION', true, Date.now() - started);
       return text;
     } catch {
@@ -210,7 +230,7 @@ intent های ممکن:
       if (primaryModel === defaultModel()) return facts;
       const fallbackStarted = Date.now();
       try {
-        const text = await this.callCaption(facts, defaultModel());
+        const text = await this.callCaption(facts, defaultModel(), category);
         await this.logAiCall(
           conversation,
           'CAPTION',
@@ -287,7 +307,7 @@ intent های ممکن:
       case 'CANCEL':
         return this.doCancel(conversation);
       case 'ASK_FAQ':
-        return this.doFaq(conversation);
+        return this.doFaq(conversation, text);
       default:
         return this.doClarifyUnclear(conversation);
     }
@@ -379,6 +399,14 @@ intent های ممکن:
     const finalReply = `${fa.salesAgent.firstGreeting(conversation.store.name)}\n\n${reply}`;
     await this.logReply(conversation, finalReply, uiBlock);
     return { reply: finalReply, uiBlocks: [uiBlock], state: nextState };
+  }
+
+  // برای /start تلگرام (docs/PRD-telegram-bot-channel.md بخش ۴.۱) — همان مسیر BROWSE بدون
+  // NLU، دقیقاً معادل اولین پیام «محصولات رو نشون بده» یک مکالمه‌ی تازه
+  async startBrowse(
+    conversation: ConversationWithStore,
+  ): Promise<EngineResult> {
+    return this.doBrowse(conversation, { intent: 'BROWSE' });
   }
 
   private async doBrowse(
@@ -627,17 +655,35 @@ intent های ممکن:
   }
 
   // getStoreFaqAnswer فعلاً stub است (طبق ساده‌سازی پلن گام ۱) — بدون FaqEntry واقعی
+  // باکس دانش فروشگاه (docs/PRD-seller-knowledge-base.md بخش ۴) — اگر جواب واقعی پیدا شد،
+  // caption() آن را با لحن فروشگاه بازنویسی می‌کند؛ اگر نه، همان stub قبلی + flag برای
+  // ریپورت ادمین (تفکیک «کلاً نامفهوم» از «فهمیده شد ولی KB جوابی نداشت»)
   private async doFaq(
     conversation: ConversationWithStore,
+    question: string,
   ): Promise<EngineResult> {
+    const match = await this.storeKb.retrieveRelevant(
+      conversation.storeId,
+      question,
+    );
+    if (match) {
+      const reply = await this.caption(
+        `سؤال مشتری: ${match.question}\nجواب واقعی: ${match.answer}`,
+        conversation,
+      );
+      await this.logReply(conversation, reply, { type: 'NONE' });
+      return { reply, uiBlocks: [], state: conversation.currentState };
+    }
+
     const reply = await this.caption(fa.salesAgent.faqStub, conversation);
-    await this.logReply(conversation, reply, { type: 'NONE' });
+    await this.logReply(conversation, reply, { type: 'NONE' }, 'NO_KB_MATCH');
     return { reply, uiBlocks: [], state: conversation.currentState };
   }
 
   private async doClarify(
     conversation: ConversationWithStore,
     hint: string,
+    flag?: 'UNCLEAR',
   ): Promise<EngineResult> {
     const attempts = conversation.clarifyAttempts + 1;
     if (attempts >= HANDOFF_CLARIFY_THRESHOLD) {
@@ -647,7 +693,7 @@ intent های ممکن:
       where: { id: conversation.id },
       data: { clarifyAttempts: attempts },
     });
-    await this.logReply(conversation, hint, { type: 'NONE' });
+    await this.logReply(conversation, hint, { type: 'NONE' }, flag);
     return { reply: hint, uiBlocks: [], state: conversation.currentState };
   }
 
@@ -662,7 +708,7 @@ intent های ممکن:
     const hint = names.length
       ? fa.salesAgent.didNotUnderstandWithHint(names)
       : fa.salesAgent.didNotUnderstand;
-    return this.doClarify(conversation, hint);
+    return this.doClarify(conversation, hint, 'UNCLEAR');
   }
 
   private async resetClarifyAttempts(conversation: ConversationWithStore) {
@@ -734,13 +780,47 @@ intent های ممکن:
     conversation: ConversationWithStore,
     text: string,
     uiBlock: UiBlock,
+    flag?: 'UNCLEAR' | 'NO_KB_MATCH',
   ) {
-    await this.prisma.conversationEvent.create({
+    const wantsVoice =
+      text.length > VOICE_MIN_REPLY_CHARS &&
+      (await this.reserveVoiceSlot(conversation.id));
+
+    const payload: Prisma.InputJsonObject = {
+      text,
+      uiBlock,
+      ...(flag ? { flag } : {}),
+      ...(wantsVoice ? { voicePending: true } : {}),
+    };
+
+    const event = await this.prisma.conversationEvent.create({
       data: {
         conversationId: conversation.id,
         type: 'AGENT_REPLY',
-        payload: { text, uiBlock },
+        payload,
       },
     });
+
+    if (wantsVoice) {
+      await this.voiceQueue.add('generate', {
+        eventId: event.id,
+        conversationId: conversation.id,
+        text,
+        storeCategory: conversation.store.category,
+      });
+    }
+  }
+
+  // افزایش اتمیک با شرط سقف — دو پاسخ هم‌زمان نمی‌توانند هردو از سقف رد شوند (طبق پلن،
+  // updateMany شرطی همان الگوی atomic increment رایج در Postgres/Prisma)
+  private async reserveVoiceSlot(conversationId: string): Promise<boolean> {
+    const result = await this.prisma.salesConversation.updateMany({
+      where: {
+        id: conversationId,
+        voiceGenerationCount: { lt: VOICE_MAX_PER_CONVERSATION },
+      },
+      data: { voiceGenerationCount: { increment: 1 } },
+    });
+    return result.count > 0;
   }
 }

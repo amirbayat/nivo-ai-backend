@@ -40,6 +40,18 @@ class EnvironmentVariables {
   // X-Relay-Secret به هر درخواست اضافه می‌شود تا relay فقط به بک‌اند خودمان جواب بدهد.
   @IsOptional() @IsString() OPENROUTER_RELAY_SECRET?: string;
 
+  // docs/PRD-telegram-bot-channel.md — بات مشترک تلگرام (فاز۲ multichannel). عمداً اختیاری:
+  // قبل از ساخت بات واقعی با BotFather، بدون این‌ها فقط وبهوک تلگرام رد می‌شود (verifySecret
+  // false)، بقیه‌ی بک‌اند بی‌اثر از این نیست.
+  @IsOptional() @IsString() TELEGRAM_BOT_TOKEN?: string;
+  @IsOptional() @IsString() TELEGRAM_WEBHOOK_SECRET?: string;
+
+  // docs/PRD-sales-agent-voice.md بخش ۱.۱ — مدل TTS روی Kie.ai (زیرساخت KieProviderService
+  // موجود، همان relay). ⚠️ اسلاگ مدل هنوز از طریق کنسول/داک واقعی Kie.ai تأیید نشده (تحقیق وب
+  // چند نتیجه‌ی متناقض داد) — قبل از استفاده‌ی واقعی در پروداکشن حتماً از داشبورد Kie.ai چک شود؛
+  // مقدار پیش‌فرض اینجا صرفاً یک best-guess است، نه فکت تاییدشده.
+  @IsOptional() @IsString() KIE_TTS_MODEL_SLUG?: string;
+
   // docs/PRD-liara-usage-reconciliation.md — رصد مصرف واقعی هر کاربر با کلید اختصاصی روی لیارا.
   // عمداً اختیاری: بدون این‌ها provisioning fail می‌شود و chat بی‌صدا روی LIARA_API_KEY مشترک
   // fallback می‌کند — دیپلوی فعلی بدون ست‌کردنشان نباید بشکند.

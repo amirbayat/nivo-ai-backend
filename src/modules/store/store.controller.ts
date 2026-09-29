@@ -23,17 +23,24 @@ import {
   CurrentUser,
   JwtPayload,
 } from '../../common/decorators/current-user.decorator';
+import type { StoreKbKind } from '@prisma/client';
 import { StoreService } from './store.service';
+import { StoreKbService } from './store-kb.service';
 import { CreateStoreDto } from './dto/create-store.dto';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
+import { CreateKbEntryDto } from './dto/create-kb-entry.dto';
+import { UpdateKbEntryDto } from './dto/update-kb-entry.dto';
 import { fa } from '../../i18n/fa';
 
 // docs/PRD-mvp-launch-plan.md گام ۰ — ثبت‌نام فروشنده و ساخت فروشگاه
 @Controller('v2/stores')
 @UseGuards(JwtGuard)
 export class StoreController {
-  constructor(private readonly storeService: StoreService) {}
+  constructor(
+    private readonly storeService: StoreService,
+    private readonly storeKbService: StoreKbService,
+  ) {}
 
   @Get('me')
   listMine(@CurrentUser() user: JwtPayload) {
@@ -215,5 +222,67 @@ export class StoreController {
     @Param('conversationId') conversationId: string,
   ) {
     return this.storeService.unmuteConversation(user.sub, id, conversationId);
+  }
+
+  // دستیار تکمیل محصول با AI (docs/PRD-seller-knowledge-base.md بخش ۲)
+  @Post(':id/products/:productId/ai-complete')
+  completeProductInfo(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('productId') productId: string,
+  ) {
+    return this.storeKbService.completeProductInfo(user.sub, id, productId);
+  }
+
+  // باکس دانش فروشگاه (بخش ۳)
+  @Get(':id/knowledge')
+  listKb(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Query('kind') kind?: StoreKbKind,
+  ) {
+    return this.storeKbService.list(user.sub, id, kind);
+  }
+
+  @Post(':id/knowledge')
+  createKb(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: CreateKbEntryDto,
+  ) {
+    return this.storeKbService.create(user.sub, id, dto);
+  }
+
+  @Patch(':id/knowledge/:entryId')
+  updateKb(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('entryId') entryId: string,
+    @Body() dto: UpdateKbEntryDto,
+  ) {
+    return this.storeKbService.update(user.sub, id, entryId, dto);
+  }
+
+  @Delete(':id/knowledge/:entryId')
+  removeKb(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('entryId') entryId: string,
+  ) {
+    return this.storeKbService.remove(user.sub, id, entryId);
+  }
+
+  // آپلود فایل → استخراج کاندیدها (ذخیره نمی‌شود — فروشنده باید هرکدام را تأیید کند، بخش ۳.۳)
+  @Post(':id/knowledge/extract-file')
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: 5 * 1024 * 1024 } }),
+  )
+  extractKbFile(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException(fa.store.noFileUploaded);
+    return this.storeKbService.extractCandidatesFromFile(user.sub, id, file);
   }
 }

@@ -921,16 +921,16 @@ model AiModel {
   // طریق /chat/completions قابل‌فراخوانی نیستند (has_chat_completions=false در کاتالوگ زنده‌ی
   // OpenRouter) و باید از endpoint اختصاصی POST /images صدا زده شوند. true یعنی این مسیر دوم
   // استفاده شود؛ false (پیش‌فرض) یعنی رفتار فعلی (/chat/completions با modalities) حفظ شود.
-  imageGenUseDirectApi Boolean @default(false)
+  imageGenUseDirectApi        Boolean @default(false)
   // بعضی مدل‌های مسیر /images (مثل Recraft style-transfer variants) اصلاً بدون عکس ورودی کار
   // نمی‌کنند — تولید «از صفر» با این مدل‌ها با یک ارور خام provider رد می‌شود (مثلاً Recraft:
   // "input_references: must have between 1 and 10 items"). true یعنی قبل از فراخوانی provider
   // چک شود که حداقل یک عکس ورودی داده شده، وگرنه یک خطای فارسی روشن به کاربر برگردد
-  imageGenRequiresInputImage Boolean @default(false)
+  imageGenRequiresInputImage  Boolean @default(false)
   // Provider USD per image. Written only by image-model-cost-estimate.processor.ts.
   // Catalog converts this to نیوو at read time (live FX + IMAGE markup + tomanPerCredit).
   // null = not enough data yet. Display-only — never used as a preflight gate.
-  estimatedImageGenCostUsd Float?
+  estimatedImageGenCostUsd    Float?
   // Legacy job-written credits. Job no longer writes this; catalog derives credits from USD.
   // Keep until a later migration drops the column. Do not read for display.
   estimatedImageGenCreditCost Float?
@@ -1129,8 +1129,8 @@ model ChatConfig {
   maxFileSizeMb     Int @default(10)
   maxExtractedChars Int @default(80000)
   // docs/PRD-chat-input-modalities-and-web-search.md — native video/audio on chat completions
-  maxVideoSizeMb Int @default(12)
-  maxAudioSizeMb Int @default(10)
+  maxVideoSizeMb    Int @default(12)
+  maxAudioSizeMb    Int @default(10)
 
   updatedAt DateTime @updatedAt
 
@@ -2034,6 +2034,7 @@ model Store {
   customers     Customer[]
   conversations SalesConversation[]
   orders        Order[]
+  kbEntries     StoreKbEntry[]
 
   @@index([sellerId])
   @@map("stores")
@@ -2045,33 +2046,80 @@ enum StoreStatus {
 }
 
 model Product {
-  id        String   @id @default(uuid())
-  storeId   String
-  store     Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  name      String
-  basePrice Int // تومان
-  stock     Int      @default(0)
-  images    String[] @default([]) // فاز بعد (پنل فروشنده) پر می‌شود — در ویزارد ثبت‌نام خالی می‌ماند
-  createdAt DateTime @default(now())
+  id          String   @id @default(uuid())
+  storeId     String
+  store       Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  name        String
+  basePrice   Int // تومان
+  stock       Int      @default(0)
+  images      String[] @default([]) // فاز بعد (پنل فروشنده) پر می‌شود — در ویزارد ثبت‌نام خالی می‌ماند
+  // دستیار تکمیل محصول با AI (docs/PRD-seller-knowledge-base.md بخش ۱.۱) — قبلاً اصلاً وجود نداشت
+  description String?  @db.Text
+  createdAt   DateTime @default(now())
+
+  kbEntries StoreKbEntry[]
 
   @@index([storeId])
   @@map("products")
 }
 
+// باکس دانش فروشگاه، چندمستأجری (docs/PRD-seller-knowledge-base.md بخش ۱.۲) — عمداً جدا از
+// SalesKbEntry موجود (که singleton و مخصوص ویجت فروش خودِ nivoai.ir است، نه فروشگاه‌های
+// چندمستأجر این ایجنت)
+enum StoreKbKind {
+  FAQ
+  POLICY
+  PRODUCT_INFO
+  GENERAL
+}
+
+model StoreKbEntry {
+  id               String      @id @default(uuid())
+  storeId          String
+  store            Store       @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  kind             StoreKbKind @default(FAQ)
+  relatedProductId String?
+  relatedProduct   Product?    @relation(fields: [relatedProductId], references: [id], onDelete: SetNull)
+  question         String
+  answer           String      @db.Text
+  tags             Json        @default("[]")
+  sourceFileKey    String?
+  embedding        Json?
+  embeddingModel   String?
+  isActive         Boolean     @default(true)
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  @@index([storeId, isActive])
+  @@map("store_kb_entries")
+}
+
 // docs/PRD-mvp-launch-plan.md بخش ۳ (گام ۱) — هسته‌ی بدون UI موتور مکالمه‌ی فروش.
 // Customer عمداً User نیست (طبق بخش ۲.۱ سند: «مشتری ناشناس/فرصت‌طلبانه، نه User») — هویتش
-// فقط sessionToken است، نه شماره‌موبایل تأییدشده؛ phone اختیاری و فقط برای نمایش/تماس بعدی است.
+// فقط sessionToken/telegramChatId است، نه شماره‌موبایل تأییدشده؛ phone اختیاری و فقط برای
+// نمایش/تماس بعدی است.
+// docs/PRD-telegram-bot-channel.md بخش ۲ — تعمیم چند-کاناله. یکتایی‌ها عمداً ترکیبی
+// (per-store) شدند نه سراسری: یک telegramChatId می‌تواند از چند فروشگاه مختلف خرید کند
+enum CustomerChannel {
+  WEB
+  TELEGRAM
+}
+
 model Customer {
-  id           String   @id @default(uuid())
-  storeId      String
-  store        Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  sessionToken String   @unique
-  phone        String?
-  fullName     String?
-  createdAt    DateTime @default(now())
+  id             String          @id @default(uuid())
+  storeId        String
+  store          Store           @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  channel        CustomerChannel @default(WEB)
+  sessionToken   String? // فقط WEB
+  telegramChatId String? // فقط TELEGRAM
+  phone          String?
+  fullName       String?
+  createdAt      DateTime        @default(now())
 
   salesConversation SalesConversation?
 
+  @@unique([storeId, sessionToken])
+  @@unique([storeId, telegramChatId])
   @@index([storeId])
   @@map("customers")
 }
@@ -2092,20 +2140,23 @@ enum ConversationState {
 // اصلی نیوو (بالای همین فایل) گرفته شده و جدول `conversations` را دارد؛ این‌جا کاملاً یک
 // دامنه‌ی جدا (مکالمه‌ی خرید مشتری ناشناس با یک فروشگاه) است.
 model SalesConversation {
-  id              String            @id @default(uuid())
-  storeId         String
-  store           Store             @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  customerId      String            @unique
-  customer        Customer          @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  currentState    ConversationState @default(GREETING)
-  contextData     Json              @default("{}") // { cart: [{productId, name, unitPrice, qty}] }
-  isMutedForHuman Boolean           @default(false)
-  clarifyAttempts Int               @default(0)
+  id                   String            @id @default(uuid())
+  storeId              String
+  store                Store             @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  customerId           String            @unique
+  customer             Customer          @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  currentState         ConversationState @default(GREETING)
+  contextData          Json              @default("{}") // { cart: [{productId, name, unitPrice, qty}] }
+  isMutedForHuman      Boolean           @default(false)
+  clarifyAttempts      Int               @default(0)
   // A/B تست مدل‌های AI (فیدبک اول پایلوت) — یک‌بار در startChat تصادفی تعیین می‌شود و تا
   // آخر عمر مکالمه ثابت می‌ماند (کلید MODEL_VARIANTS، نه خودِ اسم مدل OpenRouter)
-  abVariant       String?
-  createdAt       DateTime          @default(now())
-  updatedAt       DateTime          @updatedAt
+  abVariant            String?
+  // docs/PRD-sales-agent-voice.md بخش ۳ — سقف تعداد وویس تولیدشده به‌ازای این مکالمه (جلوی
+  // مکالمه‌ای که هر پاسخش وویس می‌گیرد)؛ افزایش اتمیک در logReply با updateMany شرطی
+  voiceGenerationCount Int               @default(0)
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
 
   events ConversationEvent[]
   order  Order?

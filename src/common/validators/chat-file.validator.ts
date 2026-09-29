@@ -51,26 +51,26 @@ export function mimeTypeForFileExt(ext: string): string {
   return EXT_MIME_TYPES[ext.toLowerCase()] ?? 'text/plain';
 }
 
-function extOf(filename: string): string {
+export function extOf(filename: string): string {
   const dot = filename.lastIndexOf('.');
   return dot === -1 ? '' : filename.slice(dot + 1).toLowerCase();
 }
 
-function isPdf(buffer: Buffer): boolean {
+export function isPdf(buffer: Buffer): boolean {
   return buffer.subarray(0, 5).toString('ascii') === '%PDF-';
 }
 
 // DOCX و XLSX هر دو ZIP هستند (Office Open XML) — همین چک به‌تنهایی جلوی «هر فایل دلخواه با
 // پسوند تغییریافته» را می‌گیرد؛ باز کردن کامل جدول مرکزی ZIP برای تشخیص دقیق‌تر word/ در برابر
 // xl/ برای این راند لازم نیست (همان سطح اعتماد chat-image.validator.ts به magic bytes ساده)
-function isZip(buffer: Buffer): boolean {
+export function isZip(buffer: Buffer): boolean {
   return buffer.subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
 }
 
 // هیچ magic bytes ذاتی‌ای برای متن ساده وجود ندارد — فقط چک می‌کنیم واقعاً UTF-8 معتبر است
 // (نه یک باینری دلخواه که کسی پسوندش را به .txt عوض کرده)؛ کاراکتر replacement (U+FFFD) یعنی
 // دیکد شکست خورده
-function isValidUtf8Text(buffer: Buffer): boolean {
+export function isValidUtf8Text(buffer: Buffer): boolean {
   if (buffer.length === 0) return false;
   const text = buffer.toString('utf-8');
   if (text.includes('�')) return false;
@@ -83,6 +83,28 @@ function isValidUtf8Text(buffer: Buffer): boolean {
     if (code <= 8 || (code >= 14 && code <= 31)) return false;
   }
   return true;
+}
+
+// برای آپلود مستقیم multer (Buffer خام، نه data URL) — باکس دانش فروشگاه
+// (docs/PRD-seller-knowledge-base.md بخش ۳.۳)، همان magic-bytes validation بالا
+export function parseUploadedKbFile(
+  buffer: Buffer,
+  filename: string,
+): ParsedChatFile | null {
+  const ext = extOf(filename);
+  if (!ext) return null;
+
+  if (ext === 'pdf')
+    return isPdf(buffer) ? { ext, kind: 'pdf', buffer, filename } : null;
+  if (ext === 'docx' || ext === 'xlsx') {
+    return isZip(buffer) ? { ext, kind: ext, buffer, filename } : null;
+  }
+  if (TEXT_EXTENSIONS.has(ext)) {
+    return isValidUtf8Text(buffer)
+      ? { ext, kind: 'text', buffer, filename }
+      : null;
+  }
+  return null;
 }
 
 export function parseChatFileDataUrl(
