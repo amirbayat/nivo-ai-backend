@@ -47,9 +47,8 @@ class EnvironmentVariables {
   @IsOptional() @IsString() TELEGRAM_WEBHOOK_SECRET?: string;
 
   // docs/PRD-sales-agent-voice.md بخش ۱.۱ — مدل TTS روی Kie.ai (زیرساخت KieProviderService
-  // موجود، همان relay). ⚠️ اسلاگ مدل هنوز از طریق کنسول/داک واقعی Kie.ai تأیید نشده (تحقیق وب
-  // چند نتیجه‌ی متناقض داد) — قبل از استفاده‌ی واقعی در پروداکشن حتماً از داشبورد Kie.ai چک شود؛
-  // مقدار پیش‌فرض اینجا صرفاً یک best-guess است، نه فکت تاییدشده.
+  // موجود، همان relay). اسلاگ توسط کاربر مستقیم از kie.ai تایید شد: google/gemini-3-8-flash-lite-tts
+  // (نسخه‌ی lite، نه نسخه‌ی کامل که سند اولیه فرض کرده بود).
   @IsOptional() @IsString() KIE_TTS_MODEL_SLUG?: string;
 
   // docs/PRD-liara-usage-reconciliation.md — رصد مصرف واقعی هر کاربر با کلید اختصاصی روی لیارا.

@@ -12,8 +12,8 @@ import type { SalesAgentVoiceJobData } from '../../modules/sales-agent/sales-age
 
 const POLL_INTERVAL_MS = 3_000;
 const MAX_POLL_ATTEMPTS = 40; // ~۲ دقیقه سقف — TTS باید خیلی سریع‌تر از رندر ویدیو باشد
-// ⚠️ اسلاگ/شکل ورودی Kie TTS تاییدنشده — رجوع کن به کامنت env.validation.ts
-const DEFAULT_TTS_MODEL_SLUG = 'gemini-3.8-flash-tts';
+// تایید شده توسط کاربر مستقیم از kie.ai — نسخه‌ی lite (نه نسخه‌ی کامل که سند اولیه فرض کرده بود)
+const DEFAULT_TTS_MODEL_SLUG = 'google/gemini-3-8-flash-lite-tts';
 
 // docs/PRD-sales-agent-voice.md بخش ۱.۲ — همان الگوی job-based کیو ویدیو (video-edit.processor.ts)
 // روی همان KieProviderService، فقط مدل/payload فرق دارد. نتیجه روی همان ConversationEvent
@@ -58,6 +58,9 @@ export class SalesAgentVoiceProcessor {
       this.config.get<string>('KIE_TTS_MODEL_SLUG') ?? DEFAULT_TTS_MODEL_SLUG;
     const tone = toneForCategory(storeCategory);
 
+    // ⚠️ اسلاگ مدل تایید شده، ولی شکل دقیق ورودی (اسم فیلدها) هنوز تایید نشده — این فقط
+    // ساده‌ترین فرض منطقی روی الگوی مدل‌های TTS مشابه است؛ اولین اجرای واقعی را با یک لاگ/تست
+    // دستی روی یک taskId واقعی چک کنید، اگر فیلدها فرق داشت فقط همین یک شیء عوض می‌شود
     const { taskId } = await this.kie.createTask(modelSlug, {
       text,
       style_prompt: `با لحن ${tone} بخون`,
