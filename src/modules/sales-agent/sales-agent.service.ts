@@ -90,6 +90,6 @@ export class SalesAgentService {
       orderBy: { createdAt: 'asc' },
       take: 50,
     });
-    return { state: conversation.currentState, events };
+    return { state: conversation.currentState, storeName: conversation.store.name, events };
   }
 }
