@@ -601,7 +601,7 @@ export class ImageGenerationService {
           ...(this.aiProvider.extraHeaders ?? {}),
         },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(120_000),
+        signal: AbortSignal.timeout(300_000),
       });
 
     let res: Awaited<ReturnType<typeof doFetch>>;
