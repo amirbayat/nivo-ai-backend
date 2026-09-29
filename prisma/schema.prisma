@@ -58,6 +58,7 @@ model User {
   captionProjects           CaptionProject[]
   videoEditJobs             VideoEditJob[]
   videoEditSessions         VideoEditSession[]
+  stores                    Store[]
 
   @@map("users")
 }
@@ -2005,4 +2006,45 @@ model VideoEditJob {
   @@index([userId])
   @@index([sessionId])
   @@map("video_edit_jobs")
+}
+
+// docs/PRD-mvp-launch-plan.md بخش ۱ — فروشگاه یک فروشنده روی ایجنت فروش دایرکت/تلگرام.
+// sellerId عمداً @unique نیست (بر خلاف Wallet/Subscription) چون یک User می‌تواند چند
+// فروشگاه بزند — دقیقاً الگوی رابطه‌ی Project (بالا)، نه Wallet.
+model Store {
+  id             String      @id @default(uuid())
+  sellerId       String
+  seller         User        @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  slug           String      @unique // بخش nivo.ai/chat/<slug> — انگلیسی، توسط خود فروشنده انتخاب می‌شود (بخش ۱.۱ سند)
+  name           String // نام فارسی فروشگاه، فقط نمایشی
+  category       String?
+  bankCardNumber String
+  bankOwnerName  String
+  status         StoreStatus @default(ACTIVE)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  products Product[]
+
+  @@index([sellerId])
+  @@map("stores")
+}
+
+enum StoreStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+model Product {
+  id        String   @id @default(uuid())
+  storeId   String
+  store     Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  name      String
+  basePrice Int // تومان
+  stock     Int      @default(0)
+  images    String[] @default([]) // فاز بعد (پنل فروشنده) پر می‌شود — در ویزارد ثبت‌نام خالی می‌ماند
+  createdAt DateTime @default(now())
+
+  @@index([storeId])
+  @@map("products")
 }
