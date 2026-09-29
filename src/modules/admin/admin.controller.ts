@@ -178,4 +178,10 @@ export class AdminController {
     }
     return this.adminService.importModels(file.buffer);
   }
+
+  // A/B تست مدل‌های AI ایجنت فروش (فیدبک اول پایلوت) — آمار per-variant
+  @Get('sales-agent/ab-stats')
+  getSalesAgentAbStats() {
+    return this.adminService.getAbStats();
+  }
 }

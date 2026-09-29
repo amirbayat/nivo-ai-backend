@@ -22,6 +22,7 @@ export type UiBlock =
         name: string;
         basePrice: number;
         stock: number;
+        images: string[];
       }[];
     }
   | { type: 'CART_SUMMARY'; items: CartItem[]; total: number }
@@ -58,4 +59,16 @@ export type EngineResult = {
   reply: string;
   uiBlocks: UiBlock[];
   state: string;
+};
+
+// دکمه‌های UiBlock (افزودن به سبد/تایید سبد) دیگر جمله‌ی فارسی نمی‌سازند تا از مسیر
+// parseIntent رد شوند — productId از خودِ دکمه معلوم است، نیازی به حدس مدل نیست
+// (فیدبک اول پایلوت: کلیک روی دکمه گاهی «نامفهوم» تشخیص داده می‌شد)
+// شکل مسطح، عیناً مثل SalesActionDto (نه یک union تفکیک‌شده‌ی سخت‌گیر) — چون همان instance
+// اعتبارسنجی‌شده‌ی DTO مستقیم به engine پاس می‌شود؛ productId فقط برای ADD_TO_CART لازم
+// است، engine.handleAction خودش نبودش را چک می‌کند
+export type SalesAction = {
+  type: 'ADD_TO_CART' | 'CONFIRM_CART';
+  productId?: string;
+  qty?: number;
 };

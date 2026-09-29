@@ -8,7 +8,9 @@ import * as crypto from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
 import { ConversationEngineService } from './conversation-engine.service';
+import { pickVariant } from './model-variants';
 import { fa } from '../../i18n/fa';
+import type { SendMessageDto } from './dto/send-message.dto';
 
 @Injectable()
 export class SalesAgentService {
@@ -18,7 +20,11 @@ export class SalesAgentService {
     private readonly storage: StorageService,
   ) {}
 
-  async startChat(slug: string) {
+  // productId اختیاری — لینک اختصاصی یک محصول (فروشنده در استوری گذاشته)؛ اگر معتبر و
+  // متعلق به همین فروشگاه باشد، اولین پاسخ مکالمه مستقیم همان محصول را نشان می‌دهد
+  // (بدون NLU) و در همین پاسخ startChat برمی‌گردد — فرانت مجبور نیست یک کیک‌آف عمومی
+  // جدا بفرستد
+  async startChat(slug: string, productId?: string) {
     const store = await this.prisma.store.findUnique({ where: { slug } });
     if (!store || store.status !== 'ACTIVE')
       throw new NotFoundException(fa.store.notFound);
@@ -28,15 +34,40 @@ export class SalesAgentService {
       data: {
         storeId: store.id,
         sessionToken,
-        salesConversation: { create: { storeId: store.id } },
+        salesConversation: {
+          create: { storeId: store.id, abVariant: pickVariant() },
+        },
       },
       include: { salesConversation: true },
     });
 
+    const conversationId = customer.salesConversation!.id;
+
+    let initial: { reply: string; uiBlocks: unknown[]; state: string } | undefined;
+    if (productId) {
+      const product = await this.prisma.product.findUnique({
+        where: { id: productId },
+      });
+      if (product && product.storeId === store.id) {
+        const conversation = await this.prisma.salesConversation.findUnique({
+          where: { id: conversationId },
+          include: { store: true },
+        });
+        initial = await this.engine.showProduct(conversation!, product);
+      }
+    }
+
     return {
-      conversationId: customer.salesConversation!.id,
+      conversationId,
       sessionToken,
       storeName: store.name,
+      ...(initial
+        ? {
+            initialReply: initial.reply,
+            initialUiBlocks: initial.uiBlocks,
+            initialState: initial.state,
+          }
+        : {}),
     };
   }
 
@@ -58,7 +89,7 @@ export class SalesAgentService {
   async sendMessage(
     conversationId: string,
     sessionToken: string,
-    message: string,
+    dto: SendMessageDto,
   ) {
     const conversation = await this.loadOwned(conversationId, sessionToken);
 
@@ -69,13 +100,17 @@ export class SalesAgentService {
         data: {
           conversationId: conversation.id,
           type: 'CUSTOMER_MESSAGE',
-          payload: { text: message },
+          payload: { text: dto.message ?? '' },
         },
       });
       return { reply: '', uiBlocks: [], state: conversation.currentState };
     }
 
-    return this.engine.handleMessage(conversation, message);
+    if (dto.action) {
+      return this.engine.handleAction(conversation, dto.action);
+    }
+    if (!dto.message) throw new BadRequestException(fa.errors.validation);
+    return this.engine.handleMessage(conversation, dto.message);
   }
 
   async submitReceipt(

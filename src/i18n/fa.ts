@@ -137,6 +137,8 @@ export const fa = {
     excelUnknownColumns:
       'فرمت ستون‌های فایل اکسل شناخته نشد — ستون‌های مورد انتظار: نام، قیمت، موجودی',
     noReceiptImage: 'برای این سفارش رسیدی ثبت نشده',
+    tooManyImages: 'هر محصول حداکثر ۴ عکس می‌تواند داشته باشد',
+    imageOnly: 'فقط فایل تصویر پذیرفته می‌شود',
   },
   salesAgent: {
     invalidSession: 'نشست معتبر نیست',
@@ -144,6 +146,14 @@ export const fa = {
     orderNotFound: 'سفارش یافت نشد',
     nothingToConfirm: 'چیزی برای تایید نیست — اول یک محصول به سبد اضافه کن',
     didNotUnderstand: 'متوجه نشدم، می‌تونی دوباره بگی چی می‌خوای؟',
+    didNotUnderstandWithHint: (productNames: string[]) =>
+      `متوجه نشدم 🙁 می‌تونی مثلاً بگی «${productNames.join('» یا «')} رو میخوام» یا از لیست بالا دکمه‌ی «افزودن به سبد» رو بزنی.`,
+    firstGreeting: (storeName: string) =>
+      `سلام! به ${storeName} خوش اومدی 👋 برای خرید فقط اسم محصول رو بگو یا از دکمه‌های پایین لیست استفاده کن.`,
+    addToCartAction: 'محصول رو به سبد اضافه کن',
+    addToCartActionNamed: (productName: string) =>
+      `${productName} رو به سبد اضافه کن`,
+    confirmCartAction: 'تایید و پرداخت',
     noProductsFound: 'محصولی با این مشخصات پیدا نکردم',
     productNotFound: 'این محصول رو پیدا نکردم، می‌تونی دوباره اسمش رو بگی؟',
     insufficientStock: 'موجودی این محصول کافی نیست',

@@ -126,6 +126,67 @@ export class StoreService {
     return { success: true };
   }
 
+  private static readonly MAX_PRODUCT_IMAGES = 4;
+
+  // آپلود عکس محصول (فیدبک اول پایلوت) — الگوی اعتبارسنجی دقیقاً مثل submitReceipt در
+  // sales-agent.service.ts (mimetype چک می‌شود، نه پسوند فایل)
+  async addProductImages(
+    sellerId: string,
+    storeId: string,
+    productId: string,
+    files: Express.Multer.File[],
+  ) {
+    const product = await this.getOwnedProduct(sellerId, storeId, productId);
+    if (
+      product.images.length + files.length >
+      StoreService.MAX_PRODUCT_IMAGES
+    ) {
+      throw new BadRequestException(fa.store.tooManyImages);
+    }
+    const keys: string[] = [];
+    for (const file of files) {
+      if (!file.mimetype.startsWith('image/')) {
+        throw new BadRequestException(fa.store.imageOnly);
+      }
+      const ext = file.mimetype.split('/')[1]?.replace('jpeg', 'jpg') ?? 'jpg';
+      keys.push(await this.storage.uploadImage(file.buffer, ext));
+    }
+    return this.prisma.product.update({
+      where: { id: productId },
+      data: { images: { push: keys } },
+    });
+  }
+
+  async removeProductImage(
+    sellerId: string,
+    storeId: string,
+    productId: string,
+    key: string,
+  ) {
+    const product = await this.getOwnedProduct(sellerId, storeId, productId);
+    const remaining = product.images.filter((k) => k !== key);
+    await this.storage.deleteObject(key).catch(() => undefined);
+    return this.prisma.product.update({
+      where: { id: productId },
+      data: { images: remaining },
+    });
+  }
+
+  // بدون چک مالکیت (سلر) — محتوای عمومی ویترین است، باید در <img> مرورگر مشتری ناشناس
+  // هم لود شود؛ بدون storeId (productId+key به‌تنهایی کافی است) — فقط چک می‌کند کلید واقعاً
+  // داخل images همین محصول است تا کلید دلخواه سرو نشود
+  async getProductImage(productId: string, key: string) {
+    const product = await this.prisma.product.findUnique({
+      where: { id: productId },
+    });
+    if (!product || !product.images.includes(key)) {
+      throw new NotFoundException(fa.store.productNotFound);
+    }
+    const ext = key.split('.').pop() ?? '';
+    const buffer = await this.storage.downloadImage(key);
+    return { buffer, mimeType: mimeTypeForExt(ext) };
+  }
+
   // parse-and-commit (نه دو-مرحله‌ای پیش‌نمایش) — فقط محصول جدید می‌سازد، upsert نیست چون
   // کلید طبیعی (SKU) نداریم؛ الگوی برگرفته از admin.service.ts importModels
   async importProducts(sellerId: string, storeId: string, buffer: Buffer) {

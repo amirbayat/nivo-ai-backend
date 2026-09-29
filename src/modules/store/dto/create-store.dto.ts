@@ -24,4 +24,21 @@ export class CreateStoreDto {
   @IsString({ message: fa.validation.required })
   @MaxLength(60, { message: fa.validation.stringTooLong })
   bankOwnerName: string;
+
+  // فیدبک اول پایلوت — اختیاری، عمداً بدون @IsUrl (فروشنده ممکن است «@nam-shop» یا
+  // «t.me/xxx» بدون https:// بنویسد؛ اعتبارسنجی سخت‌گیر فقط ورودی معتبر را رد می‌کند)
+  @IsOptional()
+  @IsString()
+  @MaxLength(200, { message: fa.validation.stringTooLong })
+  instagramUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200, { message: fa.validation.stringTooLong })
+  telegramUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200, { message: fa.validation.stringTooLong })
+  websiteUrl?: string;
 }

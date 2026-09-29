@@ -10,10 +10,11 @@ import {
   Query,
   Res,
   UploadedFile,
+  UploadedFiles,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import type { OrderStatus } from '@prisma/client';
 import { SkipThrottle } from '@nestjs/throttler';
@@ -80,6 +81,35 @@ export class StoreController {
     @Param('productId') productId: string,
   ) {
     return this.storeService.deleteProduct(user.sub, id, productId);
+  }
+
+  // فیدبک اول پایلوت — آپلود عکس محصول (حداکثر ۴ تا، هرکدام تا ۵ مگابایت)
+  @Post(':id/products/:productId/images')
+  @UseInterceptors(
+    FilesInterceptor('files', 4, { limits: { fileSize: 5 * 1024 * 1024 } }),
+  )
+  addProductImages(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('productId') productId: string,
+    @UploadedFiles() files: Express.Multer.File[],
+  ) {
+    return this.storeService.addProductImages(
+      user.sub,
+      id,
+      productId,
+      files ?? [],
+    );
+  }
+
+  @Delete(':id/products/:productId/images/:key')
+  removeProductImage(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('productId') productId: string,
+    @Param('key') key: string,
+  ) {
+    return this.storeService.removeProductImage(user.sub, id, productId, key);
   }
 
   @Post(':id/products/import')

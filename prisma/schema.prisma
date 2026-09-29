@@ -2020,6 +2020,12 @@ model Store {
   category       String?
   bankCardNumber String
   bankOwnerName  String
+  // فیدبک اول پایلوت — فروشنده می‌خواست بتواند لینک صفحه/کانالش را هم بدهد (نه ویرایش
+  // موجودی‌ها؛ فقط در ثبت‌نام اختیاری پر می‌شود). عمداً String آزاد، نه IsUrl سخت‌گیر — فروشنده
+  // ممکن است "@nam-shop" یا "t.me/xxx" بدون https:// بنویسد.
+  instagramUrl   String?
+  telegramUrl    String?
+  websiteUrl     String?
   status         StoreStatus @default(ACTIVE)
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
@@ -2095,6 +2101,9 @@ model SalesConversation {
   contextData     Json              @default("{}") // { cart: [{productId, name, unitPrice, qty}] }
   isMutedForHuman Boolean           @default(false)
   clarifyAttempts Int               @default(0)
+  // A/B تست مدل‌های AI (فیدبک اول پایلوت) — یک‌بار در startChat تصادفی تعیین می‌شود و تا
+  // آخر عمر مکالمه ثابت می‌ماند (کلید MODEL_VARIANTS، نه خودِ اسم مدل OpenRouter)
+  abVariant       String?
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 
@@ -2104,6 +2113,23 @@ model SalesConversation {
   @@index([storeId])
   @@index([storeId, isMutedForHuman])
   @@map("sales_conversations")
+}
+
+// یک ردیف به‌ازای هر فراخوانی واقعی مدل AI در موتور مکالمه (parseIntent/caption) — برای
+// آمار A/B (نرخ خرابی/fallback هر مدل، میانگین latency)؛ conversationId هیچ FK ندارد
+// (metric صرفاً آماری است، نباید با حذف مکالمه cascade/fail شود)
+model AbModelMetric {
+  id             String   @id @default(uuid())
+  conversationId String
+  variant        String
+  kind           String // 'PARSE_INTENT' | 'CAPTION'
+  success        Boolean
+  latencyMs      Int
+  createdAt      DateTime @default(now())
+
+  @@index([variant])
+  @@index([conversationId])
+  @@map("ab_model_metrics")
 }
 
 enum ConversationEventType {
