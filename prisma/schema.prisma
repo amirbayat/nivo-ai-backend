@@ -2220,6 +2220,10 @@ model SalesConversation {
   // docs/PRD-sales-agent-voice.md بخش ۳ — سقف تعداد وویس تولیدشده به‌ازای این مکالمه (جلوی
   // مکالمه‌ای که هر پاسخش وویس می‌گیرد)؛ افزایش اتمیک در logReply با updateMany شرطی
   voiceGenerationCount Int               @default(0)
+  // docs/PRD-sales-agent-voice.md بخش ۶.۱ — A/B تست جدا از abVariant (عمود متفاوت: انتخاب
+  // مدل در برابر انتخاب «وویس بفرستیم یا نه»)؛ یک‌بار در ساخت مکالمه تصادفی تعیین می‌شود.
+  // وقتی OFF است، logReply اصلاً reserveVoiceSlot را صدا نمی‌زند — این گروه هیچ وویسی نمی‌بیند.
+  voiceVariant         VoiceVariant      @default(ON)
   // docs/PRD-seller-credit-billing.md بخش «تصمیم معماری» — یک‌بار در ساخت مکالمه (startChat
   // وب / /start تلگرام) تعیین می‌شود و تا آخر عمر مکالمه ثابت می‌ماند (بر خلاف abVariant که
   // فقط انتخاب مدل است، این تعیین می‌کند اصلاً AI صدا زده شود یا نه)
@@ -2241,6 +2245,11 @@ enum BillingMode {
   FREE // در سهمیه‌ی ۱۰ خریدار جدید رایگان روزانه‌ی همین فروشگاه
   PAID // سهمیه‌ی رایگان تمام شده، از Store.creditBalanceToman کم می‌شود
   BLOCKED // هم سهمیه‌ی رایگان هم اعتبار تمام — هیچ فراخوان AI انجام نمی‌شود
+}
+
+enum VoiceVariant {
+  ON
+  OFF
 }
 
 // یک ردیف به‌ازای هر فراخوان واقعی AI (متن/وویس/ASR) + هر شارژ اعتبار — لاگ مصرف به تفکیک

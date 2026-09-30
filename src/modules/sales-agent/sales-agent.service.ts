@@ -13,7 +13,7 @@ import { AsrService } from '../../common/services/asr.service';
 import { AiProviderService } from '../../common/services/ai-provider.service';
 import { ConversationEngineService } from './conversation-engine.service';
 import { CreditService } from './credit.service';
-import { pickVariant } from './model-variants';
+import { pickVariant, pickVoiceVariant } from './model-variants';
 import { buildAsrVocabHint } from './asr-vocab-hint';
 import {
   buildHistoryEntry,
@@ -53,7 +53,12 @@ export class SalesAgentService {
         storeId: store.id,
         sessionToken,
         salesConversations: {
-          create: { storeId: store.id, abVariant: pickVariant(), billingMode },
+          create: {
+            storeId: store.id,
+            abVariant: pickVariant(),
+            voiceVariant: pickVoiceVariant(),
+            billingMode,
+          },
         },
       },
       include: { salesConversations: true },
@@ -101,6 +106,7 @@ export class SalesAgentService {
           storeId: conversation.storeId,
           customerId: conversation.customerId,
           abVariant: pickVariant(),
+          voiceVariant: pickVoiceVariant(),
           billingMode,
         },
       });

@@ -49,6 +49,26 @@ const HANDOFF_CLARIFY_THRESHOLD = 4;
 const VOICE_MIN_REPLY_CHARS = 200;
 const VOICE_MAX_PER_CONVERSATION = 10;
 
+// docs/PRD-sales-agent-voice.md بخش ۶.۲ — TTS پارامتر «حداکثر مدت» ندارد؛ با نرخ گفتار
+// فارسی ~۱۴-۱۶ کاراکتر/ثانیه، ~۴۵۰ کاراکتر تقریباً معادل ۳۰ ثانیه است (تخمین اولیه، بعد
+// از شنیدن نمونه‌ی واقعی قابل کالیبره‌شدن). متن ذخیره/نمایش‌داده‌شده کامل می‌ماند — فقط
+// متنی که برای TTS صف می‌شود کوتاه می‌شود، و نه وسط جمله.
+const VOICE_MAX_CHARS = 450;
+const SENTENCE_END_CHARS = ['.', '!', '؟', '؛'];
+
+function truncateForVoice(text: string): string {
+  if (text.length <= VOICE_MAX_CHARS) return text;
+  const window = text.slice(0, VOICE_MAX_CHARS);
+  let cutAt = -1;
+  for (const ch of SENTENCE_END_CHARS) {
+    const idx = window.lastIndexOf(ch);
+    if (idx > cutAt) cutAt = idx;
+  }
+  if (cutAt > 0) return text.slice(0, cutAt + 1);
+  const lastSpace = window.lastIndexOf(' ');
+  return lastSpace > 0 ? text.slice(0, lastSpace) : window;
+}
+
 @Injectable()
 export class ConversationEngineService {
   constructor(
@@ -1060,10 +1080,17 @@ answered=false بده (به‌جای حدس‌زدن).`,
     // برخلاف قبل، طول کوتاه/رسیدن به سقف باید از هم تفکیک شوند (نه فقط یک بولین) — بخش
     // voice.reason در AI_TRACE (docs/PRD-admin-ai-decision-trace-log.md بخش ۱) به همین نیاز دارد
     let wantsVoice = false;
-    let voiceReason: 'TOO_SHORT' | 'CONVERSATION_CAP' | undefined;
+    let voiceReason:
+      'TOO_SHORT' | 'CONVERSATION_CAP' | 'VOICE_VARIANT_OFF' | undefined;
     if (text.length > VOICE_MIN_REPLY_CHARS) {
-      wantsVoice = await this.reserveVoiceSlot(conversation.id);
-      if (!wantsVoice) voiceReason = 'CONVERSATION_CAP';
+      // docs/PRD-sales-agent-voice.md بخش ۶.۱ — گروه OFF باید واقعاً هیچ وویسی نبیند، نه
+      // فقط اینکه پخش نشود؛ پس قبل از reserveVoiceSlot چک می‌شود (سهمیه‌ی مکالمه هم دست‌نخورده می‌ماند)
+      if (conversation.voiceVariant === 'OFF') {
+        voiceReason = 'VOICE_VARIANT_OFF';
+      } else {
+        wantsVoice = await this.reserveVoiceSlot(conversation.id);
+        if (!wantsVoice) voiceReason = 'CONVERSATION_CAP';
+      }
     } else {
       voiceReason = 'TOO_SHORT';
     }
@@ -1109,7 +1136,7 @@ answered=false بده (به‌جای حدس‌زدن).`,
       await this.voiceQueue.add('generate', {
         eventId: event.id,
         conversationId: conversation.id,
-        text,
+        text: truncateForVoice(text),
         storeCategory: conversation.store.category,
         ...(traceEventId ? { traceEventId } : {}),
       });

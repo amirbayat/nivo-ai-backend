@@ -1,9 +1,10 @@
 import { PrismaService } from '../../prisma/prisma.service';
 
-// docs/PRD-sales-agent-admin-analytics.md بخش ۴ — همان محاسبه‌ی آمار A/B مدل، فقط با یک بعد
-// گروه‌بندی دیگر (کانال به‌جای مدل). مشترک بین AdminService (مقایسه‌ی cross-store، ادمین) و
-// StoreService (نسخه‌ی کوچک‌تر همین کارت در پنل خودِ فروشنده، بدون فیلتر مدل).
-export type StatsGroupBy = 'variant' | 'channel';
+// docs/PRD-sales-agent-admin-analytics.md بخش ۴ + docs/PRD-sales-agent-voice.md بخش ۶.۱ —
+// همان محاسبه‌ی آمار A/B مدل، فقط با بعد گروه‌بندی دیگر (کانال یا A/B وویس به‌جای مدل).
+// مشترک بین AdminService (مقایسه‌ی cross-store، ادمین) و StoreService (نسخه‌ی کوچک‌تر همین
+// کارت در پنل خودِ فروشنده، بدون فیلتر مدل).
+export type StatsGroupBy = 'variant' | 'channel' | 'voiceVariant';
 
 export interface ConversationStatRow {
   group: string;
@@ -61,14 +62,18 @@ export async function computeConversationStats(
     select: {
       id: true,
       abVariant: true,
+      voiceVariant: true,
       clarifyAttempts: true,
       customer: { select: { channel: true } },
     },
   });
   if (conversations.length === 0) return [];
 
-  const groupKeyOf = (c: (typeof conversations)[number]): string | null =>
-    groupBy === 'channel' ? c.customer.channel : c.abVariant;
+  const groupKeyOf = (c: (typeof conversations)[number]): string | null => {
+    if (groupBy === 'channel') return c.customer.channel;
+    if (groupBy === 'voiceVariant') return c.voiceVariant;
+    return c.abVariant;
+  };
 
   const conversationIds = conversations.map((c) => c.id);
   const groupByConversationId = new Map(
@@ -136,9 +141,9 @@ export async function computeConversationStats(
   }
   for (const m of metrics) {
     const key =
-      groupBy === 'channel'
-        ? groupByConversationId.get(m.conversationId)
-        : m.variant;
+      groupBy === 'variant'
+        ? m.variant
+        : groupByConversationId.get(m.conversationId);
     if (!key) continue;
     const b = bucket(key);
     b.aiCalls++;

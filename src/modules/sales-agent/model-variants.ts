@@ -26,6 +26,12 @@ export function pickVariant(): string {
   return VARIANT_KEYS[Math.floor(Math.random() * VARIANT_KEYS.length)];
 }
 
+// docs/PRD-sales-agent-voice.md بخش ۶.۱ — A/B تست جدا از انتخاب مدل بالا (عمود متفاوت:
+// «وویس بفرستیم یا نه»)، یک‌بار در ساخت مکالمه تصادفی (۵۰/۵۰) تعیین می‌شود.
+export function pickVoiceVariant(): 'ON' | 'OFF' {
+  return Math.random() < 0.5 ? 'ON' : 'OFF';
+}
+
 export function resolveModel(variant: string | null | undefined): string {
   return (
     (variant ? MODEL_VARIANTS[variant] : undefined) ??
