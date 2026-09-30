@@ -157,6 +157,43 @@ export class StoreService {
     });
   }
 
+  // docs/PRD-seller-knowledge-base.md بخش ۲.۵ — تصاویر پیشنهادی صفحه‌ی مبدأ، فقط بعد از
+  // تأیید صریح فروشنده دانلود و به استوریج خودمان آپلود می‌شوند (نه مستقیم لینک خارجی ذخیره
+  // شود، که با حذف/تغییر آن صفحه لینک‌های ما هم می‌شکند). یک URL ناموفق کل درخواست را
+  // نمی‌ترکاند — فقط همان یکی رد می‌شود
+  async addProductImagesFromUrl(
+    sellerId: string,
+    storeId: string,
+    productId: string,
+    urls: string[],
+  ) {
+    const product = await this.getOwnedProduct(sellerId, storeId, productId);
+    const room = StoreService.MAX_PRODUCT_IMAGES - product.images.length;
+    if (room <= 0) throw new BadRequestException(fa.store.tooManyImages);
+
+    const keys: string[] = [];
+    for (const url of urls.slice(0, room)) {
+      try {
+        const res = await fetch(url, {
+          signal: AbortSignal.timeout(10_000),
+        });
+        const contentType = res.headers.get('content-type') ?? '';
+        if (!res.ok || !contentType.startsWith('image/')) continue;
+        const buffer = Buffer.from(await res.arrayBuffer());
+        if (buffer.length > 5 * 1024 * 1024) continue;
+        const ext = contentType.split('/')[1]?.replace('jpeg', 'jpg') ?? 'jpg';
+        keys.push(await this.storage.uploadImage(buffer, ext));
+      } catch {
+        // یک URL ناموفق کل درخواست را نمی‌ترکاند — فقط همان یکی رد می‌شود
+      }
+    }
+    if (keys.length === 0) return product;
+    return this.prisma.product.update({
+      where: { id: productId },
+      data: { images: { push: keys } },
+    });
+  }
+
   async removeProductImage(
     sellerId: string,
     storeId: string,

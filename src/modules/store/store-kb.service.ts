@@ -1,4 +1,9 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { embed, cosineSimilarity, generateObject } from 'ai';
 import { z } from 'zod';
 import type { StoreKbKind } from '@prisma/client';
@@ -6,8 +11,27 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AiProviderService } from '../../common/services/ai-provider.service';
 import { extractChatFileText } from '../../common/utils/chat-file-extraction.util';
 import { parseUploadedKbFile } from '../../common/validators/chat-file.validator';
+import { fetchProductPage } from '../../common/utils/fetch-product-page.util';
 import { fa } from '../../i18n/fa';
+import { PricingService } from '../usage/pricing.service';
 import { StoreService } from './store.service';
+
+// docs/PRD-seller-knowledge-base.md بخش ۲.۳ — دقیقاً همان shape که chat.service.ts's
+// OPENROUTER_WEB_SEARCH_TOOLS استفاده می‌کند (کپی محلی، نه import — آن فایل چیزی export نمی‌کند
+// و این دو دامنه‌ی جدا هستند). engine:'auto' برای مدل‌های بدون جستجوی بومی به Exa می‌افتد،
+// پس نیازی به gate‌کردن روی AiModel.supportsWebSearch (که مخصوص محصول چت اصلی است) نیست.
+const PRODUCT_ENRICHMENT_WEB_SEARCH_TOOLS = [
+  {
+    type: 'openrouter:web_search',
+    parameters: {
+      engine: 'auto',
+      max_results: 5,
+      max_uses: 3,
+      max_total_results: 15,
+    },
+  },
+  { type: 'openrouter:datetime' },
+];
 
 // docs/PRD-seller-knowledge-base.md — تصحیح صریح: این سرویس‌ *الگوی* SalesKbService را کپی
 // می‌کند (embed + cosineSimilarity در حافظه، بدون pgvector)، ولی storeId-محور و کاملاً جدا
@@ -57,6 +81,7 @@ export class StoreKbService {
     private readonly prisma: PrismaService,
     private readonly aiProvider: AiProviderService,
     private readonly storeService: StoreService,
+    private readonly pricing: PricingService,
   ) {
     this.provider = this.aiProvider.buildClient();
   }
@@ -195,11 +220,13 @@ export class StoreKbService {
   }
 
   // دستیار تکمیل محصول با AI (بخش ۲ سند) — مدل هرگز چیزی درباره‌ی قیمت/موجودی واقعی حدس
-  // نمی‌زند، فقط description و سؤالات متنی (همان اصل امنیتی «داده‌ی واقعی، نه حدس مدل»)
+  // نمی‌زند، فقط description و سؤالات متنی (همان اصل امنیتی «داده‌ی واقعی، نه حدس مدل»).
+  // withWebSearch (بخش ۲.۳) — گران‌تر از حالت معمولی، پس از اعتبار واقعی فروشگاه کم می‌شود
   async completeProductInfo(
     sellerId: string,
     storeId: string,
     productId: string,
+    withWebSearch = false,
   ) {
     const store = await this.storeService.getOwned(sellerId, storeId);
     const product = await this.prisma.product.findUnique({
@@ -208,20 +235,45 @@ export class StoreKbService {
     if (!product || product.storeId !== storeId) {
       throw new NotFoundException(fa.store.productNotFound);
     }
+    if (withWebSearch && store.creditBalanceToman <= 0) {
+      throw new BadRequestException(fa.store.insufficientCreditForWebSearch);
+    }
 
+    const model = 'openai/gpt-5.4-mini';
     // نکته: قبلاً suggestedQuestions .min(4).max(6) بود — اگر مدل دقیقاً ۴ تا ۶ مورد
     // برنمی‌گرداند (مثلاً ۳ یا ۷ تا)، اعتبارسنجی zod توی generateObject fail می‌شد و کل
     // درخواست با خطا می‌ترکید (دقیقاً همون چیزی که فروشنده می‌دید: «تولید پیشنهاد با خطا
     // مواجه شد»). اینجا محدودیت سخت‌گیرانه را برمی‌داریم و بازه‌ی ۴-۶ را خودمان بعد از جواب
     // اعمال می‌کنیم — یک جواب کوتاه/بلندتر از حد نباید کل فیچر را بترکاند.
     try {
-      const { object } = await generateObject({
-        model: this.provider('openai/gpt-5.4-mini'),
+      const { object, usage } = await generateObject({
+        model: withWebSearch
+          ? this.aiProvider.buildClient(undefined, undefined, {
+              tools: PRODUCT_ENRICHMENT_WEB_SEARCH_TOOLS,
+              max_tool_calls: 5,
+            })(model)
+          : this.provider(model),
         schema: z.object({
           suggestedDescription: z.string(),
           suggestedQuestions: z.array(z.string()).min(1),
+          ...(withWebSearch
+            ? {
+                suggestedSpecs: z
+                  .array(z.object({ label: z.string(), value: z.string() }))
+                  .optional(),
+                sourceNote: z.string().optional(),
+              }
+            : {}),
         }),
-        system: `تو دستیار یک فروشنده‌ی فروشگاه آنلاین ایرانی هستی. برای محصول زیر یک توضیح
+        system: withWebSearch
+          ? `تو دستیار یک فروشنده‌ی فروشگاه آنلاین ایرانی هستی. نام محصول زیر را در وب جستجو کن
+و توضیح/مشخصات واقعی‌اش را پیدا کن. یک توضیح کامل‌تر و فروش‌محورتر (فارسی، ۲-۴ جمله) بنویس،
+۴ تا ۶ سؤال رایج که مشتری‌های این‌جور محصول معمولاً می‌پرسند لیست کن، و اگر مشخصات فنی واقعی
+(جنس/سایزبندی/...) پیدا کردی در suggestedSpecs بگذار. sourceNote یک جمله‌ی کوتاه بگو از کجا
+این اطلاعات آمد. هرگز قیمت/موجودی/کد محصول پیشنهاد نده — این‌ها فقط از فروشنده می‌آیند. اگر
+جستجو چیز معنی‌داری پیدا نکرد (محصول عمومی/بی‌نام‌تجاری)، به‌جای اطلاعات جعلی یک توضیح عمومی‌تر
+بده و sourceNote را خالی بگذار. پاسخ را فقط به‌صورت یک شیء JSON معتبر مطابق اسکیمای داده‌شده برگردان.`
+          : `تو دستیار یک فروشنده‌ی فروشگاه آنلاین ایرانی هستی. برای محصول زیر یک توضیح
 کامل‌تر و فروش‌محورتر (فارسی، ۲-۴ جمله) بنویس، و ۴ تا ۶ سؤال رایج که مشتری‌های این‌جور محصول
 معمولاً می‌پرسند لیست کن (فقط خودِ سؤال‌ها، بدون جواب). هرگز قیمت/موجودی/مشخصات دقیقی که در
 ورودی نیامده را حدس نزن یا اختراع نکن — فقط چیزی که از نام محصول و دسته‌بندی فروشگاه قابل‌استنتاج
@@ -231,9 +283,32 @@ export class StoreKbService {
 توضیح فعلی: ${product.description ?? '(هنوز توضیحی ثبت نشده)'}`,
       });
 
+      if (withWebSearch) {
+        const { costToman } = await this.pricing.calcCost(
+          usage.inputTokens ?? 0,
+          usage.outputTokens ?? 0,
+          model,
+        );
+        await this.prisma.creditUsageEvent.create({
+          data: {
+            storeId,
+            model,
+            kind: 'PRODUCT_ENRICHMENT',
+            costToman,
+            isFreeQuota: false,
+          },
+        });
+        await this.prisma.store.update({
+          where: { id: storeId },
+          data: { creditBalanceToman: { decrement: costToman } },
+        });
+      }
+
       return {
         suggestedDescription: object.suggestedDescription,
         suggestedQuestions: object.suggestedQuestions.slice(0, 6),
+        suggestedSpecs: object.suggestedSpecs,
+        sourceNote: object.sourceNote,
       };
     } catch (err) {
       this.logger.error(
@@ -244,6 +319,56 @@ export class StoreKbService {
       );
       throw err;
     }
+  }
+
+  // ورود سریع محصول از لینک صفحه‌ی موجود (بخش ۲.۵) — فقط پیش‌نمایش، هیچ‌چیز خودکار ذخیره
+  // نمی‌شود؛ فروشنده در فرم افزودن محصول موجود فیلدهای پرشده را می‌بیند و خودش تأیید می‌کند
+  async importProductFromUrl(sellerId: string, storeId: string, url: string) {
+    await this.storeService.getOwned(sellerId, storeId);
+
+    let page;
+    try {
+      page = await fetchProductPage(url);
+    } catch (err) {
+      this.logger.error(
+        `importProductFromUrl fetch failed for ${url}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      throw new BadRequestException(fa.store.urlNotReadable);
+    }
+    if (!page.text && !page.ogDescription && !page.title) {
+      throw new BadRequestException(fa.store.urlNotReadable);
+    }
+
+    const { object } = await generateObject({
+      model: this.provider('openai/gpt-5.4-mini'),
+      schema: z.object({
+        name: z.string(),
+        suggestedDescription: z.string(),
+        suggestedSpecs: z
+          .array(z.object({ label: z.string(), value: z.string() }))
+          .optional(),
+        priceHint: z.number().int().positive().nullable().optional(),
+      }),
+      system: `از محتوای زیر (که از یک صفحه‌ی محصول واقعی فچ شده) اطلاعات محصول را استخراج کن —
+نام محصول، یک توضیح فروش‌محور فارسی (حتی اگر متن اصلی انگلیسی بود، فارسی برگردان)، و اگر
+مشخصات فنی مشخصی (مثل جنس/سایز/رنگ) در متن بود به‌صورت لیست suggestedSpecs. priceHint فقط اگر
+قیمتی صریح در متن آمده بود — اگر قیمتی پیدا نشد priceHint را خالی بگذار، حدس نزن. هیچ‌چیزی که
+در متن نیامده اختراع نکن؛ اگر متن اطلاعات کمی داشت، یک توضیح عمومی‌تر و کوتاه‌تر بده، نه
+اطلاعات جعلی. پاسخ را فقط به‌صورت یک شیء JSON معتبر مطابق اسکیمای داده‌شده برگردان.`,
+      prompt: `عنوان صفحه: ${page.title ?? '(نامشخص)'}
+توضیح OG: ${page.ogDescription ?? '(ندارد)'}
+متن صفحه: ${page.text || '(متن قابل‌استخراجی نبود)'}`,
+    });
+
+    return {
+      name: object.name,
+      suggestedDescription: object.suggestedDescription,
+      suggestedSpecs: object.suggestedSpecs,
+      priceHint: object.priceHint ?? undefined,
+      imageUrls: page.imageUrls,
+    };
   }
 
   private async getActiveEntriesCached(

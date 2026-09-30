@@ -31,6 +31,8 @@ import { StoreBankCardService } from './store-bank-card.service';
 import { CreateStoreDto } from './dto/create-store.dto';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
+import { ImportProductFromUrlDto } from './dto/import-product-from-url.dto';
+import { AddProductImagesFromUrlDto } from './dto/add-product-images-from-url.dto';
 import { CreateKbEntryDto } from './dto/create-kb-entry.dto';
 import { UpdateKbEntryDto } from './dto/update-kb-entry.dto';
 import { PurchaseStoreCreditDto } from './dto/purchase-store-credit.dto';
@@ -125,6 +127,32 @@ export class StoreController {
     @Param('key') key: string,
   ) {
     return this.storeService.removeProductImage(user.sub, id, productId, key);
+  }
+
+  // docs/PRD-seller-knowledge-base.md بخش ۲.۵ — فقط پیش‌نمایش؛ افزودن واقعی با همین
+  // POST :id/products موجود انجام می‌شود (فروشنده در فرم فیلدهای پرشده را تأیید می‌کند)
+  @Post(':id/products/import-from-url')
+  importProductFromUrl(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: ImportProductFromUrlDto,
+  ) {
+    return this.storeKbService.importProductFromUrl(user.sub, id, dto.url);
+  }
+
+  @Post(':id/products/:productId/images/from-url')
+  addProductImagesFromUrl(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('productId') productId: string,
+    @Body() dto: AddProductImagesFromUrlDto,
+  ) {
+    return this.storeService.addProductImagesFromUrl(
+      user.sub,
+      id,
+      productId,
+      dto.urls,
+    );
   }
 
   @Post(':id/products/import')
@@ -232,14 +260,20 @@ export class StoreController {
     return this.storeService.unmuteConversation(user.sub, id, conversationId);
   }
 
-  // دستیار تکمیل محصول با AI (docs/PRD-seller-knowledge-base.md بخش ۲)
+  // دستیار تکمیل محصول با AI (docs/PRD-seller-knowledge-base.md بخش ۲/۲.۳)
   @Post(':id/products/:productId/ai-complete')
   completeProductInfo(
     @CurrentUser() user: JwtPayload,
     @Param('id') id: string,
     @Param('productId') productId: string,
+    @Query('withWebSearch') withWebSearch?: string,
   ) {
-    return this.storeKbService.completeProductInfo(user.sub, id, productId);
+    return this.storeKbService.completeProductInfo(
+      user.sub,
+      id,
+      productId,
+      withWebSearch === 'true',
+    );
   }
 
   // باکس دانش فروشگاه (بخش ۳)

@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "CreditUsageKind" ADD VALUE 'PRODUCT_ENRICHMENT';

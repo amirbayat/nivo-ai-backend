@@ -2261,6 +2261,9 @@ enum CreditUsageKind {
   VOICE_TTS
   ASR
   TOPUP
+  // docs/PRD-seller-knowledge-base.md بخش ۲.۳ — تکمیل محصول همراه با جستجوی وب واقعی، گران‌تر
+  // از generateObject ساده (که رایگان می‌ماند)
+  PRODUCT_ENRICHMENT
 }
 
 // یک ردیف به‌ازای هر فراخوانی واقعی مدل AI در موتور مکالمه (parseIntent/caption) — برای
