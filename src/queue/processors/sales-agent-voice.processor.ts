@@ -2,12 +2,13 @@ import { Process, Processor } from '@nestjs/bull';
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Job } from 'bull';
-import type { Prisma } from '@prisma/client';
+import type { BillingMode, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
 import { KieProviderService } from '../../common/services/kie-provider.service';
 import { TelegramService } from '../../modules/telegram/telegram.service';
 import { toneForCategory } from '../../modules/sales-agent/tone-by-category';
+import { CreditService } from '../../modules/sales-agent/credit.service';
 import type { SalesAgentVoiceJobData } from '../../modules/sales-agent/sales-agent.types';
 
 const POLL_INTERVAL_MS = 3_000;
@@ -17,6 +18,9 @@ const DEFAULT_TTS_MODEL_SLUG = 'google/gemini-3-8-flash-lite-tts';
 // صدای پیش‌فرض — تنها گزینه‌ای که با تست دستی واقعی تایید شده کار می‌کند؛ انتخاب صدای
 // متفاوت بر اساس جنسیت مخاطب فیچر بعدی است (docs/PRD-sales-agent-voice.md)، فعلاً ثابت
 const DEFAULT_VOICE = 'Kore';
+
+// همان نرخ استفاده‌شده در video-edit.processor.ts (بخش ۶.۵ سند آن — ۰.۰۰۵ $ = ۱۰۰۰ credit)
+const KIE_USD_PER_CREDIT = 0.005;
 
 // docs/PRD-sales-agent-voice.md بخش ۱.۲ — همان الگوی job-based کیو ویدیو (video-edit.processor.ts)
 // روی همان KieProviderService، فقط مدل/payload فرق دارد. نتیجه روی همان ConversationEvent
@@ -31,16 +35,22 @@ export class SalesAgentVoiceProcessor {
     private readonly kie: KieProviderService,
     private readonly config: ConfigService,
     private readonly telegram: TelegramService,
+    private readonly creditService: CreditService,
   ) {}
 
   @Process('generate')
   async handleGenerate(job: Job<SalesAgentVoiceJobData>): Promise<void> {
     const { eventId, conversationId, text, storeCategory } = job.data;
     try {
+      const conversation = await this.prisma.salesConversation.findUnique({
+        where: { id: conversationId },
+        select: { storeId: true, customerId: true, billingMode: true },
+      });
       const key = await this.generateAndUpload(
         text,
         storeCategory,
         conversationId,
+        conversation,
       );
       await this.finishEvent(eventId, key);
       await this.pushToTelegramIfNeeded(conversationId, key);
@@ -56,6 +66,11 @@ export class SalesAgentVoiceProcessor {
     text: string,
     storeCategory: string | null,
     conversationId: string,
+    billing: {
+      storeId: string;
+      customerId: string | null;
+      billingMode: BillingMode;
+    } | null,
   ): Promise<string> {
     const modelSlug =
       this.config.get<string>('KIE_TTS_MODEL_SLUG') ?? DEFAULT_TTS_MODEL_SLUG;
@@ -80,6 +95,17 @@ export class SalesAgentVoiceProcessor {
       const status = await this.kie.pollTask(taskId);
       if (status.state === 'success') {
         resultUrl = status.resultUrls[0] ?? null;
+        // docs/PRD-seller-credit-billing.md — هزینه‌ی واقعی وویس، از creditsConsumed واقعی kie.ai
+        if (billing && status.creditsConsumed != null) {
+          await this.creditService.logVoiceUsage({
+            storeId: billing.storeId,
+            customerId: billing.customerId,
+            conversationId,
+            billingMode: billing.billingMode,
+            model: modelSlug,
+            usdCost: status.creditsConsumed * KIE_USD_PER_CREDIT,
+          });
+        }
         break;
       }
       if (status.state === 'fail') {

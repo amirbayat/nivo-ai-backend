@@ -11,6 +11,7 @@ import { MediaTranscodeService } from '../../common/services/media-transcode.ser
 import { AsrService } from '../../common/services/asr.service';
 import { AiProviderService } from '../../common/services/ai-provider.service';
 import { ConversationEngineService } from './conversation-engine.service';
+import { CreditService } from './credit.service';
 import { pickVariant } from './model-variants';
 import { buildAsrVocabHint } from './asr-vocab-hint';
 import { fa } from '../../i18n/fa';
@@ -26,6 +27,7 @@ export class SalesAgentService {
     private readonly mediaTranscode: MediaTranscodeService,
     private readonly asr: AsrService,
     private readonly aiProvider: AiProviderService,
+    private readonly creditService: CreditService,
   ) {}
 
   // productId اختیاری — لینک اختصاصی یک محصول (فروشنده در استوری گذاشته)؛ اگر معتبر و
@@ -37,13 +39,16 @@ export class SalesAgentService {
     if (!store || store.status !== 'ACTIVE')
       throw new NotFoundException(fa.store.notFound);
 
+    // docs/PRD-seller-credit-billing.md — یک‌بار همین‌جا تعیین می‌شود، تا آخر عمر مکالمه ثابت می‌ماند
+    const billingMode = await this.creditService.decideBillingMode(store.id);
+
     const sessionToken = crypto.randomUUID();
     const customer = await this.prisma.customer.create({
       data: {
         storeId: store.id,
         sessionToken,
         salesConversation: {
-          create: { storeId: store.id, abVariant: pickVariant() },
+          create: { storeId: store.id, abVariant: pickVariant(), billingMode },
         },
       },
       include: { salesConversation: true },
@@ -52,17 +57,22 @@ export class SalesAgentService {
     const conversationId = customer.salesConversation!.id;
 
     let initial: (EngineResult & { voiceEventId?: string }) | undefined;
-    if (productId) {
-      const product = await this.prisma.product.findUnique({
-        where: { id: productId },
+    if (productId || billingMode === 'BLOCKED') {
+      const conversation = await this.prisma.salesConversation.findUnique({
+        where: { id: conversationId },
+        include: { store: true },
       });
-      if (product && product.storeId === store.id) {
-        const conversation = await this.prisma.salesConversation.findUnique({
-          where: { id: conversationId },
-          include: { store: true },
+      if (billingMode === 'BLOCKED') {
+        const blocked = await this.engine.announceBillingBlocked(conversation!);
+        initial = await this.attachVoicePending(conversationId, blocked);
+      } else {
+        const product = await this.prisma.product.findUnique({
+          where: { id: productId },
         });
-        const shown = await this.engine.showProduct(conversation!, product);
-        initial = await this.attachVoicePending(conversationId, shown);
+        if (product && product.storeId === store.id) {
+          const shown = await this.engine.showProduct(conversation!, product);
+          initial = await this.attachVoicePending(conversationId, shown);
+        }
       }
     }
 

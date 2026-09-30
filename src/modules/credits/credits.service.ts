@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { CreditPackageScope } from '@prisma/client';
+import { CreditPackageScope, type CreditPackage } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PricingService } from '../usage/pricing.service';
 import { PaymentsService } from '../payments/payments.service';
@@ -61,6 +61,10 @@ export class CreditsService {
         p.discountPercent,
         config,
       ),
+      // docs/PRD-seller-credit-billing.md بخش ۷ — مبلغی که واقعاً به بالانس شارژ می‌شود
+      // (credits × tomanPerCredit، بدون تخفیف) — برای STORE_AI_CREDIT مصرف‌کننده‌ی این فیلد
+      // است تا وقتی discountPercent>0 است تفاوت «قیمت پرداختی» و «اعتبار دریافتی» را نشان دهد
+      creditToman: p.credits * config.tomanPerCredit,
     }));
   }
 
@@ -97,6 +101,25 @@ export class CreditsService {
   ): number {
     const base = credits * config.tomanPerCredit;
     return Math.round(base * (1 - discountPercent / 100));
+  }
+
+  // docs/PRD-seller-credit-billing.md بخش ۷ — reuse شده توسط StoreCreditService (خرید اعتبار
+  // AI فروشگاه)؛ برخلاف purchasePackage زیر، مبلغ دلخواه (isCustomAmount) پشتیبانی نمی‌شود —
+  // بسته‌های STORE_AI_CREDIT فعلاً فقط بسته‌ی ثابت
+  async getActivePackagePrice(
+    packageId: string,
+  ): Promise<{ pkg: CreditPackage; priceToman: number }> {
+    const config = await this.getConfig();
+    const pkg = await this.prisma.creditPackage.findUnique({
+      where: { id: packageId },
+    });
+    if (!pkg || !pkg.isActive) throw new NotFoundException(fa.errors.notFound);
+    const priceToman = this.computePackagePrice(
+      pkg.credits,
+      pkg.discountPercent,
+      config,
+    );
+    return { pkg, priceToman };
   }
 
   async purchasePackage(userId: string, dto: PurchaseCreditPackageDto) {

@@ -26,11 +26,13 @@ import {
 import type { StoreKbKind } from '@prisma/client';
 import { StoreService } from './store.service';
 import { StoreKbService } from './store-kb.service';
+import { StoreCreditService } from './store-credit.service';
 import { CreateStoreDto } from './dto/create-store.dto';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { CreateKbEntryDto } from './dto/create-kb-entry.dto';
 import { UpdateKbEntryDto } from './dto/update-kb-entry.dto';
+import { PurchaseStoreCreditDto } from './dto/purchase-store-credit.dto';
 import { fa } from '../../i18n/fa';
 
 // docs/PRD-mvp-launch-plan.md گام ۰ — ثبت‌نام فروشنده و ساخت فروشگاه
@@ -40,6 +42,7 @@ export class StoreController {
   constructor(
     private readonly storeService: StoreService,
     private readonly storeKbService: StoreKbService,
+    private readonly storeCreditService: StoreCreditService,
   ) {}
 
   @Get('me')
@@ -284,5 +287,26 @@ export class StoreController {
   ) {
     if (!file) throw new BadRequestException(fa.store.noFileUploaded);
     return this.storeKbService.extractCandidatesFromFile(user.sub, id, file);
+  }
+
+  // docs/PRD-seller-credit-billing.md بخش ۷ — موجودی اعتبار AI + سهمیه‌ی رایگان امروز
+  @Get(':id/credit')
+  getCreditStatus(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    return this.storeCreditService.getStatus(user.sub, id);
+  }
+
+  // خرید self-serve یک بسته‌ی اعتبار — از همان درگاه پرداخت واقعی موجود
+  @Post(':id/credit/purchase')
+  purchaseCredit(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: PurchaseStoreCreditDto,
+  ) {
+    return this.storeCreditService.purchase(
+      user.sub,
+      id,
+      dto.packageId,
+      dto.gateway,
+    );
   }
 }

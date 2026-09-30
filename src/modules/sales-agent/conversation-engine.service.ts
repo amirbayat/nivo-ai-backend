@@ -7,6 +7,7 @@ import type { ConversationState, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AiProviderService } from '../../common/services/ai-provider.service';
 import { StoreKbService } from '../store/store-kb.service';
+import { CreditService } from './credit.service';
 import { fa } from '../../i18n/fa';
 import { defaultModel, resolveModel } from './model-variants';
 import { toneForCategory } from './tone-by-category';
@@ -30,6 +31,7 @@ type ProductLike = {
   basePrice: number;
   stock: number;
   images: string[];
+  description?: string | null;
 };
 
 // آستانه‌ی handoff: بعد از این تعداد پیام پیاپی نامفهوم/بی‌نتیجه، مکالمه به انسان سپرده
@@ -50,6 +52,7 @@ export class ConversationEngineService {
     private readonly prisma: PrismaService,
     private readonly aiProvider: AiProviderService,
     private readonly storeKb: StoreKbService,
+    private readonly creditService: CreditService,
     @InjectQueue('sales-agent-voice')
     private readonly voiceQueue: Queue<SalesAgentVoiceJobData>,
   ) {}
@@ -90,8 +93,12 @@ export class ConversationEngineService {
     text: string,
     state: ConversationState,
     model: string,
-  ): Promise<ParsedIntent> {
-    const { object } = await generateObject({
+  ): Promise<{
+    result: ParsedIntent;
+    inputTokens: number;
+    outputTokens: number;
+  }> {
+    const { object, usage } = await generateObject({
       model: this.aiProvider.buildClient(undefined, {
         supportsStructuredOutputs: true,
       })(model),
@@ -136,7 +143,11 @@ intent های ممکن:
 فقط JSON مطابق schema برگردان.`,
       prompt: text,
     });
-    return object;
+    return {
+      result: object,
+      inputTokens: usage.inputTokens ?? 0,
+      outputTokens: usage.outputTokens ?? 0,
+    };
   }
 
   // فقط NLU — مدل هرگز مستقیم DB/state تغییر نمی‌دهد، فقط intent+entity استخراج می‌کند
@@ -149,7 +160,7 @@ intent های ممکن:
     const primaryModel = resolveModel(conversation.abVariant);
     const started = Date.now();
     try {
-      const result = await this.callParseIntent(
+      const { result, inputTokens, outputTokens } = await this.callParseIntent(
         text,
         conversation.currentState,
         primaryModel,
@@ -159,6 +170,12 @@ intent های ممکن:
         'PARSE_INTENT',
         true,
         Date.now() - started,
+      );
+      await this.logTextCreditUsage(
+        conversation,
+        primaryModel,
+        inputTokens,
+        outputTokens,
       );
       return result;
     } catch {
@@ -171,16 +188,23 @@ intent های ممکن:
       if (primaryModel === defaultModel()) return { intent: 'UNCLEAR' };
       const fallbackStarted = Date.now();
       try {
-        const result = await this.callParseIntent(
-          text,
-          conversation.currentState,
-          defaultModel(),
-        );
+        const { result, inputTokens, outputTokens } =
+          await this.callParseIntent(
+            text,
+            conversation.currentState,
+            defaultModel(),
+          );
         await this.logAiCall(
           conversation,
           'PARSE_INTENT',
           true,
           Date.now() - fallbackStarted,
+        );
+        await this.logTextCreditUsage(
+          conversation,
+          defaultModel(),
+          inputTokens,
+          outputTokens,
         );
         return result;
       } catch {
@@ -195,13 +219,32 @@ intent های ممکن:
     }
   }
 
+  // docs/PRD-seller-credit-billing.md — نقطه‌ی مشترک لاگ مصرف متن، از هر سه call site واقعی
+  // (parseIntent/caption/tryAnswerFromProductDescriptions) صدا زده می‌شود
+  private async logTextCreditUsage(
+    conversation: ConversationWithStore,
+    model: string,
+    inputTokens: number,
+    outputTokens: number,
+  ): Promise<void> {
+    await this.creditService.logTextUsage({
+      storeId: conversation.storeId,
+      customerId: conversation.customerId,
+      conversationId: conversation.id,
+      billingMode: conversation.billingMode,
+      model,
+      inputTokens,
+      outputTokens,
+    });
+  }
+
   private async callCaption(
     facts: string,
     model: string,
     category: string | null,
-  ): Promise<string> {
+  ): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
     const tone = toneForCategory(category);
-    const { text } = await generateText({
+    const { text, usage } = await generateText({
       model: this.aiProvider.buildClient()(model),
       system: `تو دستیار فروش یک فروشگاه در دایرکت اینستاگرام هستی. فقط و فقط از «واقعیت‌های»
 داده‌شده یک پیام فارسی کوتاه (حداکثر ۲-۳ جمله)، دوستانه و محاوره‌ای بساز — هیچ عدد/اسم/شماره‌ی
@@ -211,7 +254,11 @@ intent های ممکن:
       prompt: facts,
       temperature: 0.3,
     });
-    return text.trim();
+    return {
+      text: text.trim(),
+      inputTokens: usage.inputTokens ?? 0,
+      outputTokens: usage.outputTokens ?? 0,
+    };
   }
 
   // بازنویسی نتیجه‌ی واقعی تول به یک پیام فارسی کوتاه — مدل هرگز چیزی غیر از دیتای واقعی
@@ -225,8 +272,18 @@ intent های ممکن:
     const category = conversation.store.category;
     const started = Date.now();
     try {
-      const text = await this.callCaption(facts, primaryModel, category);
+      const { text, inputTokens, outputTokens } = await this.callCaption(
+        facts,
+        primaryModel,
+        category,
+      );
       await this.logAiCall(conversation, 'CAPTION', true, Date.now() - started);
+      await this.logTextCreditUsage(
+        conversation,
+        primaryModel,
+        inputTokens,
+        outputTokens,
+      );
       return text;
     } catch {
       await this.logAiCall(
@@ -238,12 +295,22 @@ intent های ممکن:
       if (primaryModel === defaultModel()) return facts;
       const fallbackStarted = Date.now();
       try {
-        const text = await this.callCaption(facts, defaultModel(), category);
+        const { text, inputTokens, outputTokens } = await this.callCaption(
+          facts,
+          defaultModel(),
+          category,
+        );
         await this.logAiCall(
           conversation,
           'CAPTION',
           true,
           Date.now() - fallbackStarted,
+        );
+        await this.logTextCreditUsage(
+          conversation,
+          defaultModel(),
+          inputTokens,
+          outputTokens,
         );
         return text;
       } catch {
@@ -291,6 +358,10 @@ intent های ممکن:
       },
     });
 
+    if (this.billingBlocked(conversation)) {
+      return this.transitionToHandoff(conversation, 'BILLING_BLOCKED');
+    }
+
     const parsed = await this.parseIntent(text, conversation);
     const ctx = this.getContext(conversation);
 
@@ -328,6 +399,10 @@ intent های ممکن:
     conversation: ConversationWithStore,
     action: SalesAction,
   ): Promise<EngineResult> {
+    if (this.billingBlocked(conversation)) {
+      return this.transitionToHandoff(conversation, 'BILLING_BLOCKED');
+    }
+
     const ctx = this.getContext(conversation);
 
     if (action.type === 'ADD_TO_CART') {
@@ -382,6 +457,10 @@ intent های ممکن:
     conversation: ConversationWithStore,
     product: ProductLike,
   ): Promise<EngineResult> {
+    if (this.billingBlocked(conversation)) {
+      return this.transitionToHandoff(conversation, 'BILLING_BLOCKED');
+    }
+
     const uiBlock: UiBlock = {
       type: 'PRODUCT_CARD',
       products: [
@@ -404,7 +483,7 @@ intent های ممکن:
     // واقعیت‌ها جمله می‌سازد، پس هر عددی اینجا باشد عیناً به مشتری گفته می‌شود. فروشنده
     // نمی‌خواهد تعداد واقعی موجودی افشا شود؛ فقط وضعیت موجود/ناموجود کافی است.
     const reply = await this.caption(
-      `مشتری از لینک مستقیم این محصول وارد شده: ${product.name} (${product.basePrice} تومان)${product.stock === 0 ? ' — فعلاً ناموجود' : ''}`,
+      `مشتری از لینک مستقیم این محصول وارد شده: ${product.name} (${product.basePrice} تومان)${product.stock === 0 ? ' — فعلاً ناموجود' : ''}${product.description ? `\nتوضیحات محصول: ${product.description}` : ''}`,
       conversation,
     );
     const finalReply = `${fa.salesAgent.firstGreeting(conversation.store.name)}\n\n${reply}`;
@@ -417,7 +496,18 @@ intent های ممکن:
   async startBrowse(
     conversation: ConversationWithStore,
   ): Promise<EngineResult> {
+    if (this.billingBlocked(conversation)) {
+      return this.transitionToHandoff(conversation, 'BILLING_BLOCKED');
+    }
     return this.doBrowse(conversation, { intent: 'BROWSE' });
+  }
+
+  // docs/PRD-seller-credit-billing.md — وقتی همان لحظه‌ی ساخت مکالمه (startChat وب) معلوم شد
+  // BLOCKED است، اولین پاسخ باید مستقیم همین پیام ثابت باشد، نه یک CUSTOMER_MESSAGE ساختگی خالی
+  async announceBillingBlocked(
+    conversation: ConversationWithStore,
+  ): Promise<EngineResult> {
+    return this.transitionToHandoff(conversation, 'BILLING_BLOCKED');
   }
 
   private async doBrowse(
@@ -452,7 +542,7 @@ intent های ممکن:
 
     // همون دلیل showProduct بالا — بدون عدد موجودی در واقعیت‌ها
     const reply = await this.caption(
-      `این محصولات فروشگاه است: ${products.map((p) => `${p.name} (${p.basePrice} تومان)${p.stock === 0 ? ' — فعلاً ناموجود' : ''}`).join('، ')}`,
+      `این محصولات فروشگاه است: ${products.map((p) => `${p.name} (${p.basePrice} تومان)${p.stock === 0 ? ' — فعلاً ناموجود' : ''}${p.description ? ` — توضیحات: ${p.description}` : ''}`).join('، ')}`,
       conversation,
     );
     // فیدبک اول پایلوت: اولین پاسخ مکالمه (بعد از GREETING) یک خط راهنمای ثابت (نه
@@ -732,8 +822,9 @@ intent های ممکن:
 
     try {
       const tone = toneForCategory(conversation.store.category);
-      const { object } = await generateObject({
-        model: this.aiProvider.buildClient()(defaultModel()),
+      const model = defaultModel();
+      const { object, usage } = await generateObject({
+        model: this.aiProvider.buildClient()(model),
         schema: z.object({ answered: z.boolean(), reply: z.string() }),
         system: `تو دستیار فروش یک فروشگاه در دایرکت اینستاگرام هستی. زیر توضیح چند محصول
 (نوشته‌ی خودِ فروشنده) را داری. اگر واقعاً می‌شود از همین توضیحات به سؤال مشتری جواب داد،
@@ -742,6 +833,12 @@ answered=true و یک پیام فارسی کوتاه (۲-۳ جمله، لحن ${
 answered=false بده (به‌جای حدس‌زدن).`,
         prompt: `توضیح محصولات:\n${withDescription.map((p) => `${p.name}: ${p.description}`).join('\n')}\n\nسؤال مشتری: ${question}`,
       });
+      await this.logTextCreditUsage(
+        conversation,
+        model,
+        usage.inputTokens ?? 0,
+        usage.outputTokens ?? 0,
+      );
       return object.answered ? object.reply.trim() : null;
     } catch {
       return null;
@@ -790,7 +887,7 @@ answered=false بده (به‌جای حدس‌زدن).`,
 
   private async transitionToHandoff(
     conversation: ConversationWithStore,
-    reason: 'CUSTOMER_REQUESTED' | 'AGENT_STUCK',
+    reason: 'CUSTOMER_REQUESTED' | 'AGENT_STUCK' | 'BILLING_BLOCKED',
   ): Promise<EngineResult> {
     const nextState: ConversationState = 'HANDOFF_HUMAN';
     await this.persistTransition(
@@ -799,9 +896,18 @@ answered=false بده (به‌جای حدس‌زدن).`,
       this.getContext(conversation),
       reason,
     );
-    const reply = fa.salesAgent.handoffToHuman;
+    const reply =
+      reason === 'BILLING_BLOCKED'
+        ? fa.salesAgent.billingBlockedHandoff
+        : fa.salesAgent.handoffToHuman;
     await this.logReply(conversation, reply, { type: 'NONE' });
     return { reply, uiBlocks: [], state: nextState };
+  }
+
+  // docs/PRD-seller-credit-billing.md بخش ۳ — سهمیه‌ی رایگان تمام و اعتبار فروشگاه هم صفر/منفی؛
+  // این مکالمه از قبل (لحظه‌ی ساخت، decideBillingMode) به همین حالت قفل شده — بدون هیچ فراخوان AI
+  private billingBlocked(conversation: ConversationWithStore): boolean {
+    return conversation.billingMode === 'BLOCKED';
   }
 
   // یک ConversationEvent(TOOL_CALL) + یک ConversationEvent(STATE_TRANSITION) + آپدیت

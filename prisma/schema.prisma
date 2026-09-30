@@ -270,6 +270,10 @@ model Payment {
   id             String          @id @default(uuid())
   userId         String
   kind           PaymentKind     @default(SUBSCRIPTION) // docs/PRD-pay-as-you-go-wallet.md — WALLET_TOPUP پلن ندارد
+  // docs/PRD-seller-credit-billing.md بخش ۷ — فقط وقتی kind=STORE_CREDIT_TOPUP پر می‌شود؛
+  // userId همچنان همان کاربر (فروشنده/seller) می‌ماند، این فیلد فقط برای این‌که بدانیم شارژ
+  // برای کدام Store است (یک User می‌تواند چند Store داشته باشد، هرچند امروز عملاً یکی است)
+  storeId        String?
   planId         String? // فقط SUBSCRIPTION — WALLET_TOPUP این را null می‌گذارد
   amount         Int // تومان — بعد از اعمال تخفیف (اگر کد تخفیف استفاده شده باشد)
   status         PaymentStatus   @default(PENDING)
@@ -291,6 +295,7 @@ model Payment {
   updatedAt      DateTime        @updatedAt
 
   user         User                    @relation(fields: [userId], references: [id])
+  store        Store?                  @relation(fields: [storeId], references: [id])
   plan         Plan?                   @relation(fields: [planId], references: [id])
   package      CreditPackage?          @relation(fields: [packageId], references: [id])
   discountCode DiscountCode?           @relation(fields: [discountCodeId], references: [id])
@@ -298,12 +303,16 @@ model Payment {
   redemption   DiscountCodeRedemption?
 
   @@index([userId])
+  @@index([storeId])
   @@map("payments")
 }
 
 enum PaymentKind {
   SUBSCRIPTION
   WALLET_TOPUP
+  // docs/PRD-seller-credit-billing.md بخش ۷ — خرید اعتبار AI فروشگاه توسط فروشنده، از همان
+  // درگاه واقعی موجود؛ کاملاً مستقل از WALLET_TOPUP (که کیف‌پول User است، نه Store)
+  STORE_CREDIT_TOPUP
 }
 
 enum PaymentStatus {
@@ -606,6 +615,9 @@ enum CreditPackageScope {
   // وقتی از کافه‌بازار نصب شده باشد) — قیمت/تعداد نیوو کاملاً مستقل از بسته‌های NIVO_CAL (وب)
   // مدیریت می‌شود، چون کافه‌بازار کارمزد جدا می‌گیرد. bazaarSku فقط روی این بسته‌ها معنا دارد.
   NIVO_CAL_BAZAAR
+  // docs/PRD-seller-credit-billing.md بخش ۷ — بسته‌های خرید اعتبار AI فروشگاه (فروشنده→نیوو)؛
+  // ادمین از همان صفحه‌ی admin-creative چند بسته با این scope تعریف می‌کند
+  STORE_AI_CREDIT
 }
 
 model CreditPackage {
@@ -2012,29 +2024,34 @@ model VideoEditJob {
 // sellerId عمداً @unique نیست (بر خلاف Wallet/Subscription) چون یک User می‌تواند چند
 // فروشگاه بزند — دقیقاً الگوی رابطه‌ی Project (بالا)، نه Wallet.
 model Store {
-  id             String      @id @default(uuid())
-  sellerId       String
-  seller         User        @relation(fields: [sellerId], references: [id], onDelete: Cascade)
-  slug           String      @unique // بخش nivo.ai/chat/<slug> — انگلیسی، توسط خود فروشنده انتخاب می‌شود (بخش ۱.۱ سند)
-  name           String // نام فارسی فروشگاه، فقط نمایشی
-  category       String?
-  bankCardNumber String
-  bankOwnerName  String
+  id                 String      @id @default(uuid())
+  sellerId           String
+  seller             User        @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  slug               String      @unique // بخش nivo.ai/chat/<slug> — انگلیسی، توسط خود فروشنده انتخاب می‌شود (بخش ۱.۱ سند)
+  name               String // نام فارسی فروشگاه، فقط نمایشی
+  category           String?
+  bankCardNumber     String
+  bankOwnerName      String
   // فیدبک اول پایلوت — فروشنده می‌خواست بتواند لینک صفحه/کانالش را هم بدهد (نه ویرایش
   // موجودی‌ها؛ فقط در ثبت‌نام اختیاری پر می‌شود). عمداً String آزاد، نه IsUrl سخت‌گیر — فروشنده
   // ممکن است "@nam-shop" یا "t.me/xxx" بدون https:// بنویسد.
-  instagramUrl   String?
-  telegramUrl    String?
-  websiteUrl     String?
-  status         StoreStatus @default(ACTIVE)
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
+  instagramUrl       String?
+  telegramUrl        String?
+  websiteUrl         String?
+  status             StoreStatus @default(ACTIVE)
+  // docs/PRD-seller-credit-billing.md بخش ۱/۵ — اعتبار AI فروشگاه به تومان؛ بعد از تمام‌شدن
+  // سهمیه‌ی رایگان روزانه، مصرف واقعی هر فراخوانی AI از همین فیلد کم می‌شود
+  creditBalanceToman Int         @default(0)
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
 
-  products      Product[]
-  customers     Customer[]
-  conversations SalesConversation[]
-  orders        Order[]
-  kbEntries     StoreKbEntry[]
+  products          Product[]
+  customers         Customer[]
+  conversations     SalesConversation[]
+  orders            Order[]
+  kbEntries         StoreKbEntry[]
+  creditUsageEvents CreditUsageEvent[]
+  payments          Payment[]
 
   @@index([sellerId])
   @@map("stores")
@@ -2155,15 +2172,53 @@ model SalesConversation {
   // docs/PRD-sales-agent-voice.md بخش ۳ — سقف تعداد وویس تولیدشده به‌ازای این مکالمه (جلوی
   // مکالمه‌ای که هر پاسخش وویس می‌گیرد)؛ افزایش اتمیک در logReply با updateMany شرطی
   voiceGenerationCount Int               @default(0)
+  // docs/PRD-seller-credit-billing.md بخش «تصمیم معماری» — یک‌بار در ساخت مکالمه (startChat
+  // وب / /start تلگرام) تعیین می‌شود و تا آخر عمر مکالمه ثابت می‌ماند (بر خلاف abVariant که
+  // فقط انتخاب مدل است، این تعیین می‌کند اصلاً AI صدا زده شود یا نه)
+  billingMode          BillingMode       @default(FREE)
   createdAt            DateTime          @default(now())
   updatedAt            DateTime          @updatedAt
 
-  events ConversationEvent[]
-  order  Order?
+  events      ConversationEvent[]
+  order       Order?
+  usageEvents CreditUsageEvent[]
 
   @@index([storeId])
   @@index([storeId, isMutedForHuman])
   @@map("sales_conversations")
+}
+
+enum BillingMode {
+  FREE // در سهمیه‌ی ۱۰ خریدار جدید رایگان روزانه‌ی همین فروشگاه
+  PAID // سهمیه‌ی رایگان تمام شده، از Store.creditBalanceToman کم می‌شود
+  BLOCKED // هم سهمیه‌ی رایگان هم اعتبار تمام — هیچ فراخوان AI انجام نمی‌شود
+}
+
+// یک ردیف به‌ازای هر فراخوان واقعی AI (متن/وویس/ASR) + هر شارژ اعتبار — لاگ مصرف به تفکیک
+// فروشگاه+خریدار+مدل (docs/PRD-seller-credit-billing.md بخش ۱)
+model CreditUsageEvent {
+  id             String             @id @default(uuid())
+  storeId        String
+  store          Store              @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  customerId     String?
+  conversationId String?
+  conversation   SalesConversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  model          String
+  kind           CreditUsageKind
+  costToman      Int // مصرف = مقدار مثبت که از balance کم می‌شود؛ TOPUP هم مقدار مثبتی است که اضافه می‌شود
+  isFreeQuota    Boolean            @default(false) // true یعنی جزو سهمیه‌ی رایگان بوده، balance کم نشده
+  createdAt      DateTime           @default(now())
+
+  @@index([storeId, createdAt])
+  @@index([customerId])
+  @@map("credit_usage_events")
+}
+
+enum CreditUsageKind {
+  TEXT_REPLY
+  VOICE_TTS
+  ASR
+  TOPUP
 }
 
 // یک ردیف به‌ازای هر فراخوانی واقعی مدل AI در موتور مکالمه (parseIntent/caption) — برای

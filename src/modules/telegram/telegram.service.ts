@@ -9,6 +9,7 @@ import {
   ConversationEngineService,
   type ConversationWithStore,
 } from '../sales-agent/conversation-engine.service';
+import { CreditService } from '../sales-agent/credit.service';
 import { pickVariant } from '../sales-agent/model-variants';
 import { buildAsrVocabHint } from '../sales-agent/asr-vocab-hint';
 import type {
@@ -49,6 +50,7 @@ export class TelegramService {
     private readonly mediaTranscode: MediaTranscodeService,
     private readonly asr: AsrService,
     private readonly aiProvider: AiProviderService,
+    private readonly creditService: CreditService,
   ) {
     this.botToken = this.config.get<string>('TELEGRAM_BOT_TOKEN');
     this.webhookSecret = this.config.get<string>('TELEGRAM_WEBHOOK_SECRET');
@@ -152,13 +154,19 @@ export class TelegramService {
     if (existing?.salesConversation) {
       conversationId = existing.salesConversation.id;
     } else {
+      // docs/PRD-seller-credit-billing.md — یک‌بار همین‌جا تعیین می‌شود، معادل startChat وب
+      const billingMode = await this.creditService.decideBillingMode(store.id);
       const customer = await this.prisma.customer.create({
         data: {
           storeId: store.id,
           channel: 'TELEGRAM',
           telegramChatId: chatId,
           salesConversation: {
-            create: { storeId: store.id, abVariant: pickVariant() },
+            create: {
+              storeId: store.id,
+              abVariant: pickVariant(),
+              billingMode,
+            },
           },
         },
         include: { salesConversation: true },

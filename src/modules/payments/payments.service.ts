@@ -17,7 +17,7 @@ import { AdminNotificationsService } from '../admin-notifications/admin-notifica
 import { fa } from '../../i18n/fa';
 import { InitiatePaymentDto } from './dto/initiate-payment.dto';
 import { InitiateWalletTopupDto } from './dto/initiate-wallet-topup.dto';
-import type { CreditPackage, Payment, Plan, User } from '@prisma/client';
+import type { CreditPackage, Payment, Plan, Store, User } from '@prisma/client';
 
 const SUBSCRIPTION_DAYS = 30;
 
@@ -29,7 +29,10 @@ const PAY_AS_YOU_GO_PERIOD_END = new Date('2099-12-31T00:00:00.000Z');
 // docs/PRD-nivo-cal-credits-ui.md بخش ۴.۱ — اپ‌هایی که روی دامنه‌ی جدا از نیوو اصلی اجرا
 // می‌شوند (نه کوکی/localStorage مشترک) باید بعد از پرداخت به دامنه‌ی خودشان برگردند، نه
 // APP_URL سراسری. whitelist ثابت (نه یک URL دلخواه از کلاینت) برای جلوگیری از open-redirect.
-const ALLOWED_RETURN_ORIGINS = ['https://cal.nivoai.ir', 'http://localhost:5180'];
+const ALLOWED_RETURN_ORIGINS = [
+  'https://cal.nivoai.ir',
+  'http://localhost:5180',
+];
 
 @Injectable()
 export class PaymentsService {
@@ -267,6 +270,55 @@ export class PaymentsService {
     return { paymentUrl, providerRef };
   }
 
+  // خرید اعتبار AI فروشگاه (docs/PRD-seller-credit-billing.md بخش ۷) — کاملاً موازی
+  // initiateCreditTopup بالا، فقط kind=STORE_CREDIT_TOPUP و storeId اضافه دارد. عمداً یک متد
+  // جدا (نه شاخه‌ی جدید داخل createWalletTopupPayment) تا مسیر WALLET_TOPUP موجود صفر تغییر
+  // رفتار داشته باشد.
+  async initiateStoreCreditTopup(
+    userId: string,
+    storeId: string,
+    amountToman: number,
+    packageId: string,
+    credits: number,
+    tomanPerCreditSnapshot: number,
+    gateway?: PaymentProvider,
+  ) {
+    const gw = this.registry.resolve(gateway);
+    const callbackUrl = `${this.config.get('API_URL')}/api/v1/payments/callback/${gw.name.toLowerCase()}`;
+
+    this.logger.log(
+      `storeCreditTopup: gateway=${gw.name} amount=${amountToman} storeId=${storeId}`,
+    );
+
+    const { providerRef, paymentUrl } = await gw.createPayment({
+      amount: amountToman * 10, // مرز تبدیل تومان→ریال، مثل initiate()/createWalletTopupPayment
+      description: fa.payment.storeCreditTopupDescription,
+      callbackUrl,
+    });
+
+    // snapshot نرخ لحظه‌ی خرید — دقیقاً همون الگوی createWalletTopupPayment، تا اگر
+    // tomanPerCredit تا لحظه‌ی تکمیل پرداخت در ادمین عوض شود، شارژ فروشگاه با همون نرخی
+    // حساب شود که قیمت این پرداخت با آن محاسبه شده بود
+    const metadata: Prisma.InputJsonObject = { tomanPerCreditSnapshot };
+
+    await this.prisma.payment.create({
+      data: {
+        userId,
+        storeId,
+        kind: 'STORE_CREDIT_TOPUP',
+        planId: null,
+        amount: amountToman,
+        provider: gw.name,
+        providerRef,
+        packageId,
+        credits,
+        metadata,
+      },
+    });
+
+    return { paymentUrl, providerRef };
+  }
+
   // خرید نیوو از طریق پرداخت درون‌برنامه‌ای کافه‌بازار (فقط اپ اندروید نیوو کال، docs/PRD-nivo-cal-credits-ui.md
   // بخش ۴) — برخلاف initiateCreditTopup بالا، اینجا هیچ paymentUrl/redirect ای وجود ندارد: خرید از
   // قبل سمت کلاینت (SDK پولکی) کامل شده و purchaseToken آن به ما رسیده؛ کاری که این متد می‌کند
@@ -428,7 +480,7 @@ export class PaymentsService {
 
     const payment = await this.prisma.payment.findUnique({
       where: { providerRef },
-      include: { plan: true, user: true },
+      include: { plan: true, user: true, store: true },
     });
 
     if (!payment) {
@@ -485,6 +537,13 @@ export class PaymentsService {
 
     if (payment.kind === 'WALLET_TOPUP') {
       return this.completeWalletTopup(
+        payment,
+        refId!,
+        this.resolveReturnBaseUrl(payment.metadata),
+      );
+    }
+    if (payment.kind === 'STORE_CREDIT_TOPUP') {
+      return this.completeStoreCreditTopup(
         payment,
         refId!,
         this.resolveReturnBaseUrl(payment.metadata),
@@ -740,6 +799,94 @@ export class PaymentsService {
       .catch((err) =>
         this.logger.error(
           `admin notification failed for wallet topup payment=${payment.id}`,
+          err,
+        ),
+      );
+
+    return {
+      redirect: this.withSourceParam(
+        `${appUrl}/payment?status=success&refId=${refId}&invoiceId=${invoice.id}`,
+        payment.metadata,
+      ),
+    };
+  }
+
+  // docs/PRD-seller-credit-billing.md بخش ۷ — خرید اعتبار AI فروشگاه؛ موازی completeWalletTopup
+  // بالا ولی Store.creditBalanceToman را شارژ می‌کند (نه Wallet کاربر) و یک CreditUsageEvent
+  // (kind=TOPUP) برای لاگ یکپارچه‌ی مصرف/شارژ فروشگاه می‌سازد. بدون منطق فعال‌سازی
+  // PAYG plan (آن فقط برای کیف‌پول شخصی کاربر معنا دارد، نه اعتبار فروشگاه).
+  private async completeStoreCreditTopup(
+    payment: Payment & { user: User; store: Store | null },
+    refId: string,
+    appUrl: string | undefined,
+  ) {
+    if (!payment.storeId || !payment.store) {
+      this.logger.error(
+        `completeStoreCreditTopup: payment ${payment.id} has no storeId — data inconsistency`,
+      );
+      throw new BadRequestException(fa.payment.notFound);
+    }
+    // همون فرمول resolveWalletCreditToman — credits × tomanPerCreditSnapshot لحظه‌ی خرید
+    const creditToman = this.resolveWalletCreditToman(payment);
+
+    const invoice = await this.prisma.$transaction(async (tx) => {
+      await tx.payment.update({
+        where: { id: payment.id },
+        data: { status: 'COMPLETED', refId },
+      });
+
+      await tx.store.update({
+        where: { id: payment.storeId! },
+        data: { creditBalanceToman: { increment: creditToman } },
+      });
+
+      await tx.creditUsageEvent.create({
+        data: {
+          storeId: payment.storeId!,
+          model: 'n/a',
+          kind: 'TOPUP',
+          costToman: creditToman,
+          isFreeQuota: false,
+        },
+      });
+
+      return tx.invoice.create({
+        data: {
+          paymentId: payment.id,
+          userId: payment.userId,
+          planName: null, // STORE_CREDIT_TOPUP هم پلن ندارد، مثل WALLET_TOPUP
+          amount: payment.amount,
+          provider: payment.provider,
+          refId,
+          buyerName: payment.user.name,
+          buyerPhone: payment.user.phone,
+        },
+      });
+    });
+
+    this.logger.log(
+      `completeStoreCreditTopup: store=${payment.storeId} credited ${creditToman}, invoice=${invoice.id}`,
+    );
+
+    this.adminNotifications
+      .notify(
+        'WALLET_TOPUP_COMPLETED',
+        fa.adminNotification.storeCreditTopupTitle,
+        fa.adminNotification.storeCreditTopupBody(
+          payment.store.name,
+          payment.amount,
+          payment.user.phone,
+        ),
+        {
+          paymentId: payment.id,
+          storeId: payment.storeId,
+          userId: payment.userId,
+          amount: payment.amount,
+        },
+      )
+      .catch((err) =>
+        this.logger.error(
+          `admin notification failed for store credit topup payment=${payment.id}`,
           err,
         ),
       );

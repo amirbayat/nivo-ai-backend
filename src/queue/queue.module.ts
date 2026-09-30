@@ -33,6 +33,7 @@ import { OpenRouterVideoProviderModule } from '../common/services/openrouter-vid
 import { VeoProviderModule } from '../common/services/veo-provider.module';
 import { RunwayProviderModule } from '../common/services/runway-provider.module';
 import { TelegramModule } from '../modules/telegram/telegram.module';
+import { SalesAgentModule } from '../modules/sales-agent/sales-agent.module';
 
 @Module({
   imports: [
@@ -91,6 +92,9 @@ import { TelegramModule } from '../modules/telegram/telegram.module';
     RunwayProviderModule,
     CreditsModule,
     TelegramModule,
+    // docs/PRD-seller-credit-billing.md — CreditService برای لاگ مصرف VOICE_TTS در
+    // SalesAgentVoiceProcessor پایین
+    SalesAgentModule,
   ],
   providers: [
     QueueService,

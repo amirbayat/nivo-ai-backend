@@ -74,6 +74,8 @@ export const fa = {
     invalidStatus: 'وضعیت پرداخت نامعتبر است',
     description: (planName: string) => `خرید اشتراک ${planName}`,
     walletTopupDescription: 'شارژ کیف‌پول',
+    // docs/PRD-seller-credit-billing.md بخش ۷
+    storeCreditTopupDescription: 'خرید اعتبار هوش مصنوعی فروشگاه',
     gatewayError: 'خطا در اتصال به درگاه پرداخت',
     gatewayRequired: 'انتخاب درگاه پرداخت الزامی است',
     gatewayNotEnabled: 'این درگاه پرداخت فعال نیست',
@@ -167,6 +169,9 @@ export const fa = {
     receiptReceived: 'رسید دریافت شد و برای فروشنده ارسال شد — منتظر تایید باش',
     faqStub: 'این سؤال رو یادداشت کردم، به‌زودی جواب می‌دم',
     handoffToHuman: 'الان شما رو به یکی از همکارها وصل می‌کنم',
+    // docs/PRD-seller-credit-billing.md بخش ۳ — وقتی هم سهمیه‌ی رایگان تمام شده هم اعتبار
+    // فروشگاه صفر/منفی است؛ عمداً پیام ثابت (نه LLM-generated، چون این مسیر اصلاً AI صدا نمی‌زند)
+    billingBlockedHandoff: 'فروشنده به‌زودی شخصاً بهتون جواب می‌ده',
   },
   telegram: {
     startNeedsLink:
@@ -244,6 +249,10 @@ export const fa = {
     walletTopupTitle: 'شارژ کیف‌پول جدید',
     walletTopupBody: (amount: number, phone: string) =>
       `کیف‌پول ${phone} به مبلغ ${amount.toLocaleString('fa-IR')} تومان شارژ شد`,
+    // docs/PRD-seller-credit-billing.md بخش ۷
+    storeCreditTopupTitle: 'خرید اعتبار فروشگاه',
+    storeCreditTopupBody: (storeName: string, amount: number, phone: string) =>
+      `اعتبار AI فروشگاه «${storeName}» به مبلغ ${amount.toLocaleString('fa-IR')} تومان توسط ${phone} شارژ شد`,
     ticketTitle: 'تیکت پشتیبانی جدید',
     ticketBody: (subject: string, phone: string) =>
       `تیکت جدید از ${phone}: «${subject}»`,
