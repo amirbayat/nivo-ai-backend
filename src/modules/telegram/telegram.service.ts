@@ -56,6 +56,15 @@ export class TelegramService {
       this.config.get<string>('TELEGRAM_API_BASE_URL') ??
       'https://api.telegram.org';
     this.relaySecret = this.config.get<string>('TELEGRAM_RELAY_SECRET');
+    // این خط فقط یک‌بار موقع بالا آمدن اپ چاپ می‌شود — با این می‌شود از خودِ لاگ بک‌اند
+    // (بدون نیاز به curl) فهمید که آیا این پراسسِ در حال اجرا اصلاً env varهای تلگرام را
+    // دارد یا خیر (مثلاً بعد از ست‌کردن env روی همروش، اگر ری‌دیپلوی نشده باشد، این پراسس
+    // قدیمی هنوز بدون آن‌ها بالاست و این خط آن را لو می‌دهد).
+    this.logger.log(
+      `telegram config: botToken=${this.botToken ? 'set' : 'MISSING'} webhookSecret=${
+        this.webhookSecret ? 'set' : 'MISSING'
+      } apiBaseUrl=${this.apiBaseUrl} relaySecret=${this.relaySecret ? 'set' : 'not set (direct, dev only)'}`,
+    );
   }
 
   private get relayHeaders(): Record<string, string> {
@@ -78,13 +87,20 @@ export class TelegramService {
   async handleUpdate(update: TelegramUpdate): Promise<void> {
     try {
       if (update.callback_query) {
+        this.logger.debug(
+          `handling callback_query data=${update.callback_query.data}`,
+        );
         await this.handleCallback(update.callback_query);
         return;
       }
       const message = update.message;
-      if (!message) return;
+      if (!message) {
+        this.logger.debug('update has no message/callback_query, ignored');
+        return;
+      }
 
       if (message.text?.startsWith('/start')) {
+        this.logger.debug(`handling /start chat=${message.chat.id}`);
         await this.handleStart(message);
         return;
       }
@@ -101,8 +117,12 @@ export class TelegramService {
         return;
       }
     } catch (err) {
+      // قبلاً فقط err.message لاگ می‌شد — stack هم اضافه شد چون این تنها جایی است که خطاهای
+      // داخلی handleUpdate اصلاً دیده می‌شوند (کنترلر همیشه {ok:true} برمی‌گرداند، تلگرام هم
+      // هیچ خطایی نمی‌بیند)؛ بدون stack پیداکردن خط دقیق خطا عملاً غیرممکن بود.
       this.logger.error(
         `handleUpdate failed: ${err instanceof Error ? err.message : String(err)}`,
+        err instanceof Error ? err.stack : undefined,
       );
     }
   }
@@ -341,19 +361,36 @@ export class TelegramService {
     method: string,
     body: Record<string, unknown>,
   ): Promise<unknown> {
-    if (!this.botToken) return null;
-    const res = await fetch(
-      `${this.apiBaseUrl}/bot${this.botToken}/${method}`,
-      {
+    if (!this.botToken) {
+      // قبلاً اینجا بی‌صدا null برمی‌گشت — یعنی اگر TELEGRAM_BOT_TOKEN روی این پراسس ست
+      // نشده باشد، هیچ پیامی هرگز ارسال نمی‌شد و هیچ‌جا هم لاگ نمی‌شد (دقیقاً همون الگوی
+      // «deploy لود نشده» که سمت relay هم افتاده بود).
+      this.logger.warn(
+        `telegram ${method} skipped: TELEGRAM_BOT_TOKEN not set`,
+      );
+      return null;
+    }
+    let res: Response;
+    try {
+      res = await fetch(`${this.apiBaseUrl}/bot${this.botToken}/${method}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...this.relayHeaders },
         body: JSON.stringify(body),
-      },
-    );
+      });
+    } catch (err) {
+      this.logger.error(
+        `telegram ${method} network error calling ${this.apiBaseUrl}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      throw err;
+    }
     if (!res.ok) {
       this.logger.error(
         `telegram ${method} failed: ${res.status} ${await res.text()}`,
       );
+    } else {
+      this.logger.debug(`telegram ${method} ok`);
     }
     return res.json().catch(() => null);
   }
