@@ -32,6 +32,14 @@ export class TelegramService {
   private readonly logger = new Logger(TelegramService.name);
   private readonly botToken?: string;
   private readonly webhookSecret?: string;
+  // ایران تلگرام را فیلتر می‌کند — وبهوک ورودی (تلگرام→ما) مشکلی ندارد چون اتصال از بیرون ایران
+  // شروع می‌شود، ولی هر فراخوانی خروجی این سرویس به api.telegram.org (ارسال پاسخ/دانلود فایل)
+  // از سرور پروداکشن (داخل ایران) مستقیم بزند تایم‌اوت می‌گیرد. راه‌حل همان الگوی موجود پروژه
+  // برای OpenRouter/Kie.ai است (openrouter-relay/server.js، مسیرهای /kie و /kie-upload) — یک
+  // route جدید /telegram روی همان relay اضافه شد؛ اینجا فقط baseURL پیش‌فرض عوض می‌شود و یک
+  // هدر X-Relay-Secret اضافه می‌شود، نیازی به proxy/dispatcher سطح شبکه نیست.
+  private readonly apiBaseUrl: string;
+  private readonly relaySecret?: string;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -44,6 +52,14 @@ export class TelegramService {
   ) {
     this.botToken = this.config.get<string>('TELEGRAM_BOT_TOKEN');
     this.webhookSecret = this.config.get<string>('TELEGRAM_WEBHOOK_SECRET');
+    this.apiBaseUrl =
+      this.config.get<string>('TELEGRAM_API_BASE_URL') ??
+      'https://api.telegram.org';
+    this.relaySecret = this.config.get<string>('TELEGRAM_RELAY_SECRET');
+  }
+
+  private get relayHeaders(): Record<string, string> {
+    return this.relaySecret ? { 'X-Relay-Secret': this.relaySecret } : {};
   }
 
   verifySecret(secret: string | undefined): boolean {
@@ -327,10 +343,10 @@ export class TelegramService {
   ): Promise<unknown> {
     if (!this.botToken) return null;
     const res = await fetch(
-      `https://api.telegram.org/bot${this.botToken}/${method}`,
+      `${this.apiBaseUrl}/bot${this.botToken}/${method}`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...this.relayHeaders },
         body: JSON.stringify(body),
       },
     );
@@ -381,7 +397,8 @@ export class TelegramService {
     const filePath = info?.result?.file_path;
     if (!filePath) throw new Error('telegram getFile: no file_path');
     const res = await fetch(
-      `https://api.telegram.org/file/bot${this.botToken}/${filePath}`,
+      `${this.apiBaseUrl}/file/bot${this.botToken}/${filePath}`,
+      { headers: this.relayHeaders },
     );
     const arrayBuffer = await res.arrayBuffer();
     return Buffer.from(arrayBuffer);
