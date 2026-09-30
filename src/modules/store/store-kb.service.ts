@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { embed, cosineSimilarity, generateObject } from 'ai';
 import { z } from 'zod';
-import type { StoreKbKind } from '@prisma/client';
+import type { StoreKbKind, CanonicalProduct } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AiProviderService } from '../../common/services/ai-provider.service';
 import { extractChatFileText } from '../../common/utils/chat-file-extraction.util';
@@ -32,6 +32,20 @@ const PRODUCT_ENRICHMENT_WEB_SEARCH_TOOLS = [
   },
   { type: 'openrouter:datetime' },
 ];
+
+// docs/PRD-seller-knowledge-base.md بخش ۲.۴ — اگر یک CanonicalProduct مشترک تازه‌تر از این
+// باشد، به‌جای فراخوان جدید وب‌سرچ همان نتیجه استفاده می‌شود (بدون کسر اعتبار).
+const CANONICAL_FRESHNESS_MS = 30 * 24 * 60 * 60 * 1000;
+
+function normalizeProductName(name: string): string {
+  return name.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+const BASIC_SUGGESTIONS_SYSTEM_PROMPT = `تو دستیار یک فروشنده‌ی فروشگاه آنلاین ایرانی هستی. برای محصول زیر یک توضیح
+کامل‌تر و فروش‌محورتر (فارسی، ۲-۴ جمله) بنویس، و ۴ تا ۶ سؤال رایج که مشتری‌های این‌جور محصول
+معمولاً می‌پرسند لیست کن (فقط خودِ سؤال‌ها، بدون جواب). هرگز قیمت/موجودی/مشخصات دقیقی که در
+ورودی نیامده را حدس نزن یا اختراع نکن — فقط چیزی که از نام محصول و دسته‌بندی فروشگاه قابل‌استنتاج
+است. پاسخ را فقط به‌صورت یک شیء JSON معتبر مطابق اسکیمای داده‌شده برگردان.`;
 
 // docs/PRD-seller-knowledge-base.md — تصحیح صریح: این سرویس‌ *الگوی* SalesKbService را کپی
 // می‌کند (embed + cosineSimilarity در حافظه، بدون pgvector)، ولی storeId-محور و کاملاً جدا
@@ -239,13 +253,55 @@ export class StoreKbService {
       throw new BadRequestException(fa.store.insufficientCreditForWebSearch);
     }
 
+    // docs/PRD-seller-knowledge-base.md بخش ۲.۴ — قبل از جستجوی وب گران، چک می‌کنیم آیا
+    // محصول مشابهی قبلاً در فروشگاه دیگری enrich شده. اگر تازه بود (کمتر از ۳۰ روز)، همان
+    // نتیجه به‌جای فراخوان جدید وب‌سرچ استفاده می‌شود — بدون کسر اعتبار. اگر قدیمی بود، همان
+    // ردیف بعد از جستجوی تازه آپدیت می‌شود (نه یک ردیف تکراری جدید).
+    let freshCanonical: CanonicalProduct | null = null;
+    let staleCanonical: CanonicalProduct | null = null;
+    const normalizedName = normalizeProductName(product.name);
+    if (withWebSearch) {
+      const existing = await this.prisma.canonicalProduct.findFirst({
+        where: { normalizedName },
+      });
+      if (existing) {
+        const isFresh =
+          Date.now() - existing.lastEnrichedAt.getTime() <
+          CANONICAL_FRESHNESS_MS;
+        if (isFresh) freshCanonical = existing;
+        else staleCanonical = existing;
+      }
+    }
+
     const model = 'openai/gpt-5.4-mini';
-    // نکته: قبلاً suggestedQuestions .min(4).max(6) بود — اگر مدل دقیقاً ۴ تا ۶ مورد
-    // برنمی‌گرداند (مثلاً ۳ یا ۷ تا)، اعتبارسنجی zod توی generateObject fail می‌شد و کل
-    // درخواست با خطا می‌ترکید (دقیقاً همون چیزی که فروشنده می‌دید: «تولید پیشنهاد با خطا
-    // مواجه شد»). اینجا محدودیت سخت‌گیرانه را برمی‌داریم و بازه‌ی ۴-۶ را خودمان بعد از جواب
-    // اعمال می‌کنیم — یک جواب کوتاه/بلندتر از حد نباید کل فیچر را بترکاند.
     try {
+      if (freshCanonical) {
+        const basic = await this.generateBasicSuggestions(store, product);
+        await this.prisma.canonicalProduct.update({
+          where: { id: freshCanonical.id },
+          data: { sourceCount: { increment: 1 } },
+        });
+        if (product.canonicalProductId !== freshCanonical.id) {
+          await this.prisma.product.update({
+            where: { id: productId },
+            data: { canonicalProductId: freshCanonical.id },
+          });
+        }
+        return {
+          suggestedDescription: freshCanonical.richDescription,
+          suggestedQuestions: basic.suggestedQuestions.slice(0, 6),
+          suggestedSpecs: freshCanonical.specs as
+            { label: string; value: string }[] | undefined,
+          sourceNote:
+            'این توضیحات قبلاً برای محصول مشابه در فروشگاه دیگری تایید شده است.',
+        };
+      }
+
+      // نکته: قبلاً suggestedQuestions .min(4).max(6) بود — اگر مدل دقیقاً ۴ تا ۶ مورد
+      // برنمی‌گرداند (مثلاً ۳ یا ۷ تا)، اعتبارسنجی zod توی generateObject fail می‌شد و کل
+      // درخواست با خطا می‌ترکید (دقیقاً همون چیزی که فروشنده می‌دید: «تولید پیشنهاد با خطا
+      // مواجه شد»). اینجا محدودیت سخت‌گیرانه را برمی‌داریم و بازه‌ی ۴-۶ را خودمان بعد از جواب
+      // اعمال می‌کنیم — یک جواب کوتاه/بلندتر از حد نباید کل فیچر را بترکاند.
       const { object, usage } = await generateObject({
         model: withWebSearch
           ? this.aiProvider.buildClient(undefined, undefined, {
@@ -270,14 +326,12 @@ export class StoreKbService {
 و توضیح/مشخصات واقعی‌اش را پیدا کن. یک توضیح کامل‌تر و فروش‌محورتر (فارسی، ۲-۴ جمله) بنویس،
 ۴ تا ۶ سؤال رایج که مشتری‌های این‌جور محصول معمولاً می‌پرسند لیست کن، و اگر مشخصات فنی واقعی
 (جنس/سایزبندی/...) پیدا کردی در suggestedSpecs بگذار. sourceNote یک جمله‌ی کوتاه بگو از کجا
-این اطلاعات آمد. هرگز قیمت/موجودی/کد محصول پیشنهاد نده — این‌ها فقط از فروشنده می‌آیند. اگر
-جستجو چیز معنی‌داری پیدا نکرد (محصول عمومی/بی‌نام‌تجاری)، به‌جای اطلاعات جعلی یک توضیح عمومی‌تر
-بده و sourceNote را خالی بگذار. پاسخ را فقط به‌صورت یک شیء JSON معتبر مطابق اسکیمای داده‌شده برگردان.`
-          : `تو دستیار یک فروشنده‌ی فروشگاه آنلاین ایرانی هستی. برای محصول زیر یک توضیح
-کامل‌تر و فروش‌محورتر (فارسی، ۲-۴ جمله) بنویس، و ۴ تا ۶ سؤال رایج که مشتری‌های این‌جور محصول
-معمولاً می‌پرسند لیست کن (فقط خودِ سؤال‌ها، بدون جواب). هرگز قیمت/موجودی/مشخصات دقیقی که در
-ورودی نیامده را حدس نزن یا اختراع نکن — فقط چیزی که از نام محصول و دسته‌بندی فروشگاه قابل‌استنتاج
-است. پاسخ را فقط به‌صورت یک شیء JSON معتبر مطابق اسکیمای داده‌شده برگردان.`,
+این اطلاعات آمد. هرگز قیمت/موجودی/کد محصول پیشنهاد نده — این‌ها فقط از فروشنده می‌آیند. این
+توضیح ممکن است بین چند فروشگاه مشابه به اشتراک گذاشته شود — هرگز نام فروشگاه، لینک، یا شرایط
+ارسال/بازگشت مخصوص یک فروشگاه را در توضیح نیاور، فقط توضیح عمومی خودِ محصول. اگر جستجو چیز
+معنی‌داری پیدا نکرد (محصول عمومی/بی‌نام‌تجاری)، به‌جای اطلاعات جعلی یک توضیح عمومی‌تر بده و
+sourceNote را خالی بگذار. پاسخ را فقط به‌صورت یک شیء JSON معتبر مطابق اسکیمای داده‌شده برگردان.`
+          : BASIC_SUGGESTIONS_SYSTEM_PROMPT,
         prompt: `دسته‌بندی فروشگاه: ${store.category ?? 'نامشخص'}
 نام محصول: ${product.name}
 توضیح فعلی: ${product.description ?? '(هنوز توضیحی ثبت نشده)'}`,
@@ -302,6 +356,28 @@ export class StoreKbService {
           where: { id: storeId },
           data: { creditBalanceToman: { decrement: costToman } },
         });
+
+        const savedCanonical = staleCanonical
+          ? await this.prisma.canonicalProduct.update({
+              where: { id: staleCanonical.id },
+              data: {
+                richDescription: object.suggestedDescription,
+                specs: object.suggestedSpecs ?? undefined,
+                sourceCount: { increment: 1 },
+                lastEnrichedAt: new Date(),
+              },
+            })
+          : await this.prisma.canonicalProduct.create({
+              data: {
+                normalizedName,
+                richDescription: object.suggestedDescription,
+                specs: object.suggestedSpecs ?? undefined,
+              },
+            });
+        await this.prisma.product.update({
+          where: { id: productId },
+          data: { canonicalProductId: savedCanonical.id },
+        });
       }
 
       return {
@@ -319,6 +395,26 @@ export class StoreKbService {
       );
       throw err;
     }
+  }
+
+  // بخش مشترک بین حالت معمولی (withWebSearch=false) و حالت cache-hit بخش ۲.۴ (که description
+  // را از CanonicalProduct می‌گیرد ولی هنوز به یک لیست سؤال محتاج است) — رایگان/بدون کسر اعتبار
+  private async generateBasicSuggestions(
+    store: { category: string | null },
+    product: { name: string; description: string | null },
+  ) {
+    const { object } = await generateObject({
+      model: this.provider('openai/gpt-5.4-mini'),
+      schema: z.object({
+        suggestedDescription: z.string(),
+        suggestedQuestions: z.array(z.string()).min(1),
+      }),
+      system: BASIC_SUGGESTIONS_SYSTEM_PROMPT,
+      prompt: `دسته‌بندی فروشگاه: ${store.category ?? 'نامشخص'}
+نام محصول: ${product.name}
+توضیح فعلی: ${product.description ?? '(هنوز توضیحی ثبت نشده)'}`,
+    });
+    return object;
   }
 
   // ورود سریع محصول از لینک صفحه‌ی موجود (بخش ۲.۵) — فقط پیش‌نمایش، هیچ‌چیز خودکار ذخیره

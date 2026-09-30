@@ -2125,9 +2125,34 @@ model Product {
 
   kbEntries StoreKbEntry[]
 
+  // docs/PRD-seller-knowledge-base.md بخش ۲.۴ — پایگاه دانش مشترک بین فروشگاه‌های مشابه؛
+  // وقتی تکمیل با جستجوی وب (§۲.۳) روی یک محصول انجام می‌شود، به یک CanonicalProduct
+  // مشترک لینک می‌شود تا فروشگاه‌های بعدی که همان محصول را دارند از همان enrichment استفاده
+  // کنند، بدون فراخوان دوباره‌ی جستجوی وب.
+  canonicalProductId String?
+  canonicalProduct   CanonicalProduct? @relation(fields: [canonicalProductId], references: [id])
+
   @@unique([storeId, code])
   @@index([storeId])
+  @@index([canonicalProductId])
   @@map("products")
+}
+
+// docs/PRD-seller-knowledge-base.md بخش ۲.۴ — لایه‌ی مشترک بین مستأجرها؛ هرگز قیمت/موجودی/
+// اطلاعات مخصوص یک فروشگاه (نام فروشگاه، لینک، شرایط ارسال) اینجا ذخیره نمی‌شود، فقط توضیح
+// و مشخصات عمومی خودِ محصول (دقیقاً همان مرز §۲.۱/۲.۳).
+model CanonicalProduct {
+  id              String   @id @default(uuid())
+  normalizedName  String // نام نرمال‌شده برای مچ (lowercase، بدون فاصله‌ی اضافه)
+  richDescription String   @db.Text
+  specs           Json? // [{label, value}] — همان چیزی که §۲.۳ برمی‌گرداند
+  sourceCount     Int      @default(1) // به چند فروشگاه/جستجو کمک کرده — سیگنال کیفیت/اعتماد
+  lastEnrichedAt  DateTime @default(now())
+
+  linkedProducts Product[]
+
+  @@index([normalizedName])
+  @@map("canonical_products")
 }
 
 // باکس دانش فروشگاه، چندمستأجری (docs/PRD-seller-knowledge-base.md بخش ۱.۲) — عمداً جدا از
