@@ -95,6 +95,13 @@ export class ConversationEngineService {
       model: this.aiProvider.buildClient(undefined, {
         supportsStructuredOutputs: true,
       })(model),
+      // productQuery/productIndex/quantity عمداً .nullable() هستند نه .optional() — با
+      // supportsStructuredOutputs=true، OpenAI حالت strict را روی این JSON schema اجرا می‌کند
+      // که در آن *همه‌ی* کلیدها باید توی "required" باشند، حتی آن‌هایی که می‌توانند خالی
+      // باشند؛ .optional() یعنی کلید از required حذف شود که در strict mode با 400 رد می‌شود
+      // (دقیقاً همان الگوی مستندشده در nivo-cal.service.ts). قبل از این فیکس، هر فراخوانی
+      // parseIntent (هم مدل اصلی هم فالبک) با همین خطا throw می‌کرد و بی‌صدا UNCLEAR
+      // برمی‌گشت — یعنی موتور فروش هیچ پیامی را واقعاً طبقه‌بندی نمی‌کرد.
       schema: z.object({
         intent: z.enum([
           'BROWSE',
@@ -108,9 +115,9 @@ export class ConversationEngineService {
           'REQUEST_HUMAN',
           'UNCLEAR',
         ]),
-        productQuery: z.string().optional(),
-        productIndex: z.number().int().positive().optional(),
-        quantity: z.number().int().positive().optional(),
+        productQuery: z.string().nullable(),
+        productIndex: z.number().int().positive().nullable(),
+        quantity: z.number().int().positive().nullable(),
       }),
       system: `تو فقط یک استخراج‌کننده‌ی intent هستی، نه فروشنده — هیچ تصمیمی نمی‌گیری، فقط
 پیام مشتری یک فروشگاه اینستاگرامی را دسته‌بندی می‌کنی.
@@ -251,7 +258,7 @@ intent های ممکن:
     }
   }
 
-  private async searchProducts(storeId: string, query?: string) {
+  private async searchProducts(storeId: string, query?: string | null) {
     return this.prisma.product.findMany({
       where: {
         storeId,

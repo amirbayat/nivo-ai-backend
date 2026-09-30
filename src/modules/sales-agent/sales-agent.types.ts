@@ -48,11 +48,11 @@ export type ParsedIntent = {
     | 'CANCEL'
     | 'REQUEST_HUMAN'
     | 'UNCLEAR';
-  productQuery?: string;
+  productQuery?: string | null;
   // ارجاع ترتیبی به آخرین لیست نشان‌داده‌شده («اولی»/«دومی») — ۱-پایه؛ اگر ست باشد، بر
   // productQuery اولویت دارد (resolveProductRef در conversation-engine.service.ts)
-  productIndex?: number;
-  quantity?: number;
+  productIndex?: number | null;
+  quantity?: number | null;
 };
 
 export type EngineResult = {

@@ -296,7 +296,11 @@ export class TelegramService {
 
   private productImageUrl(productId: string, key: string): string {
     const apiUrl = this.config.get<string>('API_URL');
-    return `${apiUrl}/v2/products/${productId}/images/${key}`;
+    // main.ts: app.setGlobalPrefix('api/v1') روی همه‌ی روت‌ها اعمال می‌شود، ولی API_URL
+    // (طبق .env.example) فقط origin خالی است (بدون /api/v1) — بدون این پیشوند، تلگرام موقع
+    // sendPhoto با 404 مواجه می‌شود و کل uiBlock (عکس + دکمه‌ی افزودن به سبد) بی‌صدا حذف
+    // می‌شود، چون callApi روی پاسخ ناموفق throw نمی‌کند، فقط لاگ می‌کند
+    return `${apiUrl}/api/v1/v2/products/${productId}/images/${key}`;
   }
 
   private async sendEngineResult(
@@ -320,14 +324,18 @@ export class TelegramService {
               [{ text: '🛒 افزودن به سبد', callback_data: `ac:${p.id}` }],
             ],
           };
-          if (p.images[0]) {
-            await this.sendPhoto(
-              chatId,
-              this.productImageUrl(p.id, p.images[0]),
-              caption,
-              keyboard,
-            );
-          } else {
+          // fallback به متن اگر sendPhoto شکست بخورد (مثلاً عکس در دسترس نباشد) — قبلاً
+          // اینجا هیچ fallback نبود، پس یک sendPhoto ناموفق کل کارت محصول (عکس + دکمه‌ی
+          // افزودن به سبد) را بی‌صدا حذف می‌کرد، چون callApi روی پاسخ ناموفق throw نمی‌کند
+          const photoResult = p.images[0]
+            ? ((await this.sendPhoto(
+                chatId,
+                this.productImageUrl(p.id, p.images[0]),
+                caption,
+                keyboard,
+              )) as { ok?: boolean } | null)
+            : null;
+          if (!p.images[0] || !photoResult?.ok) {
             await this.sendText(chatId, caption, keyboard);
           }
         }
