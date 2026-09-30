@@ -23,6 +23,11 @@ import {
   TOKENIZER_FAMILIES,
 } from './dto/create-model.dto';
 import { UpdateModelDto } from './dto/update-model.dto';
+import {
+  computeConversationStats,
+  getStuckConversationIds,
+  type StatsGroupBy,
+} from '../sales-agent/conversation-stats.util';
 
 const MODEL_IMPORT_COLUMNS = [
   'name',
@@ -1062,111 +1067,15 @@ export class AdminService {
     return { total: rows.length, created, updated, errors };
   }
 
-  // مشترک بین getAbStats و getFailedMessages — کدام مکالمه‌ها نهایتاً به انسان سپرده شدند
-  private async getStuckConversationIds(
-    conversationIds: string[],
-  ): Promise<Set<string>> {
-    if (conversationIds.length === 0) return new Set();
-    const toolCallEvents = await this.prisma.conversationEvent.findMany({
-      where: { conversationId: { in: conversationIds }, type: 'TOOL_CALL' },
-      select: { conversationId: true, payload: true },
-    });
-    return new Set(
-      toolCallEvents
-        .filter(
-          (e) =>
-            (e.payload as { toolName?: string })?.toolName === 'AGENT_STUCK',
-        )
-        .map((e) => e.conversationId),
-    );
-  }
-
-  // A/B تست مدل‌های AI ایجنت فروش (فیدبک اول پایلوت) — آمار per-variant؛ فقط JSON، بدون
-  // UI جدا (طبق پلن، ساخت dashboard خارج از این دور است)
-  async getAbStats() {
-    const conversations = await this.prisma.salesConversation.findMany({
-      where: { abVariant: { not: null } },
-      select: { id: true, abVariant: true, clarifyAttempts: true },
-    });
-    if (conversations.length === 0) return [];
-
-    const conversationIds = conversations.map((c) => c.id);
-
-    const stuckConversationIds =
-      await this.getStuckConversationIds(conversationIds);
-
-    const approvedOrders = await this.prisma.order.findMany({
-      where: { conversationId: { in: conversationIds }, status: 'APPROVED' },
-      select: { conversationId: true },
-    });
-    const approvedConversationIds = new Set(
-      approvedOrders.map((o) => o.conversationId),
-    );
-
-    const metrics = await this.prisma.abModelMetric.findMany({
-      where: { conversationId: { in: conversationIds } },
-      select: { variant: true, success: true, latencyMs: true },
-    });
-
-    type Bucket = {
-      conversations: number;
-      totalClarifyAttempts: number;
-      stuckHandoffs: number;
-      approvedOrders: number;
-      aiCalls: number;
-      failedCalls: number;
-      totalLatencyMs: number;
-    };
-    const byVariant = new Map<string, Bucket>();
-    const bucket = (variant: string): Bucket => {
-      let b = byVariant.get(variant);
-      if (!b) {
-        b = {
-          conversations: 0,
-          totalClarifyAttempts: 0,
-          stuckHandoffs: 0,
-          approvedOrders: 0,
-          aiCalls: 0,
-          failedCalls: 0,
-          totalLatencyMs: 0,
-        };
-        byVariant.set(variant, b);
-      }
-      return b;
-    };
-
-    for (const c of conversations) {
-      const b = bucket(c.abVariant as string);
-      b.conversations++;
-      b.totalClarifyAttempts += c.clarifyAttempts;
-      if (stuckConversationIds.has(c.id)) b.stuckHandoffs++;
-      if (approvedConversationIds.has(c.id)) b.approvedOrders++;
-    }
-    for (const m of metrics) {
-      const b = bucket(m.variant);
-      b.aiCalls++;
-      if (!m.success) b.failedCalls++;
-      b.totalLatencyMs += m.latencyMs;
-    }
-
-    return Array.from(byVariant.entries())
-      .map(([variant, b]) => ({
-        variant,
-        conversations: b.conversations,
-        avgClarifyAttempts: b.conversations
-          ? b.totalClarifyAttempts / b.conversations
-          : 0,
-        stuckHandoffRate: b.conversations
-          ? b.stuckHandoffs / b.conversations
-          : 0,
-        approvedOrderRate: b.conversations
-          ? b.approvedOrders / b.conversations
-          : 0,
-        aiCalls: b.aiCalls,
-        fallbackRate: b.aiCalls ? b.failedCalls / b.aiCalls : 0,
-        avgLatencyMs: b.aiCalls ? Math.round(b.totalLatencyMs / b.aiCalls) : 0,
-      }))
-      .sort((a, b) => a.variant.localeCompare(b.variant));
+  // A/B تست مدل‌های AI ایجنت فروش (فیدبک اول پایلوت) — آمار per-variant، یا (بخش ۴
+  // PRD-sales-agent-admin-analytics.md) per-channel برای مقایسه‌ی نرخ تبدیل وب/تلگرام
+  async getAbStats(params?: {
+    storeId?: string;
+    from?: Date;
+    to?: Date;
+    groupBy?: StatsGroupBy;
+  }) {
+    return computeConversationStats(this.prisma, params);
   }
 
   // ریپورت پیام‌های نافهم — دو دلیل ممکن روی AGENT_REPLY (docs/PRD-seller-knowledge-base.md
@@ -1242,7 +1151,8 @@ export class AdminService {
     const total = filtered.length;
     const pageItems = filtered.slice((page - 1) * pageSize, page * pageSize);
 
-    const stuckConversationIds = await this.getStuckConversationIds(
+    const stuckConversationIds = await getStuckConversationIds(
+      this.prisma,
       Array.from(new Set(pageItems.map((e) => e.conversationId))),
     );
 

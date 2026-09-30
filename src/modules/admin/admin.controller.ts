@@ -179,10 +179,21 @@ export class AdminController {
     return this.adminService.importModels(file.buffer);
   }
 
-  // A/B تست مدل‌های AI ایجنت فروش (فیدبک اول پایلوت) — آمار per-variant
+  // A/B تست مدل‌های AI ایجنت فروش (فیدبک اول پایلوت) — آمار per-variant، یا با
+  // groupBy=channel مقایسه‌ی نرخ تبدیل وب/تلگرام (PRD-sales-agent-admin-analytics.md بخش ۴)
   @Get('sales-agent/ab-stats')
-  getSalesAgentAbStats() {
-    return this.adminService.getAbStats();
+  getSalesAgentAbStats(
+    @Query('storeId') storeId?: string,
+    @Query('groupBy') groupBy?: 'variant' | 'channel',
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    return this.adminService.getAbStats({
+      storeId,
+      groupBy,
+      from: from ? new Date(from) : undefined,
+      to: to ? new Date(to) : undefined,
+    });
   }
 
   // ریپورت پیام‌های نافهم (flag: 'UNCLEAR') — فاز۱ داشبورد کیفیت ایجنت فروش

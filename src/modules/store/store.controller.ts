@@ -328,6 +328,12 @@ export class StoreController {
     return this.storeKbService.extractCandidatesFromFile(user.sub, id, file);
   }
 
+  // docs/PRD-sales-agent-admin-analytics.md بخش ۴ — مقایسه‌ی نرخ تبدیل وب/تلگرام همین فروشگاه
+  @Get(':id/channel-stats')
+  getChannelStats(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    return this.storeService.getChannelStats(user.sub, id);
+  }
+
   // docs/PRD-seller-credit-billing.md بخش ۷ — موجودی اعتبار AI + سهمیه‌ی رایگان امروز
   @Get(':id/credit')
   getCreditStatus(@CurrentUser() user: JwtPayload, @Param('id') id: string) {

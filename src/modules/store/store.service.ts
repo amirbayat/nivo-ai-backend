@@ -16,6 +16,7 @@ import { CreateStoreDto } from './dto/create-store.dto';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { fa } from '../../i18n/fa';
+import { computeConversationStats } from '../sales-agent/conversation-stats.util';
 
 // هدرهای پذیرفته‌شده‌ی آپلود اکسل محصول (گام ۳) — هم فارسی (چیزی که فروشنده واقعاً می‌نویسد)
 // هم انگلیسی را می‌پذیرد
@@ -86,6 +87,16 @@ export class StoreService {
   ) {
     await this.getOwned(sellerId, storeId);
     return this.prisma.product.create({ data: { ...dto, storeId } });
+  }
+
+  // docs/PRD-sales-agent-admin-analytics.md بخش ۴ — نسخه‌ی کوچک همین آمار برای خودِ فروشنده
+  // (بدون فیلتر مدل، فقط مقایسه‌ی وب در برابر تلگرام برای همین فروشگاه)
+  async getChannelStats(sellerId: string, storeId: string) {
+    await this.getOwned(sellerId, storeId);
+    return computeConversationStats(this.prisma, {
+      storeId,
+      groupBy: 'channel',
+    });
   }
 
   async listProducts(sellerId: string, storeId: string) {
