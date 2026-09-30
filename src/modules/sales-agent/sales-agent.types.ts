@@ -80,4 +80,17 @@ export type SalesAgentVoiceJobData = {
   conversationId: string;
   text: string;
   storeCategory: string | null;
+  // docs/PRD-admin-ai-decision-trace-log.md بخش ۲ — اگر این پاسخ trace داشت، پردازشگر وویس
+  // بعداً بخش voice همان ConversationEvent(AI_TRACE) را هم آپدیت می‌کند
+  traceEventId?: string;
+};
+
+// docs/PRD-admin-ai-decision-trace-log.md بخش ۱ — محتوای ConversationEvent(AI_TRACE)، همراه
+// هر AGENT_REPLY که واقعاً از یک تصمیم/فراخوان AI آمده باشد (نه پاسخ‌های قانون‌محور ثابت)
+export type AiTraceData = {
+  intent: string;
+  handler: string;
+  factsOrPrompt: string;
+  model: string;
+  kbSource?: 'STORE_KB' | 'PRODUCT_DESCRIPTION' | 'STUB';
 };

@@ -2287,6 +2287,9 @@ enum ConversationEventType {
   TOOL_CALL
   STATE_TRANSITION
   SYSTEM
+  // docs/PRD-admin-ai-decision-trace-log.md — مکمل AGENT_REPLY، نه جایگزین آن؛ ردیف جدا تا
+  // اسکیمای AGENT_REPLY و ریپورت‌های فعلی (مثل getFailedMessages) دست‌نخورده بمانند
+  AI_TRACE
 }
 
 model ConversationEvent {

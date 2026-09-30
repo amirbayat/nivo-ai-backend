@@ -204,4 +204,10 @@ export class AdminController {
       page: page ? parseInt(page, 10) : undefined,
     });
   }
+
+  // docs/PRD-admin-ai-decision-trace-log.md بخش ۳ — تایم‌لاین کامل یک مکالمه برای دیباگ ادمین
+  @Get('sales-agent/conversations/:id/trace')
+  getSalesAgentConversationTrace(@Param('id') id: string) {
+    return this.adminService.getConversationTrace(id);
+  }
 }

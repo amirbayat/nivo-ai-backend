@@ -40,25 +40,26 @@ export class SalesAgentVoiceProcessor {
 
   @Process('generate')
   async handleGenerate(job: Job<SalesAgentVoiceJobData>): Promise<void> {
-    const { eventId, conversationId, text, storeCategory } = job.data;
+    const { eventId, conversationId, text, storeCategory, traceEventId } =
+      job.data;
     try {
       const conversation = await this.prisma.salesConversation.findUnique({
         where: { id: conversationId },
         select: { storeId: true, customerId: true, billingMode: true },
       });
-      const key = await this.generateAndUpload(
+      const { key, toneVariant } = await this.generateAndUpload(
         text,
         storeCategory,
         conversationId,
         conversation,
       );
-      await this.finishEvent(eventId, key);
+      await this.finishEvent(eventId, key, traceEventId, toneVariant);
       await this.pushToTelegramIfNeeded(conversationId, key);
     } catch (err) {
       this.logger.error(
         `voice generation failed for event=${eventId}: ${err instanceof Error ? err.message : String(err)}`,
       );
-      await this.finishEvent(eventId, null);
+      await this.finishEvent(eventId, null, traceEventId);
     }
   }
 
@@ -71,7 +72,7 @@ export class SalesAgentVoiceProcessor {
       customerId: string | null;
       billingMode: BillingMode;
     } | null,
-  ): Promise<string> {
+  ): Promise<{ key: string; toneVariant: string }> {
     const modelSlug =
       this.config.get<string>('KIE_TTS_MODEL_SLUG') ?? DEFAULT_TTS_MODEL_SLUG;
     const tone = toneForCategory(storeCategory);
@@ -115,25 +116,49 @@ export class SalesAgentVoiceProcessor {
     if (!resultUrl) throw new Error('kie tts task timed out');
 
     const buffer = await this.kie.downloadResult(resultUrl);
-    return this.storage.uploadImage(buffer, 'mp3', conversationId);
+    const key = await this.storage.uploadImage(buffer, 'mp3', conversationId);
+    return { key, toneVariant: tone };
   }
 
   private async finishEvent(
     eventId: string,
     voiceKey: string | null,
+    traceEventId?: string,
+    toneVariant?: string,
   ): Promise<void> {
     const event = await this.prisma.conversationEvent.findUnique({
       where: { id: eventId },
     });
-    if (!event) return;
-    const { voicePending, ...rest } = event.payload as Prisma.InputJsonObject;
-    void voicePending;
-    const payload: Prisma.InputJsonObject = voiceKey
-      ? { ...rest, voiceKey }
-      : { ...rest };
+    if (event) {
+      const { voicePending, ...rest } = event.payload as Prisma.InputJsonObject;
+      void voicePending;
+      const payload: Prisma.InputJsonObject = voiceKey
+        ? { ...rest, voiceKey }
+        : { ...rest };
+      await this.prisma.conversationEvent.update({
+        where: { id: eventId },
+        data: { payload },
+      });
+    }
+
+    // docs/PRD-admin-ai-decision-trace-log.md بخش ۲ — تصمیم وویس دیرتر از پاسخ متنی معلوم
+    // می‌شود، پس بخش voice همان AI_TRACE اینجا (نه در logReply) نهایی می‌شود
+    if (!traceEventId) return;
+    const traceEvent = await this.prisma.conversationEvent.findUnique({
+      where: { id: traceEventId },
+    });
+    if (!traceEvent) return;
+    const trace = traceEvent.payload as Prisma.InputJsonObject;
+    const voice: Prisma.InputJsonObject = voiceKey
+      ? {
+          generated: true,
+          voiceName: DEFAULT_VOICE,
+          toneVariant: toneVariant ?? '',
+        }
+      : { generated: false, reason: 'FAILED' };
     await this.prisma.conversationEvent.update({
-      where: { id: eventId },
-      data: { payload },
+      where: { id: traceEventId },
+      data: { payload: { ...trace, voice } },
     });
   }
 

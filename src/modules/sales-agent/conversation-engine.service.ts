@@ -14,6 +14,7 @@ import { fa } from '../../i18n/fa';
 import { defaultModel, resolveModel } from './model-variants';
 import { toneForCategory } from './tone-by-category';
 import type {
+  AiTraceData,
   CartItem,
   ConversationContext,
   EngineResult,
@@ -444,6 +445,7 @@ intent های ممکن:
         product,
         action.qty ?? 1,
         false,
+        'ADD_TO_CART',
       );
     }
 
@@ -492,12 +494,15 @@ intent های ممکن:
     // عمداً بدون عدد موجودی در واقعیت‌هایی که به مدل داده می‌شود — caption() فقط از همین
     // واقعیت‌ها جمله می‌سازد، پس هر عددی اینجا باشد عیناً به مشتری گفته می‌شود. فروشنده
     // نمی‌خواهد تعداد واقعی موجودی افشا شود؛ فقط وضعیت موجود/ناموجود کافی است.
-    const reply = await this.caption(
-      `مشتری از لینک مستقیم این محصول وارد شده: ${product.name} (${product.basePrice} تومان)${product.stock === 0 ? ' — فعلاً ناموجود' : ''}${product.description ? `\nتوضیحات محصول: ${product.description}` : ''}`,
-      conversation,
-    );
+    const facts = `مشتری از لینک مستقیم این محصول وارد شده: ${product.name} (${product.basePrice} تومان)${product.stock === 0 ? ' — فعلاً ناموجود' : ''}${product.description ? `\nتوضیحات محصول: ${product.description}` : ''}`;
+    const reply = await this.caption(facts, conversation);
     const finalReply = `${fa.salesAgent.firstGreeting(conversation.store.name)}\n\n${reply}`;
-    await this.logReply(conversation, finalReply, uiBlock);
+    await this.logReply(conversation, finalReply, uiBlock, undefined, {
+      intent: 'BROWSE',
+      handler: 'showProduct',
+      factsOrPrompt: facts,
+      model: resolveModel(conversation.abVariant),
+    });
     return { reply: finalReply, uiBlocks: [uiBlock], state: nextState };
   }
 
@@ -551,17 +556,20 @@ intent های ممکن:
     await this.resetClarifyAttempts(conversation);
 
     // همون دلیل showProduct بالا — بدون عدد موجودی در واقعیت‌ها
-    const reply = await this.caption(
-      `این محصولات فروشگاه است: ${products.map((p) => `${p.name} (${p.basePrice} تومان)${p.stock === 0 ? ' — فعلاً ناموجود' : ''}${p.description ? ` — توضیحات: ${p.description}` : ''}`).join('، ')}`,
-      conversation,
-    );
+    const facts = `این محصولات فروشگاه است: ${products.map((p) => `${p.name} (${p.basePrice} تومان)${p.stock === 0 ? ' — فعلاً ناموجود' : ''}${p.description ? ` — توضیحات: ${p.description}` : ''}`).join('، ')}`;
+    const reply = await this.caption(facts, conversation);
     // فیدبک اول پایلوت: اولین پاسخ مکالمه (بعد از GREETING) یک خط راهنمای ثابت (نه
     // LLM-generated، برای پایداری) جلوی لیست محصولات می‌گیرد — قبلاً مشتری بدون هیچ
     // توضیحی مستقیم می‌رسید به لیست محصولات و نمی‌فهمید چیکار باید بکند
     const finalReply = isFirstReply
       ? `${fa.salesAgent.firstGreeting(conversation.store.name)}\n\n${reply}`
       : reply;
-    await this.logReply(conversation, finalReply, uiBlock);
+    await this.logReply(conversation, finalReply, uiBlock, undefined, {
+      intent: parsed.intent,
+      handler: 'doBrowse',
+      factsOrPrompt: facts,
+      model: resolveModel(conversation.abVariant),
+    });
     return { reply: finalReply, uiBlocks: [uiBlock], state: nextState };
   }
 
@@ -593,6 +601,7 @@ intent های ممکن:
       product,
       parsed.quantity ?? 1,
       parsed.intent === 'REMOVE_FROM_CART',
+      parsed.intent,
     );
   }
 
@@ -604,6 +613,7 @@ intent های ممکن:
     product: { id: string; name: string; basePrice: number; stock: number },
     qty: number,
     remove: boolean,
+    intent: string,
   ): Promise<EngineResult> {
     let cart = [...ctx.cart];
     const existingIdx = cart.findIndex((i) => i.productId === product.id);
@@ -638,13 +648,16 @@ intent های ممکن:
       items: cart,
       total: this.cartTotal(cart),
     };
-    const reply = await this.caption(
-      cart.length
-        ? `سبد فعلی: ${cart.map((i) => `${i.name} × ${i.qty}`).join('، ')} — جمع کل ${this.cartTotal(cart)} تومان`
-        : fa.salesAgent.cartEmpty,
-      conversation,
-    );
-    await this.logReply(conversation, reply, uiBlock);
+    const facts = cart.length
+      ? `سبد فعلی: ${cart.map((i) => `${i.name} × ${i.qty}`).join('، ')} — جمع کل ${this.cartTotal(cart)} تومان`
+      : fa.salesAgent.cartEmpty;
+    const reply = await this.caption(facts, conversation);
+    await this.logReply(conversation, reply, uiBlock, undefined, {
+      intent,
+      handler: 'applyCartUpdate',
+      factsOrPrompt: facts,
+      model: resolveModel(conversation.abVariant),
+    });
     return { reply, uiBlocks: [uiBlock], state: nextState };
   }
 
@@ -657,13 +670,16 @@ intent های ممکن:
       items: ctx.cart,
       total: this.cartTotal(ctx.cart),
     };
-    const reply = await this.caption(
-      ctx.cart.length
-        ? `سبد فعلی: ${ctx.cart.map((i) => `${i.name} × ${i.qty}`).join('، ')} — جمع کل ${this.cartTotal(ctx.cart)} تومان`
-        : fa.salesAgent.cartEmpty,
-      conversation,
-    );
-    await this.logReply(conversation, reply, uiBlock);
+    const facts = ctx.cart.length
+      ? `سبد فعلی: ${ctx.cart.map((i) => `${i.name} × ${i.qty}`).join('، ')} — جمع کل ${this.cartTotal(ctx.cart)} تومان`
+      : fa.salesAgent.cartEmpty;
+    const reply = await this.caption(facts, conversation);
+    await this.logReply(conversation, reply, uiBlock, undefined, {
+      intent: 'VIEW_CART',
+      handler: 'doViewCart',
+      factsOrPrompt: facts,
+      model: resolveModel(conversation.abVariant),
+    });
     return { reply, uiBlocks: [uiBlock], state: conversation.currentState };
   }
 
@@ -717,11 +733,14 @@ intent های ممکن:
       ownerName,
       amount: order.totalAmount,
     };
-    const reply = await this.caption(
-      `سفارش ثبت شد. مبلغ قابل پرداخت ${order.totalAmount} تومان به شماره کارت ${cardNumber} به نام ${ownerName}. بعد از واریز، عکس رسید را بفرست.`,
-      conversation,
-    );
-    await this.logReply(conversation, reply, uiBlock);
+    const facts = `سفارش ثبت شد. مبلغ قابل پرداخت ${order.totalAmount} تومان به شماره کارت ${cardNumber} به نام ${ownerName}. بعد از واریز، عکس رسید را بفرست.`;
+    const reply = await this.caption(facts, conversation);
+    await this.logReply(conversation, reply, uiBlock, undefined, {
+      intent: 'CHECKOUT',
+      handler: 'doCreateOrder',
+      factsOrPrompt: facts,
+      model: resolveModel(conversation.abVariant),
+    });
     return { reply, uiBlocks: [uiBlock], state: nextState };
   }
 
@@ -778,8 +797,14 @@ intent های ممکن:
       lastShownProducts: [],
     });
     await this.resetClarifyAttempts(conversation);
-    const reply = await this.caption(fa.salesAgent.cartCleared, conversation);
-    await this.logReply(conversation, reply, { type: 'NONE' });
+    const facts = fa.salesAgent.cartCleared;
+    const reply = await this.caption(facts, conversation);
+    await this.logReply(conversation, reply, { type: 'NONE' }, undefined, {
+      intent: 'CANCEL',
+      handler: 'doCancel',
+      factsOrPrompt: facts,
+      model: resolveModel(conversation.abVariant),
+    });
     return { reply, uiBlocks: [], state: nextState };
   }
 
@@ -799,11 +824,15 @@ intent های ممکن:
       question,
     );
     if (match) {
-      const reply = await this.caption(
-        `سؤال مشتری: ${match.question}\nجواب واقعی: ${match.answer}`,
-        conversation,
-      );
-      await this.logReply(conversation, reply, { type: 'NONE' });
+      const facts = `سؤال مشتری: ${match.question}\nجواب واقعی: ${match.answer}`;
+      const reply = await this.caption(facts, conversation);
+      await this.logReply(conversation, reply, { type: 'NONE' }, undefined, {
+        intent: 'ASK_FAQ',
+        handler: 'doFaq',
+        factsOrPrompt: facts,
+        model: resolveModel(conversation.abVariant),
+        kbSource: 'STORE_KB',
+      });
       return { reply, uiBlocks: [], state: conversation.currentState };
     }
 
@@ -813,7 +842,21 @@ intent های ممکن:
       question,
     );
     if (fromDescription) {
-      await this.logReply(conversation, fromDescription, { type: 'NONE' });
+      // این مسیر مستقیم generateObject خودش را دارد (نه caption()) و همیشه با defaultModel()
+      // صدا زده می‌شود، نه resolveModel(abVariant) — طبق پیاده‌سازی واقعی tryAnswerFromProductDescriptions
+      await this.logReply(
+        conversation,
+        fromDescription,
+        { type: 'NONE' },
+        undefined,
+        {
+          intent: 'ASK_FAQ',
+          handler: 'doFaq',
+          factsOrPrompt: question,
+          model: defaultModel(),
+          kbSource: 'PRODUCT_DESCRIPTION',
+        },
+      );
       return {
         reply: fromDescription,
         uiBlocks: [],
@@ -822,7 +865,13 @@ intent های ممکن:
     }
 
     const reply = await this.caption(fa.salesAgent.faqStub, conversation);
-    await this.logReply(conversation, reply, { type: 'NONE' }, 'NO_KB_MATCH');
+    await this.logReply(conversation, reply, { type: 'NONE' }, 'NO_KB_MATCH', {
+      intent: 'ASK_FAQ',
+      handler: 'doFaq',
+      factsOrPrompt: fa.salesAgent.faqStub,
+      model: resolveModel(conversation.abVariant),
+      kbSource: 'STUB',
+    });
     return { reply, uiBlocks: [], state: conversation.currentState };
   }
 
@@ -1006,10 +1055,18 @@ answered=false بده (به‌جای حدس‌زدن).`,
     text: string,
     uiBlock: UiBlock,
     flag?: 'UNCLEAR' | 'NO_KB_MATCH',
+    trace?: AiTraceData,
   ) {
-    const wantsVoice =
-      text.length > VOICE_MIN_REPLY_CHARS &&
-      (await this.reserveVoiceSlot(conversation.id));
+    // برخلاف قبل، طول کوتاه/رسیدن به سقف باید از هم تفکیک شوند (نه فقط یک بولین) — بخش
+    // voice.reason در AI_TRACE (docs/PRD-admin-ai-decision-trace-log.md بخش ۱) به همین نیاز دارد
+    let wantsVoice = false;
+    let voiceReason: 'TOO_SHORT' | 'CONVERSATION_CAP' | undefined;
+    if (text.length > VOICE_MIN_REPLY_CHARS) {
+      wantsVoice = await this.reserveVoiceSlot(conversation.id);
+      if (!wantsVoice) voiceReason = 'CONVERSATION_CAP';
+    } else {
+      voiceReason = 'TOO_SHORT';
+    }
 
     const payload: Prisma.InputJsonObject = {
       text,
@@ -1026,12 +1083,35 @@ answered=false بده (به‌جای حدس‌زدن).`,
       },
     });
 
+    let traceEventId: string | undefined;
+    if (trace) {
+      const tracePayload: Prisma.InputJsonObject = {
+        intent: trace.intent,
+        handler: trace.handler,
+        factsOrPrompt: trace.factsOrPrompt,
+        model: trace.model,
+        ...(trace.kbSource ? { kbSource: trace.kbSource } : {}),
+        voice: wantsVoice
+          ? { generated: true }
+          : { generated: false, reason: voiceReason },
+      };
+      const traceEvent = await this.prisma.conversationEvent.create({
+        data: {
+          conversationId: conversation.id,
+          type: 'AI_TRACE',
+          payload: tracePayload,
+        },
+      });
+      traceEventId = traceEvent.id;
+    }
+
     if (wantsVoice) {
       await this.voiceQueue.add('generate', {
         eventId: event.id,
         conversationId: conversation.id,
         text,
         storeCategory: conversation.store.category,
+        ...(traceEventId ? { traceEventId } : {}),
       });
     }
   }

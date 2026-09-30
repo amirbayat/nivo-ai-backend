@@ -1261,6 +1261,7 @@ export class AdminService {
         const conv = conversationById.get(e.conversationId);
         return {
           id: e.id,
+          conversationId: e.conversationId,
           storeName: conv?.store.name ?? '',
           customerMessage:
             (prevCustomerMessage?.payload as { text?: string })?.text ?? '',
@@ -1275,5 +1276,50 @@ export class AdminService {
     );
 
     return { items, total, page };
+  }
+
+  // docs/PRD-admin-ai-decision-trace-log.md بخش ۳ — تایم‌لاین کامل یک مکالمه، CUSTOMER_MESSAGE
+  // را با AGENT_REPLY بعدی‌اش و (اگر بود) AI_TRACE بلافاصله بعد از همان AGENT_REPLY جفت می‌کند؛
+  // منطق ترکیب اینجاست، فرانت فقط رندر می‌کند
+  async getConversationTrace(conversationId: string) {
+    const events = await this.prisma.conversationEvent.findMany({
+      where: {
+        conversationId,
+        type: { in: ['CUSTOMER_MESSAGE', 'AGENT_REPLY', 'AI_TRACE'] },
+      },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true, type: true, payload: true, createdAt: true },
+    });
+
+    const items: {
+      id: string;
+      createdAt: Date;
+      customerMessage?: string;
+      agentReply?: { text: string; flag?: string };
+      trace?: Record<string, unknown>;
+    }[] = [];
+
+    for (const e of events) {
+      if (e.type === 'CUSTOMER_MESSAGE') {
+        items.push({
+          id: e.id,
+          createdAt: e.createdAt,
+          customerMessage: (e.payload as { text?: string })?.text ?? '',
+        });
+      } else if (e.type === 'AGENT_REPLY') {
+        items.push({
+          id: e.id,
+          createdAt: e.createdAt,
+          agentReply: e.payload as { text: string; flag?: string },
+        });
+      } else {
+        // AI_TRACE — همیشه بلافاصله بعد از AGENT_REPLY خودش ساخته می‌شود (logReply)، پس به
+        // آخرین آیتم (اگر agentReply بود) می‌چسبد
+        const last = items[items.length - 1];
+        if (last?.agentReply) last.trace = e.payload as Record<string, unknown>;
+      }
+    }
+
+    return { items };
   }
 }
