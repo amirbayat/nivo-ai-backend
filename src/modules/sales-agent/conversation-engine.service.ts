@@ -13,6 +13,7 @@ import { CardSelectorService } from '../store/card-selector.service';
 import { CreditService } from './credit.service';
 import { AbuseGuardService } from './abuse-guard.service';
 import { TelegramApiClientService } from '../telegram/telegram-api-client.service';
+import { CommentsService } from '../comments/comments.service';
 import { fa } from '../../i18n/fa';
 import { defaultModel, resolveModel } from './model-variants';
 import { toneForCategory } from './tone-by-category';
@@ -83,6 +84,7 @@ export class ConversationEngineService {
     private readonly abuseGuard: AbuseGuardService,
     private readonly storage: StorageService,
     private readonly telegramApi: TelegramApiClientService,
+    private readonly comments: CommentsService,
     @InjectQueue('sales-agent-voice')
     private readonly voiceQueue: Queue<SalesAgentVoiceJobData>,
   ) {}
@@ -93,7 +95,16 @@ export class ConversationEngineService {
     return {
       cart: raw?.cart ?? [],
       lastShownProducts: raw?.lastShownProducts ?? [],
+      appliedDiscount: raw?.appliedDiscount ?? null,
     };
+  }
+
+  // docs/PRD-customer-comments-and-discounts.md بخش الف/۶ — چند نظر تاییدشده‌ی اخیر یک محصول،
+  // برای نشان‌دادن به خریدار بعدی (showProduct/doBrowse) به شکل یک خط واقعیت اضافه
+  private async commentsFactsSuffix(productId: string): Promise<string> {
+    const approved = await this.comments.getApprovedForProduct(productId, 2);
+    if (approved.length === 0) return '';
+    return `\nنظر خریدارهای قبلی: ${approved.map((c) => `«${c.text}»`).join('، ')}`;
   }
 
   private cartTotal(cart: CartItem[]): number {
@@ -150,11 +161,14 @@ export class ConversationEngineService {
           'CONFIRM',
           'CANCEL',
           'REQUEST_HUMAN',
+          'APPLY_DISCOUNT',
           'UNCLEAR',
         ]),
         productQuery: z.string().nullable(),
         productIndex: z.number().int().positive().nullable(),
         quantity: z.number().int().positive().nullable(),
+        // docs/PRD-customer-comments-and-discounts.md بخش ۹ — فقط وقتی intent=APPLY_DISCOUNT
+        discountCode: z.string().nullable(),
       }),
       system: `تو فقط یک استخراج‌کننده‌ی intent هستی، نه فروشنده — هیچ تصمیمی نمی‌گیری، فقط
 پیام مشتری یک فروشگاه اینستاگرامی را دسته‌بندی می‌کنی.
@@ -169,6 +183,7 @@ intent های ممکن:
 - CANCEL: می‌خواهد لغو کند/سبد را خالی کند
 - ASK_FAQ: سؤال عمومی (نه درباره‌ی یک محصول خاص برای اضافه‌کردن)
 - REQUEST_HUMAN: صریحاً می‌خواهد با یک آدم واقعی صحبت کند
+- APPLY_DISCOUNT: یک کد تخفیف دارد/می‌گوید (discountCode=همان کد، دقیقاً همانی که نوشته)
 - UNCLEAR: نامفهوم یا نامرتبط
 فقط JSON مطابق schema برگردان.`,
       prompt: text,
@@ -399,6 +414,19 @@ intent های ممکن:
     const abuseResult = await this.checkAbuseGuard(conversation);
     if (abuseResult) return abuseResult;
 
+    // docs/PRD-customer-comments-and-discounts.md بخش الف/۳ — بعد از تایید سفارش (COMPLETED)
+    // یک پیام پیگیری باز می‌شود؛ اولین پیام آزاد بعدی مستقیم متن نظر می‌شود، بدون فراخوان AI
+    // (نه parseIntent، نه هزینه‌ای برای فروشگاه)
+    const awaitingReview = (
+      conversation.contextData as {
+        awaitingReview?: boolean;
+        awaitingReviewProductId?: string | null;
+      } | null
+    )?.awaitingReview;
+    if (conversation.currentState === 'COMPLETED' && awaitingReview) {
+      return this.doSubmitComment(conversation, text);
+    }
+
     if (this.billingBlocked(conversation)) {
       return this.transitionToHandoff(conversation, 'BILLING_BLOCKED');
     }
@@ -428,9 +456,104 @@ intent های ممکن:
         return this.doCancel(conversation);
       case 'ASK_FAQ':
         return this.doFaq(conversation, text, ctx);
+      case 'APPLY_DISCOUNT':
+        if (conversation.currentState === 'CART_REVIEW') {
+          return this.doApplyDiscount(conversation, ctx, parsed.discountCode);
+        }
+        return this.doClarify(conversation, fa.salesAgent.nothingToConfirm);
       default:
         return this.doClarifyUnclear(conversation);
     }
+  }
+
+  // docs/PRD-customer-comments-and-discounts.md بخش الف/۳ — همان متن آزاد مشتری، بدون هیچ NLU،
+  // مستقیم یک ProductComment (PENDING) می‌شود؛ awaitingReview پاک می‌شود تا پیام بعدی دوباره
+  // نظر تلقی نشود
+  private async doSubmitComment(
+    conversation: ConversationWithStore,
+    text: string,
+  ): Promise<EngineResult> {
+    const existingContext = (conversation.contextData ??
+      {}) as Prisma.JsonObject & {
+      awaitingReviewProductId?: string | null;
+    };
+    const productId = existingContext.awaitingReviewProductId ?? null;
+
+    await this.comments.submitComment({
+      storeId: conversation.storeId,
+      customerId: conversation.customerId,
+      productId,
+      text,
+    });
+
+    const { awaitingReview, awaitingReviewProductId, ...rest } =
+      existingContext;
+    void awaitingReview;
+    void awaitingReviewProductId;
+    await this.prisma.salesConversation.update({
+      where: { id: conversation.id },
+      data: { contextData: rest },
+    });
+
+    const reply = fa.salesAgent.reviewThanks;
+    await this.logReply(conversation, reply, { type: 'NONE' });
+    return { reply, uiBlocks: [], state: conversation.currentState };
+  }
+
+  // docs/PRD-customer-comments-and-discounts.md بخش ۹ — فقط پیش‌نمایش/اعتبارسنجی؛ مصرف واقعی
+  // (atomic increment) در doCreateOrder اتفاق می‌افتد، چون ممکن است خریدار قبل از پرداخت پشیمان شود
+  private async doApplyDiscount(
+    conversation: ConversationWithStore,
+    ctx: ConversationContext,
+    rawCode: string | null | undefined,
+  ): Promise<EngineResult> {
+    if (!rawCode) {
+      return this.doClarify(conversation, fa.salesAgent.discountCodeMissing);
+    }
+    const normalized = rawCode.trim().toUpperCase();
+    const discount = await this.prisma.storeDiscountCode.findFirst({
+      where: {
+        storeId: conversation.storeId,
+        code: normalized,
+        isActive: true,
+        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+      },
+    });
+    const valid =
+      discount &&
+      (discount.maxRedemptions == null ||
+        discount.redemptionCount < discount.maxRedemptions);
+    if (!valid) {
+      return this.doClarify(conversation, fa.salesAgent.discountCodeInvalid);
+    }
+
+    const total = this.cartTotal(ctx.cart);
+    const amountToman =
+      discount.kind === 'PERCENT'
+        ? Math.floor((total * discount.value) / 100)
+        : Math.min(discount.value, total);
+
+    const nextCtx: ConversationContext = {
+      ...ctx,
+      appliedDiscount: { id: discount.id, code: discount.code, amountToman },
+    };
+    await this.persistTransition(conversation, 'CART_REVIEW', nextCtx);
+
+    const newTotal = total - amountToman;
+    const uiBlock: UiBlock = {
+      type: 'CART_SUMMARY',
+      items: ctx.cart,
+      total: newTotal,
+    };
+    const facts = `کد تخفیف ${normalized} اعمال شد — ${amountToman} تومان تخفیف. جمع جدید سبد: ${newTotal} تومان`;
+    const reply = await this.caption(facts, conversation);
+    await this.logReply(conversation, reply, uiBlock, undefined, {
+      intent: 'APPLY_DISCOUNT',
+      handler: 'doApplyDiscount',
+      factsOrPrompt: facts,
+      model: resolveModel(conversation.abVariant),
+    });
+    return { reply, uiBlocks: [uiBlock], state: 'CART_REVIEW' };
   }
 
   // مسیر قطعی دکمه‌های UiBlock (افزودن به سبد/تایید سبد) — بدون NLU، productId از خودِ
@@ -527,7 +650,7 @@ intent های ممکن:
     // عمداً بدون عدد موجودی در واقعیت‌هایی که به مدل داده می‌شود — caption() فقط از همین
     // واقعیت‌ها جمله می‌سازد، پس هر عددی اینجا باشد عیناً به مشتری گفته می‌شود. فروشنده
     // نمی‌خواهد تعداد واقعی موجودی افشا شود؛ فقط وضعیت موجود/ناموجود کافی است.
-    const facts = `مشتری از لینک مستقیم این محصول وارد شده: ${product.name} (${product.basePrice} تومان)${product.stock === 0 ? ' — فعلاً ناموجود' : ''}${product.description ? `\nتوضیحات محصول: ${product.description}` : ''}`;
+    const facts = `مشتری از لینک مستقیم این محصول وارد شده: ${product.name} (${product.basePrice} تومان)${product.stock === 0 ? ' — فعلاً ناموجود' : ''}${product.description ? `\nتوضیحات محصول: ${product.description}` : ''}${await this.commentsFactsSuffix(product.id)}`;
     const reply = await this.caption(facts, conversation);
     const finalReply = `${fa.salesAgent.firstGreeting(conversation.store.name)}\n\n${reply}`;
     await this.logReply(conversation, finalReply, uiBlock, undefined, {
@@ -682,7 +805,7 @@ intent های ممکن:
       total: this.cartTotal(cart),
     };
     const facts = cart.length
-      ? `سبد فعلی: ${cart.map((i) => `${i.name} × ${i.qty}`).join('، ')} — جمع کل ${this.cartTotal(cart)} تومان`
+      ? `سبد فعلی: ${cart.map((i) => `${i.name} × ${i.qty}`).join('، ')} — جمع کل ${this.cartTotal(cart)} تومان\n${fa.salesAgent.discountAppliedHint}`
       : fa.salesAgent.cartEmpty;
     const reply = await this.caption(facts, conversation);
     await this.logReply(conversation, reply, uiBlock, undefined, {
@@ -731,7 +854,28 @@ intent های ممکن:
     let cardNumber: string;
     let ownerName: string;
     if (!order) {
-      const total = this.cartTotal(ctx.cart);
+      const cartTotal = this.cartTotal(ctx.cart);
+      // docs/PRD-customer-comments-and-discounts.md بخش ۹ — مصرف واقعی کد تخفیف همین‌جا،
+      // نه در doApplyDiscount (پیش‌نمایش)؛ UPDATE شرطی خام (نه updateMany) چون شرط سقف
+      // (redemptionCount < maxRedemptions) مقایسه‌ی دو ستون همین ردیف است — چیزی که فیلتر
+      // Prisma نمی‌تواند بدون رفتن به raw SQL بیان کند. لاک ردیف پستگرس خودش اتمیک‌بودن را
+      // تضمین می‌کند: دو خریدار هم‌زمان نمی‌توانند هردو از آخرین ظرفیت کد استفاده کنند.
+      let discountAmount = 0;
+      let discountCodeId: string | undefined;
+      if (ctx.appliedDiscount) {
+        const affected = await this.prisma.$executeRaw`
+          UPDATE store_discount_codes
+          SET "redemptionCount" = "redemptionCount" + 1
+          WHERE id = ${ctx.appliedDiscount.id}
+            AND "isActive" = true
+            AND ("maxRedemptions" IS NULL OR "redemptionCount" < "maxRedemptions")
+        `;
+        if (affected > 0) {
+          discountAmount = ctx.appliedDiscount.amountToman;
+          discountCodeId = ctx.appliedDiscount.id;
+        }
+      }
+      const total = cartTotal - discountAmount;
       // docs/PRD-seller-multi-bank-card-rotation.md بخش ۲ — انتخاب دقیقاً همین لحظه، یک‌بار،
       // و روی خودِ سفارش پرسیست می‌شود (بازخوانی بعدی همین سفارش دوباره انتخاب نمی‌کند)
       const card = await this.cardSelector.selectCard(conversation.storeId);
@@ -742,6 +886,7 @@ intent های ممکن:
           items: ctx.cart,
           totalAmount: total,
           bankCardId: card.id,
+          discountCodeId,
         },
       });
       cardNumber = card.cardNumber;

@@ -2065,6 +2065,8 @@ model Store {
   creditUsageEvents CreditUsageEvent[]
   payments          Payment[]
   bankCards         StoreBankCard[]
+  comments          ProductComment[]
+  discountCodes     StoreDiscountCode[]
 
   @@index([sellerId])
   @@map("stores")
@@ -2131,6 +2133,10 @@ model Product {
   // کنند، بدون فراخوان دوباره‌ی جستجوی وب.
   canonicalProductId String?
   canonicalProduct   CanonicalProduct? @relation(fields: [canonicalProductId], references: [id])
+
+  // docs/PRD-customer-comments-and-discounts.md بخش الف — نظرات تاییدشده هم منبع تکمیل
+  // توضیحات (§۶) هم قابل‌اشاره در پاسخ ایجنت به خریدار بعدی هستند
+  comments ProductComment[]
 
   @@unique([storeId, code])
   @@index([storeId])
@@ -2214,6 +2220,7 @@ model Customer {
   // docs/PRD-conversation-history.md — دیگر یک‌به‌یک نیست؛ خریدار می‌تواند چند مکالمه‌ی
   // آرشیوشده داشته باشد («گفتگوی جدید» یا رسیدن به COMPLETED/REJECTED، بدون ساخت Customer تازه)
   salesConversations SalesConversation[]
+  comments           ProductComment[]
 
   @@unique([storeId, sessionToken])
   @@unique([storeId, telegramChatId])
@@ -2367,23 +2374,84 @@ enum OrderStatus {
 }
 
 model Order {
-  id              String            @id @default(uuid())
+  id              String             @id @default(uuid())
   storeId         String
-  store           Store             @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  conversationId  String            @unique
-  conversation    SalesConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  store           Store              @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  conversationId  String             @unique
+  conversation    SalesConversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   items           Json // [{productId, name, unitPrice, qty}]
   totalAmount     Int
-  status          OrderStatus       @default(PENDING_PAYMENT)
+  status          OrderStatus        @default(PENDING_PAYMENT)
   receiptImageKey String?
   rejectReason    String?
   // docs/PRD-seller-multi-bank-card-rotation.md — کدام کارت واقعاً به این خریدار نشان داده
   // شد؛ برای شمارش سقف THRESHOLD و شفافیت به فروشنده
   bankCardId      String?
-  bankCard        StoreBankCard?    @relation(fields: [bankCardId], references: [id])
-  createdAt       DateTime          @default(now())
-  updatedAt       DateTime          @updatedAt
+  bankCard        StoreBankCard?     @relation(fields: [bankCardId], references: [id])
+  // docs/PRD-customer-comments-and-discounts.md بخش ب — کدام کد تخفیف واقعاً روی این سفارش
+  // اعمال شد (totalAmount از قبل تخفیف‌خورده ذخیره می‌شود)؛ فقط شفافیت/آمار، منطق اعمال در
+  // conversation-engine.service.ts's doApplyDiscount/doCreateOrder است
+  discountCodeId  String?
+  discountCode    StoreDiscountCode? @relation(fields: [discountCodeId], references: [id])
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
 
   @@index([storeId])
   @@map("orders")
+}
+
+// docs/PRD-customer-comments-and-discounts.md بخش الف — نظرات خریداران؛ تایید نهایی همیشه با
+// ادمین پلتفرم است (نه فروشنده)، AI فقط پیش‌فیلتر اسپم/نامرتبط برای کم‌کردن حجم صف ادمین است
+enum CommentStatus {
+  PENDING
+  AI_AUTO_REJECTED
+  ADMIN_APPROVED
+  ADMIN_REJECTED
+}
+
+model ProductComment {
+  id           String        @id @default(uuid())
+  storeId      String
+  store        Store         @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  productId    String? // نال = نظر درباره‌ی کلی فروشگاه/فروشنده، نه یک محصول خاص
+  product      Product?      @relation(fields: [productId], references: [id], onDelete: SetNull)
+  customerId   String
+  customer     Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  text         String        @db.Text
+  rating       Int? // ۱ تا ۵، اختیاری — سؤال باز §۱۱ سند: فعلاً متن آزاد کافی است، رتبه اختیاری می‌ماند
+  status       CommentStatus @default(PENDING)
+  aiVerdict    String? // خروجی خام مرحله‌ی AI برای شفافیت به ادمین
+  aiConfidence Float?
+  moderatedAt  DateTime?
+  createdAt    DateTime      @default(now())
+
+  @@index([storeId, status])
+  @@index([productId])
+  @@map("product_comments")
+}
+
+// docs/PRD-customer-comments-and-discounts.md بخش ب — کد تخفیف فروشگاهی، جدا از DiscountCode
+// موجود که User-محور محصول چت اصلی نیوو است (قابل‌استفاده مستقیم برای فروشگاه‌ها نیست)
+enum DiscountKind {
+  PERCENT
+  FIXED_AMOUNT
+}
+
+model StoreDiscountCode {
+  id              String       @id @default(uuid())
+  storeId         String
+  store           Store        @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  code            String // بزرگ‌حرف نرمال‌شده، مثل «TAKHFIF20»
+  kind            DiscountKind
+  value           Int // درصد (۰-۱۰۰) یا مبلغ ثابت تومان، بسته به kind
+  maxRedemptions  Int? // نال = نامحدود
+  redemptionCount Int          @default(0)
+  expiresAt       DateTime?
+  isActive        Boolean      @default(true)
+  createdAt       DateTime     @default(now())
+
+  orders Order[]
+
+  @@unique([storeId, code])
+  @@map("store_discount_codes")
 }

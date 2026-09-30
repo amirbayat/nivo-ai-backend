@@ -17,6 +17,7 @@ import { VideoEditProcessor } from './processors/video-edit.processor';
 import { ImageModelCostEstimateProcessor } from './processors/image-model-cost-estimate.processor';
 import { VideoModelCostEstimateProcessor } from './processors/video-model-cost-estimate.processor';
 import { SalesAgentVoiceProcessor } from './processors/sales-agent-voice.processor';
+import { ProductCommentModerationProcessor } from './processors/product-comment-moderation.processor';
 import { PrismaModule } from '../prisma/prisma.module';
 import { MessageFeedbackModule } from '../modules/message-feedback/message-feedback.module';
 import { CampaignModule } from '../modules/campaign/campaign.module';
@@ -76,6 +77,8 @@ import { SalesAgentModule } from '../modules/sales-agent/sales-agent.module';
     BullModule.registerQueue({ name: 'video-model-cost-estimate' }),
     // docs/PRD-sales-agent-voice.md — تولیدکننده در sales-agent.module.ts
     BullModule.registerQueue({ name: 'sales-agent-voice' }),
+    // docs/PRD-customer-comments-and-discounts.md — تولیدکننده در comments.module.ts
+    BullModule.registerQueue({ name: 'product-comment-moderation' }),
     PrismaModule,
     MessageFeedbackModule,
     CampaignModule,
@@ -113,6 +116,7 @@ import { SalesAgentModule } from '../modules/sales-agent/sales-agent.module';
     ImageModelCostEstimateProcessor,
     VideoModelCostEstimateProcessor,
     SalesAgentVoiceProcessor,
+    ProductCommentModerationProcessor,
   ],
 })
 export class QueueModule {}

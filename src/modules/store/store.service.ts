@@ -5,7 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import type { OrderStatus } from '@prisma/client';
+import type { OrderStatus, Prisma } from '@prisma/client';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import * as XLSX from 'xlsx';
@@ -353,7 +353,7 @@ export class StoreService {
     // docs/PRD-conversation-history.md — تأیید سفارش یعنی مکالمه واقعاً تمام شده: هم
     // currentState (COMPLETED، تا امروز هیچ‌جا ست نمی‌شد) هم archivedAt پر می‌شود تا هم
     // TERMINAL_STATES فرانت درست کار کند هم مکالمه از «فعال» بودن خارج شود
-    return this.prisma.$transaction(async (tx) => {
+    const approved = await this.prisma.$transaction(async (tx) => {
       // docs/PRD-seller-multi-bank-card-rotation.md بخش ۲ — فقط روی تایید واقعی (نه لحظه‌ی
       // نمایش) به سقف THRESHOLD همان کارت اضافه می‌شود؛ خریدار ممکن است اصلاً پرداخت نکند
       if (order.bankCardId) {
@@ -371,6 +371,62 @@ export class StoreService {
         data: { status: 'APPROVED' },
       });
     });
+    await this.requestReviewFollowUp(order);
+    return approved;
+  }
+
+  // docs/PRD-customer-comments-and-discounts.md بخش الف/۳ — بعد از تایید سفارش، یک پیام
+  // پیگیری ثابت (نه LLM-generated) باز می‌شود؛ اولین پیام آزاد بعدی مشتری در همین مکالمه
+  // (که به conversation-engine.service.ts's handleMessage می‌رسد، حتی بعد از COMPLETED —
+  // برخلاف «گفتگوی جدید»، مشتری همان conversationId را در مرورگرش باز نگه می‌دارد) طبق
+  // flag تازه‌ی contextData.awaitingReview یک ProductComment می‌شود، نه یک پیام معمولی
+  private async requestReviewFollowUp(order: {
+    conversationId: string;
+    items: Prisma.JsonValue;
+  }): Promise<void> {
+    const conversation = await this.prisma.salesConversation.findUnique({
+      where: { id: order.conversationId },
+      include: { customer: true },
+    });
+    if (!conversation) return;
+
+    const items = order.items as { productId: string }[];
+    const distinctProductIds = [...new Set(items.map((i) => i.productId))];
+    const awaitingReviewProductId =
+      distinctProductIds.length === 1 ? distinctProductIds[0] : null;
+
+    const text = fa.salesAgent.reviewFollowUpPrompt;
+    const existingContext = (conversation.contextData ??
+      {}) as Prisma.JsonObject;
+    await this.prisma.$transaction([
+      this.prisma.conversationEvent.create({
+        data: {
+          conversationId: conversation.id,
+          type: 'AGENT_REPLY',
+          payload: { text },
+        },
+      }),
+      this.prisma.salesConversation.update({
+        where: { id: conversation.id },
+        data: {
+          contextData: {
+            ...existingContext,
+            awaitingReview: true,
+            awaitingReviewProductId,
+          },
+        },
+      }),
+    ]);
+
+    if (
+      conversation.customer.channel === 'TELEGRAM' &&
+      conversation.customer.telegramChatId
+    ) {
+      await this.telegramApi.sendText(
+        conversation.customer.telegramChatId,
+        text,
+      );
+    }
   }
 
   async rejectOrder(

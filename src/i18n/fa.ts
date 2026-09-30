@@ -150,6 +150,12 @@ export const fa = {
     productCodeTaken:
       'این کد قبلاً برای محصول دیگری در همین فروشگاه استفاده شده',
     telegramConnectTokenInvalid: 'این توکن اتصال تلگرام نامعتبر یا منقضی شده',
+    // docs/PRD-customer-comments-and-discounts.md بخش ۷/۸
+    discountCodeNotFound: 'این کد تخفیف یافت نشد',
+    discountCodeTaken: 'این کد قبلاً در همین فروشگاه تعریف شده',
+    discountCodeInvalidFormat:
+      'کد تخفیف فقط می‌تواند از حروف/عدد انگلیسی و ۳ تا ۲۰ کاراکتر باشد',
+    discountPercentTooHigh: 'درصد تخفیف نمی‌تواند بیشتر از ۱۰۰ باشد',
   },
   storeKb: {
     notFound: 'این مورد در باکس دانش یافت نشد',
@@ -183,6 +189,15 @@ export const fa = {
     billingBlockedHandoff: 'فروشنده به‌زودی شخصاً بهتون جواب می‌ده',
     // docs/PRD-buyer-abuse-rate-limit.md — فقط یک‌بار (لحظه‌ی قفل‌شدن) نشان داده می‌شود، بعدش سکوت کامل
     abuseLocked: 'یکم آروم‌تر 🙏 لطفاً چند دقیقه صبر کن و دوباره پیام بده',
+    // docs/PRD-customer-comments-and-discounts.md بخش الف/۳ — بعد از تایید سفارش، پیام ثابت
+    // (نه LLM-generated) که یک پیام آزاد بعدی مشتری را به یک ProductComment تبدیل می‌کند
+    reviewFollowUpPrompt:
+      'سفارشت تایید شد ✅ امیدواریم راضی باشی 🙏 اگه دوست داری نظرت رو درباره‌ی خرید یا محصول همین‌جا برام بنویس، به بقیه هم کمک می‌کنه.',
+    reviewThanks: 'ممنون بابت نظرت! بعد از بررسی نمایش داده می‌شه 🙏',
+    // docs/PRD-customer-comments-and-discounts.md بخش ۹
+    discountCodeMissing: 'کد تخفیف رو متوجه نشدم، می‌تونی دوباره بگی؟',
+    discountCodeInvalid: 'این کد تخفیف معتبر نیست یا منقضی/تمام‌شده',
+    discountAppliedHint: 'اگه کد تخفیف داری، بگو تا برات اعمال کنم.',
   },
   telegram: {
     startNeedsLink:

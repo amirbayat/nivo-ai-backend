@@ -15,6 +15,7 @@ import { fetchProductPage } from '../../common/utils/fetch-product-page.util';
 import { fa } from '../../i18n/fa';
 import { PricingService } from '../usage/pricing.service';
 import { StoreService } from './store.service';
+import { CommentsService } from '../comments/comments.service';
 
 // docs/PRD-seller-knowledge-base.md بخش ۲.۳ — دقیقاً همان shape که chat.service.ts's
 // OPENROUTER_WEB_SEARCH_TOOLS استفاده می‌کند (کپی محلی، نه import — آن فایل چیزی export نمی‌کند
@@ -96,8 +97,18 @@ export class StoreKbService {
     private readonly aiProvider: AiProviderService,
     private readonly storeService: StoreService,
     private readonly pricing: PricingService,
+    private readonly comments: CommentsService,
   ) {
     this.provider = this.aiProvider.buildClient();
+  }
+
+  // docs/PRD-customer-comments-and-discounts.md بخش الف/۶ — نظرات تاییدشده یک منبع کمکی برای
+  // واقعی‌تر‌شدن پیشنهاد AI هستند («طبق نظر خریداران، سایزبندی کمی کوچیکه»)؛ فروشنده همچنان
+  // تایید نهایی متن را می‌دهد (human-in-the-loop، بدون تغییر)
+  private async commentsHint(productId: string): Promise<string> {
+    const approved = await this.comments.getApprovedForProduct(productId, 5);
+    if (approved.length === 0) return '';
+    return `\nچیزهایی که مشتری‌های واقعی این محصول گفته‌اند: ${approved.map((c) => `«${c.text}»`).join(' / ')}`;
   }
 
   /** برای conversation-engine.service.ts's doFaq — دقیقاً یک بهترین جواب (نه چند نمونه) */
@@ -274,9 +285,14 @@ export class StoreKbService {
     }
 
     const model = 'openai/gpt-5.4-mini';
+    const commentsHint = await this.commentsHint(productId);
     try {
       if (freshCanonical) {
-        const basic = await this.generateBasicSuggestions(store, product);
+        const basic = await this.generateBasicSuggestions(
+          store,
+          product,
+          commentsHint,
+        );
         await this.prisma.canonicalProduct.update({
           where: { id: freshCanonical.id },
           data: { sourceCount: { increment: 1 } },
@@ -334,7 +350,7 @@ sourceNote را خالی بگذار. پاسخ را فقط به‌صورت یک �
           : BASIC_SUGGESTIONS_SYSTEM_PROMPT,
         prompt: `دسته‌بندی فروشگاه: ${store.category ?? 'نامشخص'}
 نام محصول: ${product.name}
-توضیح فعلی: ${product.description ?? '(هنوز توضیحی ثبت نشده)'}`,
+توضیح فعلی: ${product.description ?? '(هنوز توضیحی ثبت نشده)'}${commentsHint}`,
       });
 
       if (withWebSearch) {
@@ -402,6 +418,7 @@ sourceNote را خالی بگذار. پاسخ را فقط به‌صورت یک �
   private async generateBasicSuggestions(
     store: { category: string | null },
     product: { name: string; description: string | null },
+    commentsHint = '',
   ) {
     const { object } = await generateObject({
       model: this.provider('openai/gpt-5.4-mini'),
@@ -412,7 +429,7 @@ sourceNote را خالی بگذار. پاسخ را فقط به‌صورت یک �
       system: BASIC_SUGGESTIONS_SYSTEM_PROMPT,
       prompt: `دسته‌بندی فروشگاه: ${store.category ?? 'نامشخص'}
 نام محصول: ${product.name}
-توضیح فعلی: ${product.description ?? '(هنوز توضیحی ثبت نشده)'}`,
+توضیح فعلی: ${product.description ?? '(هنوز توضیحی ثبت نشده)'}${commentsHint}`,
     });
     return object;
   }

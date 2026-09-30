@@ -12,6 +12,9 @@ export type ConversationContext = {
   // آخرین لیست محصولاتی که با PRODUCT_CARD نشان داده شده — برای ارجاع‌های ترتیبی مشتری
   // («اولی رو بذار تو سبد») بدون اینکه مدل مستقیم productId حدس بزند
   lastShownProducts?: { id: string; name: string }[];
+  // docs/PRD-customer-comments-and-discounts.md بخش ۹ — کد تخفیفی که همین الان روی سبد
+  // اعمال شده؛ فقط در doCreateOrder مصرف می‌شود (atomic increment)، اینجا صرفاً پیش‌نمایش است
+  appliedDiscount?: { id: string; code: string; amountToman: number } | null;
 };
 
 export type UiBlock =
@@ -47,12 +50,15 @@ export type ParsedIntent = {
     | 'CONFIRM'
     | 'CANCEL'
     | 'REQUEST_HUMAN'
+    | 'APPLY_DISCOUNT'
     | 'UNCLEAR';
   productQuery?: string | null;
   // ارجاع ترتیبی به آخرین لیست نشان‌داده‌شده («اولی»/«دومی») — ۱-پایه؛ اگر ست باشد، بر
   // productQuery اولویت دارد (resolveProductRef در conversation-engine.service.ts)
   productIndex?: number | null;
   quantity?: number | null;
+  // docs/PRD-customer-comments-and-discounts.md بخش ۹ — فقط وقتی intent=APPLY_DISCOUNT
+  discountCode?: string | null;
 };
 
 export type EngineResult = {

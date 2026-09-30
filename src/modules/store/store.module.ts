@@ -3,11 +3,13 @@ import { PaymentsModule } from '../payments/payments.module';
 import { CreditsModule } from '../credits/credits.module';
 import { UsageModule } from '../usage/usage.module';
 import { TelegramApiClientModule } from '../telegram/telegram-api-client.module';
+import { CommentsModule } from '../comments/comments.module';
 import { StoreController } from './store.controller';
 import { StoreService } from './store.service';
 import { StoreKbService } from './store-kb.service';
 import { StoreCreditService } from './store-credit.service';
 import { StoreBankCardService } from './store-bank-card.service';
+import { StoreDiscountCodeService } from './store-discount-code.service';
 import { CardSelectorService } from './card-selector.service';
 
 @Module({
@@ -22,6 +24,9 @@ import { CardSelectorService } from './card-selector.service';
     CreditsModule,
     UsageModule,
     TelegramApiClientModule,
+    // docs/PRD-customer-comments-and-discounts.md بخش ۶ — StoreKbService از نظرات تاییدشده
+    // به‌عنوان منبع کمکی تکمیل توضیحات استفاده می‌کند
+    CommentsModule,
   ],
   controllers: [StoreController],
   providers: [
@@ -29,6 +34,7 @@ import { CardSelectorService } from './card-selector.service';
     StoreKbService,
     StoreCreditService,
     StoreBankCardService,
+    StoreDiscountCodeService,
     CardSelectorService,
   ],
   // CardSelectorService هم از SalesAgentModule (doCreateOrder) لازم است —

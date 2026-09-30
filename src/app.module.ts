@@ -50,6 +50,7 @@ import { ContentAgentModule } from './modules/content-agent/content-agent.module
 import { StoreModule } from './modules/store/store.module';
 import { SalesAgentModule } from './modules/sales-agent/sales-agent.module';
 import { TelegramModule } from './modules/telegram/telegram.module';
+import { CommentsModule } from './modules/comments/comments.module';
 
 @Module({
   imports: [
@@ -100,6 +101,7 @@ import { TelegramModule } from './modules/telegram/telegram.module';
     ContentAgentModule,
     StoreModule,
     SalesAgentModule,
+    CommentsModule,
     TelegramModule,
   ],
   providers: [{ provide: APP_FILTER, useClass: AllExceptionsFilter }],
