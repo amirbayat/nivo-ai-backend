@@ -274,7 +274,21 @@ export class StoreService {
   }
 
   async approveOrder(sellerId: string, storeId: string, orderId: string) {
-    await this.getOwnedOrder(sellerId, storeId, orderId);
+    const order = await this.getOwnedOrder(sellerId, storeId, orderId);
+    // docs/PRD-seller-multi-bank-card-rotation.md بخش ۲ — فقط روی تایید واقعی (نه لحظه‌ی
+    // نمایش) به سقف THRESHOLD همان کارت اضافه می‌شود؛ خریدار ممکن است اصلاً پرداخت نکند
+    if (order.bankCardId) {
+      return this.prisma.$transaction(async (tx) => {
+        await tx.storeBankCard.update({
+          where: { id: order.bankCardId! },
+          data: { totalConfirmedToman: { increment: order.totalAmount } },
+        });
+        return tx.order.update({
+          where: { id: orderId },
+          data: { status: 'APPROVED' },
+        });
+      });
+    }
     return this.prisma.order.update({
       where: { id: orderId },
       data: { status: 'APPROVED' },

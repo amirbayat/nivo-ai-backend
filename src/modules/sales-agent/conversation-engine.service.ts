@@ -7,6 +7,7 @@ import type { ConversationState, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AiProviderService } from '../../common/services/ai-provider.service';
 import { StoreKbService } from '../store/store-kb.service';
+import { CardSelectorService } from '../store/card-selector.service';
 import { CreditService } from './credit.service';
 import { AbuseGuardService } from './abuse-guard.service';
 import { fa } from '../../i18n/fa';
@@ -53,6 +54,7 @@ export class ConversationEngineService {
     private readonly prisma: PrismaService,
     private readonly aiProvider: AiProviderService,
     private readonly storeKb: StoreKbService,
+    private readonly cardSelector: CardSelectorService,
     private readonly creditService: CreditService,
     private readonly abuseGuard: AbuseGuardService,
     @InjectQueue('sales-agent-voice')
@@ -677,16 +679,33 @@ intent های ممکن:
     let order = await this.prisma.order.findUnique({
       where: { conversationId: conversation.id },
     });
+    let cardNumber: string;
+    let ownerName: string;
     if (!order) {
       const total = this.cartTotal(ctx.cart);
+      // docs/PRD-seller-multi-bank-card-rotation.md بخش ۲ — انتخاب دقیقاً همین لحظه، یک‌بار،
+      // و روی خودِ سفارش پرسیست می‌شود (بازخوانی بعدی همین سفارش دوباره انتخاب نمی‌کند)
+      const card = await this.cardSelector.selectCard(conversation.storeId);
       order = await this.prisma.order.create({
         data: {
           storeId: conversation.storeId,
           conversationId: conversation.id,
           items: ctx.cart,
           totalAmount: total,
+          bankCardId: card.id,
         },
       });
+      cardNumber = card.cardNumber;
+      ownerName = card.ownerName;
+    } else if (order.bankCardId) {
+      const card = await this.prisma.storeBankCard.findUnique({
+        where: { id: order.bankCardId },
+      });
+      cardNumber = card?.cardNumber ?? conversation.store.bankCardNumber;
+      ownerName = card?.ownerName ?? conversation.store.bankOwnerName;
+    } else {
+      cardNumber = conversation.store.bankCardNumber;
+      ownerName = conversation.store.bankOwnerName;
     }
 
     const nextState: ConversationState = 'AWAITING_PAYMENT';
@@ -694,12 +713,12 @@ intent های ممکن:
 
     const uiBlock: UiBlock = {
       type: 'PAYMENT_INSTRUCTIONS',
-      cardNumber: conversation.store.bankCardNumber,
-      ownerName: conversation.store.bankOwnerName,
+      cardNumber,
+      ownerName,
       amount: order.totalAmount,
     };
     const reply = await this.caption(
-      `سفارش ثبت شد. مبلغ قابل پرداخت ${order.totalAmount} تومان به شماره کارت ${conversation.store.bankCardNumber} به نام ${conversation.store.bankOwnerName}. بعد از واریز، عکس رسید را بفرست.`,
+      `سفارش ثبت شد. مبلغ قابل پرداخت ${order.totalAmount} تومان به شماره کارت ${cardNumber} به نام ${ownerName}. بعد از واریز، عکس رسید را بفرست.`,
       conversation,
     );
     await this.logReply(conversation, reply, uiBlock);

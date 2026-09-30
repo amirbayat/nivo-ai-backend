@@ -2026,10 +2026,10 @@ model VideoEditJob {
 // sellerId عمداً @unique نیست (بر خلاف Wallet/Subscription) چون یک User می‌تواند چند
 // فروشگاه بزند — دقیقاً الگوی رابطه‌ی Project (بالا)، نه Wallet.
 model Store {
-  id                 String      @id @default(uuid())
+  id                 String            @id @default(uuid())
   sellerId           String
-  seller             User        @relation(fields: [sellerId], references: [id], onDelete: Cascade)
-  slug               String      @unique // بخش nivo.ai/chat/<slug> — انگلیسی، توسط خود فروشنده انتخاب می‌شود (بخش ۱.۱ سند)
+  seller             User              @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  slug               String            @unique // بخش nivo.ai/chat/<slug> — انگلیسی، توسط خود فروشنده انتخاب می‌شود (بخش ۱.۱ سند)
   name               String // نام فارسی فروشگاه، فقط نمایشی
   category           String?
   bankCardNumber     String
@@ -2040,12 +2040,16 @@ model Store {
   instagramUrl       String?
   telegramUrl        String?
   websiteUrl         String?
-  status             StoreStatus @default(ACTIVE)
+  status             StoreStatus       @default(ACTIVE)
   // docs/PRD-seller-credit-billing.md بخش ۱/۵ — اعتبار AI فروشگاه به تومان؛ بعد از تمام‌شدن
   // سهمیه‌ی رایگان روزانه، مصرف واقعی هر فراخوانی AI از همین فیلد کم می‌شود
-  creditBalanceToman Int         @default(0)
-  createdAt          DateTime    @default(now())
-  updatedAt          DateTime    @updatedAt
+  creditBalanceToman Int               @default(0)
+  // docs/PRD-seller-multi-bank-card-rotation.md — سیاست انتخاب کارت وقتی چند StoreBankCard
+  // فعال دارد؛ lastCardIndex فقط برای EQUAL (round-robin واقعی، نه رندوم)
+  cardDisplayPolicy  CardDisplayPolicy @default(EQUAL)
+  lastCardIndex      Int               @default(0)
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
 
   products          Product[]
   customers         Customer[]
@@ -2054,6 +2058,7 @@ model Store {
   kbEntries         StoreKbEntry[]
   creditUsageEvents CreditUsageEvent[]
   payments          Payment[]
+  bankCards         StoreBankCard[]
 
   @@index([sellerId])
   @@map("stores")
@@ -2062,6 +2067,38 @@ model Store {
 enum StoreStatus {
   ACTIVE
   SUSPENDED
+}
+
+// docs/PRD-seller-multi-bank-card-rotation.md — فروشنده‌ی خرد با یک کارت خیلی زود به سقف
+// روزانه/ماهانه‌ی کارت‌به‌کارت می‌رسد؛ پخش تراکنش بین چند کارت (خودش/همسر/شریک) راه‌حل رایج است
+model StoreBankCard {
+  id      String @id @default(uuid())
+  storeId String
+  store   Store  @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  cardNumber String
+  ownerName  String
+  isActive   Boolean @default(true) // حذف نمی‌شود (تاریخچه‌ی Order.bankCardId حفظ شود)، فقط غیرفعال
+
+  sortOrder      Int  @default(0) // ترتیب برای THRESHOLD — کدام کارت اول پر می‌شود
+  thresholdToman Int? // فقط THRESHOLD — سقف این کارت قبل از رفتن به کارت بعدی
+  percentWeight  Int? // فقط PERCENTAGE — وزن نسبی، جمع کل لازم نیست ۱۰۰ باشد
+
+  // فقط وقتی سفارش واقعاً تایید شد افزایش می‌یابد (approveOrder)، نه لحظه‌ی نمایش —
+  // خریدار ممکن است اصلاً پرداخت نکند
+  totalConfirmedToman Int      @default(0)
+  createdAt           DateTime @default(now())
+
+  orders Order[]
+
+  @@index([storeId, isActive])
+  @@map("store_bank_cards")
+}
+
+enum CardDisplayPolicy {
+  THRESHOLD
+  PERCENTAGE
+  EQUAL
 }
 
 model Product {
@@ -2282,6 +2319,10 @@ model Order {
   status          OrderStatus       @default(PENDING_PAYMENT)
   receiptImageKey String?
   rejectReason    String?
+  // docs/PRD-seller-multi-bank-card-rotation.md — کدام کارت واقعاً به این خریدار نشان داده
+  // شد؛ برای شمارش سقف THRESHOLD و شفافیت به فروشنده
+  bankCardId      String?
+  bankCard        StoreBankCard?    @relation(fields: [bankCardId], references: [id])
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 

@@ -27,12 +27,16 @@ import type { StoreKbKind } from '@prisma/client';
 import { StoreService } from './store.service';
 import { StoreKbService } from './store-kb.service';
 import { StoreCreditService } from './store-credit.service';
+import { StoreBankCardService } from './store-bank-card.service';
 import { CreateStoreDto } from './dto/create-store.dto';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { CreateKbEntryDto } from './dto/create-kb-entry.dto';
 import { UpdateKbEntryDto } from './dto/update-kb-entry.dto';
 import { PurchaseStoreCreditDto } from './dto/purchase-store-credit.dto';
+import { CreateBankCardDto } from './dto/create-bank-card.dto';
+import { UpdateBankCardDto } from './dto/update-bank-card.dto';
+import { UpdateCardPolicyDto } from './dto/update-card-policy.dto';
 import { fa } from '../../i18n/fa';
 
 // docs/PRD-mvp-launch-plan.md گام ۰ — ثبت‌نام فروشنده و ساخت فروشگاه
@@ -43,6 +47,7 @@ export class StoreController {
     private readonly storeService: StoreService,
     private readonly storeKbService: StoreKbService,
     private readonly storeCreditService: StoreCreditService,
+    private readonly storeBankCardService: StoreBankCardService,
   ) {}
 
   @Get('me')
@@ -308,5 +313,39 @@ export class StoreController {
       dto.packageId,
       dto.gateway,
     );
+  }
+
+  // docs/PRD-seller-multi-bank-card-rotation.md — چند کارت + سیاست چرخشی نمایش
+  @Get(':id/bank-cards')
+  listBankCards(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    return this.storeBankCardService.list(user.sub, id);
+  }
+
+  @Post(':id/bank-cards')
+  createBankCard(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: CreateBankCardDto,
+  ) {
+    return this.storeBankCardService.create(user.sub, id, dto);
+  }
+
+  @Patch(':id/bank-cards/:cardId')
+  updateBankCard(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('cardId') cardId: string,
+    @Body() dto: UpdateBankCardDto,
+  ) {
+    return this.storeBankCardService.update(user.sub, id, cardId, dto);
+  }
+
+  @Patch(':id/card-policy')
+  updateCardPolicy(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: UpdateCardPolicyDto,
+  ) {
+    return this.storeBankCardService.updatePolicy(user.sub, id, dto.policy);
   }
 }

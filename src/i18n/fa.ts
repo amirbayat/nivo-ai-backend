@@ -141,6 +141,8 @@ export const fa = {
     noReceiptImage: 'برای این سفارش رسیدی ثبت نشده',
     tooManyImages: 'هر محصول حداکثر ۴ عکس می‌تواند داشته باشد',
     imageOnly: 'فقط فایل تصویر پذیرفته می‌شود',
+    bankCardNotFound: 'این کارت بانکی یافت نشد',
+    lastActiveBankCard: 'حداقل یک کارت بانکی باید فعال بماند',
   },
   storeKb: {
     notFound: 'این مورد در باکس دانش یافت نشد',
