@@ -2131,6 +2131,9 @@ model Customer {
   telegramChatId String? // فقط TELEGRAM
   phone          String?
   fullName       String?
+  // docs/PRD-buyer-abuse-rate-limit.md — قفل موقت وقتی مشتری از سقف پیام در پنجره‌ی ۵ دقیقه‌ای
+  // رد شود؛ تا این زمان، هیچ فراخوان AI برایش انجام نمی‌شود (سکوت کامل بعد از یک پیام اول)
+  lockedUntil    DateTime?
   createdAt      DateTime        @default(now())
 
   salesConversation SalesConversation?

@@ -172,6 +172,8 @@ export const fa = {
     // docs/PRD-seller-credit-billing.md بخش ۳ — وقتی هم سهمیه‌ی رایگان تمام شده هم اعتبار
     // فروشگاه صفر/منفی است؛ عمداً پیام ثابت (نه LLM-generated، چون این مسیر اصلاً AI صدا نمی‌زند)
     billingBlockedHandoff: 'فروشنده به‌زودی شخصاً بهتون جواب می‌ده',
+    // docs/PRD-buyer-abuse-rate-limit.md — فقط یک‌بار (لحظه‌ی قفل‌شدن) نشان داده می‌شود، بعدش سکوت کامل
+    abuseLocked: 'یکم آروم‌تر 🙏 لطفاً چند دقیقه صبر کن و دوباره پیام بده',
   },
   telegram: {
     startNeedsLink:

@@ -8,6 +8,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AiProviderService } from '../../common/services/ai-provider.service';
 import { StoreKbService } from '../store/store-kb.service';
 import { CreditService } from './credit.service';
+import { AbuseGuardService } from './abuse-guard.service';
 import { fa } from '../../i18n/fa';
 import { defaultModel, resolveModel } from './model-variants';
 import { toneForCategory } from './tone-by-category';
@@ -53,6 +54,7 @@ export class ConversationEngineService {
     private readonly aiProvider: AiProviderService,
     private readonly storeKb: StoreKbService,
     private readonly creditService: CreditService,
+    private readonly abuseGuard: AbuseGuardService,
     @InjectQueue('sales-agent-voice')
     private readonly voiceQueue: Queue<SalesAgentVoiceJobData>,
   ) {}
@@ -358,6 +360,9 @@ intent های ممکن:
       },
     });
 
+    const abuseResult = await this.checkAbuseGuard(conversation);
+    if (abuseResult) return abuseResult;
+
     if (this.billingBlocked(conversation)) {
       return this.transitionToHandoff(conversation, 'BILLING_BLOCKED');
     }
@@ -399,6 +404,9 @@ intent های ممکن:
     conversation: ConversationWithStore,
     action: SalesAction,
   ): Promise<EngineResult> {
+    const abuseResult = await this.checkAbuseGuard(conversation);
+    if (abuseResult) return abuseResult;
+
     if (this.billingBlocked(conversation)) {
       return this.transitionToHandoff(conversation, 'BILLING_BLOCKED');
     }
@@ -908,6 +916,30 @@ answered=false بده (به‌جای حدس‌زدن).`,
   // این مکالمه از قبل (لحظه‌ی ساخت، decideBillingMode) به همین حالت قفل شده — بدون هیچ فراخوان AI
   private billingBlocked(conversation: ConversationWithStore): boolean {
     return conversation.billingMode === 'BLOCKED';
+  }
+
+  // docs/PRD-buyer-abuse-rate-limit.md — باید همین ابتدای هر پیام/اکشن واقعی مشتری چک شود،
+  // قبل از هر فراخوان AI (حتی قبل از چک billingBlocked، چون این ارزان‌تر و اولویت‌دارتر است).
+  // null یعنی مسدود نبوده، ادامه بده؛ غیر-null یعنی همین نتیجه را مستقیم برگردان.
+  private async checkAbuseGuard(
+    conversation: ConversationWithStore,
+  ): Promise<EngineResult | null> {
+    const { blocked, justLocked } = await this.abuseGuard.checkAndRecord(
+      conversation.customerId,
+    );
+    if (!blocked) return null;
+    if (justLocked) {
+      await this.logReply(conversation, fa.salesAgent.abuseLocked, {
+        type: 'NONE',
+      });
+      return {
+        reply: fa.salesAgent.abuseLocked,
+        uiBlocks: [],
+        state: conversation.currentState,
+      };
+    }
+    // از قبل قفل بوده — سکوت کامل، طبق تصمیم بخش ۵ سند (بدون لاگ AGENT_REPLY تازه)
+    return { reply: '', uiBlocks: [], state: conversation.currentState };
   }
 
   // یک ConversationEvent(TOOL_CALL) + یک ConversationEvent(STATE_TRANSITION) + آپدیت

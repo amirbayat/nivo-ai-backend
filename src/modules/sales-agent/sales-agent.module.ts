@@ -8,6 +8,7 @@ import { SalesAgentController } from './sales-agent.controller';
 import { SalesAgentService } from './sales-agent.service';
 import { ConversationEngineService } from './conversation-engine.service';
 import { CreditService } from './credit.service';
+import { AbuseGuardService } from './abuse-guard.service';
 
 @Module({
   imports: [
@@ -20,7 +21,12 @@ import { CreditService } from './credit.service';
     BullModule.registerQueue({ name: 'sales-agent-voice' }),
   ],
   controllers: [SalesAgentController],
-  providers: [SalesAgentService, ConversationEngineService, CreditService],
+  providers: [
+    SalesAgentService,
+    ConversationEngineService,
+    CreditService,
+    AbuseGuardService,
+  ],
   // CreditService هم از TelegramModule (handleStart) هم از QueueModule (voice processor) لازم است
   exports: [ConversationEngineService, CreditService],
 })
