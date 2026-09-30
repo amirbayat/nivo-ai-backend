@@ -209,23 +209,41 @@ export class StoreKbService {
       throw new NotFoundException(fa.store.productNotFound);
     }
 
-    const { object } = await generateObject({
-      model: this.provider('openai/gpt-5.4-mini'),
-      schema: z.object({
-        suggestedDescription: z.string(),
-        suggestedQuestions: z.array(z.string()).min(4).max(6),
-      }),
-      system: `تو دستیار یک فروشنده‌ی فروشگاه آنلاین ایرانی هستی. برای محصول زیر یک توضیح
+    // نکته: قبلاً suggestedQuestions .min(4).max(6) بود — اگر مدل دقیقاً ۴ تا ۶ مورد
+    // برنمی‌گرداند (مثلاً ۳ یا ۷ تا)، اعتبارسنجی zod توی generateObject fail می‌شد و کل
+    // درخواست با خطا می‌ترکید (دقیقاً همون چیزی که فروشنده می‌دید: «تولید پیشنهاد با خطا
+    // مواجه شد»). اینجا محدودیت سخت‌گیرانه را برمی‌داریم و بازه‌ی ۴-۶ را خودمان بعد از جواب
+    // اعمال می‌کنیم — یک جواب کوتاه/بلندتر از حد نباید کل فیچر را بترکاند.
+    try {
+      const { object } = await generateObject({
+        model: this.provider('openai/gpt-5.4-mini'),
+        schema: z.object({
+          suggestedDescription: z.string(),
+          suggestedQuestions: z.array(z.string()).min(1),
+        }),
+        system: `تو دستیار یک فروشنده‌ی فروشگاه آنلاین ایرانی هستی. برای محصول زیر یک توضیح
 کامل‌تر و فروش‌محورتر (فارسی، ۲-۴ جمله) بنویس، و ۴ تا ۶ سؤال رایج که مشتری‌های این‌جور محصول
 معمولاً می‌پرسند لیست کن (فقط خودِ سؤال‌ها، بدون جواب). هرگز قیمت/موجودی/مشخصات دقیقی که در
 ورودی نیامده را حدس نزن یا اختراع نکن — فقط چیزی که از نام محصول و دسته‌بندی فروشگاه قابل‌استنتاج
 است. پاسخ را فقط به‌صورت یک شیء JSON معتبر مطابق اسکیمای داده‌شده برگردان.`,
-      prompt: `دسته‌بندی فروشگاه: ${store.category ?? 'نامشخص'}
+        prompt: `دسته‌بندی فروشگاه: ${store.category ?? 'نامشخص'}
 نام محصول: ${product.name}
 توضیح فعلی: ${product.description ?? '(هنوز توضیحی ثبت نشده)'}`,
-    });
+      });
 
-    return object;
+      return {
+        suggestedDescription: object.suggestedDescription,
+        suggestedQuestions: object.suggestedQuestions.slice(0, 6),
+      };
+    } catch (err) {
+      this.logger.error(
+        `completeProductInfo failed for product=${productId}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+        err instanceof Error ? err.stack : undefined,
+      );
+      throw err;
+    }
   }
 
   private async getActiveEntriesCached(

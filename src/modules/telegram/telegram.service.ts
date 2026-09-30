@@ -313,7 +313,8 @@ export class TelegramService {
     switch (block.type) {
       case 'PRODUCT_CARD':
         for (const p of block.products) {
-          const caption = `${p.name}\n${p.basePrice.toLocaleString('fa-IR')} تومان — موجودی: ${p.stock.toLocaleString('fa-IR')}`;
+          // عمداً بدون تعداد موجودی — فروشنده نمی‌خواهد رقم واقعی به خریدار نشان داده شود
+          const caption = `${p.name}\n${p.basePrice.toLocaleString('fa-IR')} تومان${p.stock === 0 ? ' — ناموجود' : ''}`;
           const keyboard: TelegramInlineKeyboard = {
             inline_keyboard: [
               [{ text: '🛒 افزودن به سبد', callback_data: `ac:${p.id}` }],

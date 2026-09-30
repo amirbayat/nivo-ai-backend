@@ -198,7 +198,8 @@ intent های ممکن:
       model: this.aiProvider.buildClient()(model),
       system: `تو دستیار فروش یک فروشگاه در دایرکت اینستاگرام هستی. فقط و فقط از «واقعیت‌های»
 داده‌شده یک پیام فارسی کوتاه (حداکثر ۲-۳ جمله)، دوستانه و محاوره‌ای بساز — هیچ عدد/اسم/شماره‌ی
-تازه‌ای که در واقعیت‌ها نیامده اضافه نکن، و پیشنهاد بعدی اختراع نکن.
+تازه‌ای که در واقعیت‌ها نیامده اضافه نکن، و پیشنهاد بعدی اختراع نکن. هرگز تعداد دقیق موجودی
+انبار را اعلام نکن (حتی اگر مشتری صریح بپرسد)، فقط «موجود است» یا «فعلاً ناموجود».
 لحن نوشتار باید ${tone} باشد.`,
       prompt: facts,
       temperature: 0.3,
@@ -307,7 +308,7 @@ intent های ممکن:
       case 'CANCEL':
         return this.doCancel(conversation);
       case 'ASK_FAQ':
-        return this.doFaq(conversation, text);
+        return this.doFaq(conversation, text, ctx);
       default:
         return this.doClarifyUnclear(conversation);
     }
@@ -392,8 +393,11 @@ intent های ممکن:
       lastShownProducts: [{ id: product.id, name: product.name }],
     });
 
+    // عمداً بدون عدد موجودی در واقعیت‌هایی که به مدل داده می‌شود — caption() فقط از همین
+    // واقعیت‌ها جمله می‌سازد، پس هر عددی اینجا باشد عیناً به مشتری گفته می‌شود. فروشنده
+    // نمی‌خواهد تعداد واقعی موجودی افشا شود؛ فقط وضعیت موجود/ناموجود کافی است.
     const reply = await this.caption(
-      `مشتری از لینک مستقیم این محصول وارد شده: ${product.name} (${product.basePrice} تومان، موجودی ${product.stock})`,
+      `مشتری از لینک مستقیم این محصول وارد شده: ${product.name} (${product.basePrice} تومان)${product.stock === 0 ? ' — فعلاً ناموجود' : ''}`,
       conversation,
     );
     const finalReply = `${fa.salesAgent.firstGreeting(conversation.store.name)}\n\n${reply}`;
@@ -439,8 +443,9 @@ intent های ممکن:
     });
     await this.resetClarifyAttempts(conversation);
 
+    // همون دلیل showProduct بالا — بدون عدد موجودی در واقعیت‌ها
     const reply = await this.caption(
-      `این محصولات فروشگاه است: ${products.map((p) => `${p.name} (${p.basePrice} تومان، موجودی ${p.stock})`).join('، ')}`,
+      `این محصولات فروشگاه است: ${products.map((p) => `${p.name} (${p.basePrice} تومان)${p.stock === 0 ? ' — فعلاً ناموجود' : ''}`).join('، ')}`,
       conversation,
     );
     // فیدبک اول پایلوت: اولین پاسخ مکالمه (بعد از GREETING) یک خط راهنمای ثابت (نه
@@ -656,11 +661,14 @@ intent های ممکن:
 
   // getStoreFaqAnswer فعلاً stub است (طبق ساده‌سازی پلن گام ۱) — بدون FaqEntry واقعی
   // باکس دانش فروشگاه (docs/PRD-seller-knowledge-base.md بخش ۴) — اگر جواب واقعی پیدا شد،
-  // caption() آن را با لحن فروشگاه بازنویسی می‌کند؛ اگر نه، همان stub قبلی + flag برای
-  // ریپورت ادمین (تفکیک «کلاً نامفهوم» از «فهمیده شد ولی KB جوابی نداشت»)
+  // caption() آن را با لحن فروشگاه بازنویسی می‌کند؛ اگر نه، قبل از stub، توضیح محصولاتی که
+  // اخیراً به مشتری نشان داده شده امتحان می‌شود (فروشنده‌ها معمولاً توضیح محصول را دارند ولی
+  // باکس دانش را جدا پر نمی‌کنند) — فقط اگر جواب واقعی از همان توضیح پیدا شد استفاده می‌شود؛
+  // اگر نه، همان stub قبلی + flag برای ریپورت ادمین
   private async doFaq(
     conversation: ConversationWithStore,
     question: string,
+    ctx: ConversationContext,
   ): Promise<EngineResult> {
     const match = await this.storeKb.retrieveRelevant(
       conversation.storeId,
@@ -675,9 +683,62 @@ intent های ممکن:
       return { reply, uiBlocks: [], state: conversation.currentState };
     }
 
+    const fromDescription = await this.tryAnswerFromProductDescriptions(
+      conversation,
+      ctx,
+      question,
+    );
+    if (fromDescription) {
+      await this.logReply(conversation, fromDescription, { type: 'NONE' });
+      return {
+        reply: fromDescription,
+        uiBlocks: [],
+        state: conversation.currentState,
+      };
+    }
+
     const reply = await this.caption(fa.salesAgent.faqStub, conversation);
     await this.logReply(conversation, reply, { type: 'NONE' }, 'NO_KB_MATCH');
     return { reply, uiBlocks: [], state: conversation.currentState };
+  }
+
+  // فقط محصولاتی که همین الان به مشتری نشان داده شده‌اند (lastShownProducts) — حدس‌زدن محصول
+  // مورد نظر از روی کل کاتالوگ ریسک جواب غلط دارد. اگر توضیح آن محصولات هم چیزی نداشت که به
+  // سؤال بخورد، null برمی‌گردد (مدل صریح باید بگوید answered=false، نه اینکه جواب اختراع کند)
+  private async tryAnswerFromProductDescriptions(
+    conversation: ConversationWithStore,
+    ctx: ConversationContext,
+    question: string,
+  ): Promise<string | null> {
+    const recentIds = ctx.lastShownProducts?.map((p) => p.id) ?? [];
+    if (recentIds.length === 0) return null;
+
+    const products = await this.prisma.product.findMany({
+      where: { id: { in: recentIds }, storeId: conversation.storeId },
+      select: { name: true, description: true },
+    });
+    const withDescription = products.filter(
+      (p): p is { name: string; description: string } =>
+        !!p.description?.trim(),
+    );
+    if (withDescription.length === 0) return null;
+
+    try {
+      const tone = toneForCategory(conversation.store.category);
+      const { object } = await generateObject({
+        model: this.aiProvider.buildClient()(defaultModel()),
+        schema: z.object({ answered: z.boolean(), reply: z.string() }),
+        system: `تو دستیار فروش یک فروشگاه در دایرکت اینستاگرام هستی. زیر توضیح چند محصول
+(نوشته‌ی خودِ فروشنده) را داری. اگر واقعاً می‌شود از همین توضیحات به سؤال مشتری جواب داد،
+answered=true و یک پیام فارسی کوتاه (۲-۳ جمله، لحن ${tone}) بده — هیچ چیزی (قیمت/موجودی/مشخصات)
+که در توضیحات نیامده حدس نزن یا اختراع نکن. اگر توضیحات ربطی به این سؤال ندارد یا کافی نیست،
+answered=false بده (به‌جای حدس‌زدن).`,
+        prompt: `توضیح محصولات:\n${withDescription.map((p) => `${p.name}: ${p.description}`).join('\n')}\n\nسؤال مشتری: ${question}`,
+      });
+      return object.answered ? object.reply.trim() : null;
+    } catch {
+      return null;
+    }
   }
 
   private async doClarify(
