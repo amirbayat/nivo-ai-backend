@@ -1207,6 +1207,9 @@ export class AdminService {
       customerMessage?: string;
       agentReply?: { text: string; flag?: string };
       trace?: Record<string, unknown>;
+      // docs/PRD-buyer-purchase-intent-taxonomy.md بخش ۴.۲ — trace سطح classification
+      // (handler:'parseIntent')، به پیام مشتری می‌چسبد نه به پاسخ ربات
+      classificationTrace?: Record<string, unknown>;
     }[] = [];
 
     for (const e of events) {
@@ -1223,13 +1226,147 @@ export class AdminService {
           agentReply: e.payload as { text: string; flag?: string },
         });
       } else {
-        // AI_TRACE — همیشه بلافاصله بعد از AGENT_REPLY خودش ساخته می‌شود (logReply)، پس به
-        // آخرین آیتم (اگر agentReply بود) می‌چسبد
+        // AI_TRACE — دو نوع: (۱) handler:'parseIntent'، همیشه بلافاصله بعد از CUSTOMER_MESSAGE
+        // خودش ساخته می‌شود (handleMessage)، به آن می‌چسبد؛ (۲) بقیه، همیشه بلافاصله بعد از
+        // AGENT_REPLY خودشان ساخته می‌شوند (logReply)، به آن می‌چسبند
         const last = items[items.length - 1];
-        if (last?.agentReply) last.trace = e.payload as Record<string, unknown>;
+        const payload = e.payload as Record<string, unknown>;
+        if (
+          payload?.handler === 'parseIntent' &&
+          last?.customerMessage !== undefined
+        ) {
+          last.classificationTrace = payload;
+        } else if (last?.agentReply) {
+          last.trace = payload;
+        }
       }
     }
 
     return { items };
+  }
+
+  // docs/PRD-buyer-purchase-intent-taxonomy.md بخش ۵ — گزارش تجمیعی روی همان AI_TRACE هایی که
+  // handleMessage (نه logReply) با handler:'parseIntent' می‌نویسد. فیلتر فروشگاه/تاریخ دقیقاً
+  // همان الگوی in-memory filter بعد از join به SalesConversation که getFailedMessages دارد،
+  // چون payload یک Json آزاد است نه ستون قابل query مستقیم
+  async getBuyerIntentDiscovery(params: {
+    storeId?: string;
+    from?: Date;
+    to?: Date;
+  }) {
+    const events = await this.prisma.conversationEvent.findMany({
+      where: {
+        type: 'AI_TRACE',
+        ...((params.from ?? params.to)
+          ? {
+              createdAt: {
+                ...(params.from ? { gte: params.from } : {}),
+                ...(params.to ? { lte: params.to } : {}),
+              },
+            }
+          : {}),
+      },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        conversationId: true,
+        payload: true,
+        createdAt: true,
+      },
+    });
+
+    const classificationEvents = events.filter(
+      (e) => (e.payload as { handler?: string })?.handler === 'parseIntent',
+    );
+    if (classificationEvents.length === 0) {
+      return { buyerNeedCounts: [], unmatched: [] };
+    }
+
+    const conversationIds = Array.from(
+      new Set(classificationEvents.map((e) => e.conversationId)),
+    );
+    const conversations = await this.prisma.salesConversation.findMany({
+      where: { id: { in: conversationIds } },
+      select: { id: true, storeId: true, store: { select: { name: true } } },
+    });
+    const storeIdByConversation = new Map(
+      conversations.map((c) => [c.id, c.storeId]),
+    );
+    const storeNameByConversation = new Map(
+      conversations.map((c) => [c.id, c.store.name]),
+    );
+
+    const filtered = params.storeId
+      ? classificationEvents.filter(
+          (e) => storeIdByConversation.get(e.conversationId) === params.storeId,
+        )
+      : classificationEvents;
+
+    const buyerNeedCountMap = new Map<string, number>();
+    // گروه‌بندی ساده‌ی متن‌محور (طبق PRD بخش ۵.۳ — خوشه‌بندی هوشمندتر عمداً فاز بعد است)
+    const unmatchedGroups = new Map<
+      string,
+      { count: number; conversationId: string; createdAt: Date }
+    >();
+
+    for (const e of filtered) {
+      const payload = e.payload as {
+        buyerNeeds?: string[];
+        unmatchedBuyerNeed?: string;
+      };
+      for (const tag of payload.buyerNeeds ?? []) {
+        buyerNeedCountMap.set(tag, (buyerNeedCountMap.get(tag) ?? 0) + 1);
+      }
+      const label = payload.unmatchedBuyerNeed?.trim();
+      if (!label) continue;
+      const existing = unmatchedGroups.get(label);
+      if (existing) {
+        existing.count += 1;
+        if (e.createdAt > existing.createdAt) {
+          existing.conversationId = e.conversationId;
+          existing.createdAt = e.createdAt;
+        }
+      } else {
+        unmatchedGroups.set(label, {
+          count: 1,
+          conversationId: e.conversationId,
+          createdAt: e.createdAt,
+        });
+      }
+    }
+
+    // نمونه پیام مشتری برای هر گروه نامشخص — همان پیامی که این classification را تولید کرد
+    // (بلافاصله قبل از همین AI_TRACE در همان مکالمه، طبق ترتیب نوشتن در handleMessage)
+    const unmatchedEntries = Array.from(unmatchedGroups.entries());
+    const sampleMessages = await Promise.all(
+      unmatchedEntries.map(([, g]) =>
+        this.prisma.conversationEvent.findFirst({
+          where: {
+            conversationId: g.conversationId,
+            type: 'CUSTOMER_MESSAGE',
+            createdAt: { lte: g.createdAt },
+          },
+          orderBy: { createdAt: 'desc' },
+          select: { payload: true },
+        }),
+      ),
+    );
+
+    const unmatched = unmatchedEntries
+      .map(([label, g], i) => ({
+        label,
+        count: g.count,
+        conversationId: g.conversationId,
+        storeName: storeNameByConversation.get(g.conversationId) ?? '',
+        sampleMessage:
+          (sampleMessages[i]?.payload as { text?: string })?.text ?? '',
+        lastSeenAt: g.createdAt,
+      }))
+      .sort((a, b) => b.count - a.count);
+
+    const buyerNeedCounts = Array.from(buyerNeedCountMap.entries())
+      .map(([tag, count]) => ({ tag, count }))
+      .sort((a, b) => b.count - a.count);
+
+    return { buyerNeedCounts, unmatched };
   }
 }

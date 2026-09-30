@@ -222,4 +222,19 @@ export class AdminController {
   getSalesAgentConversationTrace(@Param('id') id: string) {
     return this.adminService.getConversationTrace(id);
   }
+
+  // docs/PRD-buyer-purchase-intent-taxonomy.md بخش ۵ — گزارش تجمیعی نیازهای خریدار + موارد
+  // خارج از taxonomy، صفحه‌ی مستقل ادمین
+  @Get('sales-agent/buyer-intent-discovery')
+  getBuyerIntentDiscovery(
+    @Query('storeId') storeId?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    return this.adminService.getBuyerIntentDiscovery({
+      storeId,
+      from: from ? new Date(from) : undefined,
+      to: to ? new Date(to) : undefined,
+    });
+  }
 }

@@ -115,7 +115,7 @@ export class ConversationEngineService {
   // فیدبک اول پایلوت (A/B مدل‌ها)
   private async logAiCall(
     conversation: ConversationWithStore,
-    kind: 'PARSE_INTENT' | 'CAPTION',
+    kind: 'PARSE_INTENT' | 'CAPTION' | 'SATISFACTION_CLASSIFY',
     success: boolean,
     latencyMs: number,
   ) {
@@ -169,6 +169,51 @@ export class ConversationEngineService {
         quantity: z.number().int().positive().nullable(),
         // docs/PRD-customer-comments-and-discounts.md بخش ۹ — فقط وقتی intent=APPLY_DISCOUNT
         discountCode: z.string().nullable(),
+        // docs/PRD-buyer-purchase-intent-taxonomy.md بخش ۴.۲ — لایه‌ی آنالیتیکس، چندبرچسبی،
+        // مستقل از intent بالا (که فقط تعیین می‌کند چه Tool ای اجرا شود)
+        buyerNeeds: z
+          .array(
+            z.enum([
+              'PRODUCT_SPEC',
+              'USAGE_GUIDE',
+              'STOCK_CHECK',
+              'VARIANT_REQUEST',
+              'PRODUCT_COMPARISON',
+              'PRODUCT_RECOMMENDATION',
+              'ASK_REVIEWS',
+              'ASK_AUTHENTICITY',
+              'ASK_SHIPPING',
+              'ASK_PAYMENT_METHODS',
+              'ASK_WARRANTY_RETURN_POLICY',
+              'ASK_STORE_TRUST',
+              'ASK_COMPATIBILITY',
+              'ASK_NAVIGATION_HELP',
+              'ASK_RESTOCK_ETA',
+              'ASK_CASH_ON_DELIVERY',
+              'PURCHASE_HESITATION',
+              'ASK_PRICE',
+              'REQUEST_DISCOUNT',
+              'NEGOTIATE_PRICE',
+              'ASK_BULK_PURCHASE',
+              'ASK_INSTALLMENT',
+              'REQUEST_MORE_PHOTOS',
+              'REQUEST_VIDEO',
+              'IMAGE_SEARCH_REQUEST',
+              'CUSTOM_ORDER_REQUEST',
+              'GIFT_WRAP_REQUEST',
+              'RESTOCK_NOTIFY_REQUEST',
+              'REQUEST_INVOICE',
+              'RESERVATION_PREORDER_REQUEST',
+              'BOT_FRUSTRATION',
+              'POSITIVE_FEEDBACK',
+              'OFF_TOPIC_OR_SPAM',
+              'TALK_TO_SELLER',
+              'PAYMENT_ISSUE',
+              'POST_PURCHASE_SUPPORT',
+            ]),
+          )
+          .nullable(),
+        unmatchedBuyerNeed: z.string().nullable(),
       }),
       system: `تو فقط یک استخراج‌کننده‌ی intent هستی، نه فروشنده — هیچ تصمیمی نمی‌گیری، فقط
 پیام مشتری یک فروشگاه اینستاگرامی را دسته‌بندی می‌کنی.
@@ -185,6 +230,52 @@ intent های ممکن:
 - REQUEST_HUMAN: صریحاً می‌خواهد با یک آدم واقعی صحبت کند
 - APPLY_DISCOUNT: یک کد تخفیف دارد/می‌گوید (discountCode=همان کد، دقیقاً همانی که نوشته)
 - UNCLEAR: نامفهوم یا نامرتبط
+
+علاوه بر intent بالا، buyerNeeds را هم پر کن — یک یا چند برچسب از لیست زیر که واقعاً «نیاز»
+خریدار را نشان می‌دهد (جدا از اینکه کدام Tool اجرا می‌شود؛ یک پیام می‌تواند چند نیاز داشته
+باشد، مثلاً هم قیمت هم سایز). اگر هیچ‌کدام صدق نمی‌کند، آرایه‌ی خالی یا null بگذار:
+- PRODUCT_SPEC: مشخصات فنی/جنس محصول
+- USAGE_GUIDE: نحوه‌ی استفاده
+- STOCK_CHECK: موجودی فعلی
+- VARIANT_REQUEST: سایز/رنگ/مدل دیگر
+- PRODUCT_COMPARISON: مقایسه‌ی دو یا چند محصول
+- PRODUCT_RECOMMENDATION: درخواست پیشنهاد/راهنمایی خرید بر اساس نیاز
+- ASK_REVIEWS: نظر خریداران قبلی
+- ASK_AUTHENTICITY: اصالت کالا
+- ASK_SHIPPING: زمان/هزینه‌ی ارسال
+- ASK_PAYMENT_METHODS: روش‌های پرداخت (سوال، نه مشکل)
+- ASK_WARRANTY_RETURN_POLICY: شرایط گارانتی/مرجوعی (سوال سیاست، نه درخواست واقعی)
+- ASK_STORE_TRUST: اعتبار/اعتماد فروشگاه
+- ASK_COMPATIBILITY: سازگاری با محصول/وسیله‌ی دیگر
+- ASK_NAVIGATION_HELP: کمک برای پیدا کردن محصول/بخش فروشگاه
+- ASK_RESTOCK_ETA: کی دوباره موجود می‌شود
+- ASK_CASH_ON_DELIVERY: پرداخت درب منزل
+- PURCHASE_HESITATION: تردید پیش از خرید، نیاز به اطمینان‌خاطر («به نظرت بخرمش؟»)
+- ASK_PRICE: استعلام قیمت
+- REQUEST_DISCOUNT: درخواست تخفیف عمومی (نه کد مشخص — آن APPLY_DISCOUNT است)
+- NEGOTIATE_PRICE: چانه‌زنی روی قیمت
+- ASK_BULK_PURCHASE: خرید عمده/همکاری
+- ASK_INSTALLMENT: خرید اقساطی
+- REQUEST_MORE_PHOTOS: درخواست عکس بیشتر
+- REQUEST_VIDEO: درخواست ویدیو
+- IMAGE_SEARCH_REQUEST: می‌خواهد با عکس جست‌وجو کند («این مدل رو دارید؟» + عکس یا توصیف عکس)
+- CUSTOM_ORDER_REQUEST: سفارشی‌سازی محصول
+- GIFT_WRAP_REQUEST: بسته‌بندی هدیه
+- RESTOCK_NOTIFY_REQUEST: درخواست اطلاع‌رسانی وقتی موجود شد
+- REQUEST_INVOICE: درخواست فاکتور رسمی
+- RESERVATION_PREORDER_REQUEST: درخواست رزرو یا پیش‌سفارش
+- BOT_FRUSTRATION: نارضایتی از خود ربات/عدم درک
+- POSITIVE_FEEDBACK: بازخورد مثبت/تشکر/رضایت
+- OFF_TOPIC_OR_SPAM: پیام نامرتبط/تبلیغاتی/اسپم
+- TALK_TO_SELLER: می‌خواهد پیش از خرید (نه از سردرگمی) با خود فروشنده صحبت کند
+- PAYMENT_ISSUE: مشکل در پرداخت کارت‌به‌کارت (رسید تایید نشده، مبلغ اشتباه و مشابه — توجه:
+  فروشگاه فقط کارت‌به‌کارت دارد، نه درگاه بانکی)
+- POST_PURCHASE_SUPPORT: هر مشکل بعد از ثبت سفارش (پیگیری/لغو/تغییر آدرس/شکایت/مرجوعی/تعویض/
+  مغایرت کالا/مشکل تحویل/پیگیری بازپرداخت) — یک تگ عمومی، نیازی به تفکیک ریز نیست
+
+اگر پیام واضح یک نیاز واقعی دارد ولی با هیچ‌کدام از موارد بالا جور نیست، آن را در
+unmatchedBuyerNeed با جمله‌ی کوتاه خودت (نه یکی از enum های بالا) بنویس؛ در غیر این صورت null.
+
 فقط JSON مطابق schema برگردان.`,
       prompt: text,
     });
@@ -428,7 +519,10 @@ intent های ممکن:
     }
 
     // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۳ — فالوآپ رضایت (چند روز بعد، صف
-    // PostPurchaseFollowUpService) این فلگ را ست کرده؛ اولین پیام آزاد بعدی جواب همان سؤال است
+    // PostPurchaseFollowUpService) این فلگ را ست کرده؛ اولین پیام آزاد بعدی *احتمالاً* جواب
+    // همان سؤال است، ولی doSatisfactionReply خودش با AI چک می‌کند که واقعاً همین‌طور است یا نه
+    // (مثلاً ممکن است مشتری بعد از چند روز یک درخواست خرید کاملاً جدید فرستاده باشد) — اگر
+    // بی‌ربط تشخیص داد null برمی‌گرداند تا پیام از مسیر عادی (پایین همین متد) پردازش شود
     const awaitingSatisfactionCheck = (
       conversation.contextData as { awaitingSatisfactionCheck?: boolean } | null
     )?.awaitingSatisfactionCheck;
@@ -436,7 +530,11 @@ intent های ممکن:
       conversation.currentState === 'COMPLETED' &&
       awaitingSatisfactionCheck
     ) {
-      return this.doSatisfactionReply(conversation, text);
+      const satisfactionResult = await this.doSatisfactionReply(
+        conversation,
+        text,
+      );
+      if (satisfactionResult) return satisfactionResult;
     }
 
     if (this.billingBlocked(conversation)) {
@@ -446,8 +544,36 @@ intent های ممکن:
     const parsed = await this.parseIntent(text, conversation);
     const ctx = this.getContext(conversation);
 
-    if (parsed.intent === 'REQUEST_HUMAN') {
-      return this.transitionToHandoff(conversation, 'CUSTOMER_REQUESTED');
+    // docs/PRD-buyer-purchase-intent-taxonomy.md بخش ۴.۲ — trace سطح classification، جدا از
+    // trace های اختصاصی هر handler در logReply؛ چون بلافاصله بعد از CUSTOMER_MESSAGE و قبل از
+    // هر AGENT_REPLY نوشته می‌شود، getConversationTrace فعلی (که trace را به AGENT_REPLY بعدش
+    // می‌چسباند) این را نادیده می‌گیرد نه خراب می‌کند — نمایش در ادمین یک گام بعدی جداست
+    if (parsed.buyerNeeds?.length || parsed.unmatchedBuyerNeed) {
+      await this.prisma.conversationEvent.create({
+        data: {
+          conversationId: conversation.id,
+          type: 'AI_TRACE',
+          payload: {
+            intent: parsed.intent,
+            handler: 'parseIntent',
+            buyerNeeds: parsed.buyerNeeds ?? [],
+            ...(parsed.unmatchedBuyerNeed
+              ? { unmatchedBuyerNeed: parsed.unmatchedBuyerNeed }
+              : {}),
+          },
+        },
+      });
+    }
+
+    // همان سند، بخش ۲ — گروه‌های P1 (پرداخت/پس از خرید): ربات فعلاً Tool ای برای حل این‌ها
+    // ندارد، پس به‌جای پاسخ نصفه‌ونیمه‌ی ASK_FAQ، مستقیم به فروشنده ارجاع می‌شود. اولویت روی
+    // REQUEST_HUMAN صریح نیست چون این چک زودتر (بالا) رد شده — یعنی اگر مشتری هم صریح انسان
+    // خواسته باشد هم مشکل پرداخت مطرح کرده، همان مسیر REQUEST_HUMAN می‌رود، تکراری نمی‌شود
+    if (
+      parsed.buyerNeeds?.includes('PAYMENT_ISSUE') ||
+      parsed.buyerNeeds?.includes('POST_PURCHASE_SUPPORT')
+    ) {
+      return this.transitionToHandoff(conversation, 'SUPPORT_NEEDED');
     }
 
     switch (parsed.intent) {
@@ -512,37 +638,138 @@ intent های ممکن:
     return { reply, uiBlocks: [], state: conversation.currentState };
   }
 
-  // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۳ — جواب مشتری به فالوآپ رضایت؛ بدون
-  // فراخوان AI (هیورستیک کلیدواژه‌ی ساده، نه sentiment مدل‌محور) — کافی است چون هدف فقط
-  // تشخیص «باید فروشنده حتماً ببیند» است، نه طبقه‌بندی دقیق
-  private isNegativeSentiment(text: string): boolean {
-    const negativeWords = [
-      'بد',
-      'ناراضی',
-      'مشکل',
-      'خراب',
-      'دیر',
-      'برنگشت',
-      'کلاهبردار',
-      'شکایت',
-      'افتضاح',
-      'ضعیف',
-      'پس میدم',
-      'پس می‌دم',
-    ];
-    return negativeWords.some((w) => text.includes(w));
+  // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۳ — طبقه‌بندی جواب مشتری به فالوآپ رضایت.
+  // نسخه‌ی اول این هیورستیک کلیدواژه‌ی ساده بود (مثلاً .includes('مشکل')) ولی فالس‌پازیتیو
+  // واقعی داشت («مشکلی نداشتم، همه چیز عالی بود» را منفی تشخیص می‌داد چون منفی‌سازی جمله را
+  // نمی‌فهمید) — جایگزین شد با یک فراخوان AI بسیار کوچک که هم منفی‌سازی را می‌فهمد هم اصلاً
+  // تشخیص می‌دهد که پیام واقعاً جواب این سؤال هست یا نه (UNRELATED)
+  private async callSatisfactionClassify(
+    text: string,
+    model: string,
+  ): Promise<{
+    verdict: 'POSITIVE' | 'NEGATIVE' | 'UNRELATED';
+    inputTokens: number;
+    outputTokens: number;
+  }> {
+    const { object, usage } = await generateObject({
+      model: this.aiProvider.buildClient(undefined, {
+        supportsStructuredOutputs: true,
+      })(model),
+      schema: z.object({
+        verdict: z.enum(['POSITIVE', 'NEGATIVE', 'UNRELATED']),
+      }),
+      system: `چند روز پیش این مشتری از یک فروشگاه اینستاگرامی خرید کرده و همین الان این پیام
+برایش فرستاده شده: «چند روزی از خریدت گذشته — همه‌چیز خوب بود؟». پیام زیر جواب مشتری به همین
+سؤال است. یکی از این سه حالت را تشخیص بده:
+- POSITIVE: راضی بوده/مشکلی نداشته (حتی اگر با جمله‌ی منفی مثل «مشکلی نبود» یا «بد نبود» بیان
+  شده باشد — منفی‌سازی جمله را در نظر بگیر، نه فقط وجود کلمه‌ی منفی)
+- NEGATIVE: از خرید/محصول/ارسال ناراضی بوده یا مشکل واقعی مطرح کرده
+- UNRELATED: پیام اصلاً جواب این سؤال نیست — مثلاً می‌خواهد چیز دیگری بخرد، سؤال تازه‌ای دارد،
+  یا کلاً بی‌ربط به رضایت از این خرید است
+فقط JSON مطابق schema برگردان.`,
+      prompt: text,
+    });
+    return {
+      verdict: object.verdict,
+      inputTokens: usage.inputTokens ?? 0,
+      outputTokens: usage.outputTokens ?? 0,
+    };
   }
 
+  // همان الگوی fallback دومرحله‌ای parseIntent/caption؛ اگر هر دو تلاش شکست خورد، امن‌ترین
+  // پیش‌فرض UNRELATED است (نه POSITIVE/NEGATIVE حدسی) — یعنی پیام از مسیر عادی پردازش می‌شود
+  // به‌جای اینکه با یک نتیجه‌ی حدسی به فروشنده یا مشتری جواب غلط داده شود
+  private async classifySatisfactionReply(
+    text: string,
+    conversation: ConversationWithStore,
+  ): Promise<'POSITIVE' | 'NEGATIVE' | 'UNRELATED'> {
+    const primaryModel = resolveModel(conversation.abVariant);
+    const started = Date.now();
+    try {
+      const { verdict, inputTokens, outputTokens } =
+        await this.callSatisfactionClassify(text, primaryModel);
+      await this.logAiCall(
+        conversation,
+        'SATISFACTION_CLASSIFY',
+        true,
+        Date.now() - started,
+      );
+      await this.logTextCreditUsage(
+        conversation,
+        primaryModel,
+        inputTokens,
+        outputTokens,
+      );
+      return verdict;
+    } catch {
+      await this.logAiCall(
+        conversation,
+        'SATISFACTION_CLASSIFY',
+        false,
+        Date.now() - started,
+      );
+      if (primaryModel === defaultModel()) return 'UNRELATED';
+      const fallbackStarted = Date.now();
+      try {
+        const { verdict, inputTokens, outputTokens } =
+          await this.callSatisfactionClassify(text, defaultModel());
+        await this.logAiCall(
+          conversation,
+          'SATISFACTION_CLASSIFY',
+          true,
+          Date.now() - fallbackStarted,
+        );
+        await this.logTextCreditUsage(
+          conversation,
+          defaultModel(),
+          inputTokens,
+          outputTokens,
+        );
+        return verdict;
+      } catch {
+        await this.logAiCall(
+          conversation,
+          'SATISFACTION_CLASSIFY',
+          false,
+          Date.now() - fallbackStarted,
+        );
+        return 'UNRELATED';
+      }
+    }
+  }
+
+  // null برمی‌گرداند یعنی «این پیام جواب رضایت نبود» — handleMessage در این حالت باید همان
+  // پیام را از مسیر عادی (parseIntent/doBrowse/...) رد کند، نه اینکه بی‌صدا گمش کند
   private async doSatisfactionReply(
     conversation: ConversationWithStore,
     text: string,
-  ): Promise<EngineResult> {
+  ): Promise<EngineResult | null> {
     const existingContext = (conversation.contextData ??
       {}) as Prisma.JsonObject & { awaitingSatisfactionCheck?: boolean };
     const { awaitingSatisfactionCheck, ...rest } = existingContext;
     void awaitingSatisfactionCheck;
-    const negative = this.isNegativeSentiment(text);
 
+    // بدون اعتبار، حتی برای طبقه‌بندی هم AI صدا زده نمی‌شود — می‌گذاریم جریان عادی (که خودش
+    // بلافاصله بعد از این چک وارد billingBlocked می‌شود و handoff می‌کند) پیام را ببیند
+    if (this.billingBlocked(conversation)) {
+      await this.prisma.salesConversation.update({
+        where: { id: conversation.id },
+        data: { contextData: rest },
+      });
+      return null;
+    }
+
+    const verdict = await this.classifySatisfactionReply(text, conversation);
+
+    if (verdict === 'UNRELATED') {
+      await this.prisma.salesConversation.update({
+        where: { id: conversation.id },
+        data: { contextData: rest },
+      });
+      return null;
+    }
+
+    const negative = verdict === 'NEGATIVE';
     await this.prisma.salesConversation.update({
       where: { id: conversation.id },
       data: {
@@ -1332,7 +1559,13 @@ answered=false بده (به‌جای حدس‌زدن).`,
 
   private async transitionToHandoff(
     conversation: ConversationWithStore,
-    reason: 'CUSTOMER_REQUESTED' | 'AGENT_STUCK' | 'BILLING_BLOCKED',
+    reason:
+      | 'CUSTOMER_REQUESTED'
+      | 'AGENT_STUCK'
+      | 'BILLING_BLOCKED'
+      // docs/PRD-buyer-purchase-intent-taxonomy.md بخش ۲ — گروه‌های P1 (PAYMENT_ISSUE/
+      // POST_PURCHASE_SUPPORT در buyerNeeds)؛ ربات Tool ای برای این‌ها ندارد، مستقیم ارجاع
+      | 'SUPPORT_NEEDED',
   ): Promise<EngineResult> {
     const nextState: ConversationState = 'HANDOFF_HUMAN';
     await this.persistTransition(
@@ -1344,9 +1577,11 @@ answered=false بده (به‌جای حدس‌زدن).`,
     const reply =
       reason === 'BILLING_BLOCKED'
         ? fa.salesAgent.billingBlockedHandoff
-        : this.isWithinWorkingHours(conversation.store)
-          ? fa.salesAgent.handoffToHuman
-          : fa.salesAgent.handoffToHumanOutOfHours;
+        : reason === 'SUPPORT_NEEDED'
+          ? fa.salesAgent.supportNeededHandoff
+          : this.isWithinWorkingHours(conversation.store)
+            ? fa.salesAgent.handoffToHuman
+            : fa.salesAgent.handoffToHumanOutOfHours;
     await this.logReply(conversation, reply, { type: 'NONE' });
     await this.notifySellerOfHandoff(conversation);
     return { reply, uiBlocks: [], state: nextState };

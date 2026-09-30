@@ -200,6 +200,10 @@ export const fa = {
     // docs/PRD-seller-credit-billing.md بخش ۳ — وقتی هم سهمیه‌ی رایگان تمام شده هم اعتبار
     // فروشگاه صفر/منفی است؛ عمداً پیام ثابت (نه LLM-generated، چون این مسیر اصلاً AI صدا نمی‌زند)
     billingBlockedHandoff: 'فروشنده به‌زودی شخصاً بهتون جواب می‌ده',
+    // docs/PRD-buyer-purchase-intent-taxonomy.md بخش ۲ — مشکلات پرداخت کارت‌به‌کارت و هر
+    // موضوع پس از خرید (P1)؛ ربات فعلاً Tool ای برای حلشان ندارد، مستقیم به فروشنده ارجاع می‌شود
+    supportNeededHandoff:
+      'این موضوع رو به فروشنده اطلاع دادم، به‌زودی خودش بهتون پیام می‌ده 🙏',
     // docs/PRD-buyer-abuse-rate-limit.md — فقط یک‌بار (لحظه‌ی قفل‌شدن) نشان داده می‌شود، بعدش سکوت کامل
     abuseLocked: 'یکم آروم‌تر 🙏 لطفاً چند دقیقه صبر کن و دوباره پیام بده',
     // docs/PRD-customer-comments-and-discounts.md بخش الف/۳ — بعد از تایید سفارش، پیام ثابت

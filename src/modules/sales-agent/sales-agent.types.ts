@@ -38,6 +38,54 @@ export type UiBlock =
   | { type: 'ORDER_STATUS'; orderId: string; status: string }
   | { type: 'NONE' };
 
+// docs/PRD-buyer-purchase-intent-taxonomy.md بخش ۳ — لایه‌ی «نیاز خریدار»، مکمل و جدا از
+// intent اجرایی بالا (چندبرچسبی؛ یک پیام هم می‌تواند هم قیمت هم سایز بخواهد). PAYMENT_ISSUE و
+// POST_PURCHASE_SUPPORT گروه‌های P1 هستند — فقط شناسایی+ارجاع به فروشنده (بخش ۲ همان سند)،
+// نه یک handler اختصاصی
+export type BuyerNeedTag =
+  // گروه A — اطلاعاتی/پیش از خرید
+  | 'PRODUCT_SPEC'
+  | 'USAGE_GUIDE'
+  | 'STOCK_CHECK'
+  | 'VARIANT_REQUEST'
+  | 'PRODUCT_COMPARISON'
+  | 'PRODUCT_RECOMMENDATION'
+  | 'ASK_REVIEWS'
+  | 'ASK_AUTHENTICITY'
+  | 'ASK_SHIPPING'
+  | 'ASK_PAYMENT_METHODS'
+  | 'ASK_WARRANTY_RETURN_POLICY'
+  | 'ASK_STORE_TRUST'
+  | 'ASK_COMPATIBILITY'
+  | 'ASK_NAVIGATION_HELP'
+  | 'ASK_RESTOCK_ETA'
+  | 'ASK_CASH_ON_DELIVERY'
+  | 'PURCHASE_HESITATION'
+  // گروه B — قیمت و تخفیف (APPLY_DISCOUNT خودش یک intent اجرایی مجزاست، اینجا تکرار نمی‌شود)
+  | 'ASK_PRICE'
+  | 'REQUEST_DISCOUNT'
+  | 'NEGOTIATE_PRICE'
+  | 'ASK_BULK_PURCHASE'
+  | 'ASK_INSTALLMENT'
+  // گروه C — رسانه
+  | 'REQUEST_MORE_PHOTOS'
+  | 'REQUEST_VIDEO'
+  | 'IMAGE_SEARCH_REQUEST'
+  // گروه D — عملیات سفارش پیش از تکمیل
+  | 'CUSTOM_ORDER_REQUEST'
+  | 'GIFT_WRAP_REQUEST'
+  | 'RESTOCK_NOTIFY_REQUEST'
+  | 'REQUEST_INVOICE'
+  | 'RESERVATION_PREORDER_REQUEST'
+  // گروه G — متا/کنترل مکالمه
+  | 'BOT_FRUSTRATION'
+  | 'POSITIVE_FEEDBACK'
+  | 'OFF_TOPIC_OR_SPAM'
+  | 'TALK_TO_SELLER'
+  // P1 — فقط شناسایی + ارجاع به فروشنده (گروه‌های E/F سند)
+  | 'PAYMENT_ISSUE'
+  | 'POST_PURCHASE_SUPPORT';
+
 // خروجی generateObject روی پیام خام مشتری — فقط NLU، هیچ تصمیم DB/state اینجا گرفته نمی‌شود
 export type ParsedIntent = {
   intent:
@@ -59,6 +107,12 @@ export type ParsedIntent = {
   quantity?: number | null;
   // docs/PRD-customer-comments-and-discounts.md بخش ۹ — فقط وقتی intent=APPLY_DISCOUNT
   discountCode?: string | null;
+  // docs/PRD-buyer-purchase-intent-taxonomy.md بخش ۴.۲ — لایه‌ی آنالیتیکس، تک فراخوانی با
+  // enum اجرایی بالا (نه یک classification جدا)
+  buyerNeeds?: BuyerNeedTag[] | null;
+  // وقتی پیام واضح یک نیاز دارد ولی با هیچ‌کدام از BuyerNeedTag جور نیست — برچسب آزاد مدل،
+  // برای فیچر کشف intent های کاور نشده (همان سند، بخش ۵)
+  unmatchedBuyerNeed?: string | null;
 };
 
 export type EngineResult = {
@@ -99,4 +153,8 @@ export type AiTraceData = {
   factsOrPrompt: string;
   model: string;
   kbSource?: 'STORE_KB' | 'PRODUCT_DESCRIPTION' | 'STORE_PROFILE' | 'STUB';
+  // docs/PRD-buyer-purchase-intent-taxonomy.md — فقط روی trace سطح parseIntent پر می‌شود
+  // (handler: 'parseIntent')، نه روی trace های اختصاصی هر handler
+  buyerNeeds?: BuyerNeedTag[];
+  unmatchedBuyerNeed?: string;
 };
