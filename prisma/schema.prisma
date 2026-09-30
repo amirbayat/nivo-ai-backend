@@ -2256,35 +2256,39 @@ enum ConversationState {
 // اصلی نیوو (بالای همین فایل) گرفته شده و جدول `conversations` را دارد؛ این‌جا کاملاً یک
 // دامنه‌ی جدا (مکالمه‌ی خرید مشتری ناشناس با یک فروشگاه) است.
 model SalesConversation {
-  id                   String            @id @default(uuid())
-  storeId              String
-  store                Store             @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  customerId           String
-  customer             Customer          @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  currentState         ConversationState @default(GREETING)
-  contextData          Json              @default("{}") // { cart: [{productId, name, unitPrice, qty}] }
-  isMutedForHuman      Boolean           @default(false)
+  id                          String            @id @default(uuid())
+  storeId                     String
+  store                       Store             @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  customerId                  String
+  customer                    Customer          @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  currentState                ConversationState @default(GREETING)
+  contextData                 Json              @default("{}") // { cart: [{productId, name, unitPrice, qty}] }
+  isMutedForHuman             Boolean           @default(false)
   // docs/PRD-conversation-history.md — پر می‌شود وقتی خریدار «گفتگوی جدید» می‌زند یا سفارش
   // این مکالمه تأیید/رد می‌شود (currentState به COMPLETED/REJECTED می‌رود)؛ مکالمه‌ی آرشیوشده
   // دیگر «فعال» فرض نمی‌شود (resolveActiveConversation تلگرام، شروع تازه‌ی وب)
-  archivedAt           DateTime?
-  clarifyAttempts      Int               @default(0)
+  archivedAt                  DateTime?
+  clarifyAttempts             Int               @default(0)
   // A/B تست مدل‌های AI (فیدبک اول پایلوت) — یک‌بار در startChat تصادفی تعیین می‌شود و تا
   // آخر عمر مکالمه ثابت می‌ماند (کلید MODEL_VARIANTS، نه خودِ اسم مدل OpenRouter)
-  abVariant            String?
+  abVariant                   String?
   // docs/PRD-sales-agent-voice.md بخش ۳ — سقف تعداد وویس تولیدشده به‌ازای این مکالمه (جلوی
   // مکالمه‌ای که هر پاسخش وویس می‌گیرد)؛ افزایش اتمیک در logReply با updateMany شرطی
-  voiceGenerationCount Int               @default(0)
+  voiceGenerationCount        Int               @default(0)
   // docs/PRD-sales-agent-voice.md بخش ۶.۱ — A/B تست جدا از abVariant (عمود متفاوت: انتخاب
   // مدل در برابر انتخاب «وویس بفرستیم یا نه»)؛ یک‌بار در ساخت مکالمه تصادفی تعیین می‌شود.
   // وقتی OFF است، logReply اصلاً reserveVoiceSlot را صدا نمی‌زند — این گروه هیچ وویسی نمی‌بیند.
-  voiceVariant         VoiceVariant      @default(ON)
+  voiceVariant                VoiceVariant      @default(ON)
   // docs/PRD-seller-credit-billing.md بخش «تصمیم معماری» — یک‌بار در ساخت مکالمه (startChat
   // وب / /start تلگرام) تعیین می‌شود و تا آخر عمر مکالمه ثابت می‌ماند (بر خلاف abVariant که
   // فقط انتخاب مدل است، این تعیین می‌کند اصلاً AI صدا زده شود یا نه)
-  billingMode          BillingMode       @default(FREE)
-  createdAt            DateTime          @default(now())
-  updatedAt            DateTime          @updatedAt
+  billingMode                 BillingMode       @default(FREE)
+  // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۴ — سبد رهاشده: وقتی مکالمه در
+  // CART_REVIEW/AWAITING_PAYMENT بیش از حد بماند، یک یادآوری یک‌باره فرستاده می‌شود؛ این فیلد
+  // جلوی تکرار یادآوری برای همان مکالمه را می‌گیرد
+  abandonedCartReminderSentAt DateTime?
+  createdAt                   DateTime          @default(now())
+  updatedAt                   DateTime          @updatedAt
 
   events      ConversationEvent[]
   order       Order?
@@ -2293,6 +2297,7 @@ model SalesConversation {
   @@index([storeId])
   @@index([storeId, isMutedForHuman])
   @@index([customerId, createdAt])
+  @@index([currentState, abandonedCartReminderSentAt])
   @@map("sales_conversations")
 }
 
@@ -2388,29 +2393,33 @@ enum OrderStatus {
 }
 
 model Order {
-  id              String             @id @default(uuid())
-  storeId         String
-  store           Store              @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  conversationId  String             @unique
-  conversation    SalesConversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  items           Json // [{productId, name, unitPrice, qty}]
-  totalAmount     Int
-  status          OrderStatus        @default(PENDING_PAYMENT)
-  receiptImageKey String?
-  rejectReason    String?
+  id                         String             @id @default(uuid())
+  storeId                    String
+  store                      Store              @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  conversationId             String             @unique
+  conversation               SalesConversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  items                      Json // [{productId, name, unitPrice, qty}]
+  totalAmount                Int
+  status                     OrderStatus        @default(PENDING_PAYMENT)
+  receiptImageKey            String?
+  rejectReason               String?
   // docs/PRD-seller-multi-bank-card-rotation.md — کدام کارت واقعاً به این خریدار نشان داده
   // شد؛ برای شمارش سقف THRESHOLD و شفافیت به فروشنده
-  bankCardId      String?
-  bankCard        StoreBankCard?     @relation(fields: [bankCardId], references: [id])
+  bankCardId                 String?
+  bankCard                   StoreBankCard?     @relation(fields: [bankCardId], references: [id])
   // docs/PRD-customer-comments-and-discounts.md بخش ب — کدام کد تخفیف واقعاً روی این سفارش
   // اعمال شد (totalAmount از قبل تخفیف‌خورده ذخیره می‌شود)؛ فقط شفافیت/آمار، منطق اعمال در
   // conversation-engine.service.ts's doApplyDiscount/doCreateOrder است
-  discountCodeId  String?
-  discountCode    StoreDiscountCode? @relation(fields: [discountCodeId], references: [id])
-  createdAt       DateTime           @default(now())
-  updatedAt       DateTime           @updatedAt
+  discountCodeId             String?
+  discountCode               StoreDiscountCode? @relation(fields: [discountCodeId], references: [id])
+  // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۳ — فالوآپ رضایت چند روز بعد از تایید
+  // سفارش (نه فوری مثل درخواست نظر بالا)؛ نال یعنی هنوز فرستاده نشده
+  satisfactionFollowUpSentAt DateTime?
+  createdAt                  DateTime           @default(now())
+  updatedAt                  DateTime           @updatedAt
 
   @@index([storeId])
+  @@index([status, satisfactionFollowUpSentAt])
   @@map("orders")
 }
 

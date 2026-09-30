@@ -18,6 +18,8 @@ import { ImageModelCostEstimateProcessor } from './processors/image-model-cost-e
 import { VideoModelCostEstimateProcessor } from './processors/video-model-cost-estimate.processor';
 import { SalesAgentVoiceProcessor } from './processors/sales-agent-voice.processor';
 import { ProductCommentModerationProcessor } from './processors/product-comment-moderation.processor';
+import { PostPurchaseFollowUpProcessor } from './processors/post-purchase-followup.processor';
+import { AbandonedCartReminderProcessor } from './processors/abandoned-cart-reminder.processor';
 import { PrismaModule } from '../prisma/prisma.module';
 import { MessageFeedbackModule } from '../modules/message-feedback/message-feedback.module';
 import { CampaignModule } from '../modules/campaign/campaign.module';
@@ -79,6 +81,9 @@ import { SalesAgentModule } from '../modules/sales-agent/sales-agent.module';
     BullModule.registerQueue({ name: 'sales-agent-voice' }),
     // docs/PRD-customer-comments-and-discounts.md — تولیدکننده در comments.module.ts
     BullModule.registerQueue({ name: 'product-comment-moderation' }),
+    // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۳/۵.۴
+    BullModule.registerQueue({ name: 'post-purchase-followup' }),
+    BullModule.registerQueue({ name: 'abandoned-cart-reminder' }),
     PrismaModule,
     MessageFeedbackModule,
     CampaignModule,
@@ -117,6 +122,8 @@ import { SalesAgentModule } from '../modules/sales-agent/sales-agent.module';
     VideoModelCostEstimateProcessor,
     SalesAgentVoiceProcessor,
     ProductCommentModerationProcessor,
+    PostPurchaseFollowUpProcessor,
+    AbandonedCartReminderProcessor,
   ],
 })
 export class QueueModule {}

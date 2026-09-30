@@ -11,6 +11,10 @@ import { SalesAgentService } from './sales-agent.service';
 import { ConversationEngineService } from './conversation-engine.service';
 import { CreditService } from './credit.service';
 import { AbuseGuardService } from './abuse-guard.service';
+import { PostPurchaseFollowUpService } from './post-purchase-followup.service';
+import { AbandonedCartReminderService } from './abandoned-cart-reminder.service';
+import { SalesAgentQaService } from './sales-agent-qa.service';
+import { SalesAgentQaController } from './sales-agent-qa.controller';
 
 @Module({
   imports: [
@@ -27,14 +31,24 @@ import { AbuseGuardService } from './abuse-guard.service';
     // نظرات تاییدشده در doFaq/showProduct
     CommentsModule,
   ],
-  controllers: [SalesAgentController],
+  controllers: [SalesAgentController, SalesAgentQaController],
   providers: [
     SalesAgentService,
     ConversationEngineService,
     CreditService,
     AbuseGuardService,
+    PostPurchaseFollowUpService,
+    AbandonedCartReminderService,
+    SalesAgentQaService,
   ],
-  // CreditService هم از TelegramModule (handleStart) هم از QueueModule (voice processor) لازم است
-  exports: [ConversationEngineService, CreditService],
+  // CreditService هم از TelegramModule (handleStart) هم از QueueModule (voice processor) لازم است.
+  // PostPurchaseFollowUpService/AbandonedCartReminderService از QueueModule (پردازشگرهای جدید
+  // §۵.۳/۵.۴ نقشه‌ی راه) لازم‌اند
+  exports: [
+    ConversationEngineService,
+    CreditService,
+    PostPurchaseFollowUpService,
+    AbandonedCartReminderService,
+  ],
 })
 export class SalesAgentModule {}

@@ -20,6 +20,12 @@ const LIARA_KEY_RETRY_CRON = '*/15 * * * *';
 // docs/PRD-image-gen-usd-estimate.md — daily USD refresh; FX is applied at catalog read
 const IMAGE_MODEL_COST_ESTIMATE_CRON = '0 4 * * *';
 const VIDEO_MODEL_COST_ESTIMATE_CRON = '15 4 * * *';
+// docs/PRD-product-strategy-and-roadmap.md بخش ۵.۳ — روزی یک‌بار کافی است، این پیام «چند روز
+// بعد» است، نه چیزی که با تاخیر دقیقه‌ای فرقی کند
+const POST_PURCHASE_FOLLOWUP_CRON = '0 10 * * *';
+// docs/PRD-product-strategy-and-roadmap.md بخش ۵.۴ — هر نیم‌ساعت، چون آستانه‌ی خودِ فیچر
+// (۳ ساعت) به این دقت حساس‌تر از فالوآپ رضایت است
+const ABANDONED_CART_REMINDER_CRON = '*/30 * * * *';
 
 @Injectable()
 export class QueueService implements OnApplicationBootstrap {
@@ -47,6 +53,10 @@ export class QueueService implements OnApplicationBootstrap {
     private readonly imageModelCostEstimateQueue: Queue,
     @InjectQueue('video-model-cost-estimate')
     private readonly videoModelCostEstimateQueue: Queue,
+    @InjectQueue('post-purchase-followup')
+    private readonly postPurchaseFollowUpQueue: Queue,
+    @InjectQueue('abandoned-cart-reminder')
+    private readonly abandonedCartReminderQueue: Queue,
     private readonly aiProvider: AiProviderService,
   ) {}
 
@@ -197,7 +207,9 @@ export class QueueService implements OnApplicationBootstrap {
       {},
       { removeOnComplete: true, removeOnFail: true },
     );
-    this.logger.log('Image model cost estimate job enqueued (one-shot on boot)');
+    this.logger.log(
+      'Image model cost estimate job enqueued (one-shot on boot)',
+    );
 
     const videoModelCostEstimateRepeatables =
       await this.videoModelCostEstimateQueue.getRepeatableJobs();
@@ -217,6 +229,36 @@ export class QueueService implements OnApplicationBootstrap {
       {},
       { removeOnComplete: true, removeOnFail: true },
     );
-    this.logger.log('Video model cost estimate job enqueued (one-shot on boot)');
+    this.logger.log(
+      'Video model cost estimate job enqueued (one-shot on boot)',
+    );
+
+    const postPurchaseFollowUpRepeatables =
+      await this.postPurchaseFollowUpQueue.getRepeatableJobs();
+    for (const job of postPurchaseFollowUpRepeatables) {
+      await this.postPurchaseFollowUpQueue.removeRepeatableByKey(job.key);
+    }
+    await this.postPurchaseFollowUpQueue.add(
+      'send-followups',
+      {},
+      { repeat: { cron: POST_PURCHASE_FOLLOWUP_CRON } },
+    );
+    this.logger.log(
+      `Post-purchase follow-up job scheduled: ${POST_PURCHASE_FOLLOWUP_CRON}`,
+    );
+
+    const abandonedCartReminderRepeatables =
+      await this.abandonedCartReminderQueue.getRepeatableJobs();
+    for (const job of abandonedCartReminderRepeatables) {
+      await this.abandonedCartReminderQueue.removeRepeatableByKey(job.key);
+    }
+    await this.abandonedCartReminderQueue.add(
+      'send-reminders',
+      {},
+      { repeat: { cron: ABANDONED_CART_REMINDER_CRON } },
+    );
+    this.logger.log(
+      `Abandoned cart reminder job scheduled: ${ABANDONED_CART_REMINDER_CRON}`,
+    );
   }
 }

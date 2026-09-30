@@ -427,6 +427,18 @@ intent های ممکن:
       return this.doSubmitComment(conversation, text);
     }
 
+    // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۳ — فالوآپ رضایت (چند روز بعد، صف
+    // PostPurchaseFollowUpService) این فلگ را ست کرده؛ اولین پیام آزاد بعدی جواب همان سؤال است
+    const awaitingSatisfactionCheck = (
+      conversation.contextData as { awaitingSatisfactionCheck?: boolean } | null
+    )?.awaitingSatisfactionCheck;
+    if (
+      conversation.currentState === 'COMPLETED' &&
+      awaitingSatisfactionCheck
+    ) {
+      return this.doSatisfactionReply(conversation, text);
+    }
+
     if (this.billingBlocked(conversation)) {
       return this.transitionToHandoff(conversation, 'BILLING_BLOCKED');
     }
@@ -496,6 +508,52 @@ intent های ممکن:
     });
 
     const reply = fa.salesAgent.reviewThanks;
+    await this.logReply(conversation, reply, { type: 'NONE' });
+    return { reply, uiBlocks: [], state: conversation.currentState };
+  }
+
+  // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۳ — جواب مشتری به فالوآپ رضایت؛ بدون
+  // فراخوان AI (هیورستیک کلیدواژه‌ی ساده، نه sentiment مدل‌محور) — کافی است چون هدف فقط
+  // تشخیص «باید فروشنده حتماً ببیند» است، نه طبقه‌بندی دقیق
+  private isNegativeSentiment(text: string): boolean {
+    const negativeWords = [
+      'بد',
+      'ناراضی',
+      'مشکل',
+      'خراب',
+      'دیر',
+      'برنگشت',
+      'کلاهبردار',
+      'شکایت',
+      'افتضاح',
+      'ضعیف',
+      'پس میدم',
+      'پس می‌دم',
+    ];
+    return negativeWords.some((w) => text.includes(w));
+  }
+
+  private async doSatisfactionReply(
+    conversation: ConversationWithStore,
+    text: string,
+  ): Promise<EngineResult> {
+    const existingContext = (conversation.contextData ??
+      {}) as Prisma.JsonObject & { awaitingSatisfactionCheck?: boolean };
+    const { awaitingSatisfactionCheck, ...rest } = existingContext;
+    void awaitingSatisfactionCheck;
+    const negative = this.isNegativeSentiment(text);
+
+    await this.prisma.salesConversation.update({
+      where: { id: conversation.id },
+      data: {
+        contextData: rest,
+        ...(negative ? { isMutedForHuman: true } : {}),
+      },
+    });
+
+    const reply = negative
+      ? fa.salesAgent.satisfactionNegativeAck
+      : fa.salesAgent.satisfactionThanksAck;
     await this.logReply(conversation, reply, { type: 'NONE' });
     return { reply, uiBlocks: [], state: conversation.currentState };
   }
@@ -619,6 +677,36 @@ intent های ممکن:
     return this.doCreateOrder(conversation, ctx);
   }
 
+  // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۲ — اگر همین Customer (نه همین مکالمه، چون
+  // «گفتگوی جدید»/رستارت مکالمه‌ی تازه می‌سازد) قبلاً یک سفارش APPROVED از این فروشگاه داشته،
+  // پیام خوش‌آمد اول عوض می‌شود؛ فقط از دیتای موجود (Order)، بدون زیرساخت تازه
+  private async buildGreeting(
+    conversation: ConversationWithStore,
+  ): Promise<string> {
+    const previousOrder = await this.prisma.order.findFirst({
+      where: {
+        status: 'APPROVED',
+        conversation: {
+          customerId: conversation.customerId,
+          id: { not: conversation.id },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!previousOrder)
+      return fa.salesAgent.firstGreeting(conversation.store.name);
+
+    const items = previousOrder.items as { name: string }[];
+    const productName = items[0]?.name;
+    if (!productName)
+      return fa.salesAgent.firstGreeting(conversation.store.name);
+
+    return fa.salesAgent.returningGreeting(
+      conversation.store.name,
+      productName,
+    );
+  }
+
   // برای لینک اختصاصی یک محصول (?product=) — دقیقاً مثل doBrowse ولی بدون NLU، چون محصول
   // از قبل مشخص است (سلر لینکش را داده، نه پیام آزاد مشتری)
   async showProduct(
@@ -652,7 +740,7 @@ intent های ممکن:
     // نمی‌خواهد تعداد واقعی موجودی افشا شود؛ فقط وضعیت موجود/ناموجود کافی است.
     const facts = `مشتری از لینک مستقیم این محصول وارد شده: ${product.name} (${product.basePrice} تومان)${product.stock === 0 ? ' — فعلاً ناموجود' : ''}${product.description ? `\nتوضیحات محصول: ${product.description}` : ''}${await this.commentsFactsSuffix(product.id)}`;
     const reply = await this.caption(facts, conversation);
-    const finalReply = `${fa.salesAgent.firstGreeting(conversation.store.name)}\n\n${reply}`;
+    const finalReply = `${await this.buildGreeting(conversation)}\n\n${reply}`;
     await this.logReply(conversation, finalReply, uiBlock, undefined, {
       intent: 'BROWSE',
       handler: 'showProduct',
@@ -718,7 +806,7 @@ intent های ممکن:
     // LLM-generated، برای پایداری) جلوی لیست محصولات می‌گیرد — قبلاً مشتری بدون هیچ
     // توضیحی مستقیم می‌رسید به لیست محصولات و نمی‌فهمید چیکار باید بکند
     const finalReply = isFirstReply
-      ? `${fa.salesAgent.firstGreeting(conversation.store.name)}\n\n${reply}`
+      ? `${await this.buildGreeting(conversation)}\n\n${reply}`
       : reply;
     await this.logReply(conversation, finalReply, uiBlock, undefined, {
       intent: parsed.intent,

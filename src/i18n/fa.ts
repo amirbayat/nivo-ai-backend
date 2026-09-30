@@ -176,6 +176,10 @@ export const fa = {
       `متوجه نشدم 🙁 می‌تونی مثلاً بگی «${productNames.join('» یا «')} رو میخوام» یا از لیست بالا دکمه‌ی «افزودن به سبد» رو بزنی.`,
     firstGreeting: (storeName: string) =>
       `سلام! به ${storeName} خوش اومدی 👋 برای خرید فقط اسم محصول رو بگو یا از دکمه‌های پایین لیست استفاده کن.`,
+    // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۲ — خریدار برگشتی (سفارش تاییدشده‌ی
+    // قبلی از همین Customer، در یک مکالمه‌ی دیگر) به‌جای پیام خوش‌آمد عمومی این را می‌بیند
+    returningGreeting: (storeName: string, productName: string) =>
+      `خوش برگشتی به ${storeName}! 👋 دفعه‌ی قبل ${productName} رو خریدی. برای این دفعه فقط اسم محصول رو بگو یا از دکمه‌های پایین لیست استفاده کن.`,
     addToCartAction: 'محصول رو به سبد اضافه کن',
     addToCartActionNamed: (productName: string) =>
       `${productName} رو به سبد اضافه کن`,
@@ -207,6 +211,18 @@ export const fa = {
     discountCodeMissing: 'کد تخفیف رو متوجه نشدم، می‌تونی دوباره بگی؟',
     discountCodeInvalid: 'این کد تخفیف معتبر نیست یا منقضی/تمام‌شده',
     discountAppliedHint: 'اگه کد تخفیف داری، بگو تا برات اعمال کنم.',
+    // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۳ — فالوآپ رضایت، چند روز بعد از تایید
+    // سفارش (نه فوری مثل reviewFollowUpPrompt بالا)؛ پیام ثابت، بدون فراخوان AI
+    satisfactionFollowUpPrompt:
+      'چند روزی از خریدت گذشته — همه‌چیز خوب بود؟ اگه مشکلی هست همین‌جا بگو تا پیگیری کنیم 🙏',
+    satisfactionThanksAck:
+      'خوشحالیم که راضی بودی! هر وقت باز چیزی خواستی، همین‌جا هستیم 🌟',
+    satisfactionNegativeAck:
+      'بابت این تجربه متاسفیم 🙏 همین الان به فروشنده اطلاع دادیم تا پیگیری کنه.',
+    // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۴ — سبد رهاشده: یادآوری یک‌باره، بدون
+    // فراخوان AI (پیام ثابت)، وقتی مکالمه در CART_REVIEW/AWAITING_PAYMENT بیش از حد بماند
+    abandonedCartReminder:
+      'هنوز منتظر تکمیل خریدتیم 🙂 اگه سوالی مونده یا نیاز به کمک داری، همین‌جا بگو.',
   },
   telegram: {
     startNeedsLink:
