@@ -164,6 +164,12 @@ export class ConversationEngineService {
           'APPLY_DISCOUNT',
           'UNCLEAR',
         ]),
+        // docs/PRD-buyer-purchase-intent-taxonomy.md — چون مدل از قبل دارد این پیام را طبقه‌بندی
+        // می‌کند، خواستن یک برچسب کیفی اطمینان هزینه‌ی اضافه‌ای ندارد؛ عمداً enum کیفی
+        // (HIGH/MEDIUM/LOW) نه یک عدد اعشاری — مدل‌های زبانی در گزارش عدد کالیبره‌شده ضعیف‌اند
+        // ولی در خودارزیابی کیفی قابل‌اتکاترند (همان الگویی که در PRD-admin-ai-decision-trace-log.md
+        // برای نمونه UI «اطمینان: بالا» فرض شده بود، ولی هیچ‌وقت واقعاً از مدل خواسته نشده بود)
+        intentConfidence: z.enum(['HIGH', 'MEDIUM', 'LOW']),
         productQuery: z.string().nullable(),
         productIndex: z.number().int().positive().nullable(),
         quantity: z.number().int().positive().nullable(),
@@ -230,6 +236,12 @@ intent های ممکن:
 - REQUEST_HUMAN: صریحاً می‌خواهد با یک آدم واقعی صحبت کند
 - APPLY_DISCOUNT: یک کد تخفیف دارد/می‌گوید (discountCode=همان کد، دقیقاً همانی که نوشته)
 - UNCLEAR: نامفهوم یا نامرتبط
+
+intentConfidence: چقدر مطمئنی که همین intent بالا درست است؟ HIGH (پیام صریح و بدون ابهام)،
+MEDIUM (احتمالاً درست ولی پیام کمی مبهم/ناقص بود)، یا LOW (حدس زدی، پیام می‌توانست چند جور
+تفسیر شود). این را با intent=UNCLEAR اشتباه نگیر — حتی وقتی مطمئن هستی که UNCLEAR درست است،
+همان اطمینانت (معمولاً HIGH) را در intentConfidence بگذار؛ intentConfidence همیشه درباره‌ی
+خودِ تشخیصت است، نه یک انتخاب جداگانه.
 
 علاوه بر intent بالا، buyerNeeds را هم پر کن — یک یا چند برچسب از لیست زیر که واقعاً «نیاز»
 خریدار را نشان می‌دهد (جدا از اینکه کدام Tool اجرا می‌شود؛ یک پیام می‌تواند چند نیاز داشته
@@ -548,7 +560,14 @@ unmatchedBuyerNeed با جمله‌ی کوتاه خودت (نه یکی از enum
     // trace های اختصاصی هر handler در logReply؛ چون بلافاصله بعد از CUSTOMER_MESSAGE و قبل از
     // هر AGENT_REPLY نوشته می‌شود، getConversationTrace فعلی (که trace را به AGENT_REPLY بعدش
     // می‌چسباند) این را نادیده می‌گیرد نه خراب می‌کند — نمایش در ادمین یک گام بعدی جداست
-    if (parsed.buyerNeeds?.length || parsed.unmatchedBuyerNeed) {
+    // شرط ثبت عمداً intentConfidence!=='HIGH' را هم شامل می‌شود (نه فقط buyerNeeds/unmatched) —
+    // این دقیقاً سیگنالی است که بخش «Potential misclassification» بخش ۵.۱ سند به آن نیاز داشت،
+    // مستقل از اینکه پیام اصلاً buyerNeeds شناخته‌شده‌ای هم داشته باشد یا نه
+    if (
+      parsed.buyerNeeds?.length ||
+      parsed.unmatchedBuyerNeed ||
+      (parsed.intentConfidence && parsed.intentConfidence !== 'HIGH')
+    ) {
       await this.prisma.conversationEvent.create({
         data: {
           conversationId: conversation.id,
@@ -559,6 +578,9 @@ unmatchedBuyerNeed با جمله‌ی کوتاه خودت (نه یکی از enum
             buyerNeeds: parsed.buyerNeeds ?? [],
             ...(parsed.unmatchedBuyerNeed
               ? { unmatchedBuyerNeed: parsed.unmatchedBuyerNeed }
+              : {}),
+            ...(parsed.intentConfidence
+              ? { intentConfidence: parsed.intentConfidence }
               : {}),
           },
         },

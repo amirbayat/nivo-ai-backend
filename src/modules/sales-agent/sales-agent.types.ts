@@ -100,6 +100,9 @@ export type ParsedIntent = {
     | 'REQUEST_HUMAN'
     | 'APPLY_DISCOUNT'
     | 'UNCLEAR';
+  // فقط وقتی از خود مدل واقعاً خواسته شده (callParseIntent) پر می‌شود؛ در fallback نهایی
+  // ({intent:'UNCLEAR'} بعد از شکست دوباره‌ی AI) خالی می‌ماند — به همین دلیل اختیاری است
+  intentConfidence?: 'HIGH' | 'MEDIUM' | 'LOW';
   productQuery?: string | null;
   // ارجاع ترتیبی به آخرین لیست نشان‌داده‌شده («اولی»/«دومی») — ۱-پایه؛ اگر ست باشد، بر
   // productQuery اولویت دارد (resolveProductRef در conversation-engine.service.ts)
@@ -157,4 +160,5 @@ export type AiTraceData = {
   // (handler: 'parseIntent')، نه روی trace های اختصاصی هر handler
   buyerNeeds?: BuyerNeedTag[];
   unmatchedBuyerNeed?: string;
+  intentConfidence?: 'HIGH' | 'MEDIUM' | 'LOW';
 };

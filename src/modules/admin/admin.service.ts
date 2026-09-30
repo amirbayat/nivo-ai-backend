@@ -1278,7 +1278,7 @@ export class AdminService {
       (e) => (e.payload as { handler?: string })?.handler === 'parseIntent',
     );
     if (classificationEvents.length === 0) {
-      return { buyerNeedCounts: [], unmatched: [] };
+      return { buyerNeedCounts: [], unmatched: [], lowConfidence: [] };
     }
 
     const conversationIds = Array.from(
@@ -1307,14 +1307,33 @@ export class AdminService {
       string,
       { count: number; conversationId: string; createdAt: Date }
     >();
+    // «Potential misclassification» بخش ۵.۱ — بر خلاف unmatched، این‌ها گروه‌بندی نمی‌شوند
+    // (هر رخداد جدا قابل‌بررسی است، نه یک برچسب تکراری)؛ فقط ۵۰ مورد اخیر (بدون صفحه‌بندی کامل،
+    // چون حجم این گزارش عمداً کوچک نگه داشته شده)
+    const lowConfidenceRaw: {
+      conversationId: string;
+      intent: string;
+      confidence: 'MEDIUM' | 'LOW';
+      createdAt: Date;
+    }[] = [];
 
     for (const e of filtered) {
       const payload = e.payload as {
         buyerNeeds?: string[];
         unmatchedBuyerNeed?: string;
+        intentConfidence?: 'HIGH' | 'MEDIUM' | 'LOW';
+        intent?: string;
       };
       for (const tag of payload.buyerNeeds ?? []) {
         buyerNeedCountMap.set(tag, (buyerNeedCountMap.get(tag) ?? 0) + 1);
+      }
+      if (payload.intentConfidence && payload.intentConfidence !== 'HIGH') {
+        lowConfidenceRaw.push({
+          conversationId: e.conversationId,
+          intent: payload.intent ?? '',
+          confidence: payload.intentConfidence,
+          createdAt: e.createdAt,
+        });
       }
       const label = payload.unmatchedBuyerNeed?.trim();
       if (!label) continue;
@@ -1333,6 +1352,32 @@ export class AdminService {
         });
       }
     }
+
+    const lowConfidenceTop = lowConfidenceRaw
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .slice(0, 50);
+    const lowConfidenceSamples = await Promise.all(
+      lowConfidenceTop.map((item) =>
+        this.prisma.conversationEvent.findFirst({
+          where: {
+            conversationId: item.conversationId,
+            type: 'CUSTOMER_MESSAGE',
+            createdAt: { lte: item.createdAt },
+          },
+          orderBy: { createdAt: 'desc' },
+          select: { payload: true },
+        }),
+      ),
+    );
+    const lowConfidence = lowConfidenceTop.map((item, i) => ({
+      conversationId: item.conversationId,
+      storeName: storeNameByConversation.get(item.conversationId) ?? '',
+      intent: item.intent,
+      confidence: item.confidence,
+      sampleMessage:
+        (lowConfidenceSamples[i]?.payload as { text?: string })?.text ?? '',
+      createdAt: item.createdAt,
+    }));
 
     // نمونه پیام مشتری برای هر گروه نامشخص — همان پیامی که این classification را تولید کرد
     // (بلافاصله قبل از همین AI_TRACE در همان مکالمه، طبق ترتیب نوشتن در handleMessage)
@@ -1367,6 +1412,6 @@ export class AdminService {
       .map(([tag, count]) => ({ tag, count }))
       .sort((a, b) => b.count - a.count);
 
-    return { buyerNeedCounts, unmatched };
+    return { buyerNeedCounts, unmatched, lowConfidence };
   }
 }
