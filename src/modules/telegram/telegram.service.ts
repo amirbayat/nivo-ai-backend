@@ -287,17 +287,38 @@ export class TelegramService {
       await this.sendText(chatId, fa.telegram.noActiveStore);
       return;
     }
+    // docs/PRD-seller-advertising-placements.md بخش ۳ — نتایج مرتبط عوض نمی‌شوند، فقط رتبه‌ی
+    // فروشگاه‌های تبلیغ‌شده در همین نتایج بالاتر می‌رود؛ ۱۰ تا می‌گیریم تا بعد از رتبه‌بندی هم
+    // ۵ تای نهایی معنی‌دار بماند
     const stores = await this.prisma.store.findMany({
       where: { status: 'ACTIVE', name: { contains: q, mode: 'insensitive' } },
-      take: 5,
+      take: 10,
     });
     if (stores.length === 0) {
       await this.sendText(chatId, fa.telegram.storeSearchEmpty);
       return;
     }
+    const activePlacements = await this.prisma.adPlacement.findMany({
+      where: {
+        storeId: { in: stores.map((s) => s.id) },
+        placement: 'TELEGRAM_STORE_SEARCH',
+        status: 'ACTIVE',
+        endsAt: { gt: new Date() },
+      },
+      select: { storeId: true },
+    });
+    const boostedIds = new Set(activePlacements.map((p) => p.storeId));
+    const top = [...stores]
+      .sort(
+        (a, b) => Number(boostedIds.has(b.id)) - Number(boostedIds.has(a.id)),
+      )
+      .slice(0, 5);
     const keyboard: TelegramInlineKeyboard = {
-      inline_keyboard: stores.map((s) => [
-        { text: s.name, callback_data: `st:${s.id}` },
+      inline_keyboard: top.map((s) => [
+        {
+          text: boostedIds.has(s.id) ? `⭐ ${s.name}` : s.name,
+          callback_data: `st:${s.id}`,
+        },
       ]),
     };
     await this.sendText(chatId, fa.telegram.storeSearchResults, keyboard);

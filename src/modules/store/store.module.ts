@@ -10,6 +10,7 @@ import { StoreKbService } from './store-kb.service';
 import { StoreCreditService } from './store-credit.service';
 import { StoreBankCardService } from './store-bank-card.service';
 import { StoreDiscountCodeService } from './store-discount-code.service';
+import { StoreAdPlacementService } from './store-ad-placement.service';
 import { CardSelectorService } from './card-selector.service';
 
 @Module({
@@ -35,6 +36,7 @@ import { CardSelectorService } from './card-selector.service';
     StoreCreditService,
     StoreBankCardService,
     StoreDiscountCodeService,
+    StoreAdPlacementService,
     CardSelectorService,
   ],
   // CardSelectorService هم از SalesAgentModule (doCreateOrder) لازم است —

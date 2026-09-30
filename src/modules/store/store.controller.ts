@@ -29,6 +29,7 @@ import { StoreKbService } from './store-kb.service';
 import { StoreCreditService } from './store-credit.service';
 import { StoreBankCardService } from './store-bank-card.service';
 import { StoreDiscountCodeService } from './store-discount-code.service';
+import { StoreAdPlacementService } from './store-ad-placement.service';
 import { CreateStoreDto } from './dto/create-store.dto';
 import { UpdateStoreDto } from './dto/update-store.dto';
 import { CreateProductDto } from './dto/create-product.dto';
@@ -43,6 +44,7 @@ import { UpdateBankCardDto } from './dto/update-bank-card.dto';
 import { UpdateCardPolicyDto } from './dto/update-card-policy.dto';
 import { CreateDiscountCodeDto } from './dto/create-discount-code.dto';
 import { UpdateDiscountCodeDto } from './dto/update-discount-code.dto';
+import { PurchaseAdPlacementDto } from './dto/purchase-ad-placement.dto';
 import { fa } from '../../i18n/fa';
 
 // docs/PRD-mvp-launch-plan.md گام ۰ — ثبت‌نام فروشنده و ساخت فروشگاه
@@ -55,6 +57,7 @@ export class StoreController {
     private readonly storeCreditService: StoreCreditService,
     private readonly storeBankCardService: StoreBankCardService,
     private readonly storeDiscountCodeService: StoreDiscountCodeService,
+    private readonly storeAdPlacementService: StoreAdPlacementService,
   ) {}
 
   @Get('me')
@@ -443,5 +446,27 @@ export class StoreController {
     @Body() dto: UpdateDiscountCodeDto,
   ) {
     return this.storeDiscountCodeService.update(user.sub, id, codeId, dto);
+  }
+
+  // docs/PRD-seller-advertising-placements.md بخش ۴ — وضعیت فعلی + لیست بازه‌های قیمتی ثابت
+  @Get(':id/ad-placement')
+  getAdPlacementStatus(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+  ) {
+    return this.storeAdPlacementService.getStatus(user.sub, id);
+  }
+
+  @Post(':id/ad-placement/purchase')
+  purchaseAdPlacement(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: PurchaseAdPlacementDto,
+  ) {
+    return this.storeAdPlacementService.purchase(
+      user.sub,
+      id,
+      dto.durationDays,
+    );
   }
 }

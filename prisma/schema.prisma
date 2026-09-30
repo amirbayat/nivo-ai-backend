@@ -2078,6 +2078,7 @@ model Store {
   bankCards         StoreBankCard[]
   comments          ProductComment[]
   discountCodes     StoreDiscountCode[]
+  adPlacements      AdPlacement[]
 
   @@index([sellerId])
   @@map("stores")
@@ -2334,6 +2335,8 @@ enum CreditUsageKind {
   // docs/PRD-seller-knowledge-base.md بخش ۲.۳ — تکمیل محصول همراه با جستجوی وب واقعی، گران‌تر
   // از generateObject ساده (که رایگان می‌ماند)
   PRODUCT_ENRICHMENT
+  // docs/PRD-seller-advertising-placements.md — خرید جایگاه تبلیغاتی از همان کیف‌پول فروشگاهی
+  AD_PLACEMENT
 }
 
 // یک ردیف به‌ازای هر فراخوانی واقعی مدل AI در موتور مکالمه (parseIntent/caption) — برای
@@ -2465,4 +2468,35 @@ model StoreDiscountCode {
 
   @@unique([storeId, code])
   @@map("store_discount_codes")
+}
+
+// docs/PRD-seller-advertising-placements.md — جایگاه تبلیغاتی/Boost فروشگاه در نتایج جستجوی
+// نام فروشگاه در تلگرام (بخش ۹.۲ سند بات تلگرام)؛ بدون مزایده، یک بازه‌ی زمانی ثابت با قیمت
+// ثابت، خریداری‌شده از همان Store.creditBalanceToman (نه یک تراکنش پرداخت جدا)
+model AdPlacement {
+  id         String            @id @default(uuid())
+  storeId    String
+  store      Store             @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  placement  AdPlacementType   @default(TELEGRAM_STORE_SEARCH)
+  startsAt   DateTime
+  endsAt     DateTime
+  priceToman Int // مبلغ واقعی کسرشده از کیف‌پول — برای شفافیت/گزارش، نه محاسبه‌ی مجدد
+  status     AdPlacementStatus @default(ACTIVE)
+  createdAt  DateTime          @default(now())
+
+  @@index([placement, status, startsAt, endsAt])
+  @@map("ad_placements")
+}
+
+enum AdPlacementType {
+  TELEGRAM_STORE_SEARCH
+  // docs/PRD-marketplace-explore-cross-store.md — همین مدل، بدون تغییر schema، وقتی
+  // مارکت‌پلیس ساخته شد (سند ۶)
+  MARKETPLACE_FEATURED
+}
+
+enum AdPlacementStatus {
+  ACTIVE
+  EXPIRED
+  CANCELLED
 }

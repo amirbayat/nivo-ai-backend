@@ -158,6 +158,9 @@ export const fa = {
     discountPercentTooHigh: 'درصد تخفیف نمی‌تواند بیشتر از ۱۰۰ باشد',
     // docs/PRD-product-strategy-and-roadmap.md بخش ۳.۲
     invalidTimeFormat: 'فرمت ساعت باید به شکل HH:mm باشد (مثلاً 09:00)',
+    // docs/PRD-seller-advertising-placements.md
+    adPlacementInsufficientBalance:
+      'اعتبار فروشگاه برای خرید این جایگاه تبلیغاتی کافی نیست — از بخش «اعتبار هوش مصنوعی» شارژ کن',
   },
   storeKb: {
     notFound: 'این مورد در باکس دانش یافت نشد',
