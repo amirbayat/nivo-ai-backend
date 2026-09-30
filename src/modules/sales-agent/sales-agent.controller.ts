@@ -32,6 +32,28 @@ export class SalesAgentController {
     return this.salesAgentService.startChat(slug, productId);
   }
 
+  // docs/PRD-conversation-history.md — دکمه‌ی «گفتگوی جدید»؛ همان sessionToken می‌ماند، فقط
+  // یک SalesConversation تازه برای همان Customer ساخته می‌شود
+  @Post('chat/:conversationId/restart')
+  restart(
+    @Param('conversationId') conversationId: string,
+    @Headers('x-session-token') sessionToken: string,
+  ) {
+    return this.salesAgentService.restartConversation(
+      conversationId,
+      sessionToken,
+    );
+  }
+
+  // docs/PRD-conversation-history.md بخش ۳ — تاریخچه‌ی همه‌ی مکالمات (فعال+آرشیوشده) همین خریدار
+  @Get('stores/:slug/customer-history')
+  getCustomerHistory(
+    @Param('slug') slug: string,
+    @Headers('x-session-token') sessionToken: string,
+  ) {
+    return this.salesAgentService.getCustomerHistory(slug, sessionToken);
+  }
+
   @Post('chat/:conversationId/messages')
   sendMessage(
     @Param('conversationId') conversationId: string,

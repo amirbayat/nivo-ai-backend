@@ -312,23 +312,26 @@ export class StoreService {
 
   async approveOrder(sellerId: string, storeId: string, orderId: string) {
     const order = await this.getOwnedOrder(sellerId, storeId, orderId);
-    // docs/PRD-seller-multi-bank-card-rotation.md بخش ۲ — فقط روی تایید واقعی (نه لحظه‌ی
-    // نمایش) به سقف THRESHOLD همان کارت اضافه می‌شود؛ خریدار ممکن است اصلاً پرداخت نکند
-    if (order.bankCardId) {
-      return this.prisma.$transaction(async (tx) => {
+    // docs/PRD-conversation-history.md — تأیید سفارش یعنی مکالمه واقعاً تمام شده: هم
+    // currentState (COMPLETED، تا امروز هیچ‌جا ست نمی‌شد) هم archivedAt پر می‌شود تا هم
+    // TERMINAL_STATES فرانت درست کار کند هم مکالمه از «فعال» بودن خارج شود
+    return this.prisma.$transaction(async (tx) => {
+      // docs/PRD-seller-multi-bank-card-rotation.md بخش ۲ — فقط روی تایید واقعی (نه لحظه‌ی
+      // نمایش) به سقف THRESHOLD همان کارت اضافه می‌شود؛ خریدار ممکن است اصلاً پرداخت نکند
+      if (order.bankCardId) {
         await tx.storeBankCard.update({
-          where: { id: order.bankCardId! },
+          where: { id: order.bankCardId },
           data: { totalConfirmedToman: { increment: order.totalAmount } },
         });
-        return tx.order.update({
-          where: { id: orderId },
-          data: { status: 'APPROVED' },
-        });
+      }
+      await tx.salesConversation.update({
+        where: { id: order.conversationId },
+        data: { currentState: 'COMPLETED', archivedAt: new Date() },
       });
-    }
-    return this.prisma.order.update({
-      where: { id: orderId },
-      data: { status: 'APPROVED' },
+      return tx.order.update({
+        where: { id: orderId },
+        data: { status: 'APPROVED' },
+      });
     });
   }
 
@@ -338,11 +341,18 @@ export class StoreService {
     orderId: string,
     reason?: string,
   ) {
-    await this.getOwnedOrder(sellerId, storeId, orderId);
-    return this.prisma.order.update({
-      where: { id: orderId },
-      data: { status: 'REJECTED', rejectReason: reason },
-    });
+    const order = await this.getOwnedOrder(sellerId, storeId, orderId);
+    const [, updated] = await this.prisma.$transaction([
+      this.prisma.salesConversation.update({
+        where: { id: order.conversationId },
+        data: { currentState: 'REJECTED', archivedAt: new Date() },
+      }),
+      this.prisma.order.update({
+        where: { id: orderId },
+        data: { status: 'REJECTED', rejectReason: reason },
+      }),
+    ]);
+    return updated;
   }
 
   // الگوی conversations.service.ts getImage — کلید در storage هیچ‌وقت مستقیم به فرانت داده

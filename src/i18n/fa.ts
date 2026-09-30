@@ -186,6 +186,24 @@ export const fa = {
       'سلام! برای شروع خرید باید از لینک مخصوص یک فروشگاه وارد شوید — لینک رو از فروشنده بگیرید یا از استوری/پیجش بزنید.',
     noActiveStore:
       'هنوز از هیچ فروشگاهی شروع نکرده‌اید — اول از لینک فروشگاه وارد شوید.',
+    historyEmpty: 'هنوز هیچ گفتگویی نداشته‌اید.',
+    historyTitle: '📜 گفتگوهای قبلی شما را انتخاب کنید:',
+    historyButtonLabel: (
+      storeName: string,
+      productName: string | null,
+      status: string,
+    ) => `${storeName} — ${productName ?? 'بدون محصول'} — ${status}`,
+    historyStatusLabels: {
+      COMPLETED: 'تکمیل‌شده',
+      REJECTED: 'ردشده',
+      IN_PROGRESS: 'در حال انجام',
+      NEEDS_ATTENTION: 'نیاز به پیگیری',
+    } as Record<string, string>,
+    historyNotFound: 'این گفتگو پیدا نشد.',
+    historyTranscriptHeader: (storeName: string, status: string) =>
+      `📜 گفتگو با «${storeName}» — وضعیت: ${status}\n—`,
+    historyCustomerLabel: 'شما',
+    historyAgentLabel: 'ربات/فروشنده',
   },
   sms: {
     otpText: (code: string) =>

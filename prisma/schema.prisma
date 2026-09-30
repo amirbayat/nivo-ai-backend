@@ -2175,7 +2175,9 @@ model Customer {
   lockedUntil    DateTime?
   createdAt      DateTime        @default(now())
 
-  salesConversation SalesConversation?
+  // docs/PRD-conversation-history.md — دیگر یک‌به‌یک نیست؛ خریدار می‌تواند چند مکالمه‌ی
+  // آرشیوشده داشته باشد («گفتگوی جدید» یا رسیدن به COMPLETED/REJECTED، بدون ساخت Customer تازه)
+  salesConversations SalesConversation[]
 
   @@unique([storeId, sessionToken])
   @@unique([storeId, telegramChatId])
@@ -2202,11 +2204,15 @@ model SalesConversation {
   id                   String            @id @default(uuid())
   storeId              String
   store                Store             @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  customerId           String            @unique
+  customerId           String
   customer             Customer          @relation(fields: [customerId], references: [id], onDelete: Cascade)
   currentState         ConversationState @default(GREETING)
   contextData          Json              @default("{}") // { cart: [{productId, name, unitPrice, qty}] }
   isMutedForHuman      Boolean           @default(false)
+  // docs/PRD-conversation-history.md — پر می‌شود وقتی خریدار «گفتگوی جدید» می‌زند یا سفارش
+  // این مکالمه تأیید/رد می‌شود (currentState به COMPLETED/REJECTED می‌رود)؛ مکالمه‌ی آرشیوشده
+  // دیگر «فعال» فرض نمی‌شود (resolveActiveConversation تلگرام، شروع تازه‌ی وب)
+  archivedAt           DateTime?
   clarifyAttempts      Int               @default(0)
   // A/B تست مدل‌های AI (فیدبک اول پایلوت) — یک‌بار در startChat تصادفی تعیین می‌شود و تا
   // آخر عمر مکالمه ثابت می‌ماند (کلید MODEL_VARIANTS، نه خودِ اسم مدل OpenRouter)
@@ -2227,6 +2233,7 @@ model SalesConversation {
 
   @@index([storeId])
   @@index([storeId, isMutedForHuman])
+  @@index([customerId, createdAt])
   @@map("sales_conversations")
 }
 

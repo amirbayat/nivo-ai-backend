@@ -12,6 +12,7 @@ import {
 import { CreditService } from '../sales-agent/credit.service';
 import { pickVariant } from '../sales-agent/model-variants';
 import { buildAsrVocabHint } from '../sales-agent/asr-vocab-hint';
+import { buildHistoryEntry } from '../sales-agent/conversation-history.util';
 import type {
   EngineResult,
   SalesAction,
@@ -106,6 +107,11 @@ export class TelegramService {
         await this.handleStart(message);
         return;
       }
+      if (message.text?.startsWith('/history')) {
+        this.logger.debug(`handling /history chat=${message.chat.id}`);
+        await this.handleHistory(message);
+        return;
+      }
       if (message.photo?.length) {
         await this.handlePhoto(message);
         return;
@@ -147,12 +153,31 @@ export class TelegramService {
       where: {
         storeId_telegramChatId: { storeId: store.id, telegramChatId: chatId },
       },
-      include: { salesConversation: true },
+      include: {
+        salesConversations: {
+          where: { archivedAt: null },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+        },
+      },
     });
 
     let conversationId: string;
-    if (existing?.salesConversation) {
-      conversationId = existing.salesConversation.id;
+    if (existing?.salesConversations.length) {
+      conversationId = existing.salesConversations[0].id;
+    } else if (existing) {
+      // مشتری قبلاً این فروشگاه را دیده ولی مکالمه‌ی فعالی ندارد (آخرینش تکمیل/رد شده) —
+      // docs/PRD-conversation-history.md: همان Customer می‌ماند، فقط یک مکالمه‌ی تازه
+      const billingMode = await this.creditService.decideBillingMode(store.id);
+      const created = await this.prisma.salesConversation.create({
+        data: {
+          storeId: store.id,
+          customerId: existing.id,
+          abVariant: pickVariant(),
+          billingMode,
+        },
+      });
+      conversationId = created.id;
     } else {
       // docs/PRD-seller-credit-billing.md — یک‌بار همین‌جا تعیین می‌شود، معادل startChat وب
       const billingMode = await this.creditService.decideBillingMode(store.id);
@@ -161,7 +186,7 @@ export class TelegramService {
           storeId: store.id,
           channel: 'TELEGRAM',
           telegramChatId: chatId,
-          salesConversation: {
+          salesConversations: {
             create: {
               storeId: store.id,
               abVariant: pickVariant(),
@@ -169,9 +194,9 @@ export class TelegramService {
             },
           },
         },
-        include: { salesConversation: true },
+        include: { salesConversations: true },
       });
-      conversationId = customer.salesConversation!.id;
+      conversationId = customer.salesConversations[0].id;
     }
 
     const conversation = await this.loadConversation(conversationId);
@@ -202,10 +227,16 @@ export class TelegramService {
     const chatId = cq.message ? String(cq.message.chat.id) : String(cq.from.id);
     await this.answerCallbackQuery(cq.id);
 
+    const data = cq.data ?? '';
+    // docs/PRD-conversation-history.md بخش ۵ — فقط‌خواندنی، مستقل از «مکالمه‌ی فعال» است
+    if (data.startsWith('h:')) {
+      await this.handleHistorySelect(chatId, data.slice(2));
+      return;
+    }
+
     const conversation = await this.resolveActiveConversation(chatId);
     if (!conversation) return;
 
-    const data = cq.data ?? '';
     let action: SalesAction | null = null;
     if (data.startsWith('ac:'))
       action = { type: 'ADD_TO_CART', productId: data.slice(3) };
@@ -215,6 +246,90 @@ export class TelegramService {
     if (conversation.isMutedForHuman) return;
     const result = await this.engine.handleAction(conversation, action);
     await this.sendEngineResult(chatId, result);
+  }
+
+  // docs/PRD-conversation-history.md بخش ۵ — /history: لیست inline از مکالمات این chatId در
+  // همه‌ی فروشگاه‌ها (یک telegramChatId می‌تواند چند Customer/فروشگاه داشته باشد)
+  private async handleHistory(message: TelegramMessage): Promise<void> {
+    const chatId = String(message.chat.id);
+    const customers = await this.prisma.customer.findMany({
+      where: { channel: 'TELEGRAM', telegramChatId: chatId },
+      include: { store: true, salesConversations: true },
+    });
+    const entries = customers
+      .flatMap((c) =>
+        c.salesConversations.map((conv) =>
+          buildHistoryEntry(conv, c.store.name),
+        ),
+      )
+      .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())
+      .slice(0, 10);
+
+    if (entries.length === 0) {
+      await this.sendText(chatId, fa.telegram.historyEmpty);
+      return;
+    }
+
+    const keyboard: TelegramInlineKeyboard = {
+      inline_keyboard: entries.map((e) => [
+        {
+          text: fa.telegram.historyButtonLabel(
+            e.storeName,
+            e.lastProductName,
+            fa.telegram.historyStatusLabels[e.status],
+          ),
+          callback_data: `h:${e.conversationId}`,
+        },
+      ]),
+    };
+    await this.sendText(chatId, fa.telegram.historyTitle, keyboard);
+  }
+
+  // فقط دامپ متنی آخرین رویدادها — هیچ state ای عوض نمی‌شود، پس ادامه‌دادن از این مسیر
+  // ممکن نیست (تصمیم سند: فقط نمایش)؛ پیام بعدی مشتری همچنان به resolveActiveConversation
+  // (مکالمه‌ی واقعاً فعال) می‌رود، نه به این مکالمه‌ی آرشیوشده
+  private async handleHistorySelect(
+    chatId: string,
+    conversationId: string,
+  ): Promise<void> {
+    const conversation = await this.prisma.salesConversation.findUnique({
+      where: { id: conversationId },
+      include: { store: true, customer: true },
+    });
+    const belongsToChat =
+      conversation?.customer.channel === 'TELEGRAM' &&
+      conversation.customer.telegramChatId === chatId;
+    if (!conversation || !belongsToChat) {
+      await this.sendText(chatId, fa.telegram.historyNotFound);
+      return;
+    }
+
+    const events = await this.prisma.conversationEvent.findMany({
+      where: {
+        conversationId,
+        type: { in: ['CUSTOMER_MESSAGE', 'AGENT_REPLY', 'SELLER_MESSAGE'] },
+      },
+      orderBy: { createdAt: 'asc' },
+      take: 20,
+    });
+    const entry = buildHistoryEntry(conversation, conversation.store.name);
+    const lines = events
+      .map((e) => {
+        const text = (e.payload as { text?: string })?.text;
+        if (!text) return null;
+        const label =
+          e.type === 'CUSTOMER_MESSAGE'
+            ? fa.telegram.historyCustomerLabel
+            : fa.telegram.historyAgentLabel;
+        return `${label}: ${text}`;
+      })
+      .filter((l): l is string => !!l);
+
+    const header = fa.telegram.historyTranscriptHeader(
+      conversation.store.name,
+      fa.telegram.historyStatusLabels[entry.status],
+    );
+    await this.sendText(chatId, [header, ...lines].join('\n'));
   }
 
   private async handlePhoto(message: TelegramMessage): Promise<void> {
@@ -283,11 +398,10 @@ export class TelegramService {
   ): Promise<ConversationWithStore | null> {
     const customers = await this.prisma.customer.findMany({
       where: { channel: 'TELEGRAM', telegramChatId: chatId },
-      include: { salesConversation: true },
+      include: { salesConversations: { where: { archivedAt: null } } },
     });
     const withConv = customers
-      .map((c) => c.salesConversation)
-      .filter((c): c is NonNullable<typeof c> => !!c)
+      .flatMap((c) => c.salesConversations)
       .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
     if (withConv.length === 0) return null;
     return this.loadConversation(withConv[0].id);

@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import * as crypto from 'crypto';
+import type { BillingMode } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
 import { MediaTranscodeService } from '../../common/services/media-transcode.service';
@@ -14,6 +15,10 @@ import { ConversationEngineService } from './conversation-engine.service';
 import { CreditService } from './credit.service';
 import { pickVariant } from './model-variants';
 import { buildAsrVocabHint } from './asr-vocab-hint';
+import {
+  buildHistoryEntry,
+  type ConversationHistoryEntry,
+} from './conversation-history.util';
 import { fa } from '../../i18n/fa';
 import type { SendMessageDto } from './dto/send-message.dto';
 import type { EngineResult } from './sales-agent.types';
@@ -47,34 +52,20 @@ export class SalesAgentService {
       data: {
         storeId: store.id,
         sessionToken,
-        salesConversation: {
+        salesConversations: {
           create: { storeId: store.id, abVariant: pickVariant(), billingMode },
         },
       },
-      include: { salesConversation: true },
+      include: { salesConversations: true },
     });
 
-    const conversationId = customer.salesConversation!.id;
-
-    let initial: (EngineResult & { voiceEventId?: string }) | undefined;
-    if (productId || billingMode === 'BLOCKED') {
-      const conversation = await this.prisma.salesConversation.findUnique({
-        where: { id: conversationId },
-        include: { store: true },
-      });
-      if (billingMode === 'BLOCKED') {
-        const blocked = await this.engine.announceBillingBlocked(conversation!);
-        initial = await this.attachVoicePending(conversationId, blocked);
-      } else {
-        const product = await this.prisma.product.findUnique({
-          where: { id: productId },
-        });
-        if (product && product.storeId === store.id) {
-          const shown = await this.engine.showProduct(conversation!, product);
-          initial = await this.attachVoicePending(conversationId, shown);
-        }
-      }
-    }
+    const conversationId = customer.salesConversations[0].id;
+    const initial = await this.buildInitialReply(
+      conversationId,
+      store.id,
+      billingMode,
+      productId,
+    );
 
     return {
       conversationId,
@@ -89,6 +80,98 @@ export class SalesAgentService {
           }
         : {}),
     };
+  }
+
+  // docs/PRD-conversation-history.md — «گفتگوی جدید»: برخلاف startChat هیچ Customer تازه‌ای
+  // ساخته نمی‌شود (پس در سهمیه‌ی روزانه‌ی ۱۰ خریدار جدید هم شمرده نمی‌شود)، همان Customer/
+  // sessionToken می‌ماند؛ فقط مکالمه‌ی فعلی آرشیو و یک SalesConversation تازه برایش ساخته می‌شود
+  async restartConversation(conversationId: string, sessionToken: string) {
+    const conversation = await this.loadOwned(conversationId, sessionToken);
+    const billingMode = await this.creditService.decideBillingMode(
+      conversation.storeId,
+    );
+
+    const fresh = await this.prisma.$transaction(async (tx) => {
+      await tx.salesConversation.update({
+        where: { id: conversationId },
+        data: { archivedAt: new Date() },
+      });
+      return tx.salesConversation.create({
+        data: {
+          storeId: conversation.storeId,
+          customerId: conversation.customerId,
+          abVariant: pickVariant(),
+          billingMode,
+        },
+      });
+    });
+
+    const initial = await this.buildInitialReply(
+      fresh.id,
+      conversation.storeId,
+      billingMode,
+    );
+
+    return {
+      conversationId: fresh.id,
+      sessionToken,
+      storeName: conversation.store.name,
+      ...(initial
+        ? {
+            initialReply: initial.reply,
+            initialUiBlocks: initial.uiBlocks,
+            initialState: initial.state,
+            initialVoiceEventId: initial.voiceEventId,
+          }
+        : {}),
+    };
+  }
+
+  // مشترک بین startChat/restartConversation — لینک اختصاصی محصول یا اعلام BLOCKED، هر دو
+  // نیازمند یک پاسخ AI فوری قبل از برگرداندن خودِ conversationId به فرانت هستند
+  private async buildInitialReply(
+    conversationId: string,
+    storeId: string,
+    billingMode: BillingMode,
+    productId?: string,
+  ): Promise<(EngineResult & { voiceEventId?: string }) | undefined> {
+    if (!productId && billingMode !== 'BLOCKED') return undefined;
+    const conversation = await this.prisma.salesConversation.findUnique({
+      where: { id: conversationId },
+      include: { store: true },
+    });
+    if (billingMode === 'BLOCKED') {
+      const blocked = await this.engine.announceBillingBlocked(conversation!);
+      return this.attachVoicePending(conversationId, blocked);
+    }
+    const product = await this.prisma.product.findUnique({
+      where: { id: productId },
+    });
+    if (product && product.storeId === storeId) {
+      const shown = await this.engine.showProduct(conversation!, product);
+      return this.attachVoicePending(conversationId, shown);
+    }
+    return undefined;
+  }
+
+  // docs/PRD-conversation-history.md بخش ۳ — همه‌ی مکالمات (فعال+آرشیوشده) همین یک Customer
+  // (شناسایی از روی sessionToken، نه JWT چون Customer یک User نیست)، تازه‌ترین اول
+  async getCustomerHistory(
+    slug: string,
+    sessionToken: string,
+  ): Promise<ConversationHistoryEntry[]> {
+    const store = await this.prisma.store.findUnique({ where: { slug } });
+    if (!store) throw new NotFoundException(fa.store.notFound);
+    if (!sessionToken) return [];
+    const customer = await this.prisma.customer.findUnique({
+      where: { storeId_sessionToken: { storeId: store.id, sessionToken } },
+    });
+    if (!customer) return [];
+    const conversations = await this.prisma.salesConversation.findMany({
+      where: { customerId: customer.id },
+      orderBy: { createdAt: 'desc' },
+    });
+    return conversations.map((c) => buildHistoryEntry(c, store.name));
   }
 
   // مالکیت مکالمه را با sessionToken چک می‌کند — الگوی ownership گام ۰ (store.service.ts
