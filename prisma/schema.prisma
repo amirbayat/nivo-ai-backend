@@ -1548,6 +1548,8 @@ enum AdminNotificationType {
   TICKET_CREATED
   SYSTEM_ERROR_SPIKE
   LIARA_ERROR_RATE
+  // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۶ — شکست خاموش صف‌ها
+  QUEUE_JOB_FAILED
 }
 
 // توکن FCM هر نصب اپ موبایل ادمین — برای ارسال پوش هدفمند وقتی پنل باز نیست

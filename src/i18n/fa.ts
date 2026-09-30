@@ -264,6 +264,10 @@ export const fa = {
     liaraErrorTitle: 'نرخ خطای بالای Liara AI',
     liaraErrorBody: (failRate: number, sampleSize: number, minutes: number) =>
       `${(failRate * 100).toLocaleString('fa-IR')}٪ از ${sampleSize.toLocaleString('fa-IR')} تماس به Liara AI در ${minutes.toLocaleString('fa-IR')} دقیقه‌ی اخیر ناموفق بود`,
+    // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۶
+    queueJobFailedTitle: 'شکست مکرر یک صف پردازشی',
+    queueJobFailedBody: (queueName: string, count: number, minutes: number) =>
+      `صف «${queueName}» در ${minutes.toLocaleString('fa-IR')} دقیقه‌ی اخیر ${count.toLocaleString('fa-IR')} بار شکست خورد`,
   },
   chatImages: {
     tooMany: (max: number) =>
