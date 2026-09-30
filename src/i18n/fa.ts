@@ -156,6 +156,8 @@ export const fa = {
     discountCodeInvalidFormat:
       'کد تخفیف فقط می‌تواند از حروف/عدد انگلیسی و ۳ تا ۲۰ کاراکتر باشد',
     discountPercentTooHigh: 'درصد تخفیف نمی‌تواند بیشتر از ۱۰۰ باشد',
+    // docs/PRD-product-strategy-and-roadmap.md بخش ۳.۲
+    invalidTimeFormat: 'فرمت ساعت باید به شکل HH:mm باشد (مثلاً 09:00)',
   },
   storeKb: {
     notFound: 'این مورد در باکس دانش یافت نشد',
@@ -184,6 +186,10 @@ export const fa = {
     receiptReceived: 'رسید دریافت شد و برای فروشنده ارسال شد — منتظر تایید باش',
     faqStub: 'این سؤال رو یادداشت کردم، به‌زودی جواب می‌دم',
     handoffToHuman: 'الان شما رو به یکی از همکارها وصل می‌کنم',
+    // docs/PRD-product-strategy-and-roadmap.md بخش ۳.۲ — وقتی Store.workingHoursStart/End
+    // ست شده و الان بیرون این بازه‌ایم
+    handoffToHumanOutOfHours:
+      'الان خارج از ساعت پاسخ‌گویی فروشگاهیم؛ به‌محض شروع ساعت کاری بهتون جواب می‌دن 🙏',
     // docs/PRD-seller-credit-billing.md بخش ۳ — وقتی هم سهمیه‌ی رایگان تمام شده هم اعتبار
     // فروشگاه صفر/منفی است؛ عمداً پیام ثابت (نه LLM-generated، چون این مسیر اصلاً AI صدا نمی‌زند)
     billingBlockedHandoff: 'فروشنده به‌زودی شخصاً بهتون جواب می‌ده',

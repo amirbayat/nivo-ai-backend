@@ -2054,6 +2054,17 @@ model Store {
   // فعال دارد؛ lastCardIndex فقط برای EQUAL (round-robin واقعی، نه رندوم)
   cardDisplayPolicy             CardDisplayPolicy @default(EQUAL)
   lastCardIndex                 Int               @default(0)
+  // docs/PRD-product-strategy-and-roadmap.md بخش ۳.۲ — فیلدهای ساختاریافته‌ی سطح فروشگاه،
+  // همیشه در دسترس ایجنت بدون نیاز به retrieval روی باکس دانش (tryAnswerFromStoreProfile).
+  // shippingInfo/returnPolicy هم بخشی از چک‌لیست تکمیل‌بودن فروشگاه هستند (بخش ۳.۱).
+  shippingInfo                  String?           @db.Text
+  returnPolicy                  String?           @db.Text
+  // معرفی کوتاه برند (۱-۲ جمله) — برای سؤالات عمومی نامرتبط با یک محصول خاص
+  brandIntro                    String?           @db.Text
+  // ساعت پاسخ‌گویی به قالب "HH:mm" — وقتی هر دو خالی باشند یعنی محدودیتی نیست (۲۴ساعته)؛
+  // در transitionToHandoff برای انتخاب پیام «الان»/«فردا» استفاده می‌شود
+  workingHoursStart             String?
+  workingHoursEnd               String?
   createdAt                     DateTime          @default(now())
   updatedAt                     DateTime          @updatedAt
 

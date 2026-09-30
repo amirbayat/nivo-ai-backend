@@ -16,9 +16,14 @@ import { mimeTypeForExt } from '../../common/validators/chat-image.validator';
 import { CreateStoreDto } from './dto/create-store.dto';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
+import { UpdateStoreDto } from './dto/update-store.dto';
 import { fa } from '../../i18n/fa';
 import { computeConversationStats } from '../sales-agent/conversation-stats.util';
 import { TelegramApiClientService } from '../telegram/telegram-api-client.service';
+import { computeProductCompleteness } from './product-completeness.util';
+
+// docs/PRD-product-strategy-and-roadmap.md بخش ۳.۱ — چک‌لیست سطح فروشگاه
+const MIN_STORE_KB_ENTRIES = 3;
 
 // docs/PRD-telegram-bot-channel.md بخش ۹.۱ — عمر لینک اتصال تلگرام فروشنده، یک‌بارمصرف
 const TELEGRAM_CONNECT_TOKEN_TTL_MS = 15 * 60 * 1000;
@@ -75,6 +80,13 @@ export class StoreService {
     return this.prisma.store.create({ data: { ...dto, sellerId } });
   }
 
+  // docs/PRD-product-strategy-and-roadmap.md بخش ۳.۲ — فیلدهای ساختاریافته (ارسال/مرجوعی/
+  // معرفی برند/ساعت پاسخ‌گویی)؛ برخلاف create، این‌ها بعد از ثبت‌نام هم قابل ویرایش‌اند
+  async update(sellerId: string, storeId: string, dto: UpdateStoreDto) {
+    await this.getOwned(sellerId, storeId);
+    return this.prisma.store.update({ where: { id: storeId }, data: dto });
+  }
+
   // مالکیت را چک می‌کند (۴۰۴/۴۰۳ مناسب پرتاب می‌کند) — الگوی ProjectsService.get
   async getOwned(sellerId: string, storeId: string) {
     const store = await this.prisma.store.findUnique({
@@ -126,10 +138,63 @@ export class StoreService {
 
   async listProducts(sellerId: string, storeId: string) {
     await this.getOwned(sellerId, storeId);
-    return this.prisma.product.findMany({
+    const products = await this.prisma.product.findMany({
       where: { storeId },
       orderBy: { createdAt: 'desc' },
     });
+    const kbCountByProduct = await this.relatedKbEntryCounts(storeId);
+    return products.map((product) => ({
+      ...product,
+      completeness: computeProductCompleteness(
+        product,
+        kbCountByProduct.get(product.id) ?? 0,
+      ),
+    }));
+  }
+
+  // docs/PRD-product-strategy-and-roadmap.md بخش ۳.۱ — یک groupBy به‌جای N کوئری جدا به‌ازای
+  // هر محصول (N+1)
+  private async relatedKbEntryCounts(
+    storeId: string,
+  ): Promise<Map<string, number>> {
+    const counts = await this.prisma.storeKbEntry.groupBy({
+      by: ['relatedProductId'],
+      where: { storeId, isActive: true, relatedProductId: { not: null } },
+      _count: { _all: true },
+    });
+    return new Map(
+      counts.map((c) => [c.relatedProductId as string, c._count._all]),
+    );
+  }
+
+  // امتیاز کلی فروشگاه (میانگین امتیاز محصولات) + چک‌لیست سه‌موردی صفحه‌ی خانه‌ی پنل
+  async getCompleteness(sellerId: string, storeId: string) {
+    const store = await this.getOwned(sellerId, storeId);
+    const products = await this.prisma.product.findMany({
+      where: { storeId },
+      select: { id: true, images: true, description: true },
+    });
+    const kbCountByProduct = await this.relatedKbEntryCounts(storeId);
+    const scores = products.map(
+      (p) =>
+        computeProductCompleteness(p, kbCountByProduct.get(p.id) ?? 0).percent,
+    );
+    const overallScorePercent =
+      scores.length === 0
+        ? 0
+        : Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
+    const totalKbEntries = await this.prisma.storeKbEntry.count({
+      where: { storeId, isActive: true },
+    });
+
+    return {
+      overallScorePercent,
+      checklist: {
+        hasProductWithPhoto: products.some((p) => p.images.length > 0),
+        hasEnoughKbEntries: totalKbEntries >= MIN_STORE_KB_ENTRIES,
+        hasShippingPolicy: !!store.shippingInfo,
+      },
+    };
   }
 
   private async getOwnedProduct(

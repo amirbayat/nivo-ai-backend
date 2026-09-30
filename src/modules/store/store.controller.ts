@@ -30,6 +30,7 @@ import { StoreCreditService } from './store-credit.service';
 import { StoreBankCardService } from './store-bank-card.service';
 import { StoreDiscountCodeService } from './store-discount-code.service';
 import { CreateStoreDto } from './dto/create-store.dto';
+import { UpdateStoreDto } from './dto/update-store.dto';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { ImportProductFromUrlDto } from './dto/import-product-from-url.dto';
@@ -69,6 +70,23 @@ export class StoreController {
   @Post()
   create(@CurrentUser() user: JwtPayload, @Body() dto: CreateStoreDto) {
     return this.storeService.create(user.sub, dto);
+  }
+
+  // docs/PRD-product-strategy-and-roadmap.md بخش ۳.۲ — ویرایش فیلدهای ساختاریافته‌ی فروشگاه
+  // بعد از ثبت‌نام (ارسال/مرجوعی/معرفی برند/ساعت پاسخ‌گویی)
+  @Patch(':id')
+  updateStore(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: UpdateStoreDto,
+  ) {
+    return this.storeService.update(user.sub, id, dto);
+  }
+
+  // بخش ۳.۱ — امتیاز کلی تکمیل‌بودن فروشگاه + چک‌لیست، برای کارت «خانه»‌ی پنل
+  @Get(':id/completeness')
+  getCompleteness(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    return this.storeService.getCompleteness(user.sub, id);
   }
 
   @Post(':id/products')

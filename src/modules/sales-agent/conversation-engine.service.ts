@@ -1077,6 +1077,31 @@ intent های ممکن:
       };
     }
 
+    const fromStoreProfile = await this.tryAnswerFromStoreProfile(
+      conversation,
+      question,
+    );
+    if (fromStoreProfile) {
+      await this.logReply(
+        conversation,
+        fromStoreProfile,
+        { type: 'NONE' },
+        undefined,
+        {
+          intent: 'ASK_FAQ',
+          handler: 'doFaq',
+          factsOrPrompt: question,
+          model: defaultModel(),
+          kbSource: 'STORE_PROFILE',
+        },
+      );
+      return {
+        reply: fromStoreProfile,
+        uiBlocks: [],
+        state: conversation.currentState,
+      };
+    }
+
     const reply = await this.caption(fa.salesAgent.faqStub, conversation);
     await this.logReply(conversation, reply, { type: 'NONE' }, 'NO_KB_MATCH', {
       intent: 'ASK_FAQ',
@@ -1121,6 +1146,49 @@ answered=true و یک پیام فارسی کوتاه (۲-۳ جمله، لحن ${
 که در توضیحات نیامده حدس نزن یا اختراع نکن. اگر توضیحات ربطی به این سؤال ندارد یا کافی نیست،
 answered=false بده (به‌جای حدس‌زدن).`,
         prompt: `توضیح محصولات:\n${withDescription.map((p) => `${p.name}: ${p.description}`).join('\n')}\n\nسؤال مشتری: ${question}`,
+      });
+      await this.logTextCreditUsage(
+        conversation,
+        model,
+        usage.inputTokens ?? 0,
+        usage.outputTokens ?? 0,
+      );
+      return object.answered ? object.reply.trim() : null;
+    } catch {
+      return null;
+    }
+  }
+
+  // docs/PRD-product-strategy-and-roadmap.md بخش ۳.۲ — فیلدهای ساختاریافته‌ی سطح فروشگاه
+  // (ارسال/مرجوعی/معرفی برند)، همیشه در دسترس بدون نیاز به retrieval روی باکس دانش. دقیقاً
+  // الگوی tryAnswerFromProductDescriptions: یک فراخوان ارزان تصمیم می‌گیرد آیا واقعاً جواب
+  // این سؤال است، هیچ‌چیز فراتر از همین سه فیلد حدس زده نمی‌شود
+  private async tryAnswerFromStoreProfile(
+    conversation: ConversationWithStore,
+    question: string,
+  ): Promise<string | null> {
+    const { shippingInfo, returnPolicy, brandIntro } = conversation.store;
+    if (!shippingInfo && !returnPolicy && !brandIntro) return null;
+
+    const facts = [
+      shippingInfo && `ارسال/هزینه‌ی ارسال: ${shippingInfo}`,
+      returnPolicy && `شرایط مرجوعی/گارانتی: ${returnPolicy}`,
+      brandIntro && `معرفی فروشگاه: ${brandIntro}`,
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    try {
+      const tone = toneForCategory(conversation.store.category);
+      const model = defaultModel();
+      const { object, usage } = await generateObject({
+        model: this.aiProvider.buildClient()(model),
+        schema: z.object({ answered: z.boolean(), reply: z.string() }),
+        system: `تو دستیار فروش یک فروشگاه در دایرکت اینستاگرام هستی. زیر چند واقعیت ثابت
+درباره‌ی خودِ فروشگاه (نه یک محصول خاص) را داری. اگر واقعاً می‌شود از همین واقعیت‌ها به سؤال
+مشتری جواب داد، answered=true و یک پیام فارسی کوتاه (۱-۲ جمله، لحن ${tone}) بده — هیچ چیزی که
+اینجا نیامده حدس نزن یا اختراع نکن. اگر ربطی به این سؤال ندارد یا کافی نیست، answered=false بده.`,
+        prompt: `اطلاعات فروشگاه:\n${facts}\n\nسؤال مشتری: ${question}`,
       });
       await this.logTextCreditUsage(
         conversation,
@@ -1188,10 +1256,43 @@ answered=false بده (به‌جای حدس‌زدن).`,
     const reply =
       reason === 'BILLING_BLOCKED'
         ? fa.salesAgent.billingBlockedHandoff
-        : fa.salesAgent.handoffToHuman;
+        : this.isWithinWorkingHours(conversation.store)
+          ? fa.salesAgent.handoffToHuman
+          : fa.salesAgent.handoffToHumanOutOfHours;
     await this.logReply(conversation, reply, { type: 'NONE' });
     await this.notifySellerOfHandoff(conversation);
     return { reply, uiBlocks: [], state: nextState };
+  }
+
+  // docs/PRD-product-strategy-and-roadmap.md بخش ۳.۲ — وقتی هر دو فیلد ست نشده، یعنی
+  // فروشگاه محدودیتی اعلام نکرده و همیشه «در ساعت کاری» حساب می‌شود. مقایسه با ساعت تهران
+  // (تک‌منطقه‌ی زمانی، نیازی به ذخیره‌ی timezone جدا نیست) روی دقیقه‌های روز، شامل بازه‌ی
+  // شبانه که از نیمه‌شب رد می‌شود (مثلاً ۲۲:۰۰ تا ۰۲:۰۰)
+  private isWithinWorkingHours(store: {
+    workingHoursStart: string | null;
+    workingHoursEnd: string | null;
+  }): boolean {
+    if (!store.workingHoursStart || !store.workingHoursEnd) return true;
+
+    const toMinutes = (hhmm: string): number => {
+      const [h, m] = hhmm.split(':').map(Number);
+      return h * 60 + m;
+    };
+    const start = toMinutes(store.workingHoursStart);
+    const end = toMinutes(store.workingHoursEnd);
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Tehran',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).formatToParts(new Date());
+    const hour = Number(parts.find((p) => p.type === 'hour')?.value ?? '0');
+    const minute = Number(parts.find((p) => p.type === 'minute')?.value ?? '0');
+    const now = hour * 60 + minute;
+
+    return start <= end
+      ? now >= start && now <= end
+      : now >= start || now <= end;
   }
 
   // docs/PRD-telegram-bot-channel.md بخش ۹.۱ — اگر فروشنده تلگرامش را وصل کرده باشد، سؤال
