@@ -20,4 +20,10 @@ export class CreateProductDto {
   @IsString({ message: fa.validation.required })
   @MaxLength(2000, { message: fa.validation.stringTooLong })
   description?: string;
+
+  // docs/PRD-telegram-bot-channel.md بخش ۹.۳ — کد کوتاه اختیاری روی محتوای تبلیغاتی فروشنده
+  @IsOptional()
+  @IsString({ message: fa.validation.required })
+  @MaxLength(40, { message: fa.validation.stringTooLong })
+  code?: string;
 }

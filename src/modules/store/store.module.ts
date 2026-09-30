@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { PaymentsModule } from '../payments/payments.module';
 import { CreditsModule } from '../credits/credits.module';
 import { UsageModule } from '../usage/usage.module';
+import { TelegramApiClientModule } from '../telegram/telegram-api-client.module';
 import { StoreController } from './store.controller';
 import { StoreService } from './store.service';
 import { StoreKbService } from './store-kb.service';
@@ -15,7 +16,13 @@ import { CardSelectorService } from './card-selector.service';
   // تکمیل محصول با جستجوی وب. عمداً import مستقیم از sales-agent/credit.service.ts نشد —
   // SalesAgentModule خودش StoreModule را import می‌کند، برعکسش چرخه می‌سازد (همان دلیلی که
   // store-credit.service.ts هم FREE_DAILY_QUOTA را به‌جای import تکرار کرده)
-  imports: [PaymentsModule, CreditsModule, UsageModule],
+  // docs/PRD-telegram-bot-channel.md بخش ۹.۱ — پوش پیام فروشنده به مشتری‌ای که کانالش تلگرام است
+  imports: [
+    PaymentsModule,
+    CreditsModule,
+    UsageModule,
+    TelegramApiClientModule,
+  ],
   controllers: [StoreController],
   providers: [
     StoreService,

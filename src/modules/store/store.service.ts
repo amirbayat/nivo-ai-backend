@@ -9,6 +9,7 @@ import type { OrderStatus } from '@prisma/client';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import * as XLSX from 'xlsx';
+import { randomBytes } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
 import { mimeTypeForExt } from '../../common/validators/chat-image.validator';
@@ -17,6 +18,10 @@ import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { fa } from '../../i18n/fa';
 import { computeConversationStats } from '../sales-agent/conversation-stats.util';
+import { TelegramApiClientService } from '../telegram/telegram-api-client.service';
+
+// docs/PRD-telegram-bot-channel.md بخش ۹.۱ — عمر لینک اتصال تلگرام فروشنده، یک‌بارمصرف
+const TELEGRAM_CONNECT_TOKEN_TTL_MS = 15 * 60 * 1000;
 
 // هدرهای پذیرفته‌شده‌ی آپلود اکسل محصول (گام ۳) — هم فارسی (چیزی که فروشنده واقعاً می‌نویسد)
 // هم انگلیسی را می‌پذیرد
@@ -47,6 +52,7 @@ export class StoreService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
+    private readonly telegramApi: TelegramApiClientService,
   ) {}
 
   list(sellerId: string) {
@@ -86,7 +92,26 @@ export class StoreService {
     dto: CreateProductDto,
   ) {
     await this.getOwned(sellerId, storeId);
+    if (dto.code) await this.assertProductCodeAvailable(storeId, dto.code);
     return this.prisma.product.create({ data: { ...dto, storeId } });
+  }
+
+  // docs/PRD-telegram-bot-channel.md بخش ۹.۳ — کد کوتاه یکتا فقط در سطح فروشگاه
+  private async assertProductCodeAvailable(
+    storeId: string,
+    code: string,
+    excludeProductId?: string,
+  ): Promise<void> {
+    // insensitive تا با جستجوی runtime در searchProducts هم‌خوان بماند — وگرنه «A12» و
+    // «a12» هر دو قابل ثبت می‌شدند ولی موقع جستجو مبهم بودند
+    const existing = await this.prisma.product.findFirst({
+      where: {
+        storeId,
+        code: { equals: code, mode: 'insensitive' },
+        ...(excludeProductId ? { id: { not: excludeProductId } } : {}),
+      },
+    });
+    if (existing) throw new ConflictException(fa.store.productCodeTaken);
   }
 
   // docs/PRD-sales-agent-admin-analytics.md بخش ۴ — نسخه‌ی کوچک همین آمار برای خودِ فروشنده
@@ -128,6 +153,8 @@ export class StoreService {
     dto: UpdateProductDto,
   ) {
     await this.getOwnedProduct(sellerId, storeId, productId);
+    if (dto.code)
+      await this.assertProductCodeAvailable(storeId, dto.code, productId);
     return this.prisma.product.update({ where: { id: productId }, data: dto });
   }
 
@@ -440,10 +467,44 @@ export class StoreService {
     conversationId: string,
     text: string,
   ) {
-    await this.getOwnedConversation(sellerId, storeId, conversationId);
-    return this.prisma.conversationEvent.create({
+    const conversation = await this.getOwnedConversation(
+      sellerId,
+      storeId,
+      conversationId,
+    );
+    const event = await this.prisma.conversationEvent.create({
       data: { conversationId, type: 'SELLER_MESSAGE', payload: { text } },
     });
+    // docs/PRD-telegram-bot-channel.md بخش ۹.۱ — قبلاً فقط وب (polling) این پیام را می‌دید؛
+    // اگر مشتری از کانال تلگرام است، مستقیم پوش می‌شود
+    if (
+      conversation.customer.channel === 'TELEGRAM' &&
+      conversation.customer.telegramChatId
+    ) {
+      await this.telegramApi.sendText(
+        conversation.customer.telegramChatId,
+        text,
+      );
+    }
+    return event;
+  }
+
+  // docs/PRD-telegram-bot-channel.md بخش ۹.۱ — لینک اتصال یک‌بارمصرف («بیشتر» ← «اتصال
+  // تلگرام»)؛ توکن کوتاه رندوم روی خودِ Store ذخیره می‌شود (نه یک جدول جدا) و بعد از مصرف
+  // پاک می‌شود — TelegramService.handleStart این را با پیلود seller_<token> تشخیص می‌دهد
+  async createTelegramConnectToken(sellerId: string, storeId: string) {
+    await this.getOwned(sellerId, storeId);
+    const token = randomBytes(6).toString('base64url');
+    await this.prisma.store.update({
+      where: { id: storeId },
+      data: {
+        telegramConnectToken: token,
+        telegramConnectTokenExpiresAt: new Date(
+          Date.now() + TELEGRAM_CONNECT_TOKEN_TTL_MS,
+        ),
+      },
+    });
+    return { token };
   }
 
   // «برگردون به ربات» — دستی، هیچ‌جا خودکار ریست نمی‌شود؛ currentState هم به BROWSING

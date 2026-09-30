@@ -147,6 +147,9 @@ export const fa = {
       'نتونستیم این لینک رو بخونیم — لطفاً اطلاعات محصول رو دستی وارد کن',
     insufficientCreditForWebSearch:
       'اعتبار فروشگاه برای تکمیل با جستجوی وب کافی نیست — از بخش «اعتبار هوش مصنوعی» شارژ کن',
+    productCodeTaken:
+      'این کد قبلاً برای محصول دیگری در همین فروشگاه استفاده شده',
+    telegramConnectTokenInvalid: 'این توکن اتصال تلگرام نامعتبر یا منقضی شده',
   },
   storeKb: {
     notFound: 'این مورد در باکس دانش یافت نشد',
@@ -183,9 +186,29 @@ export const fa = {
   },
   telegram: {
     startNeedsLink:
-      'سلام! برای شروع خرید باید از لینک مخصوص یک فروشگاه وارد شوید — لینک رو از فروشنده بگیرید یا از استوری/پیجش بزنید.',
+      'سلام! برای شروع خرید از لینک مخصوص فروشگاه استفاده کنید، یا همین‌جا اسم فروشگاه مورد نظرتون رو تایپ کنید تا پیداش کنیم.',
     noActiveStore:
-      'هنوز از هیچ فروشگاهی شروع نکرده‌اید — اول از لینک فروشگاه وارد شوید.',
+      'هنوز از هیچ فروشگاهی شروع نکرده‌اید — اسم فروشگاه رو تایپ کنید یا از لینک مستقیم فروشگاه استفاده کنید.',
+    // docs/PRD-telegram-bot-channel.md بخش ۹.۲ — جستجوی فروشگاه با نام (بدون دیپ‌لینک)
+    storeSearchResults: '🔎 این فروشگاه‌ها پیدا شدند، یکی رو انتخاب کنید:',
+    storeSearchEmpty:
+      'فروشگاهی با این اسم پیدا نشد. اسم دیگه‌ای امتحان کنید یا از لینک مستقیم فروشگاه استفاده کنید.',
+    // docs/PRD-telegram-bot-channel.md بخش ۹.۱ — اتصال تلگرام شخصی فروشنده برای اعلان‌ها
+    sellerConnected: (storeName: string) =>
+      `تلگرام شما به فروشگاه «${storeName}» وصل شد ✅ از این به بعد وقتی مشتری‌ای نیاز به پاسخ انسانی داشت یا رسیدی فرستاد، همین‌جا بهتون اطلاع می‌دیم.`,
+    sellerConnectInvalid:
+      'این لینک اتصال نامعتبر یا منقضی شده — یک لینک تازه از پنل («بیشتر» ← «اتصال تلگرام») بگیرید.',
+    handoffNotification: (customerText: string) =>
+      `🔔 یک مشتری نیاز به پاسخ شما داره:\n\n«${customerText}»`,
+    handoffReplyButton: '💬 پاسخ بده',
+    receiptNotificationCaption: '🧾 رسید جدید برای بررسی رسید.',
+    receiptApproveButton: '✅ تایید',
+    receiptRejectButton: '❌ رد',
+    orderApprovedFromTelegram: 'سفارش تایید شد ✅',
+    orderRejectedFromTelegram: 'سفارش رد شد ❌',
+    sellerReplyPrompt: (conversationId: string) =>
+      `✍️ جواب مشتری رو تایپ کنید و بفرستید:\n(کد گفتگو: ${conversationId})`,
+    sellerReplySent: 'پیام شما برای مشتری ارسال شد ✅',
     historyEmpty: 'هنوز هیچ گفتگویی نداشته‌اید.',
     historyTitle: '📜 گفتگوهای قبلی شما را انتخاب کنید:',
     historyButtonLabel: (

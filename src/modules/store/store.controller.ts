@@ -334,6 +334,15 @@ export class StoreController {
     return this.storeService.getChannelStats(user.sub, id);
   }
 
+  // docs/PRD-telegram-bot-channel.md بخش ۹.۱ — لینک اتصال یک‌بارمصرف تلگرام شخصی فروشنده
+  @Post(':id/telegram-connect-token')
+  createTelegramConnectToken(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+  ) {
+    return this.storeService.createTelegramConnectToken(user.sub, id);
+  }
+
   // docs/PRD-seller-credit-billing.md بخش ۷ — موجودی اعتبار AI + سهمیه‌ی رایگان امروز
   @Get(':id/credit')
   getCreditStatus(@CurrentUser() user: JwtPayload, @Param('id') id: string) {

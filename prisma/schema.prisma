@@ -2026,30 +2026,36 @@ model VideoEditJob {
 // sellerId عمداً @unique نیست (بر خلاف Wallet/Subscription) چون یک User می‌تواند چند
 // فروشگاه بزند — دقیقاً الگوی رابطه‌ی Project (بالا)، نه Wallet.
 model Store {
-  id                 String            @id @default(uuid())
-  sellerId           String
-  seller             User              @relation(fields: [sellerId], references: [id], onDelete: Cascade)
-  slug               String            @unique // بخش nivo.ai/chat/<slug> — انگلیسی، توسط خود فروشنده انتخاب می‌شود (بخش ۱.۱ سند)
-  name               String // نام فارسی فروشگاه، فقط نمایشی
-  category           String?
-  bankCardNumber     String
-  bankOwnerName      String
+  id                            String            @id @default(uuid())
+  sellerId                      String
+  seller                        User              @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  slug                          String            @unique // بخش nivo.ai/chat/<slug> — انگلیسی، توسط خود فروشنده انتخاب می‌شود (بخش ۱.۱ سند)
+  name                          String // نام فارسی فروشگاه، فقط نمایشی
+  category                      String?
+  bankCardNumber                String
+  bankOwnerName                 String
   // فیدبک اول پایلوت — فروشنده می‌خواست بتواند لینک صفحه/کانالش را هم بدهد (نه ویرایش
   // موجودی‌ها؛ فقط در ثبت‌نام اختیاری پر می‌شود). عمداً String آزاد، نه IsUrl سخت‌گیر — فروشنده
   // ممکن است "@nam-shop" یا "t.me/xxx" بدون https:// بنویسد.
-  instagramUrl       String?
-  telegramUrl        String?
-  websiteUrl         String?
-  status             StoreStatus       @default(ACTIVE)
+  instagramUrl                  String?
+  telegramUrl                   String?
+  websiteUrl                    String?
+  // docs/PRD-telegram-bot-channel.md بخش ۹.۱ — chat_id تلگرام شخصی فروشنده، بعد از اتصال با
+  // دیپ‌لینک یک‌بارمصرف (telegramConnectToken) ست می‌شود؛ وقتی ست باشد، اعلان handoff/رسید
+  // برای همین chat_id پوش می‌شود
+  ownerTelegramChatId           String?
+  telegramConnectToken          String?           @unique
+  telegramConnectTokenExpiresAt DateTime?
+  status                        StoreStatus       @default(ACTIVE)
   // docs/PRD-seller-credit-billing.md بخش ۱/۵ — اعتبار AI فروشگاه به تومان؛ بعد از تمام‌شدن
   // سهمیه‌ی رایگان روزانه، مصرف واقعی هر فراخوانی AI از همین فیلد کم می‌شود
-  creditBalanceToman Int               @default(0)
+  creditBalanceToman            Int               @default(0)
   // docs/PRD-seller-multi-bank-card-rotation.md — سیاست انتخاب کارت وقتی چند StoreBankCard
   // فعال دارد؛ lastCardIndex فقط برای EQUAL (round-robin واقعی، نه رندوم)
-  cardDisplayPolicy  CardDisplayPolicy @default(EQUAL)
-  lastCardIndex      Int               @default(0)
-  createdAt          DateTime          @default(now())
-  updatedAt          DateTime          @updatedAt
+  cardDisplayPolicy             CardDisplayPolicy @default(EQUAL)
+  lastCardIndex                 Int               @default(0)
+  createdAt                     DateTime          @default(now())
+  updatedAt                     DateTime          @updatedAt
 
   products          Product[]
   customers         Customer[]
@@ -2111,10 +2117,15 @@ model Product {
   images      String[] @default([]) // فاز بعد (پنل فروشنده) پر می‌شود — در ویزارد ثبت‌نام خالی می‌ماند
   // دستیار تکمیل محصول با AI (docs/PRD-seller-knowledge-base.md بخش ۱.۱) — قبلاً اصلاً وجود نداشت
   description String?  @db.Text
+  // docs/PRD-telegram-bot-channel.md بخش ۹.۳ — کد کوتاه اختیاری که فروشنده روی محتوای
+  // تبلیغاتی‌اش می‌گذارد؛ خریدار به‌جای اسم محصول می‌تواند کد را بگوید (searchProducts اول
+  // یک exact match روی این را امتحان می‌کند). یکتا فقط در سطح فروشگاه، نه سراسری.
+  code        String?
   createdAt   DateTime @default(now())
 
   kbEntries StoreKbEntry[]
 
+  @@unique([storeId, code])
   @@index([storeId])
   @@map("products")
 }

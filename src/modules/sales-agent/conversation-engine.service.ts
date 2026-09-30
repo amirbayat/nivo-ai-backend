@@ -5,11 +5,14 @@ import { generateObject, generateText } from 'ai';
 import { z } from 'zod';
 import type { ConversationState, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { StorageService } from '../../storage/storage.service';
+import { mimeTypeForExt } from '../../common/validators/chat-image.validator';
 import { AiProviderService } from '../../common/services/ai-provider.service';
 import { StoreKbService } from '../store/store-kb.service';
 import { CardSelectorService } from '../store/card-selector.service';
 import { CreditService } from './credit.service';
 import { AbuseGuardService } from './abuse-guard.service';
+import { TelegramApiClientService } from '../telegram/telegram-api-client.service';
 import { fa } from '../../i18n/fa';
 import { defaultModel, resolveModel } from './model-variants';
 import { toneForCategory } from './tone-by-category';
@@ -78,6 +81,8 @@ export class ConversationEngineService {
     private readonly cardSelector: CardSelectorService,
     private readonly creditService: CreditService,
     private readonly abuseGuard: AbuseGuardService,
+    private readonly storage: StorageService,
+    private readonly telegramApi: TelegramApiClientService,
     @InjectQueue('sales-agent-voice')
     private readonly voiceQueue: Queue<SalesAgentVoiceJobData>,
   ) {}
@@ -351,6 +356,14 @@ intent های ممکن:
   }
 
   private async searchProducts(storeId: string, query?: string | null) {
+    // docs/PRD-telegram-bot-channel.md بخش ۹.۳ — کد محصول (روی محتوای تبلیغاتی) قبل از
+    // جستجوی نام امتحان می‌شود؛ اگر دقیقاً مچ شد، فقط همان یکی برگردانده می‌شود
+    if (query) {
+      const exact = await this.prisma.product.findFirst({
+        where: { storeId, code: { equals: query, mode: 'insensitive' } },
+      });
+      if (exact) return [exact];
+    }
     return this.prisma.product.findMany({
       where: {
         storeId,
@@ -798,7 +811,42 @@ intent های ممکن:
       conversation,
     );
     await this.logReply(conversation, reply, uiBlock);
+    await this.notifySellerOfReceipt(conversation, order.id, receiptImageKey);
     return { reply, uiBlocks: [uiBlock], state: nextState };
+  }
+
+  // docs/PRD-telegram-bot-channel.md بخش ۹.۱ — عکس رسید از پشت JwtGuard+مالکیت سرو می‌شود،
+  // پس سرور تلگرام نمی‌تواند خودش آن را fetch کند؛ بایت‌های واقعی multipart آپلود می‌شوند
+  private async notifySellerOfReceipt(
+    conversation: ConversationWithStore,
+    orderId: string,
+    receiptImageKey: string,
+  ): Promise<void> {
+    const chatId = conversation.store.ownerTelegramChatId;
+    if (!chatId) return;
+    const ext = receiptImageKey.split('.').pop() ?? 'jpg';
+    const buffer = await this.storage.downloadImage(receiptImageKey);
+    await this.telegramApi.sendPhotoBuffer(
+      chatId,
+      buffer,
+      `receipt.${ext}`,
+      mimeTypeForExt(ext),
+      fa.telegram.receiptNotificationCaption,
+      {
+        inline_keyboard: [
+          [
+            {
+              text: fa.telegram.receiptApproveButton,
+              callback_data: `sap:${orderId}`,
+            },
+            {
+              text: fa.telegram.receiptRejectButton,
+              callback_data: `srj:${orderId}`,
+            },
+          ],
+        ],
+      },
+    );
   }
 
   private async doCancel(
@@ -997,7 +1045,39 @@ answered=false بده (به‌جای حدس‌زدن).`,
         ? fa.salesAgent.billingBlockedHandoff
         : fa.salesAgent.handoffToHuman;
     await this.logReply(conversation, reply, { type: 'NONE' });
+    await this.notifySellerOfHandoff(conversation);
     return { reply, uiBlocks: [], state: nextState };
+  }
+
+  // docs/PRD-telegram-bot-channel.md بخش ۹.۱ — اگر فروشنده تلگرامش را وصل کرده باشد، سؤال
+  // مشتری + دکمه‌ی «پاسخ بده» مستقیم پوش می‌شود؛ اگر نه، بی‌صدا رد می‌شود (فروشنده فقط از
+  // پنل «نیاز به توجه» می‌بیند، مثل قبل)
+  private async notifySellerOfHandoff(
+    conversation: ConversationWithStore,
+  ): Promise<void> {
+    const chatId = conversation.store.ownerTelegramChatId;
+    if (!chatId) return;
+    const lastCustomerMessage = await this.prisma.conversationEvent.findFirst({
+      where: { conversationId: conversation.id, type: 'CUSTOMER_MESSAGE' },
+      orderBy: { createdAt: 'desc' },
+    });
+    const customerText =
+      (lastCustomerMessage?.payload as { text?: string } | undefined)?.text ??
+      '—';
+    await this.telegramApi.sendText(
+      chatId,
+      fa.telegram.handoffNotification(customerText),
+      {
+        inline_keyboard: [
+          [
+            {
+              text: fa.telegram.handoffReplyButton,
+              callback_data: `sr:${conversation.id}`,
+            },
+          ],
+        ],
+      },
+    );
   }
 
   // docs/PRD-seller-credit-billing.md بخش ۳ — سهمیه‌ی رایگان تمام و اعتبار فروشگاه هم صفر/منفی؛

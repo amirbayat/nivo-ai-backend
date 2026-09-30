@@ -4,6 +4,7 @@ import { StoreModule } from '../store/store.module';
 import { MediaTranscodeModule } from '../../common/services/media-transcode.module';
 import { AsrModule } from '../../common/services/asr.module';
 import { UsageModule } from '../usage/usage.module';
+import { TelegramApiClientModule } from '../telegram/telegram-api-client.module';
 import { SalesAgentController } from './sales-agent.controller';
 import { SalesAgentService } from './sales-agent.service';
 import { ConversationEngineService } from './conversation-engine.service';
@@ -19,6 +20,8 @@ import { AbuseGuardService } from './abuse-guard.service';
     UsageModule,
     // docs/PRD-sales-agent-voice.md — مصرف‌کننده/پردازشگر واقعی در queue.module.ts
     BullModule.registerQueue({ name: 'sales-agent-voice' }),
+    // docs/PRD-telegram-bot-channel.md بخش ۹.۱ — پوش اعلان handoff/رسید به تلگرام فروشنده
+    TelegramApiClientModule,
   ],
   controllers: [SalesAgentController],
   providers: [

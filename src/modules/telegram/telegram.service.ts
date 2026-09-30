@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import type { Store } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
 import { MediaTranscodeService } from '../../common/services/media-transcode.service';
@@ -10,6 +11,7 @@ import {
   type ConversationWithStore,
 } from '../sales-agent/conversation-engine.service';
 import { CreditService } from '../sales-agent/credit.service';
+import { StoreService } from '../store/store.service';
 import { pickVariant, pickVoiceVariant } from '../sales-agent/model-variants';
 import { buildAsrVocabHint } from '../sales-agent/asr-vocab-hint';
 import { buildHistoryEntry } from '../sales-agent/conversation-history.util';
@@ -52,6 +54,7 @@ export class TelegramService {
     private readonly asr: AsrService,
     private readonly aiProvider: AiProviderService,
     private readonly creditService: CreditService,
+    private readonly storeService: StoreService,
   ) {
     this.botToken = this.config.get<string>('TELEGRAM_BOT_TOKEN');
     this.webhookSecret = this.config.get<string>('TELEGRAM_WEBHOOK_SECRET');
@@ -121,6 +124,16 @@ export class TelegramService {
         return;
       }
       if (message.text) {
+        // docs/PRD-telegram-bot-channel.md بخش ۹.۱ — جواب فروشنده به پیام force_reply (نه
+        // مشتری‌ای که در حال خریده)؛ باید قبل از handleText (که مکالمه‌ی مشتری را می‌جوید) چک شود
+        const sellerReplyConversationId = this.extractSellerReplyRef(message);
+        if (sellerReplyConversationId) {
+          await this.handleSellerReplyMessage(
+            message,
+            sellerReplyConversationId,
+          );
+          return;
+        }
         await this.handleText(message);
         return;
       }
@@ -137,18 +150,59 @@ export class TelegramService {
 
   private async handleStart(message: TelegramMessage): Promise<void> {
     const chatId = String(message.chat.id);
-    const slug = message.text!.trim().split(/\s+/)[1];
-    if (!slug) {
+    const payload = message.text!.trim().split(/\s+/)[1];
+    if (!payload) {
       await this.sendText(chatId, fa.telegram.startNeedsLink);
       return;
     }
 
-    const store = await this.prisma.store.findUnique({ where: { slug } });
+    // docs/PRD-telegram-bot-channel.md بخش ۹.۱ — دیپ‌لینک اتصال تلگرام فروشنده، جدا از
+    // دیپ‌لینک مشتری‌محور زیر (که با slug فروشگاه است، نه یک توکن)
+    if (payload.startsWith('seller_')) {
+      await this.handleSellerConnect(chatId, payload.slice('seller_'.length));
+      return;
+    }
+
+    const store = await this.prisma.store.findUnique({
+      where: { slug: payload },
+    });
     if (!store || store.status !== 'ACTIVE') {
       await this.sendText(chatId, fa.store.notFound);
       return;
     }
+    await this.startChatForStore(chatId, store);
+  }
 
+  // docs/PRD-telegram-bot-channel.md بخش ۹.۱ — Store.telegramConnectToken یک‌بارمصرف است،
+  // بلافاصله بعد از مصرف پاک می‌شود تا همان لینک دوباره کار نکند
+  private async handleSellerConnect(
+    chatId: string,
+    token: string,
+  ): Promise<void> {
+    const store = await this.prisma.store.findFirst({
+      where: {
+        telegramConnectToken: token,
+        telegramConnectTokenExpiresAt: { gt: new Date() },
+      },
+    });
+    if (!store) {
+      await this.sendText(chatId, fa.telegram.sellerConnectInvalid);
+      return;
+    }
+    await this.prisma.store.update({
+      where: { id: store.id },
+      data: {
+        ownerTelegramChatId: chatId,
+        telegramConnectToken: null,
+        telegramConnectTokenExpiresAt: null,
+      },
+    });
+    await this.sendText(chatId, fa.telegram.sellerConnected(store.name));
+  }
+
+  // مشترک بین دیپ‌لینک مستقیم (?start=<slug>) و انتخاب از نتایج جستجوی نام (بخش ۹.۲،
+  // callback_data: 'st:<storeId>') — قبلاً فقط داخل handleStart بود
+  private async startChatForStore(chatId: string, store: Store): Promise<void> {
     const existing = await this.prisma.customer.findUnique({
       where: {
         storeId_telegramChatId: { storeId: store.id, telegramChatId: chatId },
@@ -211,7 +265,9 @@ export class TelegramService {
     const chatId = String(message.chat.id);
     const conversation = await this.resolveActiveConversation(chatId);
     if (!conversation) {
-      await this.sendText(chatId, fa.telegram.noActiveStore);
+      // docs/PRD-telegram-bot-channel.md بخش ۹.۲ — بدون مکالمه‌ی فعال، متن به‌عنوان جستجوی
+      // نام فروشگاه در نظر گرفته می‌شود، نه فقط یک پیام رد شده
+      await this.searchStores(chatId, message.text ?? '');
       return;
     }
     if (conversation.isMutedForHuman) {
@@ -225,6 +281,28 @@ export class TelegramService {
     await this.sendEngineResult(chatId, result);
   }
 
+  private async searchStores(chatId: string, query: string): Promise<void> {
+    const q = query.trim();
+    if (!q) {
+      await this.sendText(chatId, fa.telegram.noActiveStore);
+      return;
+    }
+    const stores = await this.prisma.store.findMany({
+      where: { status: 'ACTIVE', name: { contains: q, mode: 'insensitive' } },
+      take: 5,
+    });
+    if (stores.length === 0) {
+      await this.sendText(chatId, fa.telegram.storeSearchEmpty);
+      return;
+    }
+    const keyboard: TelegramInlineKeyboard = {
+      inline_keyboard: stores.map((s) => [
+        { text: s.name, callback_data: `st:${s.id}` },
+      ]),
+    };
+    await this.sendText(chatId, fa.telegram.storeSearchResults, keyboard);
+  }
+
   private async handleCallback(cq: TelegramCallbackQuery): Promise<void> {
     const chatId = cq.message ? String(cq.message.chat.id) : String(cq.from.id);
     await this.answerCallbackQuery(cq.id);
@@ -233,6 +311,28 @@ export class TelegramService {
     // docs/PRD-conversation-history.md بخش ۵ — فقط‌خواندنی، مستقل از «مکالمه‌ی فعال» است
     if (data.startsWith('h:')) {
       await this.handleHistorySelect(chatId, data.slice(2));
+      return;
+    }
+    // docs/PRD-telegram-bot-channel.md بخش ۹.۲ — انتخاب از نتایج جستجوی نام فروشگاه
+    if (data.startsWith('st:')) {
+      const store = await this.prisma.store.findUnique({
+        where: { id: data.slice(3) },
+      });
+      if (!store || store.status !== 'ACTIVE') {
+        await this.sendText(chatId, fa.store.notFound);
+        return;
+      }
+      await this.startChatForStore(chatId, store);
+      return;
+    }
+    // docs/PRD-telegram-bot-channel.md بخش ۹.۱ — این دو روی چت خودِ فروشنده اجرا می‌شوند
+    // (نه یک مکالمه‌ی خریدار)، پس باید قبل از resolveActiveConversation زیر مچ شوند
+    if (data.startsWith('sr:')) {
+      await this.handleSellerReplyButton(chatId, data.slice(3));
+      return;
+    }
+    if (data.startsWith('sap:') || data.startsWith('srj:')) {
+      await this.handleSellerOrderDecision(chatId, data);
       return;
     }
 
@@ -393,6 +493,79 @@ export class TelegramService {
     });
   }
 
+  // docs/PRD-telegram-bot-channel.md بخش ۹.۱ — کد گفتگو داخل متن پیام force_reply (نه در
+  // callback_data) کدگذاری شده، چون force_reply جایگزین inline keyboard پیام می‌شود؛ وقتی
+  // فروشنده جواب می‌دهد، تلگرام همان پیام اصلی را در reply_to_message برمی‌گرداند
+  private static readonly SELLER_REPLY_REF_REGEX =
+    /کد گفتگو: ([0-9a-fA-F-]{36})/;
+
+  private extractSellerReplyRef(message: TelegramMessage): string | null {
+    const promptText = message.reply_to_message?.text;
+    if (!promptText) return null;
+    const match = promptText.match(TelegramService.SELLER_REPLY_REF_REGEX);
+    return match ? match[1] : null;
+  }
+
+  private async handleSellerReplyButton(
+    chatId: string,
+    conversationId: string,
+  ): Promise<void> {
+    const conversation = await this.prisma.salesConversation.findUnique({
+      where: { id: conversationId },
+      include: { store: true },
+    });
+    if (!conversation || conversation.store.ownerTelegramChatId !== chatId)
+      return;
+    await this.sendForceReply(
+      chatId,
+      fa.telegram.sellerReplyPrompt(conversationId),
+    );
+  }
+
+  private async handleSellerReplyMessage(
+    message: TelegramMessage,
+    conversationId: string,
+  ): Promise<void> {
+    const chatId = String(message.chat.id);
+    const conversation = await this.prisma.salesConversation.findUnique({
+      where: { id: conversationId },
+      include: { store: true },
+    });
+    if (!conversation || conversation.store.ownerTelegramChatId !== chatId)
+      return;
+    const text = message.text?.trim();
+    if (!text) return;
+    await this.storeService.sendSellerMessage(
+      conversation.store.sellerId,
+      conversation.storeId,
+      conversation.id,
+      text,
+    );
+    await this.sendText(chatId, fa.telegram.sellerReplySent);
+  }
+
+  private async handleSellerOrderDecision(
+    chatId: string,
+    data: string,
+  ): Promise<void> {
+    const approve = data.startsWith('sap:');
+    const orderId = data.slice(4);
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: { conversation: { include: { store: true } } },
+    });
+    if (!order || order.conversation.store.ownerTelegramChatId !== chatId)
+      return;
+    const store = order.conversation.store;
+    if (approve) {
+      await this.storeService.approveOrder(store.sellerId, store.id, orderId);
+      await this.sendText(chatId, fa.telegram.orderApprovedFromTelegram);
+    } else {
+      await this.storeService.rejectOrder(store.sellerId, store.id, orderId);
+      await this.sendText(chatId, fa.telegram.orderRejectedFromTelegram);
+    }
+  }
+
   // یک chat_id می‌تواند در چند فروشگاه مختلف مشتری باشد (یکتایی per-store، بخش ۲ سند) —
   // «فروشگاه فعال» یعنی مکالمه‌ای که آخرین‌بار در آن فعالیتی ثبت شده (آخرین /start یا پیام)
   private async resolveActiveConversation(
@@ -537,6 +710,16 @@ export class TelegramService {
       chat_id: chatId,
       text,
       ...(keyboard ? { reply_markup: keyboard } : {}),
+    });
+  }
+
+  // docs/PRD-telegram-bot-channel.md بخش ۹.۱ — تلگرام reply_to_message را روی پیام بعدی
+  // فروشنده می‌گذارد؛ conversationId از متن همین پیام استخراج می‌شود (بخش extractSellerReplyRef)
+  private sendForceReply(chatId: string, text: string) {
+    return this.callApi('sendMessage', {
+      chat_id: chatId,
+      text,
+      reply_markup: { force_reply: true },
     });
   }
 

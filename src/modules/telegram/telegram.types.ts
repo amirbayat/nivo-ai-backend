@@ -21,6 +21,10 @@ export interface TelegramMessage {
   text?: string;
   photo?: TelegramPhotoSize[];
   voice?: TelegramVoice;
+  // docs/PRD-telegram-bot-channel.md بخش ۹.۱ — force_reply: وقتی فروشنده به پیام
+  // force_reply بات جواب می‌دهد، تلگرام این فیلد را با همان پیام اصلی پر می‌کند؛ conversationId
+  // از متن همان پیام اصلی (که ما ساختیم) استخراج می‌شود، نیازی به session state جدا نیست
+  reply_to_message?: TelegramMessage;
 }
 
 export interface TelegramCallbackQuery {
