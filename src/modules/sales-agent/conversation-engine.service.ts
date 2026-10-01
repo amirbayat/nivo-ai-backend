@@ -279,6 +279,11 @@ export class ConversationEngineService {
     // caption() همیشه یک معرفی کلی می‌ساخت، حتی وقتی مشتری سوال مشخصی (مثل «سرفصل‌هاش چیه؟»)
     // پرسیده بود که جوابش در facts/description بود
     customerQuestion?: string,
+    // فیدبک زنده‌ی کاربر ۱۴۰۵/۰۷/۱۰ — وقتی caller (doBrowse/showProduct) خودش قبلاً یک
+    // خوش‌آمدگویی ثابت (buildGreeting) جلوی همین متن چسبانده، بدون این پرچم مدل هم مستقل خودش
+    // یک «سلام! خوش اومدی 😊» دیگر اول پاسخ می‌ساخت (لحن «دوستانه و محاوره‌ای» پایین طبیعتاً این
+    // را القا می‌کند) و نتیجه دو تا سلام پشت‌سرهم در یک پیام بود
+    skipGreeting = false,
   ): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
     const tone = toneForCategory(category);
     const { text, usage } = await generateText({
@@ -290,6 +295,10 @@ export class ConversationEngineService {
 لحن نوشتار باید ${tone} باشد.${
         customerQuestion
           ? '\nمشتری زیر «سوال مشتری» یک سوال مشخص پرسیده — مستقیم و دقیق با استفاده از همین واقعیت‌ها جوابش را بده؛ اگر واقعیت‌ها جوابش را ندارند، صادقانه بگو که این اطلاعات را نداری.'
+          : ''
+      }${
+        skipGreeting
+          ? '\nیک پیام خوش‌آمد جداگانه همین الان قبل از این متن برای مشتری فرستاده شده — این پیام را هرگز با «سلام»/«خوش اومدی»/هر نوع احوال‌پرسی شروع نکن، مستقیم برو سراغ محتوا.'
           : ''
       }`,
       prompt: customerQuestion
@@ -311,6 +320,7 @@ export class ConversationEngineService {
     facts: string,
     conversation: ConversationWithStore,
     customerQuestion?: string,
+    skipGreeting = false,
   ): Promise<string> {
     const primaryModel = resolveModel(conversation.abVariant);
     const category = conversation.store.category;
@@ -321,6 +331,7 @@ export class ConversationEngineService {
         primaryModel,
         category,
         customerQuestion,
+        skipGreeting,
       );
       await this.logAiCall(conversation, 'CAPTION', true, Date.now() - started);
       await this.logTextCreditUsage(
@@ -345,6 +356,7 @@ export class ConversationEngineService {
           defaultModel(),
           category,
           customerQuestion,
+          skipGreeting,
         );
         await this.logAiCall(
           conversation,
@@ -382,6 +394,9 @@ export class ConversationEngineService {
     category: string | null,
     candidateProductIds: string[],
     customerQuestion?: string,
+    // همون دلیل callCaption بالا — doBrowse وقتی isFirstReply است خودش buildGreeting را جلوی
+    // همین متن می‌چسباند
+    skipGreeting = false,
   ): Promise<{
     text: string;
     relevantProductIds: string[];
@@ -413,7 +428,11 @@ export class ConversationEngineService {
 پراکنده است.
 ۲. وگرنه اگر مشتری معرفی کلی/چندتایی می‌خواهد، حداکثر ۳ تای مرتبط‌ترین کاندید را برگردان —
 هرگز کورکورانه همه‌ی کاندیدها را برنگردان و هرگز بیشتر از ۳ تا.
-شناسه‌های کاندید: ${candidateProductIds.join(', ')}`,
+شناسه‌های کاندید: ${candidateProductIds.join(', ')}${
+        skipGreeting
+          ? '\nیک پیام خوش‌آمد جداگانه همین الان قبل از این متن برای مشتری فرستاده شده — فیلد text را هرگز با «سلام»/«خوش اومدی»/هر نوع احوال‌پرسی شروع نکن، مستقیم برو سراغ محتوا.'
+          : ''
+      }`,
       prompt: customerQuestion
         ? `سوال مشتری: ${customerQuestion}\n\nواقعیت‌ها:\n${facts}`
         : facts,
@@ -435,6 +454,7 @@ export class ConversationEngineService {
     conversation: ConversationWithStore,
     candidateProductIds: string[],
     customerQuestion?: string,
+    skipGreeting = false,
   ): Promise<{ text: string; relevantProductIds: string[] }> {
     const primaryModel = resolveModel(conversation.abVariant);
     const category = conversation.store.category;
@@ -447,6 +467,7 @@ export class ConversationEngineService {
           category,
           candidateProductIds,
           customerQuestion,
+          skipGreeting,
         );
       await this.logAiCall(conversation, 'CAPTION', true, Date.now() - started);
       await this.logTextCreditUsage(
@@ -481,6 +502,7 @@ export class ConversationEngineService {
             category,
             candidateProductIds,
             customerQuestion,
+            skipGreeting,
           );
         await this.logAiCall(
           conversation,
@@ -1207,7 +1229,9 @@ export class ConversationEngineService {
     // واقعیت‌ها جمله می‌سازد، پس هر عددی اینجا باشد عیناً به مشتری گفته می‌شود. فروشنده
     // نمی‌خواهد تعداد واقعی موجودی افشا شود؛ فقط وضعیت موجود/ناموجود کافی است.
     const facts = `مشتری از لینک مستقیم این محصول وارد شده: ${product.name} (${product.basePrice} تومان)${product.stock === 0 ? ' — فعلاً ناموجود' : ''}${product.description ? `\nتوضیحات محصول: ${truncateDescriptionForFacts(product.description)}` : ''}${await this.commentsFactsSuffix(product.id)}`;
-    const reply = await this.caption(facts, conversation);
+    // skipGreeting=true چون finalReply پایین همیشه (بدون قید isFirstReply) یک buildGreeting
+    // جلوی همین reply می‌چسباند — بدون این پرچم، caption() خودش هم یک «سلام!» جدا می‌ساخت
+    const reply = await this.caption(facts, conversation, undefined, true);
     const finalReply = `${await this.buildGreeting(conversation)}\n\n${reply}`;
     await this.logReply(conversation, finalReply, uiBlock, undefined, {
       intent: 'BROWSE',
@@ -1277,6 +1301,7 @@ export class ConversationEngineService {
                 conversation,
                 products.map((p) => p.id),
                 customerMessage,
+                isFirstReply,
               );
             const filtered = products.filter((p) =>
               relevantProductIds.includes(p.id),
@@ -1287,7 +1312,12 @@ export class ConversationEngineService {
             };
           })()
         : {
-            text: await this.caption(facts, conversation, customerMessage),
+            text: await this.caption(
+              facts,
+              conversation,
+              customerMessage,
+              isFirstReply,
+            ),
             products,
           };
     // دفاع دوم، مستقل از پرامپت — سقف ۳ محصول نمایشی، حتی اگر مدل با وجود دستور پرامپت
