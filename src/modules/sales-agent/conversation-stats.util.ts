@@ -4,7 +4,10 @@ import { PrismaService } from '../../prisma/prisma.service';
 // همان محاسبه‌ی آمار A/B مدل، فقط با بعد گروه‌بندی دیگر (کانال یا A/B وویس به‌جای مدل).
 // مشترک بین AdminService (مقایسه‌ی cross-store، ادمین) و StoreService (نسخه‌ی کوچک‌تر همین
 // کارت در پنل خودِ فروشنده، بدون فیلتر مدل).
-export type StatsGroupBy = 'variant' | 'channel' | 'voiceVariant';
+// docs/PRD-sales-agent-response-strategy-ab.md بخش ۱۱ — گروه‌بندی بر اساس Track A/B
+// (RULE_BASED/SIMPLE_AGENT) برای مقایسه‌ی نرخ تبدیل/هزینه/تاخیر واقعی، هم‌الگوی voiceVariant
+export type StatsGroupBy =
+  'variant' | 'channel' | 'voiceVariant' | 'responseStrategy';
 
 export interface ConversationStatRow {
   group: string;
@@ -63,6 +66,7 @@ export async function computeConversationStats(
       id: true,
       abVariant: true,
       voiceVariant: true,
+      responseStrategy: true,
       clarifyAttempts: true,
       customer: { select: { channel: true } },
     },
@@ -72,6 +76,7 @@ export async function computeConversationStats(
   const groupKeyOf = (c: (typeof conversations)[number]): string | null => {
     if (groupBy === 'channel') return c.customer.channel;
     if (groupBy === 'voiceVariant') return c.voiceVariant;
+    if (groupBy === 'responseStrategy') return c.responseStrategy;
     return c.abVariant;
   };
 

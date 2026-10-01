@@ -188,11 +188,13 @@ export class AdminController {
 
   // A/B تست مدل‌های AI ایجنت فروش (فیدبک اول پایلوت) — آمار per-variant، یا با
   // groupBy=channel مقایسه‌ی نرخ تبدیل وب/تلگرام (PRD-sales-agent-admin-analytics.md بخش ۴)،
-  // یا groupBy=voiceVariant مقایسه‌ی A/B وویس (PRD-sales-agent-voice.md بخش ۶.۱)
+  // یا groupBy=voiceVariant مقایسه‌ی A/B وویس (PRD-sales-agent-voice.md بخش ۶.۱)، یا
+  // groupBy=responseStrategy مقایسه‌ی Track A/B (PRD-sales-agent-response-strategy-ab.md بخش ۱۱)
   @Get('sales-agent/ab-stats')
   getSalesAgentAbStats(
     @Query('storeId') storeId?: string,
-    @Query('groupBy') groupBy?: 'variant' | 'channel' | 'voiceVariant',
+    @Query('groupBy')
+    groupBy?: 'variant' | 'channel' | 'voiceVariant' | 'responseStrategy',
     @Query('from') from?: string,
     @Query('to') to?: string,
   ) {
