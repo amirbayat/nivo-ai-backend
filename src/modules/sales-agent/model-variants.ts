@@ -11,13 +11,9 @@ export const MODEL_VARIANTS: Record<string, string> = {
   'gemini-3.8-flash': 'google/gemini-3.8-flash',
   'claude-sonnet-5.5': 'anthropic/claude-sonnet-5.5',
   'grok-4.7': 'x-ai/grok-4.7',
-  // typesafe/jev-router (۱۴۰۵/۰۷/۰۳ روی OpenRouter منتشر شد) — یک روتر است، نه یک مدل ثابت:
-  // خودش هر درخواست را می‌خواند و مدل/reasoning effort مناسب را انتخاب می‌کند. خودِ روتر
-  // رایگان است (هزینه‌ی واقعی مال مدلی‌ست که انتخاب می‌کند). Chat Completions استاندارد را
-  // پیاده می‌کند، پس دقیقاً مثل بقیه‌ی این لیست از همین relay رد می‌شود، بدون هیچ تغییر دیگری.
-  // (نسخه‌ی دیگر، jev-1.13/Decisions API با probability خروجی، سازگار با generateObject/
-  // این SDK نیست — یکپارچه‌سازی جدا می‌خواهد، عمداً اینجا اضافه نشده)
-  'jev-router': 'typesafe/jev-router',
+  // typesafe/jev-router ۱۴۰۵/۰۷/۰۱ از pool حذف شد — فیدبک کاربر: کیفیت پاسخ ضعیف بود.
+  // resolveModel() پایین یک fallback امن دارد، پس مکالمه‌های قدیمی که از قبل
+  // abVariant:'jev-router' دارند هم بدون کرش به مدل پیش‌فرض می‌افتند.
 };
 
 const VARIANT_KEYS = Object.keys(MODEL_VARIANTS);

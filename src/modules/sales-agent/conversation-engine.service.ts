@@ -80,6 +80,17 @@ function truncateForVoice(text: string): string {
   return lastSpace > 0 ? text.slice(0, lastSpace) : window;
 }
 
+// فیدبک کاربر ۱۴۰۵/۰۷/۰۱ — سقف ذخیره‌سازی description به ۵۰۰۰ کاراکتر بالا رفت (create/
+// update-product.dto.ts)، ولی description تقریباً ۹۵٪+ توکن هر محصول در facts است و
+// doBrowse() تا ۵ محصول را همزمان می‌فرستد؛ بدون این سقف، هزینه‌ی هر پاسخ AI به‌شدت بالا
+// می‌رفت. فروشنده هرچقدر می‌خواهد می‌نویسد، ولی فقط این مقدار به مدل تزریق می‌شود.
+const DESCRIPTION_FACTS_MAX_CHARS = 700;
+
+function truncateDescriptionForFacts(description: string): string {
+  if (description.length <= DESCRIPTION_FACTS_MAX_CHARS) return description;
+  return `${description.slice(0, DESCRIPTION_FACTS_MAX_CHARS)}...`;
+}
+
 @Injectable()
 export class ConversationEngineService {
   constructor(
@@ -262,6 +273,10 @@ export class ConversationEngineService {
     facts: string,
     model: string,
     category: string | null,
+    // فیدبک کاربر ۱۴۰۵/۰۷/۰۱ — قبلاً این‌جا سوال واقعی مشتری اصلاً پاس داده نمی‌شد، پس
+    // caption() همیشه یک معرفی کلی می‌ساخت، حتی وقتی مشتری سوال مشخصی (مثل «سرفصل‌هاش چیه؟»)
+    // پرسیده بود که جوابش در facts/description بود
+    customerQuestion?: string,
   ): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
     const tone = toneForCategory(category);
     const { text, usage } = await generateText({
@@ -270,8 +285,14 @@ export class ConversationEngineService {
 داده‌شده یک پیام فارسی کوتاه (حداکثر ۲-۳ جمله)، دوستانه و محاوره‌ای بساز — هیچ عدد/اسم/شماره‌ی
 تازه‌ای که در واقعیت‌ها نیامده اضافه نکن، و پیشنهاد بعدی اختراع نکن. هرگز تعداد دقیق موجودی
 انبار را اعلام نکن (حتی اگر مشتری صریح بپرسد)، فقط «موجود است» یا «فعلاً ناموجود».
-لحن نوشتار باید ${tone} باشد.`,
-      prompt: facts,
+لحن نوشتار باید ${tone} باشد.${
+        customerQuestion
+          ? '\nمشتری زیر «سوال مشتری» یک سوال مشخص پرسیده — مستقیم و دقیق با استفاده از همین واقعیت‌ها جوابش را بده؛ اگر واقعیت‌ها جوابش را ندارند، صادقانه بگو که این اطلاعات را نداری.'
+          : ''
+      }`,
+      prompt: customerQuestion
+        ? `سوال مشتری: ${customerQuestion}\n\nواقعیت‌ها:\n${facts}`
+        : facts,
       temperature: 0.3,
     });
     return {
@@ -287,6 +308,7 @@ export class ConversationEngineService {
   private async caption(
     facts: string,
     conversation: ConversationWithStore,
+    customerQuestion?: string,
   ): Promise<string> {
     const primaryModel = resolveModel(conversation.abVariant);
     const category = conversation.store.category;
@@ -296,6 +318,7 @@ export class ConversationEngineService {
         facts,
         primaryModel,
         category,
+        customerQuestion,
       );
       await this.logAiCall(conversation, 'CAPTION', true, Date.now() - started);
       await this.logTextCreditUsage(
@@ -319,6 +342,7 @@ export class ConversationEngineService {
           facts,
           defaultModel(),
           category,
+          customerQuestion,
         );
         await this.logAiCall(
           conversation,
@@ -519,7 +543,7 @@ export class ConversationEngineService {
 
     switch (parsed.intent) {
       case 'BROWSE':
-        return this.doBrowse(conversation, parsed);
+        return this.doBrowse(conversation, parsed, text);
       case 'ADD_TO_CART':
       case 'REMOVE_FROM_CART':
         return this.doUpdateCart(conversation, ctx, parsed);
@@ -952,7 +976,7 @@ export class ConversationEngineService {
     // عمداً بدون عدد موجودی در واقعیت‌هایی که به مدل داده می‌شود — caption() فقط از همین
     // واقعیت‌ها جمله می‌سازد، پس هر عددی اینجا باشد عیناً به مشتری گفته می‌شود. فروشنده
     // نمی‌خواهد تعداد واقعی موجودی افشا شود؛ فقط وضعیت موجود/ناموجود کافی است.
-    const facts = `مشتری از لینک مستقیم این محصول وارد شده: ${product.name} (${product.basePrice} تومان)${product.stock === 0 ? ' — فعلاً ناموجود' : ''}${product.description ? `\nتوضیحات محصول: ${product.description}` : ''}${await this.commentsFactsSuffix(product.id)}`;
+    const facts = `مشتری از لینک مستقیم این محصول وارد شده: ${product.name} (${product.basePrice} تومان)${product.stock === 0 ? ' — فعلاً ناموجود' : ''}${product.description ? `\nتوضیحات محصول: ${truncateDescriptionForFacts(product.description)}` : ''}${await this.commentsFactsSuffix(product.id)}`;
     const reply = await this.caption(facts, conversation);
     const finalReply = `${await this.buildGreeting(conversation)}\n\n${reply}`;
     await this.logReply(conversation, finalReply, uiBlock, undefined, {
@@ -986,6 +1010,7 @@ export class ConversationEngineService {
   private async doBrowse(
     conversation: ConversationWithStore,
     parsed: ParsedIntent,
+    customerMessage?: string,
   ): Promise<EngineResult> {
     const products = await this.searchProducts(
       conversation.storeId,
@@ -1014,8 +1039,10 @@ export class ConversationEngineService {
     await this.resetClarifyAttempts(conversation);
 
     // همون دلیل showProduct بالا — بدون عدد موجودی در واقعیت‌ها
-    const facts = `این محصولات فروشگاه است: ${products.map((p) => `${p.name} (${p.basePrice} تومان)${p.stock === 0 ? ' — فعلاً ناموجود' : ''}${p.description ? ` — توضیحات: ${p.description}` : ''}`).join('، ')}`;
-    const reply = await this.caption(facts, conversation);
+    const facts = `این محصولات فروشگاه است: ${products.map((p) => `${p.name} (${p.basePrice} تومان)${p.stock === 0 ? ' — فعلاً ناموجود' : ''}${p.description ? ` — توضیحات: ${truncateDescriptionForFacts(p.description)}` : ''}`).join('، ')}`;
+    // فیدبک کاربر ۱۴۰۵/۰۷/۰۱ — سوال واقعی مشتری (مثلاً «سرفصل‌هاش چیه؟») را هم به caption
+    // می‌دهیم تا به‌جای یک معرفی کلی، مستقیم همان سوال را از facts بالا جواب بدهد
+    const reply = await this.caption(facts, conversation, customerMessage);
     // فیدبک اول پایلوت: اولین پاسخ مکالمه (بعد از GREETING) یک خط راهنمای ثابت (نه
     // LLM-generated، برای پایداری) جلوی لیست محصولات می‌گیرد — قبلاً مشتری بدون هیچ
     // توضیحی مستقیم می‌رسید به لیست محصولات و نمی‌فهمید چیکار باید بکند
@@ -1721,6 +1748,7 @@ answered=false بده (به‌جای حدس‌زدن).`,
       | 'CONVERSATION_CAP'
       | 'VOICE_VARIANT_OFF'
       | 'CONSECUTIVE_CAP'
+      | 'STORE_NO_CREDIT_CAP'
       | undefined;
     if (text.length > VOICE_MIN_REPLY_CHARS) {
       // docs/PRD-sales-agent-voice.md بخش ۶.۱ — گروه OFF باید واقعاً هیچ وویسی نبیند، نه
@@ -1733,6 +1761,15 @@ answered=false بده (به‌جای حدس‌زدن).`,
         // docs/PRD-sales-agent-voice.md بخش ۶.۳ — حتی اگر واجد شرایط باشد (طول کافی، سقف کل
         // مکالمه هم خالی)، بعد از ۲ تای پشت‌سرهم باید فقط متن بماند
         voiceReason = 'CONSECUTIVE_CAP';
+      } else if (
+        // فیدبک کاربر ۱۴۰۵/۰۷/۰۱ — فروشنده‌ی بدون اعتبار حداکثر ۳ مکالمه‌ی مجزا وویس می‌گیرد؛
+        // فقط روی اولین وویسِ هر مکالمه چک می‌شود (نه هر پاسخ) تا شمارنده‌ی فروشگاه یک‌بار
+        // به‌ازای هر مکالمه زیاد شود
+        conversation.billingMode !== 'PAID' &&
+        conversation.voiceGenerationCount === 0 &&
+        !(await this.reserveFreeVoiceConversationSlot(conversation.storeId))
+      ) {
+        voiceReason = 'STORE_NO_CREDIT_CAP';
       } else {
         wantsVoice = await this.reserveVoiceSlot(conversation.id);
         if (!wantsVoice) voiceReason = 'CONVERSATION_CAP';
@@ -1792,13 +1829,20 @@ answered=false بده (به‌جای حدس‌زدن).`,
     }
 
     if (wantsVoice) {
-      await this.voiceQueue.add('generate', {
-        eventId: event.id,
-        conversationId: conversation.id,
-        text: truncateForVoice(text),
-        storeCategory: conversation.store.category,
-        ...(traceEventId ? { traceEventId } : {}),
-      });
+      // فیدبک کاربر ۱۴۰۵/۰۷/۰۱ — قبلاً هیچ retry خودکاری نبود (attempts پیش‌فرض Bull=۱)؛
+      // یک تایم‌اوت/خطای گذرا یعنی همون یه بار شکست، تمام. حالا یک بار دیگر با ۵ ثانیه
+      // تاخیر امتحان می‌شود (lockDuration پیش‌فرض صف کافی است، این job چند ثانیه طول می‌کشد نه دقیقه)
+      await this.voiceQueue.add(
+        'generate',
+        {
+          eventId: event.id,
+          conversationId: conversation.id,
+          text: truncateForVoice(text),
+          storeCategory: conversation.store.category,
+          ...(traceEventId ? { traceEventId } : {}),
+        },
+        { attempts: 2, backoff: { type: 'fixed', delay: 5_000 } },
+      );
     }
   }
 
@@ -1811,6 +1855,18 @@ answered=false بده (به‌جای حدس‌زدن).`,
         voiceGenerationCount: { lt: VOICE_MAX_PER_CONVERSATION },
       },
       data: { voiceGenerationCount: { increment: 1 } },
+    });
+    return result.count > 0;
+  }
+
+  // همان الگوی atomic شرطی بالا — فیدبک کاربر ۱۴۰۵/۰۷/۰۱: فروشنده‌ی بدون اعتبار حداکثر ۳
+  // مکالمه‌ی مجزا وویس می‌گیرد؛ فقط یک‌بار به‌ازای هر مکالمه (روی اولین وویسش) صدا زده می‌شود
+  private async reserveFreeVoiceConversationSlot(
+    storeId: string,
+  ): Promise<boolean> {
+    const result = await this.prisma.store.updateMany({
+      where: { id: storeId, freeVoiceConversationsUsed: { lt: 3 } },
+      data: { freeVoiceConversationsUsed: { increment: 1 } },
     });
     return result.count > 0;
   }

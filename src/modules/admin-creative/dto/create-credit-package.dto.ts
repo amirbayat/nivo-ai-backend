@@ -52,9 +52,18 @@ export class CreateCreditPackageDto {
   // (isCustomAmount=false) معنا دارد؛ باید از قبل در پیشخان بازار ساخته شده باشد
   // (docs/PRD-nivo-cal-credits-ui.md بخش ۴)
   @IsOptional()
-  @Transform(({ value }) =>
+  @Transform(({ value }: { value: unknown }) =>
     typeof value === 'string' && value.trim() === '' ? undefined : value,
   )
   @IsString({ message: fa.validation.required })
   bazaarSku?: string;
+
+  // فیدبک کاربر ۱۴۰۵/۰۷/۰۱ — فقط برای scope=STORE_AI_CREDIT معنا دارد: بسته‌ی مخصوص یک
+  // فروشگاه خاص؛ رشته‌ی خالی یعنی بسته‌ی عمومی (همان الگوی bazaarSku بالا)
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' && value.trim() === '' ? undefined : value,
+  )
+  @IsString({ message: fa.validation.required })
+  storeId?: string;
 }

@@ -10,6 +10,7 @@ import { TelegramService } from '../../modules/telegram/telegram.service';
 import { toneForCategory } from '../../modules/sales-agent/tone-by-category';
 import { voiceForBuyer } from '../../modules/sales-agent/voice-gender';
 import { CreditService } from '../../modules/sales-agent/credit.service';
+import { buildSalesAgentVoiceWebhookCallbackUrl } from '../../modules/sales-agent/sales-agent-voice-webhook.constants';
 import type { SalesAgentVoiceJobData } from '../../modules/sales-agent/sales-agent.types';
 
 const POLL_INTERVAL_MS = 3_000;
@@ -41,19 +42,13 @@ export class SalesAgentVoiceProcessor {
     const { eventId, conversationId, text, storeCategory, traceEventId } =
       job.data;
     try {
-      const conversation = await this.prisma.salesConversation.findUnique({
-        where: { id: conversationId },
-        select: {
-          storeId: true,
-          customerId: true,
-          billingMode: true,
-          customer: { select: { fullName: true } },
-        },
-      });
+      const conversation = await this.loadBillingConversation(conversationId);
       // docs/PRD-sales-agent-voice.md بخش ۶.۴ — تخمین جنسیت خریدار از اسم تلگرام (اگر در
       // دسترس بود) و انتخاب صدای مخالف آن؛ وقتی اسم نیست/ناشناس است، صدای خنثی پیش‌فرض
       const voice = voiceForBuyer(conversation?.customer.fullName);
       const { key, toneVariant } = await this.generateAndUpload(
+        eventId,
+        traceEventId,
         text,
         storeCategory,
         conversationId,
@@ -63,14 +58,141 @@ export class SalesAgentVoiceProcessor {
       await this.finishEvent(eventId, key, traceEventId, toneVariant, voice);
       await this.pushToTelegramIfNeeded(conversationId, key);
     } catch (err) {
+      // فیدبک کاربر ۱۴۰۵/۰۷/۰۱ — قبلاً اینجا همیشه خطا را می‌بلعید (catch بدون throw دوباره)،
+      // یعنی Bull همیشه job را «موفق» می‌دید و هیچ‌وقت retry نمی‌زد، حتی با attempts:2 تنظیم‌شده
+      // روی voiceQueue.add (conversation-engine.service.ts). اگر هنوز تلاش باقی مانده، باید
+      // دوباره throw بشه تا Bull خودش retry کند؛ finishEvent(..., null, ...) فقط روی آخرین
+      // تلاش صدا زده می‌شود، وگرنه trace زودتر از موعد «ناموفق» نهایی می‌شد و پولینگ درِاور
+      // ادمین (A5) قبل از نتیجه‌ی واقعی retry متوقف می‌شد
+      const maxAttempts = job.opts?.attempts ?? 1;
+      const isFinalAttempt = job.attemptsMade + 1 >= maxAttempts;
       this.logger.error(
-        `voice generation failed for event=${eventId}: ${err instanceof Error ? err.message : String(err)}`,
+        `voice generation failed for event=${eventId} (attempt ${job.attemptsMade + 1}/${maxAttempts}): ${err instanceof Error ? err.message : String(err)}`,
       );
+      if (!isFinalAttempt) throw err;
       await this.finishEvent(eventId, null, traceEventId);
     }
   }
 
+  // فیدبک کاربر ۱۴۰۵/۰۷/۰۱ — بعد از اینکه polling معمولی (handleGenerate بالا) تایم‌اوت زد و
+  // event را FAILED نهایی کرد، webhook می‌تواند با همین taskId یک بار دیگر pollTask بزند تا
+  // ببیند آیا Kie دیرتر واقعاً موفق شده یا نه — همون الگوی video-edit-webhook.service.ts،
+  // فقط به‌جای اعتماد به بدنه‌ی webhook (که شکلش برای endpoint عمومی jobs/createTask مستند
+  // نیست)، از همون pollTask قابل‌اعتماد موجود استفاده می‌کند. فراخوانی از
+  // SalesAgentVoiceWebhookService، بعد از اینکه آنجا تایید شده event واقعاً FAILED نهایی شده
+  // (نه هنوز در حال polling فعال) — صدا زدن این متد وقتی poll loop فعاله یعنی ریسک کسر دوباره
+  async recoverFromWebhook(
+    eventId: string,
+    conversationId: string,
+    taskId: string,
+    traceEventId?: string,
+  ): Promise<void> {
+    try {
+      const status = await this.kie.pollTask(taskId);
+      if (status.state !== 'success') {
+        this.logger.log(
+          `sales-agent-voice webhook recovery: event=${eventId} taskId=${taskId} هنوز state=${status.state} — no-op`,
+        );
+        return;
+      }
+      const resultUrl = status.resultUrls[0] ?? null;
+      if (!resultUrl) {
+        this.logger.warn(
+          `sales-agent-voice webhook recovery: event=${eventId} taskId=${taskId} state=success ولی resultUrl ندارد`,
+        );
+        return;
+      }
+
+      // چک مجدد درست قبل از نوشتن — پنجره‌ی کوچک race در صورت رسیدن دوباره‌ی همین webhook را
+      // کم می‌کند (قفل اتمیک کامل برای این مسیر کم‌ریسک/کم‌ارزش overkill است)
+      const fresh = await this.prisma.conversationEvent.findUnique({
+        where: { id: eventId },
+      });
+      const freshPayload = fresh?.payload as { voiceKey?: string } | null;
+      if (freshPayload?.voiceKey) {
+        this.logger.log(
+          `sales-agent-voice webhook recovery: event=${eventId} همین الان توسط یک فراخوانی موازی بازیابی شد — no-op`,
+        );
+        return;
+      }
+
+      const conversation = await this.loadBillingConversation(conversationId);
+      const voice = voiceForBuyer(conversation?.customer.fullName);
+      const modelSlug =
+        this.config.get<string>('KIE_TTS_MODEL_SLUG') ?? DEFAULT_TTS_MODEL_SLUG;
+      if (conversation && status.creditsConsumed != null) {
+        await this.creditService.logVoiceUsage({
+          storeId: conversation.storeId,
+          customerId: conversation.customerId,
+          conversationId,
+          billingMode: conversation.billingMode,
+          model: modelSlug,
+          usdCost: status.creditsConsumed * KIE_USD_PER_CREDIT,
+        });
+      }
+      const tone = toneForCategory(conversation?.store.category ?? null);
+      const key = await this.downloadAndStore(resultUrl, conversationId);
+      await this.finishEvent(eventId, key, traceEventId, tone, voice);
+      await this.pushToTelegramIfNeeded(conversationId, key);
+      this.logger.log(
+        `sales-agent-voice webhook recovery: event=${eventId} بعد از تایم‌اوت polling با webhook بازیابی و SUCCEEDED شد`,
+      );
+    } catch (err) {
+      this.logger.error(
+        `sales-agent-voice webhook recovery failed for event=${eventId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      // چیزی برای برگرداندن نیست — event همین الان هم FAILED نهایی شده بود
+    }
+  }
+
+  private async loadBillingConversation(conversationId: string) {
+    return this.prisma.salesConversation.findUnique({
+      where: { id: conversationId },
+      select: {
+        storeId: true,
+        customerId: true,
+        billingMode: true,
+        customer: { select: { fullName: true } },
+        store: { select: { category: true } },
+      },
+    });
+  }
+
+  private async downloadAndStore(
+    resultUrl: string,
+    conversationId: string,
+  ): Promise<string> {
+    const buffer = await this.kie.downloadResult(resultUrl);
+    return this.storage.uploadImage(buffer, 'mp3', conversationId);
+  }
+
+  // فیدبک کاربر ۱۴۰۵/۰۷/۰۱ — kieTaskId روی payload خودِ event نوشته می‌شود تا webhook بتواند
+  // بعداً با همین taskId مسیرش را به همین event پیدا کند (recoverFromWebhook بالا)
+  private async persistTaskTracking(
+    eventId: string,
+    taskId: string,
+    traceEventId?: string,
+  ): Promise<void> {
+    const event = await this.prisma.conversationEvent.findUnique({
+      where: { id: eventId },
+    });
+    if (!event) return;
+    const payload = event.payload as Prisma.InputJsonObject;
+    await this.prisma.conversationEvent.update({
+      where: { id: eventId },
+      data: {
+        payload: {
+          ...payload,
+          kieTaskId: taskId,
+          ...(traceEventId ? { voiceTraceEventId: traceEventId } : {}),
+        },
+      },
+    });
+  }
+
   private async generateAndUpload(
+    eventId: string,
+    traceEventId: string | undefined,
     text: string,
     storeCategory: string | null,
     conversationId: string,
@@ -88,15 +210,30 @@ export class SalesAgentVoiceProcessor {
     // اسکیمای واقعی این مدل با تست دستی مستقیم روی kie.ai تایید شد (۱۴۰۵/۰۷/۰۸) — فرض قبلی
     // ({text, style_prompt}) اصلاً معتبر نبود و createTask همیشه fail می‌شد (به‌خاطر همین
     // «وویس فرستاده نمی‌شد»، بی‌سروصدا، فقط در لاگ). فرمت واقعی: speakers/dialogue_turns
-    // (مدل چندگوینده است)، هر speaker_id باید دقیقاً به‌شکل «Speaker N» باشد. لحن هم پارامتر
-    // جدا ندارد — به‌صورت دستورالعمل طبیعی داخل متن تزریق می‌شود (الگوی مستند رسمی Gemini TTS)؛
-    // فقط پذیرفته‌شدنش توسط API تایید شده، تاثیر واقعی‌اش روی صدا هنوز با گوش چک نشده
-    const { taskId } = await this.kie.createTask(modelSlug, {
-      speakers: [{ speaker_id: 'Speaker 1', voice }],
-      dialogue_turns: [
-        { speaker_id: 'Speaker 1', text: `با لحن ${tone} بگو: ${text}` },
-      ],
-    });
+    // (مدل چندگوینده است)، هر speaker_id باید دقیقاً به‌شکل «Speaker N» باشد.
+    //
+    // فیدبک کاربر ۱۴۰۵/۰۷/۰۱: دستورالعمل لحن («با لحن ... بگو:») عیناً توی صدای تولیدشده
+    // خونده می‌شد — چون این مدل پارامتر style جدا ندارد و قبلاً به‌عنوان دستورالعمل طبیعی
+    // داخل متن تزریق می‌شد، که این مدل بر خلاف فرض قبلی آن را خطاب به شنونده می‌خواند، نه یک
+    // دستور اجرایی. تا پارامتر style واقعی/انتخاب speaker جدا بررسی شود، فقط متن خام فرستاده
+    // می‌شود؛ `tone` هنوز محاسبه و به‌عنوان متادیتای نمایشی (toneVariant) برگردانده می‌شود.
+    //
+    // callbackUrl: فقط اگر API_URL ست باشد (همون الگوی video-edit.processor.ts's
+    // kieWebhookCallbackUrl) — polling همیشه فعال می‌ماند، webhook فقط یک safety-net اضافه
+    // برای بعد از تایم‌اوت است (recoverFromWebhook بالا)
+    const apiUrl = this.config.get<string>('API_URL');
+    const callbackUrl = apiUrl
+      ? buildSalesAgentVoiceWebhookCallbackUrl(apiUrl)
+      : undefined;
+    const { taskId } = await this.kie.createTask(
+      modelSlug,
+      {
+        speakers: [{ speaker_id: 'Speaker 1', voice }],
+        dialogue_turns: [{ speaker_id: 'Speaker 1', text }],
+      },
+      callbackUrl,
+    );
+    await this.persistTaskTracking(eventId, taskId, traceEventId);
 
     let resultUrl: string | null = null;
     for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
@@ -123,8 +260,7 @@ export class SalesAgentVoiceProcessor {
     }
     if (!resultUrl) throw new Error('kie tts task timed out');
 
-    const buffer = await this.kie.downloadResult(resultUrl);
-    const key = await this.storage.uploadImage(buffer, 'mp3', conversationId);
+    const key = await this.downloadAndStore(resultUrl, conversationId);
     return { key, toneVariant: tone };
   }
 

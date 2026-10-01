@@ -4,7 +4,10 @@ import type { Store } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
 import { MediaTranscodeService } from '../../common/services/media-transcode.service';
-import { AsrService } from '../../common/services/asr.service';
+import {
+  AsrService,
+  VOICE_MESSAGE_ASR_CHAIN,
+} from '../../common/services/asr.service';
 import { AiProviderService } from '../../common/services/ai-provider.service';
 import {
   ConversationEngineService,
@@ -623,6 +626,8 @@ export class TelegramService {
       this.aiProvider.sharedApiKey,
       'fa',
       vocabHint,
+      VOICE_MESSAGE_ASR_CHAIN,
+      false,
     );
     if (!transcript.text.trim()) return;
 

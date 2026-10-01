@@ -4,6 +4,8 @@ import { CreditsModule } from '../credits/credits.module';
 import { UsageModule } from '../usage/usage.module';
 import { TelegramApiClientModule } from '../telegram/telegram-api-client.module';
 import { CommentsModule } from '../comments/comments.module';
+import { AsrModule } from '../../common/services/asr.module';
+import { MediaTranscodeModule } from '../../common/services/media-transcode.module';
 import { StoreController } from './store.controller';
 import { StoreService } from './store.service';
 import { StoreKbService } from './store-kb.service';
@@ -28,6 +30,9 @@ import { CardSelectorService } from './card-selector.service';
     // docs/PRD-customer-comments-and-discounts.md بخش ۶ — StoreKbService از نظرات تاییدشده
     // به‌عنوان منبع کمکی تکمیل توضیحات استفاده می‌کند
     CommentsModule,
+    // فیدبک کاربر ۱۴۰۵/۰۷/۰۱ — میکروفون/تبدیل صدا به متن فروشنده روی فرم محصول
+    AsrModule,
+    MediaTranscodeModule,
   ],
   controllers: [StoreController],
   providers: [

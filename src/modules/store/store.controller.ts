@@ -165,6 +165,21 @@ export class StoreController {
     return this.storeKbService.importProductFromUrl(user.sub, id, dto.url);
   }
 
+  // فیدبک کاربر ۱۴۰۵/۰۷/۰۱ — میکروفون کنار توضیحات محصول در فرم فروشنده (ProductSheet)؛
+  // عمداً زیر productId نیست چون موقع ساخت محصول جدید هنوز productId وجود ندارد
+  @Post(':id/transcribe')
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: 10 * 1024 * 1024 } }),
+  )
+  transcribeDescription(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException(fa.errors.validation);
+    return this.storeKbService.transcribeDescription(user.sub, id, file);
+  }
+
   @Post(':id/products/:productId/images/from-url')
   addProductImagesFromUrl(
     @CurrentUser() user: JwtPayload,
@@ -372,6 +387,13 @@ export class StoreController {
   @Get(':id/credit')
   getCreditStatus(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     return this.storeCreditService.getStatus(user.sub, id);
+  }
+
+  // فیدبک کاربر ۱۴۰۵/۰۷/۰۱ — بسته‌های عمومی + مخصوص همین فروشگاه (برخلاف مسیر عمومی
+  // v2/credits/packages که فقط بسته‌های عمومی را می‌بیند، چون storeId ندارد)
+  @Get(':id/credit/packages')
+  listCreditPackages(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    return this.storeCreditService.listPackages(user.sub, id);
   }
 
   // خرید self-serve یک بسته‌ی اعتبار — از همان درگاه پرداخت واقعی موجود

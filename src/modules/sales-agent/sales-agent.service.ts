@@ -9,7 +9,10 @@ import type { BillingMode } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
 import { MediaTranscodeService } from '../../common/services/media-transcode.service';
-import { AsrService } from '../../common/services/asr.service';
+import {
+  AsrService,
+  VOICE_MESSAGE_ASR_CHAIN,
+} from '../../common/services/asr.service';
 import { AiProviderService } from '../../common/services/ai-provider.service';
 import { ConversationEngineService } from './conversation-engine.service';
 import { CreditService } from './credit.service';
@@ -291,11 +294,15 @@ export class SalesAgentService {
       conversation.store.name,
       products.map((p) => p.name),
     );
+    // فقط متن نهایی لازم است (نه timestamp کلمه‌ای) — VOICE_MESSAGE_ASR_CHAIN طبق
+    // فیدبک کاربر ۱۴۰۵/۰۷/۰۱ (دقت whisper هنوز ضعیف است) chirp-3 را هم امتحان می‌کند
     const transcript = await this.asr.transcribeWithFallback(
       mp3Buffer,
       this.aiProvider.sharedApiKey,
       'fa',
       vocabHint,
+      VOICE_MESSAGE_ASR_CHAIN,
+      false,
     );
     const result = await this.engine.handleMessage(
       conversation,

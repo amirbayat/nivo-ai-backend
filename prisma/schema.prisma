@@ -636,10 +636,16 @@ model CreditPackage {
   // می‌توانند این را داشته باشند (بازار SKU با قیمت ثابت می‌خواهد، نه مبلغ آزاد). null یعنی این
   // بسته از طریق کافه‌بازار قابل‌خرید نیست (docs/PRD-nivo-cal-credits-ui.md بخش ۴).
   bazaarSku       String?            @unique
+  // فیدبک کاربر ۱۴۰۵/۰۷/۰۱ — فقط برای scope=STORE_AI_CREDIT معنا دارد: اگر پر باشد، این بسته
+  // فقط برای همین فروشگاه قابل‌خرید است (نه همه‌ی فروشنده‌ها)؛ null یعنی بسته‌ی عمومی (رفتار
+  // قبلی، بدون تغییر) — StoreCreditService.purchase() فیلتر می‌کند: storeId IS NULL OR storeId=این فروشگاه
+  storeId         String?
+  store           Store?             @relation(fields: [storeId], references: [id], onDelete: Cascade)
   createdAt       DateTime           @default(now())
 
   payments Payment[] // docs/PRD-admin-credit-reports.md بخش ۲ — برای گزارش «نیوو فروخته‌شده به تفکیک بسته»
 
+  @@index([storeId])
   @@map("credit_packages")
 }
 
@@ -2050,6 +2056,10 @@ model Store {
   // docs/PRD-seller-credit-billing.md بخش ۱/۵ — اعتبار AI فروشگاه به تومان؛ بعد از تمام‌شدن
   // سهمیه‌ی رایگان روزانه، مصرف واقعی هر فراخوانی AI از همین فیلد کم می‌شود
   creditBalanceToman            Int               @default(0)
+  // فیدبک کاربر ۱۴۰۵/۰۷/۰۱ — برای فروشنده‌ای که هنوز اعتبار نخریده (billingMode!==PAID)،
+  // حداکثر ۳ مکالمه‌ی مجزا وویس می‌گیرند؛ با اولین وویسِ هر مکالمه‌ی تازه زیاد می‌شود
+  // (conversation-engine.service.ts's logReply/reserveFreeVoiceConversationSlot)
+  freeVoiceConversationsUsed    Int               @default(0)
   // docs/PRD-seller-multi-bank-card-rotation.md — سیاست انتخاب کارت وقتی چند StoreBankCard
   // فعال دارد؛ lastCardIndex فقط برای EQUAL (round-robin واقعی، نه رندوم)
   cardDisplayPolicy             CardDisplayPolicy @default(EQUAL)
@@ -2084,6 +2094,8 @@ model Store {
   comments          ProductComment[]
   discountCodes     StoreDiscountCode[]
   adPlacements      AdPlacement[]
+  // فیدبک کاربر ۱۴۰۵/۰۷/۰۱ — بسته‌های اعتبار AI مخصوص همین فروشگاه (scope=STORE_AI_CREDIT)
+  creditPackages    CreditPackage[]
 
   @@index([sellerId])
   @@map("stores")

@@ -60,6 +60,17 @@ export const ASR_FALLBACK_CHAIN = [
   'x-ai/grok-stt-1.0',
 ] as const;
 
+// فقط برای وویس‌پیام خریدار در چت فروشگاه/تلگرام (sales-agent.service.ts، telegram.service.ts)
+// — برخلاف ASR_FALLBACK_CHAIN بالا (که زیرکپشن ویدیو هم از آن استفاده می‌کند و به
+// timestamp سطح کلمه نیاز دارد)، این مسیر فقط به متن نهایی نیاز دارد. google/chirp-3 گوگل
+// برای زبان‌های کم‌منبع مثل فارسی طراحی شده و روی OpenRouter مشخص نیست timestamp کلمه‌ای
+// بدهد یا نه — به همین دلیل اینجا جدا نگه داشته شده تا زیرکپشن ویدیو دست‌نخورده بماند.
+// فیدبک کاربر ۱۴۰۵/۰۷/۰۱: دقت whisper-large-v3 (با وجود ارتقا در ۱۴۰۵-۰۶-۱۶) هنوز ضعیف است.
+export const VOICE_MESSAGE_ASR_CHAIN = [
+  'google/chirp-3',
+  ...ASR_FALLBACK_CHAIN,
+] as const;
+
 // docs/PRD-video-auto-captions.md §۴/§۱۷ — فراخوانی POST /audio/transcriptions روی OpenRouter
 // (از طریق aiProvider.baseURL که در پروداکشن به openrouter-relay اشاره می‌کند، نه مستقیم
 // openrouter.ai — دقیقاً همان الگوی video-generation.service.ts). چون این یک آپلود
@@ -76,9 +87,11 @@ export class AsrService {
     apiKey: string,
     language = 'fa',
     prompt?: string,
+    models: readonly string[] = ASR_FALLBACK_CHAIN,
+    wordTimestamps = true,
   ): Promise<AsrTranscriptResult> {
     let lastErr: Error | null = null;
-    for (const model of ASR_FALLBACK_CHAIN) {
+    for (const model of models) {
       try {
         return await this.transcribeWithModel(
           model,
@@ -86,6 +99,7 @@ export class AsrService {
           apiKey,
           language,
           prompt,
+          wordTimestamps,
         );
       } catch (err) {
         if (!(err instanceof AsrAvailabilityError)) throw err;
@@ -109,6 +123,7 @@ export class AsrService {
     // فیدبک کاربر: غلط املایی زیاد روی خروجی واقعی — prompt استاندارد Whisper (بایاس سبک/واژگان،
     // نه دستور) تنها اهرم موجود برای بهبود بدون عوض‌کردن مدل است؛ اختیاری و کاملاً بی‌اثر اگر خالی باشد
     prompt?: string,
+    wordTimestamps = true,
   ): Promise<AsrTranscriptResult> {
     // base64 در بدنه‌ی JSON، نه multipart/form-data — دقیقاً همان الگوی موجود frame_images در
     // video-generation.service.ts (data:...;base64,...)، هم برای یکدستی با بقیه‌ی کد، هم چون
@@ -118,7 +133,7 @@ export class AsrService {
       input_audio: { data: audioBuffer.toString('base64'), format: 'mp3' },
       language,
       response_format: 'verbose_json',
-      timestamp_granularities: ['word'],
+      ...(wordTimestamps ? { timestamp_granularities: ['word'] } : {}),
       ...(prompt ? { prompt } : {}),
     };
 
@@ -130,7 +145,7 @@ export class AsrService {
     // بشود حدس زد آیا مشکل مختص یک فایل خاص، فرمت request، یا مسیر relay بوده یا نه
     this.logger.log(
       `ASR ${model} request → POST ${url} | via=${this.aiProvider.fetch ? 'proxy-fetch(undici+dispatcher)' : 'global-fetch'} | ` +
-        `body: model=${model} language=${language} response_format=verbose_json timestamp_granularities=[word] ` +
+        `body: model=${model} language=${language} response_format=verbose_json timestamp_granularities=${wordTimestamps ? '[word]' : '[]'} ` +
         `input_audio.format=mp3 audioBytes=${audioBuffer.length} (base64Len=${body.input_audio.data.length}) | ` +
         `prompt=${prompt ? 'yes' : 'no'} | ` +
         `extraHeaders=${JSON.stringify(Object.keys(this.aiProvider.extraHeaders ?? {}))}`,

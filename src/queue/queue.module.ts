@@ -17,6 +17,8 @@ import { VideoEditProcessor } from './processors/video-edit.processor';
 import { ImageModelCostEstimateProcessor } from './processors/image-model-cost-estimate.processor';
 import { VideoModelCostEstimateProcessor } from './processors/video-model-cost-estimate.processor';
 import { SalesAgentVoiceProcessor } from './processors/sales-agent-voice.processor';
+import { SalesAgentVoiceWebhookController } from '../modules/sales-agent/sales-agent-voice-webhook.controller';
+import { SalesAgentVoiceWebhookService } from '../modules/sales-agent/sales-agent-voice-webhook.service';
 import { ProductCommentModerationProcessor } from './processors/product-comment-moderation.processor';
 import { PostPurchaseFollowUpProcessor } from './processors/post-purchase-followup.processor';
 import { AbandonedCartReminderProcessor } from './processors/abandoned-cart-reminder.processor';
@@ -104,7 +106,14 @@ import { SalesAgentModule } from '../modules/sales-agent/sales-agent.module';
     // SalesAgentVoiceProcessor پایین
     SalesAgentModule,
   ],
+  // فیدبک کاربر ۱۴۰۵/۰۷/۰۱ — SalesAgentVoiceWebhookController اینجاست (نه در sales-agent
+  // module) چون SalesAgentVoiceWebhookService مستقیم SalesAgentVoiceProcessor را تزریق
+  // می‌کند (recoverFromWebhook) و آن provider همین‌جاست؛ وارد کردن QueueModule داخل
+  // SalesAgentModule یک import چرخه‌ای می‌ساخت (QueueModule از قبل SalesAgentModule را
+  // import می‌کند)
+  controllers: [SalesAgentVoiceWebhookController],
   providers: [
+    SalesAgentVoiceWebhookService,
     QueueService,
     TokenFlushProcessor,
     FeedbackSummaryProcessor,

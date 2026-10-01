@@ -46,11 +46,22 @@ export class CreditsService {
 
   // scope خالی یعنی GENERAL — رفتار فعلی nivo-ai-frontend (که هیچ‌وقت scope نمی‌فرسته) عیناً
   // حفظ می‌شود؛ فقط نیوو کال با scope=NIVO_CAL بسته‌های اختصاصی خودش رو می‌بینه، نه برعکس.
-  async listPackages(scope: CreditPackageScope = 'GENERAL') {
+  // فیدبک کاربر ۱۴۰۵/۰۷/۰۱ — storeId اختیاری: فقط وقتی پاس داده شود (مسیر احراز‌هویت‌شده‌ی
+  // StoreCreditService.listPackages) بسته‌های مخصوص همان فروشگاه هم کنار بسته‌های عمومی
+  // دیده می‌شوند؛ بدون آن (مسیر عمومی credits-public.controller.ts) فقط بسته‌های عمومی.
+  async listPackages(scope: CreditPackageScope = 'GENERAL', storeId?: string) {
     const [config, packages] = await Promise.all([
       this.getConfig(),
       this.prisma.creditPackage.findMany({
-        where: { isActive: true, scope },
+        // توجه: فیلتر Prisma's `{in: [storeId, null]}` روی ستون nullable مقدار null را match
+        // نمی‌کند (رفتار شناخته‌شده‌ی Prisma/SQL) — به همین دلیل OR صریح لازم است
+        where: {
+          isActive: true,
+          scope,
+          ...(storeId
+            ? { OR: [{ storeId: null }, { storeId }] }
+            : { storeId: null }),
+        },
         orderBy: { sortOrder: 'asc' },
       }),
     ]);

@@ -36,6 +36,12 @@ export class StoreCreditService {
     };
   }
 
+  // فیدبک کاربر ۱۴۰۵/۰۷/۰۱ — لیست بسته‌های قابل‌خرید این فروشگاه: عمومی‌ها + مخصوص همین فروشگاه
+  async listPackages(sellerId: string, storeId: string) {
+    await this.storeService.getOwned(sellerId, storeId);
+    return this.credits.listPackages('STORE_AI_CREDIT', storeId);
+  }
+
   async purchase(
     sellerId: string,
     storeId: string,
@@ -46,6 +52,10 @@ export class StoreCreditService {
     const { pkg, priceToman } =
       await this.credits.getActivePackagePrice(packageId);
     if (pkg.scope !== 'STORE_AI_CREDIT') {
+      throw new BadRequestException(fa.errors.notFound);
+    }
+    // بسته‌ی مخصوص یک فروشگاه دیگر نباید قابل‌خرید باشد — حتی اگر packageId را از جایی حدس بزند
+    if (pkg.storeId && pkg.storeId !== storeId) {
       throw new BadRequestException(fa.errors.notFound);
     }
     const config = await this.credits.getConfig();

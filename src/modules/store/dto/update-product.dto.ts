@@ -5,7 +5,7 @@ import { fa } from '../../../i18n/fa';
 export class UpdateProductDto {
   @IsOptional()
   @IsString({ message: fa.validation.required })
-  @MaxLength(120, { message: fa.validation.stringTooLong })
+  @MaxLength(200, { message: fa.validation.stringTooLong })
   name?: string;
 
   @IsOptional()
@@ -18,9 +18,11 @@ export class UpdateProductDto {
   @Min(0, { message: fa.validation.numberPositive })
   stock?: number;
 
+  // فیدبک کاربر ۱۴۰۵/۰۷/۰۱ — ۲۰۰۰ سقف قبلی کم بود؛ ۵۰۰۰ شد. این سقفِ ذخیره‌سازی است، نه
+  // سقفِ توکن AI — conversation-engine.service.ts قبل از تزریق به facts جداگانه truncate می‌کند
   @IsOptional()
   @IsString({ message: fa.validation.required })
-  @MaxLength(2000, { message: fa.validation.stringTooLong })
+  @MaxLength(5000, { message: fa.validation.stringTooLong })
   description?: string;
 
   // docs/PRD-telegram-bot-channel.md بخش ۹.۳ — کد کوتاه اختیاری روی محتوای تبلیغاتی فروشنده

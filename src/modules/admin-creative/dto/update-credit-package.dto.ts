@@ -53,10 +53,19 @@ export class UpdateCreditPackageDto {
   // شناسه‌ی SKU کافه‌بازار — رشته‌ی خالی یعنی «پاک کردن» (null در دیتابیس، نه یک‌رشته‌ی خالی
   // یکتا که با بسته‌ی دیگری تصادم unique constraint بدهد)
   @IsOptional()
-  @Transform(({ value }) =>
+  @Transform(({ value }: { value: unknown }) =>
     typeof value === 'string' && value.trim() === '' ? null : value,
   )
   @ValidateIf((_, value) => value !== null)
   @IsString({ message: fa.validation.required })
   bazaarSku?: string | null;
+
+  // فیدبک کاربر ۱۴۰۵/۰۷/۰۱ — رشته‌ی خالی یعنی «پاک کردن» (برگرداندن به بسته‌ی عمومی)
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' && value.trim() === '' ? null : value,
+  )
+  @ValidateIf((_, value) => value !== null)
+  @IsString({ message: fa.validation.required })
+  storeId?: string | null;
 }

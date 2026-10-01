@@ -9,6 +9,11 @@ import { z } from 'zod';
 import type { StoreKbKind, CanonicalProduct } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AiProviderService } from '../../common/services/ai-provider.service';
+import {
+  AsrService,
+  VOICE_MESSAGE_ASR_CHAIN,
+} from '../../common/services/asr.service';
+import { MediaTranscodeService } from '../../common/services/media-transcode.service';
 import { extractChatFileText } from '../../common/utils/chat-file-extraction.util';
 import { parseUploadedKbFile } from '../../common/validators/chat-file.validator';
 import { fetchProductPage } from '../../common/utils/fetch-product-page.util';
@@ -98,8 +103,32 @@ export class StoreKbService {
     private readonly storeService: StoreService,
     private readonly pricing: PricingService,
     private readonly comments: CommentsService,
+    private readonly asr: AsrService,
+    private readonly mediaTranscode: MediaTranscodeService,
   ) {
     this.provider = this.aiProvider.buildClient();
+  }
+
+  // ابزار داخلی فروشنده روی فرم محصول (میکروفون کنار توضیحات) — فیدبک کاربر ۱۴۰۵/۰۷/۰۱.
+  // عمداً هیچ semantics مکالمه/billing ندارد (این مصرف مشتری نیست)؛ همان الگوی
+  // sales-agent.service.ts's submitVoiceMessage (extractAudio → ASR بدون timestamp کلمه‌ای)
+  async transcribeDescription(
+    sellerId: string,
+    storeId: string,
+    file: { buffer: Buffer; originalname: string },
+  ): Promise<{ text: string }> {
+    await this.storeService.getOwned(sellerId, storeId);
+    const ext = file.originalname.split('.').pop() || 'webm';
+    const mp3Buffer = await this.mediaTranscode.extractAudio(file.buffer, ext);
+    const transcript = await this.asr.transcribeWithFallback(
+      mp3Buffer,
+      this.aiProvider.sharedApiKey,
+      'fa',
+      undefined,
+      VOICE_MESSAGE_ASR_CHAIN,
+      false,
+    );
+    return { text: transcript.text };
   }
 
   // docs/PRD-customer-comments-and-discounts.md بخش الف/۶ — نظرات تاییدشده یک منبع کمکی برای
