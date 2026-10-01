@@ -28,6 +28,15 @@ export function pickVoiceVariant(): 'ON' | 'OFF' {
   return Math.random() < 0.5 ? 'ON' : 'OFF';
 }
 
+// docs/PRD-sales-agent-response-strategy-ab.md بخش ۸ — eval واقعی (۴ اجرای مستقل) نشان داد
+// Track B (agent) به‌طور پیوسته از Track A دقیق‌تر است (~۷۷-۸۴٪ در برابر ~۶۰-۶۱٪)، ولی
+// هزینه/تاخیر واقعی‌اش هنوز اندازه‌گیری نشده (قطعاً چند فراخوان بیشتر از Track A دارد) — تا آن
+// اندازه‌گیری انجام نشود، پیش‌فرض محتاطانه RULE_BASED می‌ماند. کد Track B کامل و پشت
+// SIMPLE_AGENT آماده است (doBrowse)، فقط فعلاً هیچ مکالمه‌ی واقعی‌ای تصادفی به آن نمی‌رسد.
+export function pickResponseStrategy(): 'RULE_BASED' | 'SIMPLE_AGENT' {
+  return 'RULE_BASED';
+}
+
 export function resolveModel(variant: string | null | undefined): string {
   return (
     (variant ? MODEL_VARIANTS[variant] : undefined) ??

@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
 import type { Queue } from 'bull';
-import { generateObject, generateText } from 'ai';
+import { generateObject, generateText, tool, stepCountIs } from 'ai';
 import { z } from 'zod';
 import type { ConversationState, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -135,7 +135,11 @@ export class ConversationEngineService {
   // فیدبک اول پایلوت (A/B مدل‌ها)
   private async logAiCall(
     conversation: ConversationWithStore,
-    kind: 'PARSE_INTENT' | 'CAPTION' | 'SATISFACTION_CLASSIFY',
+    // docs/PRD-sales-agent-response-strategy-ab.md بخش ۲ — 'AGENT_CAPTION' جدا از 'CAPTION' است
+    // تا توکن/هزینه/تاخیر Track B (agent) در مقایسه با Track A قابل تفکیک بماند؛ ستون DB همچنان
+    // String خام است (AbModelMetric.kind)، پس migration لازم ندارد
+    kind:
+      'PARSE_INTENT' | 'CAPTION' | 'AGENT_CAPTION' | 'SATISFACTION_CLASSIFY',
     success: boolean,
     latencyMs: number,
   ) {
@@ -154,6 +158,7 @@ export class ConversationEngineService {
     text: string,
     state: ConversationState,
     model: string,
+    storeContextSummary?: string | null,
   ): Promise<{
     result: ParsedIntent;
     inputTokens: number;
@@ -173,7 +178,7 @@ export class ConversationEngineService {
       // schema/prompt در intent-classification.schema.ts — تنها منبع واحد، sales-agent-qa.service.ts
       // (تست دقت intent) هم از همین‌جا می‌خواند تا دریفت بین این دو caller پیش نیاید
       schema: intentClassificationSchema,
-      system: buildIntentClassificationPrompt(state),
+      system: buildIntentClassificationPrompt(state, storeContextSummary),
       prompt: text,
     });
     return {
@@ -191,12 +196,23 @@ export class ConversationEngineService {
     conversation: ConversationWithStore,
   ): Promise<ParsedIntent> {
     const primaryModel = resolveModel(conversation.abVariant);
+    // docs/PRD-sales-agent-implicit-need-detection.md بخش ۴.۱ — جمله‌ی کوتاه و ارزان (بدون
+    // کوئری اضافه، conversation.store از قبل لود است) فقط برای تشخیص خامِ storeRelevance؛
+    // fit دقیق با کاتالوگ واقعی در doBrowse سنجیده می‌شود، نه اینجا
+    const storeContextSummary = [
+      conversation.store.category &&
+        `این فروشگاه در حوزه‌ی «${conversation.store.category}» فعالیت می‌کند`,
+      conversation.store.brandIntro,
+    ]
+      .filter(Boolean)
+      .join('. ');
     const started = Date.now();
     try {
       const { result, inputTokens, outputTokens } = await this.callParseIntent(
         text,
         conversation.currentState,
         primaryModel,
+        storeContextSummary,
       );
       await this.logAiCall(
         conversation,
@@ -226,6 +242,7 @@ export class ConversationEngineService {
             text,
             conversation.currentState,
             defaultModel(),
+            storeContextSummary,
           );
         await this.logAiCall(
           conversation,
@@ -284,6 +301,12 @@ export class ConversationEngineService {
     // یک «سلام! خوش اومدی 😊» دیگر اول پاسخ می‌ساخت (لحن «دوستانه و محاوره‌ای» پایین طبیعتاً این
     // را القا می‌کند) و نتیجه دو تا سلام پشت‌سرهم در یک پیام بود
     skipGreeting = false,
+    // docs/PRD-sales-agent-response-strategy-ab.md بخش ۱ (Track A، ردیف bridgeAndPitch) —
+    // وقتی غیر-null است یعنی پشت درخواست مشتری یک هدف بزرگ‌تر implicit تشخیص داده شده که با
+    // این فروشگاه مرتبط است و برای پیشنهاد آماده‌ایم؛ مدل باید اول آن هدف را تایید کند، بعد با
+    // یک پل علّی کوتاه توضیح بدهد این محصول چطور به آن هدف کمک می‌کند، بعد محصول را معرفی کند —
+    // نه این‌که مستقیم برود سراغ معرفی محصول (رفتار قبلی که مشتری حس می‌کرد «نیازش فهمیده نشد»)
+    bridgeNeedSummary?: string | null,
   ): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
     const tone = toneForCategory(category);
     const { text, usage } = await generateText({
@@ -295,6 +318,10 @@ export class ConversationEngineService {
 لحن نوشتار باید ${tone} باشد.${
         customerQuestion
           ? '\nمشتری زیر «سوال مشتری» یک سوال مشخص پرسیده — مستقیم و دقیق با استفاده از همین واقعیت‌ها جوابش را بده؛ اگر واقعیت‌ها جوابش را ندارند، صادقانه بگو که این اطلاعات را نداری.'
+          : ''
+      }${
+        bridgeNeedSummary
+          ? `\nهدف واقعی مشتری (نه اسم محصول): «${bridgeNeedSummary}». ابتدا در یک جمله‌ی کوتاه نشان بده این هدف را فهمیده‌ای، بعد با یک جمله‌ی کوتاه پل بزن که چرا این محصول به این هدف کمک می‌کند، و در آخر محصول را معرفی کن — نه برعکس.`
           : ''
       }${
         skipGreeting
@@ -321,6 +348,7 @@ export class ConversationEngineService {
     conversation: ConversationWithStore,
     customerQuestion?: string,
     skipGreeting = false,
+    bridgeNeedSummary?: string | null,
   ): Promise<string> {
     const primaryModel = resolveModel(conversation.abVariant);
     const category = conversation.store.category;
@@ -332,6 +360,7 @@ export class ConversationEngineService {
         category,
         customerQuestion,
         skipGreeting,
+        bridgeNeedSummary,
       );
       await this.logAiCall(conversation, 'CAPTION', true, Date.now() - started);
       await this.logTextCreditUsage(
@@ -357,6 +386,7 @@ export class ConversationEngineService {
           category,
           customerQuestion,
           skipGreeting,
+          bridgeNeedSummary,
         );
         await this.logAiCall(
           conversation,
@@ -397,6 +427,8 @@ export class ConversationEngineService {
     // همون دلیل callCaption بالا — doBrowse وقتی isFirstReply است خودش buildGreeting را جلوی
     // همین متن می‌چسباند
     skipGreeting = false,
+    // همون دلیل bridgeNeedSummary در callCaption بالا — طبق جدول تصمیم Track A
+    bridgeNeedSummary?: string | null,
   ): Promise<{
     text: string;
     relevantProductIds: string[];
@@ -419,6 +451,10 @@ export class ConversationEngineService {
 لحن نوشتار باید ${tone} باشد.${
         customerQuestion
           ? '\nمشتری زیر «سوال مشتری» یک سوال مشخص پرسیده — مستقیم و دقیق با استفاده از همین واقعیت‌ها جوابش را بده؛ اگر واقعیت‌ها جوابش را ندارند، صادقانه بگو که این اطلاعات را نداری.'
+          : ''
+      }${
+        bridgeNeedSummary
+          ? `\nهدف واقعی مشتری (نه اسم محصول): «${bridgeNeedSummary}». ابتدا در یک جمله‌ی کوتاه نشان بده این هدف را فهمیده‌ای، بعد با یک جمله‌ی کوتاه پل بزن که چرا محصول(های) پیشنهادی به این هدف کمک می‌کنند، و در آخر محصول را معرفی کن — نه برعکس.`
           : ''
       }
 علاوه‌بر متن پاسخ، باید تصمیم بگیری در relevantProductIds چند و کدام محصول برگردانی — دقیقاً
@@ -455,6 +491,7 @@ export class ConversationEngineService {
     candidateProductIds: string[],
     customerQuestion?: string,
     skipGreeting = false,
+    bridgeNeedSummary?: string | null,
   ): Promise<{ text: string; relevantProductIds: string[] }> {
     const primaryModel = resolveModel(conversation.abVariant);
     const category = conversation.store.category;
@@ -468,6 +505,7 @@ export class ConversationEngineService {
           candidateProductIds,
           customerQuestion,
           skipGreeting,
+          bridgeNeedSummary,
         );
       await this.logAiCall(conversation, 'CAPTION', true, Date.now() - started);
       await this.logTextCreditUsage(
@@ -503,6 +541,7 @@ export class ConversationEngineService {
             candidateProductIds,
             customerQuestion,
             skipGreeting,
+            bridgeNeedSummary,
           );
         await this.logAiCall(
           conversation,
@@ -535,6 +574,114 @@ export class ConversationEngineService {
     }
   }
 
+  // docs/PRD-sales-agent-response-strategy-ab.md بخش ۱ (Track A، ردیف askClarifyingQuestion)
+  // — وقتی pitchReadiness=NEEDS_CLARIFICATION است، به‌جای حدس‌زدن و نشان‌دادن یک محصول (رفتار
+  // قدیمی که در eval واقعی باعث شد مشتری با هدف مبهم مستقیم یک محصول نامرتبط ببیند)، یک سوال
+  // کوتاه و مشخص می‌پرسیم تا هدف دقیق‌تر شود. فقط بر اساس «واقعیت‌ها»ی فروشگاه سوال می‌سازد —
+  // هرگز در این مرحله محصولی معرفی/نام‌برده نمی‌شود
+  private async callAskClarifyingQuestion(
+    facts: string,
+    model: string,
+    category: string | null,
+    needSummary: string,
+    skipGreeting = false,
+  ): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
+    const tone = toneForCategory(category);
+    const { text, usage } = await generateText({
+      model: this.aiProvider.buildClient()(model),
+      system: `تو دستیار فروش یک فروشگاه در دایرکت اینستاگرام هستی. مشتری یک هدف کلی دارد
+(«${needSummary}») ولی هنوز اطلاعات کافی برای پیشنهاد دقیق محصول نداری. فقط بر اساس «واقعیت‌های»
+زیر (محصولات واقعی فروشگاه)، یک پیام فارسی کوتاه (حداکثر ۱-۲ جمله) و ${tone} بساز که دقیقاً یک
+سوال مشخص بپرسد تا بفهمی کدام محصول را پیشنهاد بدهی. هیچ محصولی را در این مرحله نام نبر یا پیشنهاد
+نکن، و هیچ عدد/اسم تازه‌ای که در واقعیت‌ها نیامده اختراع نکن.${
+        skipGreeting
+          ? '\nیک پیام خوش‌آمد جداگانه همین الان قبل از این متن برای مشتری فرستاده شده — این پیام را هرگز با «سلام»/«خوش اومدی»/هر نوع احوال‌پرسی شروع نکن، مستقیم برو سراغ سوال.'
+          : ''
+      }`,
+      prompt: facts,
+      temperature: 0.3,
+    });
+    return {
+      text: text.trim(),
+      inputTokens: usage.inputTokens ?? 0,
+      outputTokens: usage.outputTokens ?? 0,
+    };
+  }
+
+  // همون fallback دومرحله‌ای caption() — اگر هر دو تلاش شکست خورد، fallback یک متن ثابت است
+  // (fa.salesAgent.clarifyNeedFallback)، نه facts خام (که برخلاف caption، برای این مورد متن
+  // قابل‌نمایش به مشتری نیست)
+  private async askClarifyingQuestion(
+    facts: string,
+    conversation: ConversationWithStore,
+    needSummary: string,
+    skipGreeting = false,
+  ): Promise<string> {
+    const primaryModel = resolveModel(conversation.abVariant);
+    const category = conversation.store.category;
+    const started = Date.now();
+    try {
+      const { text, inputTokens, outputTokens } =
+        await this.callAskClarifyingQuestion(
+          facts,
+          primaryModel,
+          category,
+          needSummary,
+          skipGreeting,
+        );
+      await this.logAiCall(conversation, 'CAPTION', true, Date.now() - started);
+      await this.logTextCreditUsage(
+        conversation,
+        primaryModel,
+        inputTokens,
+        outputTokens,
+      );
+      return text;
+    } catch {
+      await this.logAiCall(
+        conversation,
+        'CAPTION',
+        false,
+        Date.now() - started,
+      );
+      if (primaryModel === defaultModel()) {
+        return fa.salesAgent.clarifyNeedFallback;
+      }
+      const fallbackStarted = Date.now();
+      try {
+        const { text, inputTokens, outputTokens } =
+          await this.callAskClarifyingQuestion(
+            facts,
+            defaultModel(),
+            category,
+            needSummary,
+            skipGreeting,
+          );
+        await this.logAiCall(
+          conversation,
+          'CAPTION',
+          true,
+          Date.now() - fallbackStarted,
+        );
+        await this.logTextCreditUsage(
+          conversation,
+          defaultModel(),
+          inputTokens,
+          outputTokens,
+        );
+        return text;
+      } catch {
+        await this.logAiCall(
+          conversation,
+          'CAPTION',
+          false,
+          Date.now() - fallbackStarted,
+        );
+        return fa.salesAgent.clarifyNeedFallback;
+      }
+    }
+  }
+
   private async searchProducts(storeId: string, query?: string | null) {
     // docs/PRD-telegram-bot-channel.md بخش ۹.۳ — کد محصول (روی محتوای تبلیغاتی) قبل از
     // جستجوی نام امتحان می‌شود؛ اگر دقیقاً مچ شد، فقط همان یکی برگردانده می‌شود
@@ -552,6 +699,230 @@ export class ConversationEngineService {
       orderBy: { createdAt: 'desc' },
       take: 5,
     });
+  }
+
+  // docs/PRD-sales-agent-response-strategy-ab.md بخش ۱ (Track B) — جایگزین agent-محور همین یک
+  // تصمیم (captionWithRelevance)، نه کل conversation-engine. برخلاف Track A که سیگنال‌های
+  // needType/storeRelevance/pitchReadiness را از بیرون می‌گیرد، این مسیر خودش با ابزار تصمیم
+  // می‌گیرد که آیا اطلاعات کافی برای معرفی محصول دارد یا باید سوال روشن‌کننده بپرسد — هیچ سیگنال
+  // از‌پیش‌محاسبه‌شده‌ای به آن داده نمی‌شود، فقط پیام مشتری و دو ابزار. قرارداد خروجی عمداً دقیقاً
+  // همان { text, relevantProductIds } است تا مستقیماً جای‌گزین Track A باشد (relevantProductIds
+  // خالی یعنی «سوال روشن‌کننده پرسید، هنوز محصولی نشان نده» — هم‌ارز شاخه‌ی CLARIFY در Track A)
+  private async callAgentCaptionWithRelevance(
+    facts: string,
+    model: string,
+    category: string | null,
+    storeId: string,
+    candidateProductIds: string[],
+    customerQuestion?: string,
+    skipGreeting = false,
+  ): Promise<{
+    text: string;
+    relevantProductIds: string[];
+    inputTokens: number;
+    outputTokens: number;
+  }> {
+    const tone = toneForCategory(category);
+    const client = this.aiProvider.buildClient(undefined, {
+      supportsStructuredOutputs: true,
+    })(model);
+
+    const getProductDetails = tool({
+      description:
+        'جزئیات کامل یک محصول (توضیحات کامل، قیمت، موجودی) را با شناسه‌اش برمی‌گرداند — قبل از تصمیم نهایی برای سنجش تناسب محصول با نیاز مشتری از این استفاده کن',
+      inputSchema: z.object({ productId: z.string() }),
+      execute: async ({ productId }: { productId: string }) => {
+        const product = await this.prisma.product.findUnique({
+          where: { id: productId },
+        });
+        if (!product || product.storeId !== storeId) {
+          return { error: 'محصولی با این شناسه در این فروشگاه پیدا نشد' };
+        }
+        return {
+          id: product.id,
+          name: product.name,
+          basePrice: product.basePrice,
+          inStock: product.stock > 0,
+          description: product.description
+            ? truncateDescriptionForFacts(product.description)
+            : null,
+        };
+      },
+    });
+
+    const searchProductsTool = tool({
+      description:
+        'در کاتالوگ فروشگاه بر اساس یک عبارت جست‌وجو می‌کند — اگر کاندیدهای اولیه کافی به‌نظر نمی‌رسند از این استفاده کن تا محصول مرتبط‌تری در کل فروشگاه پیدا کنی',
+      inputSchema: z.object({ query: z.string() }),
+      execute: async ({ query }: { query: string }) => {
+        const results = await this.searchProducts(storeId, query);
+        return results.map((p) => ({
+          id: p.id,
+          name: p.name,
+          basePrice: p.basePrice,
+          inStock: p.stock > 0,
+        }));
+      },
+    });
+
+    // ابزار پایانی بدون execute — مدل باید دقیقاً با همین ساختار پاسخ نهایی را اعلام کند؛ چون
+    // execute ندارد، حلقه‌ی چندمرحله‌ای SDK بعد از این فراخوان خودش متوقف می‌شود (نیازی به
+    // منطق پایان‌دهی دستی نیست)
+    const respondToCustomer = tool({
+      description:
+        'پاسخ نهایی به مشتری را اعلام می‌کند — این باید همیشه آخرین قدم تو باشد، دقیقاً یک‌بار صدا زده شود',
+      inputSchema: z.object({
+        text: z
+          .string()
+          .describe(
+            'متن فارسی کوتاه (حداکثر ۲-۳ جمله) برای مشتری — یا معرفی/پاسخ بر اساس محصول(های) واقعی، یا اگر اطلاعات کافی نداری یک سوال روشن‌کننده (بدون نام‌بردن محصول)',
+          ),
+        relevantProductIds: z
+          .array(z.string())
+          .describe(
+            'شناسه‌ی محصول(های) واقعاً مرتبط برای نمایش کارت — اگر داری سوال روشن‌کننده می‌پرسی، این را خالی بگذار',
+          ),
+      }),
+    });
+
+    const result = await generateText({
+      model: client,
+      tools: {
+        get_product_details: getProductDetails,
+        search_products: searchProductsTool,
+        respond_to_customer: respondToCustomer,
+      },
+      stopWhen: stepCountIs(4),
+      system: `تو دستیار فروش یک فروشگاه در دایرکت اینستاگرام هستی. لحن نوشتار باید ${tone}
+باشد. کاندیدهای اولیه‌ای که از جست‌وجوی پیام مشتری پیدا شده‌اند، پایین در «واقعیت‌ها» آمده‌اند
+(نام/قیمت/موجودی/توضیحات). قبل از تصمیم نهایی لازم نیست حتماً ابزاری صدا بزنی — اگر واقعیت‌های
+داده‌شده برای تصمیم کافی‌اند، مستقیم respond_to_customer را صدا بزن.
+فقط و فقط بر اساس واقعیت‌های واقعی (داده‌شده یا از ابزارها) تصمیم بگیر — هیچ عدد/اسم/شماره‌ی
+تازه‌ای که در این واقعیت‌ها نیامده اختراع نکن، و هرگز تعداد دقیق موجودی انبار را اعلام نکن (حتی
+اگر مشتری صریح بپرسد)، فقط «موجود است» یا «فعلاً ناموجود».
+تصمیم نهایی را با respond_to_customer اعلام کن (دقیقاً یک‌بار، به‌عنوان آخرین قدم):
+۱. اگر هدف واقعی مشتری و تناسبش با یکی از محصولات برایت روشن است، یک پیام کوتاه و دوستانه با
+حداکثر ۳ شناسه‌ی مرتبط‌ترین محصول بساز (اگر یک محصول به‌تنهایی برنده‌ی مشخصی است، فقط همان یکی).
+۲. اگر هدف مشتری کلی/مبهم است و واقعاً نمی‌توانی مطمئن باشی کدام محصول مناسب است، به‌جای حدس
+کورکورانه فقط یک سوال کوتاه و مشخص بپرس تا هدف را دقیق‌تر کنی — در این حالت هیچ محصولی نام نبر و
+relevantProductIds را خالی بگذار.${
+        customerQuestion
+          ? '\nمشتری زیر «سوال مشتری» یک سوال مشخص پرسیده — اگر واقعیت‌ها جوابش را می‌دهند، مستقیم و دقیق جواب بده؛ اگر نه، صادقانه بگو این اطلاعات را نداری (این هم یک پاسخ معتبر است، نیازی به سوال روشن‌کننده نیست).'
+          : ''
+      }${
+        skipGreeting
+          ? '\nیک پیام خوش‌آمد جداگانه همین الان قبل از این پاسخ برای مشتری فرستاده شده — فیلد text را هرگز با «سلام»/«خوش اومدی»/هر نوع احوال‌پرسی شروع نکن.'
+          : ''
+      }
+شناسه‌های کاندید اولیه: ${candidateProductIds.join(', ')}`,
+      prompt: customerQuestion
+        ? `سوال مشتری: ${customerQuestion}\n\nواقعیت‌ها:\n${facts}`
+        : facts,
+      temperature: 0.3,
+    });
+
+    const finalCall = result.toolCalls.find(
+      (c) => c.toolName === 'respond_to_customer',
+    ) as { input: { text: string; relevantProductIds: string[] } } | undefined;
+
+    if (!finalCall) {
+      // مدل به سقف قدم رسید بدون صدا زدن respond_to_customer — fallback امن پایین (در
+      // agentCaptionWithRelevance) این حالت را هم مثل خطا مدیریت می‌کند
+      throw new Error(
+        'Agent did not call respond_to_customer within step limit',
+      );
+    }
+
+    return {
+      text: finalCall.input.text.trim(),
+      relevantProductIds: finalCall.input.relevantProductIds,
+      inputTokens: result.usage.inputTokens ?? 0,
+      outputTokens: result.usage.outputTokens ?? 0,
+    };
+  }
+
+  // همون fallback دومرحله‌ای captionWithRelevance — اگر هر دو تلاش شکست خورد (شامل نرسیدن به
+  // respond_to_customer)، fallback امن «همه‌ی کاندیدها مرتبط‌اند» است، نه اینکه هیچ محصولی نشان
+  // داده نشود
+  private async agentCaptionWithRelevance(
+    facts: string,
+    conversation: ConversationWithStore,
+    candidateProductIds: string[],
+    customerQuestion?: string,
+    skipGreeting = false,
+  ): Promise<{ text: string; relevantProductIds: string[] }> {
+    const primaryModel = resolveModel(conversation.abVariant);
+    const category = conversation.store.category;
+    const started = Date.now();
+    try {
+      const { text, relevantProductIds, inputTokens, outputTokens } =
+        await this.callAgentCaptionWithRelevance(
+          facts,
+          primaryModel,
+          category,
+          conversation.storeId,
+          candidateProductIds,
+          customerQuestion,
+          skipGreeting,
+        );
+      await this.logAiCall(
+        conversation,
+        'AGENT_CAPTION',
+        true,
+        Date.now() - started,
+      );
+      await this.logTextCreditUsage(
+        conversation,
+        primaryModel,
+        inputTokens,
+        outputTokens,
+      );
+      return { text, relevantProductIds };
+    } catch {
+      await this.logAiCall(
+        conversation,
+        'AGENT_CAPTION',
+        false,
+        Date.now() - started,
+      );
+      if (primaryModel === defaultModel()) {
+        return { text: facts, relevantProductIds: candidateProductIds };
+      }
+      const fallbackStarted = Date.now();
+      try {
+        const { text, relevantProductIds, inputTokens, outputTokens } =
+          await this.callAgentCaptionWithRelevance(
+            facts,
+            defaultModel(),
+            category,
+            conversation.storeId,
+            candidateProductIds,
+            customerQuestion,
+            skipGreeting,
+          );
+        await this.logAiCall(
+          conversation,
+          'AGENT_CAPTION',
+          true,
+          Date.now() - fallbackStarted,
+        );
+        await this.logTextCreditUsage(
+          conversation,
+          defaultModel(),
+          inputTokens,
+          outputTokens,
+        );
+        return { text, relevantProductIds };
+      } catch {
+        await this.logAiCall(
+          conversation,
+          'AGENT_CAPTION',
+          false,
+          Date.now() - fallbackStarted,
+        );
+        return { text: facts, relevantProductIds: candidateProductIds };
+      }
+    }
   }
 
   private resolveProductRef(
@@ -1285,41 +1656,139 @@ export class ConversationEngineService {
 
     // همون دلیل showProduct بالا — بدون عدد موجودی در واقعیت‌ها
     const facts = `این محصولات فروشگاه است: ${products.map((p) => `${p.name} (${p.basePrice} تومان)${p.stock === 0 ? ' — فعلاً ناموجود' : ''}${p.description ? ` — توضیحات: ${truncateDescriptionForFacts(p.description)}` : ''}`).join('، ')}`;
-    // فیدبک کاربر ۱۴۰۵/۰۷/۰۱ — سوال واقعی مشتری (مثلاً «سرفصل‌هاش چیه؟») را هم به caption
-    // می‌دهیم تا به‌جای یک معرفی کلی، مستقیم همان سوال را از facts بالا جواب بدهد
-    //
-    // فیدبک دوم ۱۴۰۵/۰۷/۰۱ — وقتی چند محصول کاندید داریم، باید caption قبل از ساخت uiBlock
-    // صدا زده بشه تا بر اساس خودِ پاسخ، فقط محصولات واقعاً مرتبط کارتشون نشون داده بشه (قبلاً
-    // uiBlock از روی همه‌ی products ساخته می‌شد، مستقل از اینکه پاسخ متنی فقط یکیشون رو توصیه
-    // کرده بود — مثلاً «برای فرانت‌اند React بهتره» ولی کارت دوره‌ی پایتون هم زیرش می‌موند)
-    const relevantProducts =
-      products.length > 1
-        ? await (async () => {
-            const { text, relevantProductIds } =
-              await this.captionWithRelevance(
+
+    // docs/PRD-sales-agent-response-strategy-ab.md بخش ۱، جدول Track A — جدول تصمیمی که
+    // docs/PRD-sales-agent-implicit-need-detection.md فاز ۱ محاسبه می‌کرد ولی تا امروز هیچ‌جا
+    // مصرف نمی‌شد (eval واقعی مورد t6 را نشان داد: pitchReadiness=NEEDS_CLARIFICATION می‌گرفت
+    // ولی doBrowse بدون پرسیدن سوال مستقیم یک محصول نشان می‌داد). فقط برای مکالمه‌های
+    // responseStrategy=RULE_BASED فعال است — SIMPLE_AGENT تا فاز ۲ (ساخت Track B) رفتار قدیمی
+    // را حفظ می‌کند تا مقایسه‌ی دو مسیر منصفانه بماند.
+    const useRuleBasedDecisionTable =
+      conversation.responseStrategy === 'RULE_BASED';
+    if (
+      useRuleBasedDecisionTable &&
+      parsed.needType &&
+      parsed.needType !== 'NONE' &&
+      parsed.pitchReadiness === 'NEEDS_CLARIFICATION'
+    ) {
+      const clarifyText = await this.askClarifyingQuestion(
+        facts,
+        conversation,
+        parsed.implicitNeedSummary ?? customerMessage ?? '',
+        isFirstReply,
+      );
+      const finalClarifyText = isFirstReply
+        ? `${await this.buildGreeting(conversation)}\n\n${clarifyText}`
+        : clarifyText;
+      await this.logReply(
+        conversation,
+        finalClarifyText,
+        { type: 'NONE' },
+        undefined,
+        {
+          intent: parsed.intent,
+          handler: 'doBrowse',
+          factsOrPrompt: facts,
+          model: resolveModel(conversation.abVariant),
+        },
+      );
+      return {
+        reply: finalClarifyText,
+        uiBlocks: [],
+        state: conversation.currentState,
+      };
+    }
+    // Track B — docs/PRD-sales-agent-response-strategy-ab.md بخش ۱. برخلاف Track A، هیچ سیگنال
+    // از‌پیش‌محاسبه‌شده‌ای به agent داده نمی‌شود؛ خودش با ابزار تصمیم می‌گیرد سوال بپرسد یا
+    // محصول معرفی کند. relevantProductIds خالی یعنی تصمیم گرفت سوال روشن‌کننده بپرسد — هم‌ارز
+    // شاخه‌ی CLARIFY بالا، فقط این‌بار خودِ agent تشخیص داده، نه جدول از‌پیش‌نوشته‌شده
+    let relevantProducts: { text: string; products: typeof products };
+    if (conversation.responseStrategy === 'SIMPLE_AGENT') {
+      const { text, relevantProductIds } = await this.agentCaptionWithRelevance(
+        facts,
+        conversation,
+        products.map((p) => p.id),
+        customerMessage,
+        isFirstReply,
+      );
+      if (relevantProductIds.length === 0) {
+        const finalClarifyText = isFirstReply
+          ? `${await this.buildGreeting(conversation)}\n\n${text}`
+          : text;
+        await this.logReply(
+          conversation,
+          finalClarifyText,
+          { type: 'NONE' },
+          undefined,
+          {
+            intent: parsed.intent,
+            handler: 'doBrowse',
+            factsOrPrompt: facts,
+            model: resolveModel(conversation.abVariant),
+          },
+        );
+        return {
+          reply: finalClarifyText,
+          uiBlocks: [],
+          state: conversation.currentState,
+        };
+      }
+      const filtered = products.filter((p) =>
+        relevantProductIds.includes(p.id),
+      );
+      relevantProducts = {
+        text,
+        products: filtered.length > 0 ? filtered : products,
+      };
+    } else {
+      // bridgeAndPitch (جدول Track A) — هدف implicit مرتبط با فروشگاه و آماده‌ی پیشنهاد است؛
+      // قبل از معرفی محصول، آن هدف تایید و با یک پل علّی کوتاه به محصول وصل می‌شود
+      const bridgeNeedSummary =
+        useRuleBasedDecisionTable &&
+        parsed.needType === 'IMPLICIT' &&
+        parsed.storeRelevance === 'RELEVANT' &&
+        parsed.pitchReadiness === 'READY'
+          ? parsed.implicitNeedSummary
+          : null;
+
+      // فیدبک کاربر ۱۴۰۵/۰۷/۰۱ — سوال واقعی مشتری (مثلاً «سرفصل‌هاش چیه؟») را هم به caption
+      // می‌دهیم تا به‌جای یک معرفی کلی، مستقیم همان سوال را از facts بالا جواب بدهد
+      //
+      // فیدبک دوم ۱۴۰۵/۰۷/۰۱ — وقتی چند محصول کاندید داریم، باید caption قبل از ساخت uiBlock
+      // صدا زده بشه تا بر اساس خودِ پاسخ، فقط محصولات واقعاً مرتبط کارتشون نشون داده بشه (قبلاً
+      // uiBlock از روی همه‌ی products ساخته می‌شد، مستقل از اینکه پاسخ متنی فقط یکیشون رو توصیه
+      // کرده بود — مثلاً «برای فرانت‌اند React بهتره» ولی کارت دوره‌ی پایتون هم زیرش می‌موند)
+      relevantProducts =
+        products.length > 1
+          ? await (async () => {
+              const { text, relevantProductIds } =
+                await this.captionWithRelevance(
+                  facts,
+                  conversation,
+                  products.map((p) => p.id),
+                  customerMessage,
+                  isFirstReply,
+                  bridgeNeedSummary,
+                );
+              const filtered = products.filter((p) =>
+                relevantProductIds.includes(p.id),
+              );
+              return {
+                text,
+                products: filtered.length > 0 ? filtered : products,
+              };
+            })()
+          : {
+              text: await this.caption(
                 facts,
                 conversation,
-                products.map((p) => p.id),
                 customerMessage,
                 isFirstReply,
-              );
-            const filtered = products.filter((p) =>
-              relevantProductIds.includes(p.id),
-            );
-            return {
-              text,
-              products: filtered.length > 0 ? filtered : products,
+                bridgeNeedSummary,
+              ),
+              products,
             };
-          })()
-        : {
-            text: await this.caption(
-              facts,
-              conversation,
-              customerMessage,
-              isFirstReply,
-            ),
-            products,
-          };
+    }
     // دفاع دوم، مستقل از پرامپت — سقف ۳ محصول نمایشی، حتی اگر مدل با وجود دستور پرامپت
     // بیشتر برگرداند (docs/PRD-product-display-focus-and-variations.md §۱)
     relevantProducts.products = relevantProducts.products.slice(0, 3);

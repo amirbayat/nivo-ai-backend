@@ -2355,6 +2355,10 @@ model SalesConversation {
   // مدل در برابر انتخاب «وویس بفرستیم یا نه»)؛ یک‌بار در ساخت مکالمه تصادفی تعیین می‌شود.
   // وقتی OFF است، logReply اصلاً reserveVoiceSlot را صدا نمی‌زند — این گروه هیچ وویسی نمی‌بیند.
   voiceVariant                      VoiceVariant      @default(ON)
+  // docs/PRD-sales-agent-response-strategy-ab.md — Track A (قانون‌محور) در برابر Track B
+  // (agent ساده) برای تصمیم «چی بگو/کدام محصول را نشان بده» در doBrowse؛ یک‌بار در ساخت
+  // مکالمه تصادفی (۵۰/۵۰) تعیین می‌شود و تا آخر عمر مکالمه ثابت می‌ماند (هم‌الگوی voiceVariant)
+  responseStrategy                  ResponseStrategy  @default(RULE_BASED)
   // docs/PRD-seller-credit-billing.md بخش «تصمیم معماری» — یک‌بار در ساخت مکالمه (startChat
   // وب / /start تلگرام) تعیین می‌شود و تا آخر عمر مکالمه ثابت می‌ماند (بر خلاف abVariant که
   // فقط انتخاب مدل است، این تعیین می‌کند اصلاً AI صدا زده شود یا نه)
@@ -2390,6 +2394,13 @@ enum BillingMode {
 enum VoiceVariant {
   ON
   OFF
+}
+
+// docs/PRD-sales-agent-response-strategy-ab.md — دو پیاده‌سازی مستقل برای همون یک تصمیم
+// (doBrowse/captionWithRelevance)، برای مقایسه‌ی منصفانه‌ی دقت/توکن/تاخیر
+enum ResponseStrategy {
+  RULE_BASED
+  SIMPLE_AGENT
 }
 
 // یک ردیف به‌ازای هر فراخوان واقعی AI (متن/وویس/ASR) + هر شارژ اعتبار — لاگ مصرف به تفکیک

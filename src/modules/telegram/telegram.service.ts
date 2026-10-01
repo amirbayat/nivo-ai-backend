@@ -15,7 +15,11 @@ import {
 } from '../sales-agent/conversation-engine.service';
 import { CreditService } from '../sales-agent/credit.service';
 import { StoreService } from '../store/store.service';
-import { pickVariant, pickVoiceVariant } from '../sales-agent/model-variants';
+import {
+  pickVariant,
+  pickVoiceVariant,
+  pickResponseStrategy,
+} from '../sales-agent/model-variants';
 import { buildAsrVocabHint } from '../sales-agent/asr-vocab-hint';
 import { buildHistoryEntry } from '../sales-agent/conversation-history.util';
 import type {
@@ -276,6 +280,7 @@ export class TelegramService {
           customerId: existing.id,
           abVariant: pickVariant(),
           voiceVariant: pickVoiceVariant(),
+          responseStrategy: pickResponseStrategy(),
           billingMode,
         },
       });
@@ -296,6 +301,7 @@ export class TelegramService {
               storeId: store.id,
               abVariant: pickVariant(),
               voiceVariant: pickVoiceVariant(),
+              responseStrategy: pickResponseStrategy(),
               billingMode,
             },
           },

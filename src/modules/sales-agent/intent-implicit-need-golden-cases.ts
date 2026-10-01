@@ -1,18 +1,18 @@
 import type { ConversationState } from '@prisma/client';
 import type { BuyerNeedTag, ParsedIntent } from './sales-agent.types';
 
-// docs/PRD-sales-agent-implicit-need-detection.md بخش ۵ — فاز ۰: این eval-set قبل از هر
-// تغییری در buildIntentClassificationPrompt/intentClassificationSchema ساخته شده تا یک
-// baseline واقعی از رفتار «فعلی» (بدون needType/storeRelevance/pitchReadiness) ثبت شود. همان
-// الگوی INTENT_GOLDEN_CASES (intent-golden-cases.ts)، با یک تفاوت مهم: چون طبقه‌بندی هنوز به
-// context فروشگاه/کاتالوگ دسترسی ندارد (نه امروز، نه در فاز ۱ که فقط فیلدهای Zod را اضافه
-// می‌کند، نه پرامپت را به یک فروشگاه خاص وصل می‌کند)، فیلد `storeContext` فقط برای مستندسازی و
-// بازبینی دستی نتایج است — توسط runImplicitNeedGoldenSet فعلاً به پرامپت تزریق نمی‌شود.
+// docs/PRD-sales-agent-implicit-need-detection.md بخش ۵ — فاز ۰ این eval-set را (قبل از هر
+// تغییری در buildIntentClassificationPrompt/intentClassificationSchema) ساخت تا baseline واقعیِ
+// رفتار «قبلی» ثبت شود. از فاز ۱ به بعد، همان فایل به‌روزرسانی شده: schema واقعی الان
+// needType/implicitNeedSummary/storeRelevance/pitchReadiness را برمی‌گرداند، و
+// buildIntentClassificationPrompt یک پارامتر دوم (storeContextSummary) می‌گیرد — پس
+// `storeContext` پایین دیگر فقط مستندسازی نیست، واقعاً توسط runImplicitNeedGoldenSet به پرامپت
+// تزریق می‌شود (همان الگوی INTENT_GOLDEN_CASES، با این فیلد/گریدینگ‌های اضافه).
 //
-// expectedIntent/expectedBuyerNeeds پاسخ «درست»ِ نهایی (هدف) را نشان می‌دهند، نه الزاماً چیزی که
-// سیستم فعلی امروز تولید می‌کند — دقیقاً مثل INTENT_GOLDEN_CASES. انتظار صریح: روی baseline فاز
-// ۰، بیشتر موارد دسته‌ی «هدف ضمنی مرتبط» و «هدف نامرتبط» fail می‌شوند (همان باگ ریشه‌ای سند)؛
-// هدف فاز ۰ ثبت دقیق همین شکست‌هاست، نه رفع آن‌ها.
+// expectedIntent/expectedBuyerNeeds/expectedNeedType/... پاسخ «درست»ِ نهایی (هدف) را نشان
+// می‌دهند، نه الزاماً چیزی که سیستم امروز تولید می‌کند. برای مواردی که قضاوت صحیحش ذاتاً مبهم/
+// سلیقه‌ای است (مثلاً PURE_INFO_REQUEST)، عمداً expectedNeedType/... ست نشده تا یک fail کاذب
+// روی یک قضاوت غیرقطعی تولید نشود — فقط expectedIntent/expectedBuyerNeeds (دقیق‌تر) چک می‌شوند.
 export type ImplicitNeedCategory =
   | 'RELEVANT_IMPLICIT_GOAL' // هدف ضمنی مرتبط
   | 'EXPLICIT_REQUEST' // درخواست صریح (گروه کنترل — باید همین الان هم درست کار کند)
@@ -28,13 +28,17 @@ export interface ImplicitNeedGoldenCase {
   category: ImplicitNeedCategory;
   message: string;
   state?: ConversationState;
-  // فقط مستندسازی/بازبینی دستی — امروز به پرامپت داده نمی‌شود (بالا را ببین)
+  // جمله‌ی کوتاه فارسی درباره‌ی اینکه فروشگاه چه می‌فروشد — مستقیماً به‌عنوان
+  // storeContextSummary به buildIntentClassificationPrompt داده می‌شود
   storeContext?: string;
   expectedIntent: ParsedIntent['intent'];
   expectedBuyerNeeds?: BuyerNeedTag[];
-  // اگر true باشد یعنی سنجش کامل این مورد وابسته به چیزی است که هنوز وجود ندارد (مثلاً
-  // storeRelevance/pitchReadiness فاز ۱ یا تاریخچه‌ی چندنوبتی مکالمه) — runImplicitNeedGoldenSet
-  // این را در نتیجه منعکس می‌کند تا با «واقعاً fail شد» قاطی نشود
+  expectedNeedType?: NonNullable<ParsedIntent['needType']>;
+  expectedStoreRelevance?: NonNullable<ParsedIntent['storeRelevance']>;
+  expectedPitchReadiness?: NonNullable<ParsedIntent['pitchReadiness']>;
+  // اگر true باشد یعنی سنجش کامل این مورد وابسته به چیزی است که هنوز وجود ندارد (مثلاً کاتالوگ
+  // واقعی فروشگاه برای fit-check دقیق — فاز ۴.۲ — یا تاریخچه‌ی چندنوبتی مکالمه که
+  // runImplicitNeedGoldenSet مثل runIntentGoldenSet فقط یک پیام مجزا تست می‌کند، نه کل مکالمه)
   notFullyMeasurableYet?: boolean;
   notes: string;
 }
@@ -45,8 +49,11 @@ export const IMPLICIT_NEED_GOLDEN_CASES: ImplicitNeedGoldenCase[] = [
     id: 'n1',
     category: 'RELEVANT_IMPLICIT_GOAL',
     message: 'میخوام برم فرانت اند دولوپر بشم',
-    storeContext: 'فروشگاه آموزش React/فرانت‌اند می‌فروشد',
+    storeContext: 'این فروشگاه آموزش React/فرانت‌اند می‌فروشد',
     expectedIntent: 'BROWSE',
+    expectedNeedType: 'IMPLICIT',
+    expectedStoreRelevance: 'RELEVANT',
+    expectedPitchReadiness: 'READY',
     notes:
       'نمونه‌ی ریشه‌ای این سند — نباید OFF_TOPIC_OR_SPAM بگیرد و نباید به پاسخ عمومی «متوجه نشدم» ختم شود',
   },
@@ -54,17 +61,21 @@ export const IMPLICIT_NEED_GOLDEN_CASES: ImplicitNeedGoldenCase[] = [
     id: 'n2',
     category: 'RELEVANT_IMPLICIT_GOAL',
     message: 'استخدامی جدیدا سخته، میخوام رزومه‌م قوی‌تر شه',
-    storeContext: 'فروشگاه دوره‌های برنامه‌نویسی/مهارت‌آموزی می‌فروشد',
+    storeContext: 'این فروشگاه دوره‌های برنامه‌نویسی/مهارت‌آموزی می‌فروشد',
     expectedIntent: 'BROWSE',
+    expectedNeedType: 'IMPLICIT',
+    expectedStoreRelevance: 'RELEVANT',
     notes: 'هدف شغلی ضمنی، بدون اسم بردن از هیچ محصول/دوره‌ی خاص',
   },
   {
     id: 'n3',
     category: 'RELEVANT_IMPLICIT_GOAL',
     message: 'پوست صورتم این اواخر خیلی جوش میزنه، چیکار کنم خوب شه',
-    storeContext: 'فروشگاه لوازم آرایشی/مراقبت پوست می‌فروشد',
+    storeContext: 'این فروشگاه لوازم آرایشی/مراقبت پوست می‌فروشد',
     expectedIntent: 'BROWSE',
     expectedBuyerNeeds: ['PRODUCT_RECOMMENDATION'],
+    expectedNeedType: 'IMPLICIT',
+    expectedStoreRelevance: 'RELEVANT',
     notes: 'نیاز ضمنی در حوزه‌ی غیرآموزشی هم باید همین رفتار را بگیرد',
   },
 
@@ -74,6 +85,7 @@ export const IMPLICIT_NEED_GOLDEN_CASES: ImplicitNeedGoldenCase[] = [
     category: 'EXPLICIT_REQUEST',
     message: 'یه دوره React میخوام',
     expectedIntent: 'BROWSE',
+    expectedNeedType: 'EXPLICIT',
     notes:
       'مسیر فعلی — نباید با تغییرات فاز ۱ به بعد خراب شود (regression guard)',
   },
@@ -82,6 +94,7 @@ export const IMPLICIT_NEED_GOLDEN_CASES: ImplicitNeedGoldenCase[] = [
     category: 'EXPLICIT_REQUEST',
     message: 'همین کرم مرطوب‌کننده رو میخوام بخرم',
     expectedIntent: 'ADD_TO_CART',
+    expectedNeedType: 'EXPLICIT',
     notes: 'درخواست صریح با نام محصول — باید دست‌نخورده بماند',
   },
 
@@ -90,19 +103,23 @@ export const IMPLICIT_NEED_GOLDEN_CASES: ImplicitNeedGoldenCase[] = [
     id: 'n6',
     category: 'AMBIGUOUS_GOAL',
     message: 'میخوام برنامه‌نویسی یاد بگیرم',
-    storeContext: 'فروشگاه چند دوره‌ی مختلف (پایتون، React، دیتا) دارد',
+    storeContext:
+      'این فروشگاه چند دوره‌ی خیلی متفاوت (پایتون، React، دیتا) دارد',
     expectedIntent: 'BROWSE',
-    notFullyMeasurableYet: true,
+    expectedNeedType: 'IMPLICIT',
+    expectedStoreRelevance: 'RELEVANT',
+    expectedPitchReadiness: 'NEEDS_CLARIFICATION',
     notes:
-      'رفتار ایده‌آل یک سوال مشخص‌کننده است (کدام زمینه؟)؛ امروز intent=BROWSE قابل قبول است ولی «سوال هدفمند پرسیدن» با schema فعلی قابل سنجش نیست (نیازمند pitchReadiness فاز ۱)',
+      'رفتار ایده‌آل یک سوال مشخص‌کننده است (کدام زمینه؟) نه حدس کورکورانه — از فاز ۱ با pitchReadiness قابل سنجش شد؛ استفاده‌ی واقعی از این سیگنال برای پرسیدن سوال هنوز فاز ۴ (پل‌زدن در پاسخ‌دهی) است',
   },
   {
     id: 'n7',
     category: 'AMBIGUOUS_GOAL',
     message: 'یه چیزی میخوام بگیرم ولی نمیدونم چی',
     expectedIntent: 'BROWSE',
-    notFullyMeasurableYet: true,
-    notes: 'مشابه n6 — هدف هست ولی خیلی کلی',
+    expectedNeedType: 'IMPLICIT',
+    notes:
+      'مشابه n6 — هدف هست ولی خیلی کلی؛ بدون storeContext مشخص، storeRelevance را چک نمی‌کنیم',
   },
 
   // ── هدف نامرتبط ───────────────────────────────────────────────────────────
@@ -110,9 +127,12 @@ export const IMPLICIT_NEED_GOLDEN_CASES: ImplicitNeedGoldenCase[] = [
     id: 'n8',
     category: 'IRRELEVANT_GOAL',
     message: 'میخوام مهاجرت کنم',
-    storeContext: 'فروشگاه دوره‌ی React می‌فروشد',
+    storeContext: 'این فروشگاه فقط دوره‌ی React می‌فروشد',
     expectedIntent: 'UNCLEAR',
     expectedBuyerNeeds: [],
+    expectedNeedType: 'IMPLICIT',
+    expectedStoreRelevance: 'NOT_RELEVANT',
+    expectedPitchReadiness: 'NOT_READY',
     notes:
       'هدف شخصیِ واقعی ولی کاملاً نامرتبط با فروشگاه — نباید OFF_TOPIC_OR_SPAM بگیرد (آن تگ برای اسپم/تبلیغ است، نه هر پیام نامرتبط)؛ نباید پیشنهاد اجباری بدهد',
   },
@@ -122,6 +142,8 @@ export const IMPLICIT_NEED_GOLDEN_CASES: ImplicitNeedGoldenCase[] = [
     message: 'امشب فوتبال رو دیدی؟ چه بازی‌ای بود',
     expectedIntent: 'UNCLEAR',
     expectedBuyerNeeds: [],
+    expectedNeedType: 'NONE',
+    expectedStoreRelevance: 'NOT_RELEVANT',
     notes: 'گپ عادی نامرتبط — نه اسپم، نه نیاز خرید',
   },
 
@@ -131,11 +153,11 @@ export const IMPLICIT_NEED_GOLDEN_CASES: ImplicitNeedGoldenCase[] = [
     category: 'MISMATCHED_PRODUCT',
     message: 'میخوام فرانت‌اند بشم',
     storeContext:
-      'فروشگاه فقط دوره‌ی پایتون/بک‌اند دارد (هیچ دوره‌ی فرانت‌اندی ندارد)',
+      'این فروشگاه فقط دوره‌ی پایتون/بک‌اند دارد (هیچ دوره‌ی فرانت‌اندی ندارد)',
     expectedIntent: 'BROWSE',
     notFullyMeasurableYet: true,
     notes:
-      'باید fit واقعی بسنجد نه فقط ارتباط کلی حوزه («آموزش برنامه‌نویسی»)؛ سنجش واقعی نیازمند کاتالوگ واقعی فروشگاه در پرامپت است (فاز ۴.۲) — امروز قابل اجرا نیست، فقط برای مستندسازی اینجاست',
+      'storeContext اینجا عمداً دقیق‌تر از چیزی است که در تولید واقعی در اختیار طبقه‌بندی قرار می‌گیرد (فقط store.category/brandIntro کلی، نه فهرست دقیق «چه دوره‌ای نداریم») — سنجش واقعی fit نیازمند کاتالوگ واقعی فروشگاه در خودِ doBrowse است (فاز ۴.۲)، نه این فراخوان طبقه‌بندی',
   },
 
   // ── درخواست اطلاعات صرف ──────────────────────────────────────────────────
@@ -183,6 +205,8 @@ export const IMPLICIT_NEED_GOLDEN_CASES: ImplicitNeedGoldenCase[] = [
     message: 'امروز حوصله ندارم',
     expectedIntent: 'UNCLEAR',
     expectedBuyerNeeds: [],
+    expectedNeedType: 'NONE',
+    expectedStoreRelevance: 'NOT_RELEVANT',
     notes: 'نباید فروش اجباری/پیشنهاد بی‌ربط بدهد؛ مکالمه‌ی عادی کافی است',
   },
   {
@@ -191,6 +215,8 @@ export const IMPLICIT_NEED_GOLDEN_CASES: ImplicitNeedGoldenCase[] = [
     message: 'سلام خوبی؟ چه خبر',
     expectedIntent: 'UNCLEAR',
     expectedBuyerNeeds: [],
+    expectedNeedType: 'NONE',
+    expectedStoreRelevance: 'NOT_RELEVANT',
     notes: 'احوال‌پرسی صرف — نه BROWSE، نه OFF_TOPIC_OR_SPAM',
   },
 ];

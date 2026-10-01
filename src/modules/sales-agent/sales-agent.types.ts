@@ -134,6 +134,13 @@ export type ParsedIntent = {
   // وقتی پیام واضح یک نیاز دارد ولی با هیچ‌کدام از BuyerNeedTag جور نیست — برچسب آزاد مدل،
   // برای فیچر کشف intent های کاور نشده (همان سند، بخش ۵)
   unmatchedBuyerNeed?: string | null;
+  // docs/PRD-sales-agent-implicit-need-detection.md بخش ۴.۱ — سه سیگنال مستقل، جدا از intent/
+  // buyerNeeds بالا. فقط وقتی از خود مدل واقعاً خواسته شده پر می‌شوند؛ در fallback نهایی
+  // ({intent:'UNCLEAR'}) خالی می‌مانند — دقیقاً مثل intentConfidence، به همین دلیل اختیاری‌اند
+  needType?: 'EXPLICIT' | 'IMPLICIT' | 'NONE';
+  implicitNeedSummary?: string | null;
+  storeRelevance?: 'RELEVANT' | 'POSSIBLY_RELEVANT' | 'NOT_RELEVANT';
+  pitchReadiness?: 'READY' | 'NEEDS_CLARIFICATION' | 'NOT_READY';
 };
 
 export type EngineResult = {

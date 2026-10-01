@@ -16,7 +16,11 @@ import {
 import { AiProviderService } from '../../common/services/ai-provider.service';
 import { ConversationEngineService } from './conversation-engine.service';
 import { CreditService } from './credit.service';
-import { pickVariant, pickVoiceVariant } from './model-variants';
+import {
+  pickVariant,
+  pickVoiceVariant,
+  pickResponseStrategy,
+} from './model-variants';
 import { buildAsrVocabHint } from './asr-vocab-hint';
 import {
   buildHistoryEntry,
@@ -60,6 +64,7 @@ export class SalesAgentService {
             storeId: store.id,
             abVariant: pickVariant(),
             voiceVariant: pickVoiceVariant(),
+            responseStrategy: pickResponseStrategy(),
             billingMode,
           },
         },
@@ -79,6 +84,7 @@ export class SalesAgentService {
       conversationId,
       sessionToken,
       storeName: store.name,
+      responseStrategy: customer.salesConversations[0].responseStrategy,
       ...(initial
         ? {
             initialReply: initial.reply,
@@ -110,6 +116,7 @@ export class SalesAgentService {
           customerId: conversation.customerId,
           abVariant: pickVariant(),
           voiceVariant: pickVoiceVariant(),
+          responseStrategy: pickResponseStrategy(),
           billingMode,
         },
       });
@@ -125,6 +132,7 @@ export class SalesAgentService {
       conversationId: fresh.id,
       sessionToken,
       storeName: conversation.store.name,
+      responseStrategy: fresh.responseStrategy,
       ...(initial
         ? {
             initialReply: initial.reply,
@@ -398,7 +406,24 @@ export class SalesAgentService {
     return {
       state: conversation.currentState,
       storeName: conversation.store.name,
+      responseStrategy: conversation.responseStrategy,
       events,
     };
+  }
+
+  // docs/PRD-sales-agent-response-strategy-ab.md بخش ۹ — سوییچ دستی خریدار (فعلاً فقط برای
+  // تست زنده‌ی کاربر، نه یک قابلیت نهایی محصول) بین Track A/B روی همین مکالمه؛ بدون migration
+  // چون responseStrategy از قبل روی SalesConversation هست
+  async setResponseStrategy(
+    conversationId: string,
+    sessionToken: string,
+    responseStrategy: 'RULE_BASED' | 'SIMPLE_AGENT',
+  ) {
+    await this.loadOwned(conversationId, sessionToken);
+    await this.prisma.salesConversation.update({
+      where: { id: conversationId },
+      data: { responseStrategy },
+    });
+    return { responseStrategy };
   }
 }

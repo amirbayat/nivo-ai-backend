@@ -1,6 +1,7 @@
-// docs/PRD-sales-agent-implicit-need-detection.md بخش ۵ (فاز ۰) — اجرای مستقل (بدون بوت Nest
-// کامل/Docker) تا baseline واقعیِ سیستم فعلی (schema/prompt دست‌نخورده) قبل از هر تغییری ثبت
-// شود. مثل بقیه‌ی scripts/manual/*.ts، مستقیم از src ایمپورت می‌کند، نه از طریق DI.
+// docs/PRD-sales-agent-implicit-need-detection.md بخش ۵ — اجرای مستقل (بدون بوت Nest کامل/
+// Docker) همان eval-set که SalesAgentQaService.runImplicitNeedGoldenSet اجرا می‌کند؛ برای
+// چک سریع از خط فرمان، هم baseline فاز ۰ (قبل از فاز ۱) هم بعد از هر تغییر در schema/پرامپت.
+// مثل بقیه‌ی scripts/manual/*.ts، مستقیم از src ایمپورت می‌کند، نه از طریق DI.
 //
 // اجرا: npx ts-node --transpile-only scripts/manual/run-implicit-need-baseline.ts [variantKey]
 import { config as loadEnv } from 'dotenv';
@@ -46,9 +47,7 @@ async function main() {
   const model = resolveModel(variantKey);
   const aiProvider = new AiProviderService(fakeConfig);
 
-  console.log(
-    `\n== baseline فاز ۰ — فروشگاه فرضی، مدل: ${variantKey} (${model}) ==\n`,
-  );
+  console.log(`\n== eval نیاز ضمنی — مدل: ${variantKey} (${model}) ==\n`);
 
   type Row = {
     id: string;
@@ -58,6 +57,13 @@ async function main() {
     actualIntent?: string;
     actualBuyerNeeds: string[];
     unmatchedBuyerNeed?: string;
+    expectedNeedType?: string;
+    actualNeedType?: string;
+    implicitNeedSummary?: string;
+    expectedStoreRelevance?: string;
+    actualStoreRelevance?: string;
+    expectedPitchReadiness?: string;
+    actualPitchReadiness?: string;
     passed: boolean;
     falsePositiveSpam: boolean;
     notFullyMeasurableYet?: boolean;
@@ -72,7 +78,10 @@ async function main() {
           supportsStructuredOutputs: true,
         })(model),
         schema: intentClassificationSchema,
-        system: buildIntentClassificationPrompt(goldenCase.state ?? 'BROWSING'),
+        system: buildIntentClassificationPrompt(
+          goldenCase.state ?? 'BROWSING',
+          goldenCase.storeContext,
+        ),
         prompt: goldenCase.message,
       });
       const actualBuyerNeeds = object.buyerNeeds ?? [];
@@ -81,6 +90,15 @@ async function main() {
         goldenCase.expectedBuyerNeeds.every((t) =>
           actualBuyerNeeds.includes(t),
         );
+      const needTypeOk =
+        !goldenCase.expectedNeedType ||
+        object.needType === goldenCase.expectedNeedType;
+      const storeRelevanceOk =
+        !goldenCase.expectedStoreRelevance ||
+        object.storeRelevance === goldenCase.expectedStoreRelevance;
+      const pitchReadinessOk =
+        !goldenCase.expectedPitchReadiness ||
+        object.pitchReadiness === goldenCase.expectedPitchReadiness;
       const falsePositiveSpam =
         FALSE_POSITIVE_RISK_CATEGORIES.includes(goldenCase.category) &&
         actualBuyerNeeds.includes('OFF_TOPIC_OR_SPAM');
@@ -92,7 +110,19 @@ async function main() {
         actualIntent: object.intent,
         actualBuyerNeeds,
         unmatchedBuyerNeed: object.unmatchedBuyerNeed ?? undefined,
-        passed: object.intent === goldenCase.expectedIntent && buyerNeedsOk,
+        expectedNeedType: goldenCase.expectedNeedType,
+        actualNeedType: object.needType,
+        implicitNeedSummary: object.implicitNeedSummary ?? undefined,
+        expectedStoreRelevance: goldenCase.expectedStoreRelevance,
+        actualStoreRelevance: object.storeRelevance,
+        expectedPitchReadiness: goldenCase.expectedPitchReadiness,
+        actualPitchReadiness: object.pitchReadiness,
+        passed:
+          object.intent === goldenCase.expectedIntent &&
+          buyerNeedsOk &&
+          needTypeOk &&
+          storeRelevanceOk &&
+          pitchReadinessOk,
         falsePositiveSpam,
         notFullyMeasurableYet: goldenCase.notFullyMeasurableYet,
       });
@@ -115,9 +145,11 @@ async function main() {
     const mark = r.error ? '💥' : r.passed ? '✅' : '❌';
     const spamFlag = r.falsePositiveSpam ? '  ⚠️ FALSE-POSITIVE-SPAM' : '';
     const notMeasurable = r.notFullyMeasurableYet ? '  (نیازمند فاز بعد)' : '';
+    const signals = `needType=${r.actualNeedType ?? '—'}${r.expectedNeedType ? `(expected=${r.expectedNeedType})` : ''} storeRelevance=${r.actualStoreRelevance ?? '—'}${r.expectedStoreRelevance ? `(expected=${r.expectedStoreRelevance})` : ''} pitchReadiness=${r.actualPitchReadiness ?? '—'}${r.expectedPitchReadiness ? `(expected=${r.expectedPitchReadiness})` : ''}`;
     console.log(
       `${mark} [${r.category}] ${r.id} — "${r.message}"\n` +
-        `   expected=${r.expectedIntent}  actual=${r.actualIntent ?? r.error}  buyerNeeds=${r.actualBuyerNeeds.join(',') || '—'}${r.unmatchedBuyerNeed ? `  unmatched=${r.unmatchedBuyerNeed}` : ''}${spamFlag}${notMeasurable}`,
+        `   expected=${r.expectedIntent}  actual=${r.actualIntent ?? r.error}  buyerNeeds=${r.actualBuyerNeeds.join(',') || '—'}${r.unmatchedBuyerNeed ? `  unmatched=${r.unmatchedBuyerNeed}` : ''}${spamFlag}${notMeasurable}\n` +
+        `   ${signals}${r.implicitNeedSummary ? `  summary="${r.implicitNeedSummary}"` : ''}`,
     );
   }
 
@@ -152,6 +184,6 @@ async function main() {
 main()
   .then(() => process.exit(0))
   .catch((err) => {
-    console.error('اجرای baseline شکست خورد:', err);
+    console.error('اجرای eval شکست خورد:', err);
     process.exit(1);
   });

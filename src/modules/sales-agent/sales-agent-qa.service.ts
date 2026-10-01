@@ -46,12 +46,21 @@ export interface ImplicitNeedGoldenResult {
   id: string;
   category: string;
   message: string;
+  storeContext?: string;
   expectedIntent: string;
   actualIntent?: string;
   intentConfidence?: string;
   expectedBuyerNeeds?: string[];
   actualBuyerNeeds?: string[];
   unmatchedBuyerNeed?: string;
+  // docs/PRD-sales-agent-implicit-need-detection.md بخش ۴.۱ — سه سیگنال جدید فاز ۱
+  expectedNeedType?: string;
+  actualNeedType?: string;
+  implicitNeedSummary?: string;
+  expectedStoreRelevance?: string;
+  actualStoreRelevance?: string;
+  expectedPitchReadiness?: string;
+  actualPitchReadiness?: string;
   passed: boolean;
   notFullyMeasurableYet?: boolean;
   error?: string;
@@ -163,8 +172,11 @@ export class SalesAgentQaService {
 
   // docs/PRD-buyer-purchase-intent-taxonomy.md بخش ۵.۴ — همان schema/prompt واقعی
   // callParseIntent (intent-classification.schema.ts)، بدون هیچ وابستگی به یک فروشگاه/محصول
-  // واقعی (بر خلاف runGoldenSet بالا که caption تولید می‌کند) — چون طبقه‌بندی intent اصلاً به
-  // محصولات/پروفایل فروشگاه وابسته نیست، فقط به متن پیام و وضعیت مکالمه
+  // واقعی (بر خلاف runGoldenSet بالا که caption تولید می‌کند) — چون INTENT_GOLDEN_CASES
+  // (برخلاف IMPLICIT_NEED_GOLDEN_CASES پایین) اصلاً storeContext ندارد، پس به‌جایش فقط به متن
+  // پیام و وضعیت مکالمه نیاز دارد. از فاز ۱ سند implicit-need-detection، buildIntentClassificationPrompt
+  // یک storeContextSummary اختیاری هم می‌گیرد (برای تشخیص storeRelevance) — این‌جا undefined
+  // پاس داده می‌شود
   async runIntentGoldenSet(variantKey: string): Promise<IntentGoldenResult[]> {
     const model = resolveModel(variantKey);
     const results: IntentGoldenResult[] = [];
@@ -232,6 +244,7 @@ export class SalesAgentQaService {
           schema: intentClassificationSchema,
           system: buildIntentClassificationPrompt(
             goldenCase.state ?? 'BROWSING',
+            goldenCase.storeContext,
           ),
           prompt: goldenCase.message,
         });
@@ -241,17 +254,39 @@ export class SalesAgentQaService {
           goldenCase.expectedBuyerNeeds.every((t) =>
             actualBuyerNeeds.includes(t),
           );
+        const needTypeOk =
+          !goldenCase.expectedNeedType ||
+          object.needType === goldenCase.expectedNeedType;
+        const storeRelevanceOk =
+          !goldenCase.expectedStoreRelevance ||
+          object.storeRelevance === goldenCase.expectedStoreRelevance;
+        const pitchReadinessOk =
+          !goldenCase.expectedPitchReadiness ||
+          object.pitchReadiness === goldenCase.expectedPitchReadiness;
         results.push({
           id: goldenCase.id,
           category: goldenCase.category,
           message: goldenCase.message,
+          storeContext: goldenCase.storeContext,
           expectedIntent: goldenCase.expectedIntent,
           actualIntent: object.intent,
           intentConfidence: object.intentConfidence,
           expectedBuyerNeeds: goldenCase.expectedBuyerNeeds,
           actualBuyerNeeds,
           unmatchedBuyerNeed: object.unmatchedBuyerNeed ?? undefined,
-          passed: object.intent === goldenCase.expectedIntent && buyerNeedsOk,
+          expectedNeedType: goldenCase.expectedNeedType,
+          actualNeedType: object.needType,
+          implicitNeedSummary: object.implicitNeedSummary ?? undefined,
+          expectedStoreRelevance: goldenCase.expectedStoreRelevance,
+          actualStoreRelevance: object.storeRelevance,
+          expectedPitchReadiness: goldenCase.expectedPitchReadiness,
+          actualPitchReadiness: object.pitchReadiness,
+          passed:
+            object.intent === goldenCase.expectedIntent &&
+            buyerNeedsOk &&
+            needTypeOk &&
+            storeRelevanceOk &&
+            pitchReadinessOk,
           notFullyMeasurableYet: goldenCase.notFullyMeasurableYet,
           latencyMs: Date.now() - started,
         });
@@ -260,6 +295,7 @@ export class SalesAgentQaService {
           id: goldenCase.id,
           category: goldenCase.category,
           message: goldenCase.message,
+          storeContext: goldenCase.storeContext,
           expectedIntent: goldenCase.expectedIntent,
           passed: false,
           notFullyMeasurableYet: goldenCase.notFullyMeasurableYet,

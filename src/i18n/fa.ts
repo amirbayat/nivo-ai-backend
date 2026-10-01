@@ -195,6 +195,10 @@ export const fa = {
       `${productName} رو به سبد اضافه کن`,
     confirmCartAction: 'تایید و پرداخت',
     noProductsFound: 'محصولی با این مشخصات پیدا نکردم',
+    // docs/PRD-sales-agent-response-strategy-ab.md بخش ۱ (Track A، ردیف askClarifyingQuestion)
+    // — fallback وقتی هر دو تلاش AI برای ساخت سوال روشن‌کننده شکست بخورد
+    clarifyNeedFallback:
+      'دوست دارم دقیق‌تر کمکت کنم — می‌تونی بیشتر توضیح بدی دنبال چی هستی؟',
     productNotFound: 'این محصول رو پیدا نکردم، می‌تونی دوباره اسمش رو بگی؟',
     insufficientStock: 'موجودی این محصول کافی نیست',
     cartEmpty: 'سبد خرید خالی است',

@@ -14,6 +14,7 @@ import { SkipThrottle } from '@nestjs/throttler';
 import type { Response } from 'express';
 import { SalesAgentService } from './sales-agent.service';
 import { SendMessageDto } from './dto/send-message.dto';
+import { SetResponseStrategyDto } from './dto/set-response-strategy.dto';
 import { StoreService } from '../store/store.service';
 
 // docs/PRD-mvp-launch-plan.md گام ۱ — بدون JwtGuard: مشتری این فروشگاه یک User نیست،
@@ -89,6 +90,21 @@ export class SalesAgentController {
     @Headers('x-session-token') sessionToken: string,
   ) {
     return this.salesAgentService.getConversation(conversationId, sessionToken);
+  }
+
+  // docs/PRD-sales-agent-response-strategy-ab.md بخش ۹ — سوییچ دستی خریدار برای تست زنده‌ی
+  // Track A/B، فعلاً فقط برای تست، نه قابلیت نهایی
+  @Post('chat/:conversationId/response-strategy')
+  setResponseStrategy(
+    @Param('conversationId') conversationId: string,
+    @Headers('x-session-token') sessionToken: string,
+    @Body() dto: SetResponseStrategyDto,
+  ) {
+    return this.salesAgentService.setResponseStrategy(
+      conversationId,
+      sessionToken,
+      dto.responseStrategy,
+    );
   }
 
   // docs/PRD-sales-agent-voice.md بخش ۲.۲ — وویس ورودی مشتری از وب (ضبط با MediaRecorder)
