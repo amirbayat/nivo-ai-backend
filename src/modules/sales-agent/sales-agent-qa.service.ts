@@ -8,6 +8,7 @@ import { resolveModel } from './model-variants';
 import { toneForCategory } from './tone-by-category';
 import { GOLDEN_QUESTIONS } from './qa-golden-questions';
 import { INTENT_GOLDEN_CASES } from './intent-golden-cases';
+import { IMPLICIT_NEED_GOLDEN_CASES } from './intent-implicit-need-golden-cases';
 import {
   buildIntentClassificationPrompt,
   intentClassificationSchema,
@@ -33,6 +34,26 @@ export interface IntentGoldenResult {
   actualBuyerNeeds?: string[];
   unmatchedBuyerNeed?: string;
   passed: boolean;
+  error?: string;
+  latencyMs: number;
+}
+
+// docs/PRD-sales-agent-implicit-need-detection.md بخش ۵ — فاز ۰. همان شکل IntentGoldenResult
+// بالا، به‌علاوه‌ی `category` (برای تجمیع نرخ false-positive/recall به‌تفکیک دسته‌ی ۸گانه‌ی
+// سند) و `notFullyMeasurableYet` (منعکس‌کننده‌ی همان فیلد روی خود golden case — یعنی جواب
+// ثبت می‌شود ولی در محاسبه‌ی «باگ واقعی رفع شد یا نه» حساب نشود)
+export interface ImplicitNeedGoldenResult {
+  id: string;
+  category: string;
+  message: string;
+  expectedIntent: string;
+  actualIntent?: string;
+  intentConfidence?: string;
+  expectedBuyerNeeds?: string[];
+  actualBuyerNeeds?: string[];
+  unmatchedBuyerNeed?: string;
+  passed: boolean;
+  notFullyMeasurableYet?: boolean;
   error?: string;
   latencyMs: number;
 }
@@ -184,6 +205,64 @@ export class SalesAgentQaService {
           message: goldenCase.message,
           expectedIntent: goldenCase.expectedIntent,
           passed: false,
+          error: err instanceof Error ? err.message : 'خطای نامشخص',
+          latencyMs: Date.now() - started,
+        });
+      }
+    }
+    return results;
+  }
+
+  // docs/PRD-sales-agent-implicit-need-detection.md بخش ۵ (فاز ۰) — عمداً هنوز از همان
+  // intentClassificationSchema/buildIntentClassificationPrompt فعلی (بدون تغییر) استفاده
+  // می‌کند تا baseline واقعیِ «قبل از هر تغییری» ثبت شود؛ فاز ۱ همین متد را (بعد از اضافه‌شدن
+  // needType/storeRelevance/pitchReadiness به schema) به‌روز می‌کند تا آن فیلدها هم سنجیده شوند
+  async runImplicitNeedGoldenSet(
+    variantKey: string,
+  ): Promise<ImplicitNeedGoldenResult[]> {
+    const model = resolveModel(variantKey);
+    const results: ImplicitNeedGoldenResult[] = [];
+    for (const goldenCase of IMPLICIT_NEED_GOLDEN_CASES) {
+      const started = Date.now();
+      try {
+        const { object } = await generateObject({
+          model: this.aiProvider.buildClient(undefined, {
+            supportsStructuredOutputs: true,
+          })(model),
+          schema: intentClassificationSchema,
+          system: buildIntentClassificationPrompt(
+            goldenCase.state ?? 'BROWSING',
+          ),
+          prompt: goldenCase.message,
+        });
+        const actualBuyerNeeds = object.buyerNeeds ?? [];
+        const buyerNeedsOk =
+          !goldenCase.expectedBuyerNeeds?.length ||
+          goldenCase.expectedBuyerNeeds.every((t) =>
+            actualBuyerNeeds.includes(t),
+          );
+        results.push({
+          id: goldenCase.id,
+          category: goldenCase.category,
+          message: goldenCase.message,
+          expectedIntent: goldenCase.expectedIntent,
+          actualIntent: object.intent,
+          intentConfidence: object.intentConfidence,
+          expectedBuyerNeeds: goldenCase.expectedBuyerNeeds,
+          actualBuyerNeeds,
+          unmatchedBuyerNeed: object.unmatchedBuyerNeed ?? undefined,
+          passed: object.intent === goldenCase.expectedIntent && buyerNeedsOk,
+          notFullyMeasurableYet: goldenCase.notFullyMeasurableYet,
+          latencyMs: Date.now() - started,
+        });
+      } catch (err) {
+        results.push({
+          id: goldenCase.id,
+          category: goldenCase.category,
+          message: goldenCase.message,
+          expectedIntent: goldenCase.expectedIntent,
+          passed: false,
+          notFullyMeasurableYet: goldenCase.notFullyMeasurableYet,
           error: err instanceof Error ? err.message : 'خطای نامشخص',
           latencyMs: Date.now() - started,
         });

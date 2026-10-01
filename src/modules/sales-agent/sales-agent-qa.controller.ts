@@ -4,6 +4,7 @@ import { AdminGuard } from '../../common/guards/admin.guard';
 import { SalesAgentQaService } from './sales-agent-qa.service';
 import { RunGoldenSetDto } from './dto/run-golden-set.dto';
 import { RunIntentGoldenSetDto } from './dto/run-intent-golden-set.dto';
+import { RunImplicitNeedGoldenSetDto } from './dto/run-implicit-need-golden-set.dto';
 
 // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۵ — ابزار QA داخلی تیم، نه فروشنده؛ پشت
 // همان JwtGuard+AdminGuard بقیه‌ی admin.controller.ts، فقط در یک کنترلر جدا تا آن فایل
@@ -28,5 +29,12 @@ export class SalesAgentQaController {
   @Post('run-intent')
   runIntent(@Body() dto: RunIntentGoldenSetDto) {
     return this.qaService.runIntentGoldenSet(dto.variant);
+  }
+
+  // docs/PRD-sales-agent-implicit-need-detection.md بخش ۵ (فاز ۰) — بدون storeId، به همان
+  // دلیل run-intent بالا
+  @Post('run-implicit-need')
+  runImplicitNeed(@Body() dto: RunImplicitNeedGoldenSetDto) {
+    return this.qaService.runImplicitNeedGoldenSet(dto.variant);
   }
 }
