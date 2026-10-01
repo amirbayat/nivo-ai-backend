@@ -15,6 +15,15 @@ export type ConversationContext = {
   // docs/PRD-customer-comments-and-discounts.md بخش ۹ — کد تخفیفی که همین الان روی سبد
   // اعمال شده؛ فقط در doCreateOrder مصرف می‌شود (atomic increment)، اینجا صرفاً پیش‌نمایش است
   appliedDiscount?: { id: string; code: string; amountToman: number } | null;
+  // docs/PRD-product-display-focus-and-variations.md §۲ — وقتی مکالمه از یک لینک اختصاصی
+  // محصول (وب یا تلگرام) شروع شده، showProduct همین‌جا ثبت می‌کند؛ تا وقتی ست است،
+  // handleMessage پیام‌های BROWSE عمومی را به‌جای جستجوی چندمحصولی دوباره روی همین محصول
+  // متمرکز می‌کند. کاملاً گذرا/کنترلی است، جایی گزارش‌دهی نمی‌شود — به همین دلیل اینجا
+  // (JSON context) است، نه ستون دیتابیس
+  anchoredProductId?: string | null;
+  // همان بخش — شمارنده‌ی پیام‌های متوالی با نشانه‌ی تردید/نارضایتی حین anchor بودن؛ با
+  // ADD_TO_CART صفر می‌شود، با رسیدن به ۲ انکر برداشته می‌شود (مشتری محصول جایگزین می‌بیند)
+  anchorHesitationStreak?: number;
 };
 
 export type UiBlock =

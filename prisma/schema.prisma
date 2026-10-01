@@ -2139,20 +2139,25 @@ enum CardDisplayPolicy {
 }
 
 model Product {
-  id          String   @id @default(uuid())
-  storeId     String
-  store       Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  name        String
-  basePrice   Int // تومان
-  stock       Int      @default(0)
-  images      String[] @default([]) // فاز بعد (پنل فروشنده) پر می‌شود — در ویزارد ثبت‌نام خالی می‌ماند
+  id                String   @id @default(uuid())
+  storeId           String
+  store             Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  name              String
+  basePrice         Int // تومان
+  stock             Int      @default(0)
+  images            String[] @default([]) // فاز بعد (پنل فروشنده) پر می‌شود — در ویزارد ثبت‌نام خالی می‌ماند
   // دستیار تکمیل محصول با AI (docs/PRD-seller-knowledge-base.md بخش ۱.۱) — قبلاً اصلاً وجود نداشت
-  description String?  @db.Text
+  description       String?  @db.Text
   // docs/PRD-telegram-bot-channel.md بخش ۹.۳ — کد کوتاه اختیاری که فروشنده روی محتوای
   // تبلیغاتی‌اش می‌گذارد؛ خریدار به‌جای اسم محصول می‌تواند کد را بگوید (searchProducts اول
   // یک exact match روی این را امتحان می‌کند). یکتا فقط در سطح فروشگاه، نه سراسری.
-  code        String?
-  createdAt   DateTime @default(now())
+  code              String?
+  createdAt         DateTime @default(now())
+  // docs/PRD-product-display-focus-and-variations.md §۲.۴ — کد کوتاه یکتای سراسری برای لینک
+  // اختصاصی تلگرام این محصول (payload محدودیت ۶۴ کاراکتری `/start` را دارد، UUID خام جا
+  // نمی‌شود)؛ lazy-generate می‌شود (اولین باری که فروشنده لینک تلگرام را می‌خواهد)، نه در
+  // لحظه‌ی ساخت محصول — محصولات قدیمی‌تر هم همین‌طور پوشش داده می‌شوند
+  telegramShortCode String?  @unique
 
   kbEntries StoreKbEntry[]
 
@@ -2166,6 +2171,14 @@ model Product {
   // docs/PRD-customer-comments-and-discounts.md بخش الف — نظرات تاییدشده هم منبع تکمیل
   // توضیحات (§۶) هم قابل‌اشاره در پاسخ ایجنت به خریدار بعدی هستند
   comments ProductComment[]
+
+  // docs/PRD-product-display-focus-and-variations.md §۳ — جایگاه‌های تبلیغاتی محصول‌محور
+  // (GREETING_FEATURED_PRODUCT) این محصول
+  adPlacements AdPlacement[]
+
+  // docs/PRD-admin-product-enrichment-review.md — تاریخچه‌ی پیش‌نویس‌های تکمیل‌اطلاعات
+  // ادمین‌محور این محصول (رد‌شده‌ها هم نگه داشته می‌شوند، نه فقط فعال‌ها)
+  enrichmentDrafts ProductEnrichmentDraft[]
 
   @@unique([storeId, code])
   @@index([storeId])
@@ -2188,6 +2201,44 @@ model CanonicalProduct {
 
   @@index([normalizedName])
   @@map("canonical_products")
+}
+
+// docs/PRD-admin-product-enrichment-review.md — ادمین محصولات کم‌اطلاعات را enrich می‌کند
+// (منبع دستی یا جستجوی وب)، خودش تایید می‌دهد، بعد فروشنده هم باید تایید بدهد تا
+// Product.description واقعی آپدیت شود. یک پیش‌نویس فعال (PENDING_*) در هر لحظه برای هر
+// محصول در سرویس enforce می‌شود، نه constraint دیتابیس — تاریخچه‌ی رد‌شده‌ها باید بماند.
+enum ProductEnrichmentSource {
+  ADMIN_RESOURCE
+  WEB_SEARCH
+}
+
+enum ProductEnrichmentStatus {
+  PENDING_ADMIN_REVIEW
+  PENDING_SELLER_REVIEW
+  SELLER_APPROVED
+  SELLER_REJECTED
+  ADMIN_REJECTED
+}
+
+model ProductEnrichmentDraft {
+  id                   String                  @id @default(uuid())
+  productId            String
+  product              Product                 @relation(fields: [productId], references: [id], onDelete: Cascade)
+  status               ProductEnrichmentStatus @default(PENDING_ADMIN_REVIEW)
+  source               ProductEnrichmentSource
+  adminResourceText    String?                 @db.Text // فقط وقتی source=ADMIN_RESOURCE
+  suggestedDescription String                  @db.Text
+  suggestedQuestions   String[]                @default([])
+  suggestedSpecs       Json?
+  sourceNote           String?                 @db.Text
+  createdByAdminId     String
+  createdAt            DateTime                @default(now())
+  adminReviewedAt      DateTime?
+  sellerDecidedAt      DateTime?
+
+  @@index([productId])
+  @@index([status])
+  @@map("product_enrichment_drafts")
 }
 
 // باکس دانش فروشگاه، چندمستأجری (docs/PRD-seller-knowledge-base.md بخش ۱.۲) — عمداً جدا از
@@ -2516,6 +2567,11 @@ model AdPlacement {
   storeId         String
   store           Store             @relation(fields: [storeId], references: [id], onDelete: Cascade)
   placement       AdPlacementType   @default(TELEGRAM_STORE_SEARCH)
+  // docs/PRD-product-display-focus-and-variations.md §۳ — فقط برای placement:
+  // GREETING_FEATURED_PRODUCT پر می‌شود؛ بازه‌ی فعال هر محصول مستقل از بقیه‌ی محصولات همان
+  // فروشگاه است (برخلاف TELEGRAM_STORE_SEARCH که سطح کل فروشگاه است)
+  productId       String?
+  product         Product?          @relation(fields: [productId], references: [id], onDelete: Cascade)
   startsAt        DateTime
   endsAt          DateTime
   priceToman      Int // مبلغ واقعی کسرشده از کیف‌پول — برای شفافیت/گزارش، نه محاسبه‌ی مجدد
@@ -2527,6 +2583,7 @@ model AdPlacement {
   createdAt       DateTime          @default(now())
 
   @@index([placement, status, startsAt, endsAt])
+  @@index([productId])
   @@map("ad_placements")
 }
 
@@ -2535,6 +2592,9 @@ enum AdPlacementType {
   // docs/PRD-marketplace-explore-cross-store.md — همین مدل، بدون تغییر schema، وقتی
   // مارکت‌پلیس ساخته شد (سند ۶)
   MARKETPLACE_FEATURED
+  // docs/PRD-product-display-focus-and-variations.md §۳ — فاز ۲ تبلیغات: نمایش یک محصول
+  // مشخص در اولین پیام مکالمه (نه نتایج جستجوی تلگرام)؛ productId الزامی است
+  GREETING_FEATURED_PRODUCT
 }
 
 enum AdPlacementStatus {

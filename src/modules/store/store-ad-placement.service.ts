@@ -84,4 +84,79 @@ export class StoreAdPlacementService {
       return placement;
     });
   }
+
+  // docs/PRD-product-display-focus-and-variations.md §۳ — جایگاه فاز ۲: نمایش یک محصول
+  // مشخص در اولین پیام مکالمه. متدهای مجزا از purchase/getStatus بالا (نه overload)، چون
+  // scope کوئری per-product است نه per-store — هر محصول بازه‌ی فعال مستقل خودش را دارد
+  async getProductStatus(sellerId: string, storeId: string, productId: string) {
+    await this.storeService.getOwnedProduct(sellerId, storeId, productId);
+    const active = await this.prisma.adPlacement.findFirst({
+      where: {
+        storeId,
+        productId,
+        placement: 'GREETING_FEATURED_PRODUCT',
+        status: 'ACTIVE',
+        endsAt: { gt: new Date() },
+      },
+      orderBy: { endsAt: 'desc' },
+    });
+    return { active, priceTiers: PRICE_TIERS };
+  }
+
+  async purchaseProductPlacement(
+    sellerId: string,
+    storeId: string,
+    productId: string,
+    durationDays: 7 | 30,
+  ) {
+    await this.storeService.getOwnedProduct(sellerId, storeId, productId);
+    const tier = PRICE_TIERS.find((t) => t.durationDays === durationDays);
+    if (!tier) throw new BadRequestException(fa.validation.required);
+
+    return this.prisma.$transaction(async (tx) => {
+      const debited = await tx.store.updateMany({
+        where: { id: storeId, creditBalanceToman: { gte: tier.priceToman } },
+        data: { creditBalanceToman: { decrement: tier.priceToman } },
+      });
+      if (debited.count === 0) {
+        throw new BadRequestException(fa.store.adPlacementInsufficientBalance);
+      }
+
+      const current = await tx.adPlacement.findFirst({
+        where: {
+          storeId,
+          productId,
+          placement: 'GREETING_FEATURED_PRODUCT',
+          status: 'ACTIVE',
+          endsAt: { gt: new Date() },
+        },
+        orderBy: { endsAt: 'desc' },
+      });
+      const startsAt = current ? current.endsAt : new Date();
+      const endsAt = new Date(startsAt.getTime() + tier.durationDays * DAY_MS);
+
+      const placement = await tx.adPlacement.create({
+        data: {
+          storeId,
+          productId,
+          placement: 'GREETING_FEATURED_PRODUCT',
+          startsAt,
+          endsAt,
+          priceToman: tier.priceToman,
+        },
+      });
+
+      await tx.creditUsageEvent.create({
+        data: {
+          storeId,
+          model: 'n/a',
+          kind: 'AD_PLACEMENT',
+          costToman: tier.priceToman,
+          isFreeQuota: false,
+        },
+      });
+
+      return placement;
+    });
+  }
 }

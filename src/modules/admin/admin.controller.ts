@@ -21,6 +21,11 @@ import { TicketsService } from '../tickets/tickets.service';
 import { UpdateTicketStatusDto } from '../tickets/dto/update-ticket-status.dto';
 import { CreateModelDto } from './dto/create-model.dto';
 import { UpdateModelDto } from './dto/update-model.dto';
+import {
+  CurrentUser,
+  JwtPayload,
+} from '../../common/decorators/current-user.decorator';
+import { ProductEnrichmentService } from '../store/product-enrichment.service';
 
 @Controller('admin')
 @UseGuards(JwtGuard, AdminGuard)
@@ -28,6 +33,7 @@ export class AdminController {
   constructor(
     private readonly adminService: AdminService,
     private readonly ticketsService: TicketsService,
+    private readonly productEnrichmentService: ProductEnrichmentService,
   ) {}
 
   @Get('dashboard')
@@ -288,5 +294,48 @@ export class AdminController {
   @Get('sales-agent/ad-placement-instrumentation')
   getAdPlacementInstrumentation(@Query('storeId') storeId?: string) {
     return this.adminService.getAdPlacementInstrumentation({ storeId });
+  }
+
+  // docs/PRD-admin-product-enrichment-review.md — لیست کراس-فروشگاه محصولات کم‌اطلاعات
+  @Get('products/low-completeness')
+  getLowCompletenessProducts(
+    @Query('storeId') storeId?: string,
+    @Query('page') page?: string,
+  ) {
+    return this.productEnrichmentService.adminListLowCompleteness({
+      storeId,
+      page: page ? parseInt(page, 10) : undefined,
+    });
+  }
+
+  @Post('products/:productId/enrichment-draft')
+  createEnrichmentDraft(
+    @CurrentUser() user: JwtPayload,
+    @Param('productId') productId: string,
+    @Body()
+    body: { source: 'WEB_SEARCH' | 'ADMIN_RESOURCE'; resourceText?: string },
+  ) {
+    const opts =
+      body.source === 'ADMIN_RESOURCE'
+        ? ({
+            source: 'ADMIN_RESOURCE',
+            resourceText: body.resourceText ?? '',
+          } as const)
+        : ({ source: 'WEB_SEARCH' } as const);
+    return this.productEnrichmentService.adminCreateDraft(
+      user.sub,
+      productId,
+      opts,
+    );
+  }
+
+  @Post('products/enrichment-draft/:draftId/approve')
+  approveEnrichmentDraft(@Param('draftId') draftId: string) {
+    return this.productEnrichmentService.adminApproveDraft(draftId);
+  }
+
+  @Post('products/enrichment-draft/:draftId/reject')
+  rejectEnrichmentDraft(@Param('draftId') draftId: string) {
+    return this.productEnrichmentService.adminRejectDraft(draftId);
   }
 }

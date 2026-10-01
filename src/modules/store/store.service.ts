@@ -21,6 +21,7 @@ import { fa } from '../../i18n/fa';
 import { computeConversationStats } from '../sales-agent/conversation-stats.util';
 import { TelegramApiClientService } from '../telegram/telegram-api-client.service';
 import { computeProductCompleteness } from './product-completeness.util';
+import { generateShortCode } from '../../common/utils/generate-code';
 
 // docs/PRD-product-strategy-and-roadmap.md بخش ۳.۱ — چک‌لیست سطح فروشگاه
 const MIN_STORE_KB_ENTRIES = 3;
@@ -197,11 +198,9 @@ export class StoreService {
     };
   }
 
-  private async getOwnedProduct(
-    sellerId: string,
-    storeId: string,
-    productId: string,
-  ) {
+  // عمداً public — StoreAdPlacementService (جایگاه تبلیغاتی محصول‌محور) هم از همین چک
+  // مالکیت استفاده می‌کند (docs/PRD-product-display-focus-and-variations.md §۳)
+  async getOwnedProduct(sellerId: string, storeId: string, productId: string) {
     await this.getOwned(sellerId, storeId);
     const product = await this.prisma.product.findUnique({
       where: { id: productId },
@@ -227,6 +226,35 @@ export class StoreService {
     await this.getOwnedProduct(sellerId, storeId, productId);
     await this.prisma.product.delete({ where: { id: productId } });
     return { success: true };
+  }
+
+  // docs/PRD-product-display-focus-and-variations.md §۲.۴ — lazy-generate، نه در لحظه‌ی
+  // ساخت محصول، تا محصولات قدیمی‌تر هم بدون migration داده پوشش داده شوند. همان الگوی
+  // retry-on-collision auth.service.ts's generateUniqueReferralCode
+  async getProductTelegramLink(
+    sellerId: string,
+    storeId: string,
+    productId: string,
+  ): Promise<{ shortCode: string }> {
+    const product = await this.getOwnedProduct(sellerId, storeId, productId);
+    if (product.telegramShortCode)
+      return { shortCode: product.telegramShortCode };
+
+    for (let attempt = 0; ; attempt++) {
+      const code = generateShortCode();
+      const clash = await this.prisma.product.findUnique({
+        where: { telegramShortCode: code },
+      });
+      if (!clash) {
+        await this.prisma.product.update({
+          where: { id: productId },
+          data: { telegramShortCode: code },
+        });
+        return { shortCode: code };
+      }
+      if (attempt > 5)
+        throw new Error('failed to generate unique telegram short code');
+    }
   }
 
   private static readonly MAX_PRODUCT_IMAGES = 4;

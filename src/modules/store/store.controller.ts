@@ -30,6 +30,7 @@ import { StoreCreditService } from './store-credit.service';
 import { StoreBankCardService } from './store-bank-card.service';
 import { StoreDiscountCodeService } from './store-discount-code.service';
 import { StoreAdPlacementService } from './store-ad-placement.service';
+import { ProductEnrichmentService } from './product-enrichment.service';
 import { CreateStoreDto } from './dto/create-store.dto';
 import { UpdateStoreDto } from './dto/update-store.dto';
 import { CreateProductDto } from './dto/create-product.dto';
@@ -58,6 +59,7 @@ export class StoreController {
     private readonly storeBankCardService: StoreBankCardService,
     private readonly storeDiscountCodeService: StoreDiscountCodeService,
     private readonly storeAdPlacementService: StoreAdPlacementService,
+    private readonly productEnrichmentService: ProductEnrichmentService,
   ) {}
 
   @Get('me')
@@ -152,6 +154,18 @@ export class StoreController {
     @Param('key') key: string,
   ) {
     return this.storeService.removeProductImage(user.sub, id, productId, key);
+  }
+
+  // docs/PRD-product-display-focus-and-variations.md §۲.۴ — کد کوتاه لینک تلگرامی این
+  // محصول را برمی‌گرداند (در صورت نبود، همین‌جا می‌سازد)؛ فرانت خودش لینک کامل
+  // https://t.me/<bot>?start=p_<shortCode> را می‌سازد
+  @Post(':id/products/:productId/telegram-link')
+  getProductTelegramLink(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('productId') productId: string,
+  ) {
+    return this.storeService.getProductTelegramLink(user.sub, id, productId);
   }
 
   // docs/PRD-seller-knowledge-base.md بخش ۲.۵ — فقط پیش‌نمایش؛ افزودن واقعی با همین
@@ -489,6 +503,78 @@ export class StoreController {
       user.sub,
       id,
       dto.durationDays,
+    );
+  }
+
+  // docs/PRD-product-display-focus-and-variations.md §۳ — جایگاه فاز ۲: نمایش یک محصول
+  // مشخص در اولین پیام مکالمه؛ مسیر مجزا از ad-placement سطح-فروشگاه بالا، نه discriminator
+  // روی همان endpoint، چون دو مفهوم محصولی متفاوتند
+  @Get(':id/products/:productId/ad-placement')
+  getProductAdPlacementStatus(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('productId') productId: string,
+  ) {
+    return this.storeAdPlacementService.getProductStatus(
+      user.sub,
+      id,
+      productId,
+    );
+  }
+
+  @Post(':id/products/:productId/ad-placement/purchase')
+  purchaseProductAdPlacement(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('productId') productId: string,
+    @Body() dto: PurchaseAdPlacementDto,
+  ) {
+    return this.storeAdPlacementService.purchaseProductPlacement(
+      user.sub,
+      id,
+      productId,
+      dto.durationDays,
+    );
+  }
+
+  // docs/PRD-admin-product-enrichment-review.md — پیش‌نویس تایید‌شده‌ی ادمین در انتظار
+  // تصمیم فروشنده برای این محصول (یا null اگر چیزی در انتظار نیست)
+  @Get(':id/products/:productId/enrichment-draft')
+  getPendingEnrichmentDraft(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('productId') productId: string,
+  ) {
+    return this.productEnrichmentService.sellerGetPendingDraft(
+      user.sub,
+      id,
+      productId,
+    );
+  }
+
+  @Post(':id/products/:productId/enrichment-draft/approve')
+  approveEnrichmentDraft(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('productId') productId: string,
+  ) {
+    return this.productEnrichmentService.sellerApproveDraft(
+      user.sub,
+      id,
+      productId,
+    );
+  }
+
+  @Post(':id/products/:productId/enrichment-draft/reject')
+  rejectEnrichmentDraft(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('productId') productId: string,
+  ) {
+    return this.productEnrichmentService.sellerRejectDraft(
+      user.sub,
+      id,
+      productId,
     );
   }
 }

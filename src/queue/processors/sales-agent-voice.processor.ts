@@ -163,7 +163,12 @@ export class SalesAgentVoiceProcessor {
     conversationId: string,
   ): Promise<string> {
     const buffer = await this.kie.downloadResult(resultUrl);
-    return this.storage.uploadImage(buffer, 'mp3', conversationId);
+    // فیدبک زنده‌ی کاربر ۱۴۰۵/۰۷/۰۹ — خروجی واقعی Kie یک فایل WAV است (resultUrl خودش با
+    // .wav تمام می‌شود)، نه mp3؛ هیچ ترنسکودی هم انجام نمی‌شود. قبلاً این‌جا 'mp3' هاردکد شده
+    // بود و sales-agent.controller.ts هم Content-Type را audio/mpeg می‌فرستاد — مرورگر بایت‌های
+    // WAV را به‌عنوان mp3 نمی‌توانست دیکود کند و پخش به‌طور خاموش شکست می‌خورد (تگ audio هیچ
+    // خطایی هم به UI نشان نمی‌داد). تلگرام چون خودش فایل را دوباره پردازش می‌کند متاثر نمی‌شد.
+    return this.storage.uploadImage(buffer, 'wav', conversationId);
   }
 
   // فیدبک کاربر ۱۴۰۵/۰۷/۰۱ — kieTaskId روی payload خودِ event نوشته می‌شود تا webhook بتواند

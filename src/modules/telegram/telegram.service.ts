@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { Store } from '@prisma/client';
+import type { Store, Product } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
 import { MediaTranscodeService } from '../../common/services/media-transcode.service';
@@ -183,6 +183,26 @@ export class TelegramService {
       return;
     }
 
+    // docs/PRD-product-display-focus-and-variations.md §۲.۴ — لینک اختصاصی یک محصول؛ کد
+    // کوتاه چون UUID خام محصول در کنار slug از سقف ۶۴ کاراکتری payload تلگرام رد می‌شود
+    if (payload.startsWith('p_')) {
+      const product = await this.prisma.product.findUnique({
+        where: { telegramShortCode: payload.slice('p_'.length) },
+        include: { store: true },
+      });
+      if (!product || product.store.status !== 'ACTIVE') {
+        await this.sendText(chatId, fa.store.notFound);
+        return;
+      }
+      await this.startChatForStore(
+        chatId,
+        product.store,
+        message.from?.first_name,
+        product,
+      );
+      return;
+    }
+
     const store = await this.prisma.store.findUnique({
       where: { slug: payload },
     });
@@ -221,11 +241,14 @@ export class TelegramService {
   }
 
   // مشترک بین دیپ‌لینک مستقیم (?start=<slug>) و انتخاب از نتایج جستجوی نام (بخش ۹.۲،
-  // callback_data: 'st:<storeId>') — قبلاً فقط داخل handleStart بود
+  // callback_data: 'st:<storeId>') — قبلاً فقط داخل handleStart بود. پارامتر اختیاری
+  // product فقط از دیپ‌لینک اختصاصی محصول (p_<code>) پر می‌شود
+  // (docs/PRD-product-display-focus-and-variations.md §۲.۴)
   private async startChatForStore(
     chatId: string,
     store: Store,
     firstName?: string,
+    product?: Product,
   ): Promise<void> {
     const existing = await this.prisma.customer.findUnique({
       where: {
@@ -284,7 +307,9 @@ export class TelegramService {
 
     const conversation = await this.loadConversation(conversationId);
     if (!conversation) return;
-    const result = await this.engine.startBrowse(conversation);
+    const result = product
+      ? await this.engine.showProduct(conversation, product)
+      : await this.engine.startBrowse(conversation);
     await this.sendEngineResult(chatId, result);
     // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۲ — فقط یک‌بار در شروع هر مکالمه‌ی
     // فروشگاه؛ Reply Keyboard تا وقتی حذفش نکنیم (remove_keyboard) پایین صفحه‌ی خریدار می‌ماند،

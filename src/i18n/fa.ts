@@ -161,6 +161,12 @@ export const fa = {
     // docs/PRD-seller-advertising-placements.md
     adPlacementInsufficientBalance:
       'اعتبار فروشگاه برای خرید این جایگاه تبلیغاتی کافی نیست — از بخش «اعتبار هوش مصنوعی» شارژ کن',
+    // docs/PRD-admin-product-enrichment-review.md
+    enrichmentActiveDraftExists:
+      'این محصول همین الان یک پیش‌نویس فعال دارد — اول همان را تایید/رد کن',
+    enrichmentDraftNotFound: 'پیش‌نویسی برای تایید/رد یافت نشد',
+    enrichmentDraftWrongStatus:
+      'این پیش‌نویس در وضعیتی نیست که این اکشن روی آن ممکن باشد',
   },
   storeKb: {
     notFound: 'این مورد در باکس دانش یافت نشد',
@@ -180,6 +186,10 @@ export const fa = {
     // قبلی از همین Customer، در یک مکالمه‌ی دیگر) به‌جای پیام خوش‌آمد عمومی این را می‌بیند
     returningGreeting: (storeName: string, productName: string) =>
       `خوش برگشتی به ${storeName}! 👋 دفعه‌ی قبل ${productName} رو خریدی. برای این دفعه فقط اسم محصول رو بگو یا از دکمه‌های پایین لیست استفاده کن.`,
+    // docs/PRD-product-display-focus-and-variations.md §۳ — جایگاه تبلیغاتی GREETING_FEATURED_PRODUCT؛
+    // بعد از متن خوش‌آمد عادی (عمومی/برگشتی) اضافه می‌شود، جایگزینش نمی‌کند
+    featuredProductPromo: (productName: string) =>
+      `✨ پیشنهاد ویژه‌ی این فروشگاه: ${productName}!`,
     addToCartAction: 'محصول رو به سبد اضافه کن',
     addToCartActionNamed: (productName: string) =>
       `${productName} رو به سبد اضافه کن`,

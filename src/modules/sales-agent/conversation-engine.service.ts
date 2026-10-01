@@ -114,6 +114,8 @@ export class ConversationEngineService {
       cart: raw?.cart ?? [],
       lastShownProducts: raw?.lastShownProducts ?? [],
       appliedDiscount: raw?.appliedDiscount ?? null,
+      anchoredProductId: raw?.anchoredProductId ?? null,
+      anchorHesitationStreak: raw?.anchorHesitationStreak ?? 0,
     };
   }
 
@@ -404,10 +406,14 @@ export class ConversationEngineService {
           ? '\nمشتری زیر «سوال مشتری» یک سوال مشخص پرسیده — مستقیم و دقیق با استفاده از همین واقعیت‌ها جوابش را بده؛ اگر واقعیت‌ها جوابش را ندارند، صادقانه بگو که این اطلاعات را نداری.'
           : ''
       }
-علاوه‌بر متن پاسخ، در relevantProductIds فقط شناسه‌ی محصولاتی را برگردان که واقعاً به
-سوال/نیاز مشتری مرتبط‌اند (مثلاً اگر مشتری پرسیده «برای فرانت‌اند کدوم بهتره؟» و جواب یک محصول
-خاص است، فقط همان را برگردان، نه بقیه‌ی محصولات نامرتبط). اگر مشتری چیز خاصی نپرسیده و معرفی
-کلی می‌خواهد، همه‌ی شناسه‌های کاندید را برگردان. شناسه‌های کاندید: ${candidateProductIds.join(', ')}`,
+علاوه‌بر متن پاسخ، باید تصمیم بگیری در relevantProductIds چند و کدام محصول برگردانی — دقیقاً
+همین ترتیب را رعایت کن:
+۱. اگر مشتری نیاز/سؤال مشخصی دارد و یک محصول به‌تنهایی جوابش است (مثلاً «برای فرانت‌اند کدوم
+بهتره؟» با یک برنده‌ی مشخص)، فقط همان یک شناسه را برگردان — تعداد کمتر همیشه بهتر از توضیح
+پراکنده است.
+۲. وگرنه اگر مشتری معرفی کلی/چندتایی می‌خواهد، حداکثر ۳ تای مرتبط‌ترین کاندید را برگردان —
+هرگز کورکورانه همه‌ی کاندیدها را برنگردان و هرگز بیشتر از ۳ تا.
+شناسه‌های کاندید: ${candidateProductIds.join(', ')}`,
       prompt: customerQuestion
         ? `سوال مشتری: ${customerQuestion}\n\nواقعیت‌ها:\n${facts}`
         : facts,
@@ -611,6 +617,27 @@ export class ConversationEngineService {
     const parsed = await this.parseIntent(text, conversation);
     const ctx = this.getContext(conversation);
 
+    // docs/PRD-product-display-focus-and-variations.md §۲.۳ — لنگر محصول را حفظ می‌کنیم مگر
+    // مشتری صریح محصول دیگری بخواهد (پایین‌تر، شاخه‌ی BROWSE با productQuery) یا دو پیام
+    // متوالی نشانه‌ی تردید/نارضایتی بدهد — آن‌وقت لنگر برداشته می‌شود و doBrowse همان محصول
+    // را از پیشنهادهای جایگزین حذف می‌کند (anchorJustDropped)
+    let anchorJustDropped: string | null = null;
+    if (ctx.anchoredProductId) {
+      if (parsed.intent === 'ADD_TO_CART') {
+        ctx.anchorHesitationStreak = 0;
+      } else if (
+        parsed.buyerNeeds?.includes('PURCHASE_HESITATION') ||
+        parsed.buyerNeeds?.includes('BOT_FRUSTRATION')
+      ) {
+        ctx.anchorHesitationStreak = (ctx.anchorHesitationStreak ?? 0) + 1;
+      }
+      if ((ctx.anchorHesitationStreak ?? 0) >= 2) {
+        anchorJustDropped = ctx.anchoredProductId;
+        ctx.anchoredProductId = null;
+        ctx.anchorHesitationStreak = 0;
+      }
+    }
+
     // docs/PRD-buyer-purchase-intent-taxonomy.md بخش ۴.۲ — trace سطح classification، جدا از
     // trace های اختصاصی هر handler در logReply؛ چون بلافاصله بعد از CUSTOMER_MESSAGE و قبل از
     // هر AGENT_REPLY نوشته می‌شود، getConversationTrace فعلی (که trace را به AGENT_REPLY بعدش
@@ -679,9 +706,30 @@ export class ConversationEngineService {
       if (photosResult) return photosResult;
     }
 
+    // docs/PRD-product-display-focus-and-variations.md §۲.۲ — پیام عمومی («بیشتر بگو»/«چیز
+    // دیگه هم داری») حین anchor بودن، به‌جای جستجوی چندمحصولی عادی، دوباره روی همان محصول
+    // لنگر متمرکز می‌شود. وقتی مشتری صریح چیز دیگری خواسته (productQuery ست است)، این شرط
+    // رد می‌شود و doBrowse عادی پایین اجرا می‌شود (که لنگر را هم پاک می‌کند)
+    if (
+      ctx.anchoredProductId &&
+      parsed.intent === 'BROWSE' &&
+      !parsed.productQuery
+    ) {
+      const anchoredProduct = await this.prisma.product.findUnique({
+        where: { id: ctx.anchoredProductId },
+      });
+      if (anchoredProduct && anchoredProduct.storeId === conversation.storeId) {
+        return this.showProduct(
+          conversation,
+          anchoredProduct,
+          ctx.anchorHesitationStreak,
+        );
+      }
+    }
+
     switch (parsed.intent) {
       case 'BROWSE':
-        return this.doBrowse(conversation, parsed, text);
+        return this.doBrowse(conversation, parsed, text, anchorJustDropped);
       case 'ADD_TO_CART':
       case 'REMOVE_FROM_CART':
         return this.doUpdateCart(conversation, ctx, parsed);
@@ -1069,25 +1117,64 @@ export class ConversationEngineService {
       },
       orderBy: { createdAt: 'desc' },
     });
-    if (!previousOrder)
-      return fa.salesAgent.firstGreeting(conversation.store.name);
 
-    const items = previousOrder.items as { name: string }[];
-    const productName = items[0]?.name;
-    if (!productName)
-      return fa.salesAgent.firstGreeting(conversation.store.name);
+    const base = (() => {
+      if (!previousOrder)
+        return fa.salesAgent.firstGreeting(conversation.store.name);
+      const items = previousOrder.items as { name: string }[];
+      const productName = items[0]?.name;
+      if (!productName)
+        return fa.salesAgent.firstGreeting(conversation.store.name);
+      return fa.salesAgent.returningGreeting(
+        conversation.store.name,
+        productName,
+      );
+    })();
 
-    return fa.salesAgent.returningGreeting(
-      conversation.store.name,
-      productName,
-    );
+    return `${base}${await this.featuredProductPromoSuffix(conversation)}`;
+  }
+
+  // docs/PRD-product-display-focus-and-variations.md §۳ — فاز ۲ جایگاه تبلیغاتی: اگر فروشگاه
+  // یک محصول را برای نمایش در اولین پیام مکالمه پول داده، همین‌جا به greeting اضافه می‌شود.
+  // اگر هم‌زمان چند محصول فعال بود (فروشنده برای چند محصول جداگانه خریده)، فقط آخرین
+  // خریدشده نشان داده می‌شود — این یک اسلات تک در هر فروشگاه است، نه رقابت بین چند فروشگاه
+  // مثل TELEGRAM_STORE_SEARCH، پس نیازی به چرخش/رتبه‌بندی نیست
+  private async featuredProductPromoSuffix(
+    conversation: ConversationWithStore,
+  ): Promise<string> {
+    const active = await this.prisma.adPlacement.findFirst({
+      where: {
+        storeId: conversation.storeId,
+        placement: 'GREETING_FEATURED_PRODUCT',
+        status: 'ACTIVE',
+        endsAt: { gt: new Date() },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!active?.productId) return '';
+    const product = await this.prisma.product.findUnique({
+      where: { id: active.productId },
+    });
+    if (!product) return '';
+    // fire-and-forget — طبق تصمیم سند تبلیغات موجود فقط «نشان داده شد» لازم است، تاخیرش
+    // نباید جلوی پاسخ به مشتری را بگیرد
+    void this.prisma.adPlacement
+      .update({
+        where: { id: active.id },
+        data: { impressionCount: { increment: 1 } },
+      })
+      .catch(() => undefined);
+    return `\n\n${fa.salesAgent.featuredProductPromo(product.name)}`;
   }
 
   // برای لینک اختصاصی یک محصول (?product=) — دقیقاً مثل doBrowse ولی بدون NLU، چون محصول
-  // از قبل مشخص است (سلر لینکش را داده، نه پیام آزاد مشتری)
+  // از قبل مشخص است (سلر لینکش را داده، نه پیام آزاد مشتری). همچنین از handleMessage برای
+  // «نگه‌داشتن تمرکز» حین anchor بودن دوباره صدا زده می‌شود — آن‌جا streak فعلی را پاس
+  // می‌دهد تا با هر فراخوانی صفر نشود (docs/PRD-product-display-focus-and-variations.md §۲)
   async showProduct(
     conversation: ConversationWithStore,
     product: ProductLike,
+    anchorHesitationStreak = 0,
   ): Promise<EngineResult> {
     if (this.billingBlocked(conversation)) {
       return this.transitionToHandoff(conversation, 'BILLING_BLOCKED');
@@ -1109,6 +1196,11 @@ export class ConversationEngineService {
     await this.persistTransition(conversation, nextState, {
       cart: this.getContext(conversation).cart,
       lastShownProducts: [{ id: product.id, name: product.name }],
+      // docs/PRD-product-display-focus-and-variations.md §۲ — مکالمه از لینک اختصاصی همین
+      // محصول شروع شده (وب یا تلگرام)؛ تا وقتی مشتری صریح محصول دیگر نخواهد یا تردید نشان
+      // ندهد، handleMessage پیام‌های BROWSE عمومی را به همین محصول برمی‌گرداند
+      anchoredProductId: product.id,
+      anchorHesitationStreak,
     });
 
     // عمداً بدون عدد موجودی در واقعیت‌هایی که به مدل داده می‌شود — caption() فقط از همین
@@ -1149,11 +1241,18 @@ export class ConversationEngineService {
     conversation: ConversationWithStore,
     parsed: ParsedIntent,
     customerMessage?: string,
+    // docs/PRD-product-display-focus-and-variations.md §۲.۳ — وقتی لنگر محصول به‌خاطر
+    // تردید/نارضایتی متوالی برداشته شده، همان محصول از لیست جایگزین‌ها حذف می‌شود تا
+    // پیشنهاد واقعاً «محصول دیگر» باشد، نه همان محصولی که مشتری از آن مردد بود
+    excludeProductId?: string | null,
   ): Promise<EngineResult> {
-    const products = await this.searchProducts(
+    let products = await this.searchProducts(
       conversation.storeId,
       parsed.productQuery,
     );
+    if (excludeProductId) {
+      products = products.filter((p) => p.id !== excludeProductId);
+    }
     if (products.length === 0) {
       return this.doClarify(conversation, fa.salesAgent.noProductsFound);
     }
@@ -1191,6 +1290,9 @@ export class ConversationEngineService {
             text: await this.caption(facts, conversation, customerMessage),
             products,
           };
+    // دفاع دوم، مستقل از پرامپت — سقف ۳ محصول نمایشی، حتی اگر مدل با وجود دستور پرامپت
+    // بیشتر برگرداند (docs/PRD-product-display-focus-and-variations.md §۱)
+    relevantProducts.products = relevantProducts.products.slice(0, 3);
 
     const uiBlock: UiBlock = {
       type: 'PRODUCT_CARD',
@@ -1203,12 +1305,24 @@ export class ConversationEngineService {
       })),
     };
     const nextState: ConversationState = 'BROWSING';
+    // فیدبک زنده‌ی کاربر ۱۴۰۵/۰۷/۰۹ — وقتی caption خودش جمع کرده روی یک محصول (مثلاً «برای
+    // فرانت‌اند React بهتره»)، باید روی همون محصول لنگر بیندازیم؛ وگرنه سوال بعدی مشتری
+    // («چیا یادمیگیرم توش؟» بدون اسم صریح محصول) دوباره وارد جستجوی چندمحصولی عادی می‌شود و
+    // caption بدون هیچ context‌ای از اینکه کدوم محصول همین الان توصیه شده بود، ممکنه محصول
+    // اشتباه رو توضیح بده. فقط وقتی دقیقاً یک محصول باقی مونده anchor می‌کنیم؛ لیست چندتایی
+    // هنوز لنگر نمی‌خواد (مشتری هنوز بین گزینه‌ها تصمیم نگرفته)
+    const singleNarrowedProduct =
+      relevantProducts.products.length === 1
+        ? relevantProducts.products[0]
+        : null;
     await this.persistTransition(conversation, nextState, {
       cart: this.getContext(conversation).cart,
       lastShownProducts: relevantProducts.products.map((p) => ({
         id: p.id,
         name: p.name,
       })),
+      anchoredProductId: singleNarrowedProduct?.id ?? null,
+      anchorHesitationStreak: 0,
     });
     await this.resetClarifyAttempts(conversation);
 
@@ -1503,9 +1617,14 @@ export class ConversationEngineService {
       return this.doClarify(conversation, fa.salesAgent.nothingToConfirm);
     }
     const nextState: ConversationState = 'BROWSING';
+    // لغو سبد سیگنالی درباره‌ی لنگر محصول نیست — صریحاً حفظش می‌کنیم تا این‌جا خاموش پاک نشود
+    const { anchoredProductId, anchorHesitationStreak } =
+      this.getContext(conversation);
     await this.persistTransition(conversation, nextState, {
       cart: [],
       lastShownProducts: [],
+      anchoredProductId,
+      anchorHesitationStreak,
     });
     await this.resetClarifyAttempts(conversation);
     const facts = fa.salesAgent.cartCleared;

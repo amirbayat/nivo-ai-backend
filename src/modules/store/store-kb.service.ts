@@ -47,6 +47,26 @@ function normalizeProductName(name: string): string {
   return name.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
+// docs/PRD-admin-product-enrichment-review.md بخش ۲ — Product فیلد مجزا برای specs ندارد؛
+// ترکیب همین‌جا (وقت تولید) انجام می‌شود تا ادمین/فروشنده دقیقاً متنی را که روی
+// Product.description نوشته خواهد شد تایید کنند، نه یک ترکیب نامرئی وقت اعمال
+function composeFinalDescription(
+  description: string,
+  specs?: { label: string; value: string }[],
+): string {
+  if (!specs?.length) return description;
+  const specsBlock = specs.map((s) => `- ${s.label}: ${s.value}`).join('\n');
+  return `${description}\n\nمشخصات:\n${specsBlock}`;
+}
+
+const ADMIN_RESOURCE_SYSTEM_PROMPT = `تو دستیار تیم محتوای نیوو هستی. یک ادمین یک منبع متنی
+(مثلاً از سایت تامین‌کننده) درباره‌ی یک محصول پیدا کرده و برایت پیست کرده. از همین متن یک
+توضیح کامل و فروش‌محور فارسی (۲-۴ جمله) و مشخصات فنی واقعی (در صورت وجود) استخراج کن. هرگز
+چیزی که در متن نیامده حدس نزن یا اختراع نکن — اگر متن اطلاعات کمی داشت، توضیح کوتاه‌تر و
+عمومی‌تر بده، نه اطلاعات جعلی. هرگز قیمت/موجودی را در توضیح نیاور. ۴ تا ۶ سؤال رایج مشتری هم
+لیست کن (فقط خودِ سؤال‌ها، بدون جواب). پاسخ را فقط به‌صورت یک شیء JSON معتبر مطابق اسکیمای
+داده‌شده برگردان.`;
+
 const BASIC_SUGGESTIONS_SYSTEM_PROMPT = `تو دستیار یک فروشنده‌ی فروشگاه آنلاین ایرانی هستی. برای محصول زیر یک توضیح
 کامل‌تر و فروش‌محورتر (فارسی، ۲-۴ جمله) بنویس، و ۴ تا ۶ سؤال رایج که مشتری‌های این‌جور محصول
 معمولاً می‌پرسند لیست کن (فقط خودِ سؤال‌ها، بدون جواب). هرگز قیمت/موجودی/مشخصات دقیقی که در
@@ -440,6 +460,204 @@ sourceNote را خالی بگذار. پاسخ را فقط به‌صورت یک �
       );
       throw err;
     }
+  }
+
+  // docs/PRD-admin-product-enrichment-review.md بخش ۲ — نسخه‌ی ادمین‌محور completeProductInfo
+  // بالا: بدون sellerId/getOwned (ادمین مالک فروشگاه نیست)، بدون چک/کسر اعتبار فروشنده (این
+  // ابتکار از طرف ادمین است، نه درخواست فروشنده — هزینه‌ی عملیاتی پلتفرم است). چرخه‌ی عمر
+  // پیش‌نویس (ذخیره/تایید/رد) مسئولیت ProductEnrichmentService است، نه این متد — این متد فقط
+  // تولید محتوا را برمی‌گرداند، چیزی persist نمی‌کند.
+  async adminGenerateEnrichmentDraft(
+    productId: string,
+    opts:
+      | { source: 'WEB_SEARCH' }
+      | { source: 'ADMIN_RESOURCE'; resourceText: string },
+  ): Promise<{
+    suggestedDescription: string;
+    suggestedQuestions: string[];
+    suggestedSpecs?: { label: string; value: string }[];
+    sourceNote?: string;
+  }> {
+    const product = await this.prisma.product.findUnique({
+      where: { id: productId },
+      include: { store: true },
+    });
+    if (!product) throw new NotFoundException(fa.store.productNotFound);
+    const commentsHint = await this.commentsHint(productId);
+
+    if (opts.source === 'ADMIN_RESOURCE') {
+      const object = await this.generateFromAdminResource(
+        product.store,
+        product,
+        opts.resourceText,
+      );
+      return {
+        suggestedDescription: composeFinalDescription(
+          object.suggestedDescription,
+          object.suggestedSpecs,
+        ),
+        suggestedQuestions: object.suggestedQuestions.slice(0, 6),
+        suggestedSpecs: object.suggestedSpecs,
+      };
+    }
+
+    const storeId = product.storeId;
+    const normalizedName = normalizeProductName(product.name);
+    const existing = await this.prisma.canonicalProduct.findFirst({
+      where: { normalizedName },
+    });
+    let freshCanonical: CanonicalProduct | null = null;
+    let staleCanonical: CanonicalProduct | null = null;
+    if (existing) {
+      const isFresh =
+        Date.now() - existing.lastEnrichedAt.getTime() < CANONICAL_FRESHNESS_MS;
+      if (isFresh) freshCanonical = existing;
+      else staleCanonical = existing;
+    }
+
+    const model = 'openai/gpt-5.4-mini';
+    try {
+      if (freshCanonical) {
+        const basic = await this.generateBasicSuggestions(
+          product.store,
+          product,
+          commentsHint,
+        );
+        await this.prisma.canonicalProduct.update({
+          where: { id: freshCanonical.id },
+          data: { sourceCount: { increment: 1 } },
+        });
+        if (product.canonicalProductId !== freshCanonical.id) {
+          await this.prisma.product.update({
+            where: { id: productId },
+            data: { canonicalProductId: freshCanonical.id },
+          });
+        }
+        const specs = freshCanonical.specs as
+          { label: string; value: string }[] | undefined;
+        return {
+          suggestedDescription: composeFinalDescription(
+            freshCanonical.richDescription,
+            specs,
+          ),
+          suggestedQuestions: basic.suggestedQuestions.slice(0, 6),
+          suggestedSpecs: specs,
+          sourceNote:
+            'این توضیحات قبلاً برای محصول مشابه در فروشگاه دیگری تایید شده است.',
+        };
+      }
+
+      const { object, usage } = await generateObject({
+        model: this.aiProvider.buildClient(undefined, undefined, {
+          tools: PRODUCT_ENRICHMENT_WEB_SEARCH_TOOLS,
+          max_tool_calls: 5,
+        })(model),
+        schema: z.object({
+          suggestedDescription: z.string(),
+          suggestedQuestions: z.array(z.string()).min(1),
+          suggestedSpecs: z
+            .array(z.object({ label: z.string(), value: z.string() }))
+            .optional(),
+          sourceNote: z.string().optional(),
+        }),
+        system: `تو دستیار یک فروشنده‌ی فروشگاه آنلاین ایرانی هستی. نام محصول زیر را در وب جستجو کن
+و توضیح/مشخصات واقعی‌اش را پیدا کن. یک توضیح کامل‌تر و فروش‌محورتر (فارسی، ۲-۴ جمله) بنویس،
+۴ تا ۶ سؤال رایج که مشتری‌های این‌جور محصول معمولاً می‌پرسند لیست کن، و اگر مشخصات فنی واقعی
+(جنس/سایزبندی/...) پیدا کردی در suggestedSpecs بگذار. sourceNote یک جمله‌ی کوتاه بگو از کجا
+این اطلاعات آمد. هرگز قیمت/موجودی/کد محصول پیشنهاد نده — این‌ها فقط از فروشنده می‌آیند. این
+توضیح ممکن است بین چند فروشگاه مشابه به اشتراک گذاشته شود — هرگز نام فروشگاه، لینک، یا شرایط
+ارسال/بازگشت مخصوص یک فروشگاه را در توضیح نیاور، فقط توضیح عمومی خودِ محصول. اگر جستجو چیز
+معنی‌داری پیدا نکرد (محصول عمومی/بی‌نام‌تجاری)، به‌جای اطلاعات جعلی یک توضیح عمومی‌تر بده و
+sourceNote را خالی بگذار. پاسخ را فقط به‌صورت یک شیء JSON معتبر مطابق اسکیمای داده‌شده برگردان.`,
+        prompt: `دسته‌بندی فروشگاه: ${product.store.category ?? 'نامشخص'}
+نام محصول: ${product.name}
+توضیح فعلی: ${product.description ?? '(هنوز توضیحی ثبت نشده)'}${commentsHint}`,
+      });
+
+      // فروشنده هیچ درخواستی نداده و اعتبارش کسر نمی‌شود، ولی هزینه‌ی واقعی همچنان برای
+      // دید تحلیلی/آمار هزینه‌ی پلتفرم ثبت می‌شود (storeId فقط برای گزارش‌گیری، نه کسر از کیف‌پول)
+      const { costToman } = await this.pricing.calcCost(
+        usage.inputTokens ?? 0,
+        usage.outputTokens ?? 0,
+        model,
+      );
+      await this.prisma.creditUsageEvent.create({
+        data: {
+          storeId,
+          model,
+          kind: 'PRODUCT_ENRICHMENT',
+          costToman,
+          isFreeQuota: true,
+        },
+      });
+
+      const savedCanonical = staleCanonical
+        ? await this.prisma.canonicalProduct.update({
+            where: { id: staleCanonical.id },
+            data: {
+              richDescription: object.suggestedDescription,
+              specs: object.suggestedSpecs ?? undefined,
+              sourceCount: { increment: 1 },
+              lastEnrichedAt: new Date(),
+            },
+          })
+        : await this.prisma.canonicalProduct.create({
+            data: {
+              normalizedName,
+              richDescription: object.suggestedDescription,
+              specs: object.suggestedSpecs ?? undefined,
+            },
+          });
+      await this.prisma.product.update({
+        where: { id: productId },
+        data: { canonicalProductId: savedCanonical.id },
+      });
+
+      return {
+        suggestedDescription: composeFinalDescription(
+          object.suggestedDescription,
+          object.suggestedSpecs,
+        ),
+        suggestedQuestions: object.suggestedQuestions.slice(0, 6),
+        suggestedSpecs: object.suggestedSpecs,
+        sourceNote: object.sourceNote,
+      };
+    } catch (err) {
+      this.logger.error(
+        `adminGenerateEnrichmentDraft failed for product=${productId}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+        err instanceof Error ? err.stack : undefined,
+      );
+      throw err;
+    }
+  }
+
+  // docs/PRD-admin-product-enrichment-review.md بخش ۲ — بدون وب‌سرچ، بدون CanonicalProduct
+  // (منبع یک‌بارمصرف دستی ادمین است، نه جستجوی پولی تکرارشدنی بین فروشگاه‌ها)
+  private async generateFromAdminResource(
+    store: { category: string | null },
+    product: { name: string; description: string | null },
+    resourceText: string,
+  ) {
+    const { object } = await generateObject({
+      model: this.provider('openai/gpt-5.4-mini'),
+      schema: z.object({
+        suggestedDescription: z.string(),
+        suggestedQuestions: z.array(z.string()).min(1),
+        suggestedSpecs: z
+          .array(z.object({ label: z.string(), value: z.string() }))
+          .optional(),
+      }),
+      system: ADMIN_RESOURCE_SYSTEM_PROMPT,
+      prompt: `نام محصول: ${product.name}
+دسته‌بندی فروشگاه: ${store.category ?? 'نامشخص'}
+توضیح فعلی: ${product.description ?? '(هنوز توضیحی ثبت نشده)'}
+
+--- منبع ارائه‌شده توسط ادمین ---
+${resourceText.slice(0, MAX_EXTRACTED_CHARS)}`,
+    });
+    return object;
   }
 
   // بخش مشترک بین حالت معمولی (withWebSearch=false) و حالت cache-hit بخش ۲.۴ (که description

@@ -14,6 +14,7 @@ import { StoreBankCardService } from './store-bank-card.service';
 import { StoreDiscountCodeService } from './store-discount-code.service';
 import { StoreAdPlacementService } from './store-ad-placement.service';
 import { CardSelectorService } from './card-selector.service';
+import { ProductEnrichmentService } from './product-enrichment.service';
 
 @Module({
   // docs/PRD-seller-credit-billing.md بخش ۷ — StoreCreditService برای خرید self-serve اعتبار
@@ -43,9 +44,16 @@ import { CardSelectorService } from './card-selector.service';
     StoreDiscountCodeService,
     StoreAdPlacementService,
     CardSelectorService,
+    ProductEnrichmentService,
   ],
   // CardSelectorService هم از SalesAgentModule (doCreateOrder) لازم است —
   // docs/PRD-seller-multi-bank-card-rotation.md بخش ۲
-  exports: [StoreService, StoreKbService, CardSelectorService],
+  // ProductEnrichmentService هم از AdminModule لازم است — docs/PRD-admin-product-enrichment-review.md
+  exports: [
+    StoreService,
+    StoreKbService,
+    CardSelectorService,
+    ProductEnrichmentService,
+  ],
 })
 export class StoreModule {}
