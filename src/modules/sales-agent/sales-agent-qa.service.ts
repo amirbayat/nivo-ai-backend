@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { generateText } from 'ai';
+import { generateObject, generateText } from 'ai';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AiProviderService } from '../../common/services/ai-provider.service';
 import { StoreKbService } from '../store/store-kb.service';
@@ -7,12 +7,32 @@ import { fa } from '../../i18n/fa';
 import { resolveModel } from './model-variants';
 import { toneForCategory } from './tone-by-category';
 import { GOLDEN_QUESTIONS } from './qa-golden-questions';
+import { INTENT_GOLDEN_CASES } from './intent-golden-cases';
+import {
+  buildIntentClassificationPrompt,
+  intentClassificationSchema,
+} from './intent-classification.schema';
 
 export interface GoldenQuestionResult {
   id: string;
   category: string;
   question: string;
   answer?: string;
+  error?: string;
+  latencyMs: number;
+}
+
+// docs/PRD-buyer-purchase-intent-taxonomy.md بخش ۵.۴
+export interface IntentGoldenResult {
+  id: string;
+  message: string;
+  expectedIntent: string;
+  actualIntent?: string;
+  intentConfidence?: string;
+  expectedBuyerNeeds?: string[];
+  actualBuyerNeeds?: string[];
+  unmatchedBuyerNeed?: string;
+  passed: boolean;
   error?: string;
   latencyMs: number;
 }
@@ -112,6 +132,58 @@ export class SalesAgentQaService {
           id: golden.id,
           category: golden.category,
           question: golden.question,
+          error: err instanceof Error ? err.message : 'خطای نامشخص',
+          latencyMs: Date.now() - started,
+        });
+      }
+    }
+    return results;
+  }
+
+  // docs/PRD-buyer-purchase-intent-taxonomy.md بخش ۵.۴ — همان schema/prompt واقعی
+  // callParseIntent (intent-classification.schema.ts)، بدون هیچ وابستگی به یک فروشگاه/محصول
+  // واقعی (بر خلاف runGoldenSet بالا که caption تولید می‌کند) — چون طبقه‌بندی intent اصلاً به
+  // محصولات/پروفایل فروشگاه وابسته نیست، فقط به متن پیام و وضعیت مکالمه
+  async runIntentGoldenSet(variantKey: string): Promise<IntentGoldenResult[]> {
+    const model = resolveModel(variantKey);
+    const results: IntentGoldenResult[] = [];
+    for (const goldenCase of INTENT_GOLDEN_CASES) {
+      const started = Date.now();
+      try {
+        const { object } = await generateObject({
+          model: this.aiProvider.buildClient(undefined, {
+            supportsStructuredOutputs: true,
+          })(model),
+          schema: intentClassificationSchema,
+          system: buildIntentClassificationPrompt(
+            goldenCase.state ?? 'BROWSING',
+          ),
+          prompt: goldenCase.message,
+        });
+        const actualBuyerNeeds = object.buyerNeeds ?? [];
+        const buyerNeedsOk =
+          !goldenCase.expectedBuyerNeeds?.length ||
+          goldenCase.expectedBuyerNeeds.every((t) =>
+            actualBuyerNeeds.includes(t),
+          );
+        results.push({
+          id: goldenCase.id,
+          message: goldenCase.message,
+          expectedIntent: goldenCase.expectedIntent,
+          actualIntent: object.intent,
+          intentConfidence: object.intentConfidence,
+          expectedBuyerNeeds: goldenCase.expectedBuyerNeeds,
+          actualBuyerNeeds,
+          unmatchedBuyerNeed: object.unmatchedBuyerNeed ?? undefined,
+          passed: object.intent === goldenCase.expectedIntent && buyerNeedsOk,
+          latencyMs: Date.now() - started,
+        });
+      } catch (err) {
+        results.push({
+          id: goldenCase.id,
+          message: goldenCase.message,
+          expectedIntent: goldenCase.expectedIntent,
+          passed: false,
           error: err instanceof Error ? err.message : 'خطای نامشخص',
           latencyMs: Date.now() - started,
         });
