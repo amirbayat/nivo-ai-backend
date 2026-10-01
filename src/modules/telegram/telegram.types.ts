@@ -43,3 +43,14 @@ export interface TelegramUpdate {
 export interface TelegramInlineKeyboard {
   inline_keyboard: { text: string; callback_data: string }[][];
 }
+
+// docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۲ — Reply Keyboard واقعی تلگرام (جای کیبرد
+// خود گوشی می‌نشیند، با اسکرول چت از بین نمی‌رود)، برخلاف TelegramInlineKeyboard که زیر یک
+// پیام خاص می‌چسبد و با تایپ دکمه، متن روی دکمه (نه یک callback_data مخفی) برمی‌گردد — پس فقط
+// برای چند اکشن کلی/ثابت مناسب است، نه نتایج دینامیک (مثل نتایج سرچ فروشگاه)
+export interface TelegramReplyKeyboard {
+  keyboard: { text: string }[][];
+  resize_keyboard?: boolean;
+}
+
+export type TelegramKeyboard = TelegramInlineKeyboard | TelegramReplyKeyboard;

@@ -23,6 +23,7 @@ import {
 } from './intent-classification.schema';
 import type {
   AiTraceData,
+  BuyerNeedTag,
   CartItem,
   ConversationContext,
   EngineResult,
@@ -371,6 +372,27 @@ export class ConversationEngineService {
     return null;
   }
 
+  // docs/PRD-buyer-preference-personalization.md §۹.۳
+  private async recordBuyerNeedCounts(
+    customerId: string,
+    tags: BuyerNeedTag[],
+  ): Promise<void> {
+    const customer = await this.prisma.customer.findUnique({
+      where: { id: customerId },
+      select: { buyerNeedCounts: true },
+    });
+    const counts = {
+      ...((customer?.buyerNeedCounts as Record<string, number> | null) ?? {}),
+    };
+    for (const tag of tags) {
+      counts[tag] = (counts[tag] ?? 0) + 1;
+    }
+    await this.prisma.customer.update({
+      where: { id: customerId },
+      data: { buyerNeedCounts: counts },
+    });
+  }
+
   async handleMessage(
     conversation: ConversationWithStore,
     text: string,
@@ -456,6 +478,17 @@ export class ConversationEngineService {
       });
     }
 
+    // docs/PRD-buyer-preference-personalization.md §۹.۳ — فاز ۱: فقط تجمیع، هیچ رفتار
+    // ایجنتی از رویش تصمیم نمی‌گیرد. عمداً read-merge-write ساده (نه raw SQL atomic
+    // increment) — این یک شمارنده‌ی تحلیلی کم‌ریسک است، نه داده‌ی مالی؛ پیام‌های یک مشتری
+    // هم عملاً پشت‌سرهم می‌آیند، نه هم‌زمان
+    if (parsed.buyerNeeds?.length) {
+      await this.recordBuyerNeedCounts(
+        conversation.customerId,
+        parsed.buyerNeeds,
+      );
+    }
+
     // همان سند، بخش ۲ — گروه‌های P1 (پرداخت/پس از خرید): ربات فعلاً Tool ای برای حل این‌ها
     // ندارد، پس به‌جای پاسخ نصفه‌ونیمه‌ی ASK_FAQ، مستقیم به فروشنده ارجاع می‌شود. اولویت روی
     // REQUEST_HUMAN صریح نیست چون این چک زودتر (بالا) رد شده — یعنی اگر مشتری هم صریح انسان
@@ -465,6 +498,21 @@ export class ConversationEngineService {
       parsed.buyerNeeds?.includes('POST_PURCHASE_SUPPORT')
     ) {
       return this.transitionToHandoff(conversation, 'SUPPORT_NEEDED');
+    }
+
+    // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۳ — قبلاً «عکس بیشتر بده»/«چه شکلیه؟»
+    // یا به ASK_FAQ می‌رفت (که اصلاً uiBlock نمی‌فرستد) یا حداکثر از PRODUCT_CARD موجود یک
+    // عکس (images[0]) می‌گرفت. فقط وقتی محصول قابل‌شناسایی باشد وارد می‌شویم؛ وگرنه جریان
+    // عادی (switch پایین) همان مسیر همیشگی‌اش را می‌رود. اکشن‌های قطعی (پرداخت/لغو/تخفیف) را
+    // عمداً رد می‌کند تا عکس‌خواهی حین آن‌ها جریان تصمیم‌گیری را منحرف نکند
+    if (
+      parsed.buyerNeeds?.includes('REQUEST_MORE_PHOTOS') &&
+      !['CHECKOUT', 'CONFIRM', 'CANCEL', 'APPLY_DISCOUNT'].includes(
+        parsed.intent,
+      )
+    ) {
+      const photosResult = await this.doShowPhotos(conversation, ctx, parsed);
+      if (photosResult) return photosResult;
     }
 
     switch (parsed.intent) {
@@ -493,6 +541,42 @@ export class ConversationEngineService {
       default:
         return this.doClarifyUnclear(conversation);
     }
+  }
+
+  // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۳ — همان منطق شناسایی محصول doUpdateCart
+  // (ایندکس صریح از lastShownProducts، وگرنه جستجوی نام). null یعنی «محصول قابل‌شناسایی نبود»؛
+  // handleMessage در این حالت جریان عادی (switch) را ادامه می‌دهد، نه یک پیام خطای جدا درباره‌ی
+  // عکس — چون intent اصلی (مثلاً ASK_FAQ) همچنان باید جواب خودش را بدهد
+  private async doShowPhotos(
+    conversation: ConversationWithStore,
+    ctx: ConversationContext,
+    parsed: ParsedIntent,
+  ): Promise<EngineResult | null> {
+    const ref = this.resolveProductRef(ctx, parsed);
+    const product = ref
+      ? await this.prisma.product.findUnique({ where: { id: ref.id } })
+      : parsed.productQuery
+        ? (
+            await this.searchProducts(conversation.storeId, parsed.productQuery)
+          )[0]
+        : null;
+    if (!product || product.storeId !== conversation.storeId) return null;
+    if (product.images.length === 0) return null;
+
+    const uiBlock: UiBlock = {
+      type: 'PRODUCT_PHOTOS',
+      productId: product.id,
+      productName: product.name,
+      images: product.images,
+    };
+    const reply = fa.salesAgent.photosCaption(product.name);
+    await this.logReply(conversation, reply, uiBlock, undefined, {
+      intent: parsed.intent,
+      handler: 'doShowPhotos',
+      factsOrPrompt: product.name,
+      model: resolveModel(conversation.abVariant),
+    });
+    return { reply, uiBlocks: [uiBlock], state: conversation.currentState };
   }
 
   // docs/PRD-customer-comments-and-discounts.md بخش الف/۳ — همان متن آزاد مشتری، بدون هیچ NLU،

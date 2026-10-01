@@ -28,6 +28,15 @@ export type UiBlock =
         images: string[];
       }[];
     }
+  // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۳ — برخلاف PRODUCT_CARD که فقط
+  // images[0] را می‌فرستد، این بلاک همه‌ی عکس‌های محصول را حمل می‌کند، برای وقتی مشتری
+  // صریحاً عکس بیشتر خواسته (BuyerNeedTag.REQUEST_MORE_PHOTOS)
+  | {
+      type: 'PRODUCT_PHOTOS';
+      productId: string;
+      productName: string;
+      images: string[];
+    }
   | { type: 'CART_SUMMARY'; items: CartItem[]; total: number }
   | {
       type: 'PAYMENT_INSTRUCTIONS';

@@ -2216,18 +2216,22 @@ enum CustomerChannel {
 }
 
 model Customer {
-  id             String          @id @default(uuid())
-  storeId        String
-  store          Store           @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  channel        CustomerChannel @default(WEB)
-  sessionToken   String? // فقط WEB
-  telegramChatId String? // فقط TELEGRAM
-  phone          String?
-  fullName       String?
+  id              String          @id @default(uuid())
+  storeId         String
+  store           Store           @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  channel         CustomerChannel @default(WEB)
+  sessionToken    String? // فقط WEB
+  telegramChatId  String? // فقط TELEGRAM
+  phone           String?
+  fullName        String?
   // docs/PRD-buyer-abuse-rate-limit.md — قفل موقت وقتی مشتری از سقف پیام در پنجره‌ی ۵ دقیقه‌ای
   // رد شود؛ تا این زمان، هیچ فراخوان AI برایش انجام نمی‌شود (سکوت کامل بعد از یک پیام اول)
-  lockedUntil    DateTime?
-  createdAt      DateTime        @default(now())
+  lockedUntil     DateTime?
+  createdAt       DateTime        @default(now())
+  // docs/PRD-buyer-preference-personalization.md §۹.۳ — شمارنده‌ی تجمیعی هر BuyerNeedTag
+  // دیده‌شده برای این خریدار (Record<BuyerNeedTag, number>)؛ با هر AI_TRACE جدید incremental
+  // آپدیت می‌شود، نه یک job دوره‌ای سنگین. فاز ۱: فقط جمع‌آوری، هیچ رفتار ایجنتی از رویش تصمیم نمی‌گیرد
+  buyerNeedCounts Json?
 
   // docs/PRD-conversation-history.md — دیگر یک‌به‌یک نیست؛ خریدار می‌تواند چند مکالمه‌ی
   // آرشیوشده داشته باشد («گفتگوی جدید» یا رسیدن به COMPLETED/REJECTED، بدون ساخت Customer تازه)

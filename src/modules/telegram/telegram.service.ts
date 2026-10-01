@@ -24,6 +24,7 @@ import { fa } from '../../i18n/fa';
 import type {
   TelegramCallbackQuery,
   TelegramInlineKeyboard,
+  TelegramKeyboard,
   TelegramMessage,
   TelegramUpdate,
 } from './telegram.types';
@@ -113,6 +114,17 @@ export class TelegramService {
       if (message.text?.startsWith('/history')) {
         this.logger.debug(`handling /history chat=${message.chat.id}`);
         await this.handleHistory(message);
+        return;
+      }
+      // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۲ — دکمه‌های منوی ثابت (Reply
+      // Keyboard) متن دقیق خودشان را به‌عنوان یک پیام معمولی برمی‌گردانند، نه یک callback جدا؛
+      // باید قبل از handleText عمومی چک شوند تا به‌جای جستجوی فروشگاه/پیام مشتری تفسیر نشوند
+      if (message.text === fa.telegram.menuOrders) {
+        await this.handleHistory(message);
+        return;
+      }
+      if (message.text === fa.telegram.menuCart) {
+        await this.handleMenuCart(message);
         return;
       }
       if (message.photo?.length) {
@@ -258,6 +270,42 @@ export class TelegramService {
     const conversation = await this.loadConversation(conversationId);
     if (!conversation) return;
     const result = await this.engine.startBrowse(conversation);
+    await this.sendEngineResult(chatId, result);
+    // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۲ — فقط یک‌بار در شروع هر مکالمه‌ی
+    // فروشگاه؛ Reply Keyboard تا وقتی حذفش نکنیم (remove_keyboard) پایین صفحه‌ی خریدار می‌ماند،
+    // نیازی به فرستادن دوباره‌اش در هر پیام نیست
+    await this.sendText(chatId, fa.telegram.menuIntro, this.mainMenuKeyboard());
+  }
+
+  // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۲ — فقط چند اکشن کلی/ثابت که همیشه معنی
+  // دارند، نه نتایج دینامیک (آن‌ها inline می‌مانند، بخش ۵.۱۲ توضیح می‌دهد چرا)
+  private mainMenuKeyboard(): TelegramKeyboard {
+    return {
+      keyboard: [
+        [{ text: fa.telegram.menuOrders }, { text: fa.telegram.menuCart }],
+      ],
+      resize_keyboard: true,
+    };
+  }
+
+  // دکمه‌ی ثابت «🛒 سبد فعلی» — دقیقاً همان مسیر handleText عادی (parseIntent متن را
+  // VIEW_CART تشخیص می‌دهد)، فقط وقتی مکالمه‌ی فعالی نیست پیام روشن‌تری می‌دهد به‌جای اینکه
+  // به‌اشتباه به‌عنوان جستجوی نام فروشگاه («🛒 سبد فعلی») تفسیر شود
+  private async handleMenuCart(message: TelegramMessage): Promise<void> {
+    const chatId = String(message.chat.id);
+    const conversation = await this.resolveActiveConversation(chatId);
+    if (!conversation) {
+      await this.sendText(chatId, fa.telegram.noActiveStore);
+      return;
+    }
+    if (conversation.isMutedForHuman) {
+      await this.logCustomerMessage(conversation.id, message.text ?? '');
+      return;
+    }
+    const result = await this.engine.handleMessage(
+      conversation,
+      message.text ?? '',
+    );
     await this.sendEngineResult(chatId, result);
   }
 
@@ -460,6 +508,17 @@ export class TelegramService {
     const conversation = await this.resolveActiveConversation(chatId);
     if (!conversation || conversation.isMutedForHuman) return;
 
+    // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۱ بند ۱ — قبلاً هر عکسی (حتی وقتی
+    // مشتری فقط عکس یک محصول/اسکرین‌شات می‌فرستد، نه رسید) بدون قید و شرط به
+    // handleReceiptUpload می‌رفت و جواب گمراه‌کننده‌ی «سفارشی در انتظار پرداخت پیدا نکردم»
+    // می‌گرفت؛ این چک هم آن پیام را با یک پیام صادقانه عوض می‌کند، هم آپلود بی‌فایده‌ی عکس
+    // به storage را قبل از آن متوقف می‌کند. engine.handleReceiptUpload همچنان خودش هم این
+    // شرط را چک می‌کند (defense-in-depth)، اینجا فقط زودتر و ارزان‌تر رد می‌شود
+    if (conversation.currentState !== 'AWAITING_PAYMENT') {
+      await this.sendText(chatId, fa.telegram.photoNotExpected);
+      return;
+    }
+
     const photos = message.photo ?? [];
     const largest = photos[photos.length - 1]; // تلگرام رزولوشن‌ها را صعودی می‌فرستد
     if (!largest) return;
@@ -658,6 +717,17 @@ export class TelegramService {
           }
         }
         return;
+      // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۳ — برخلاف PRODUCT_CARD که فقط
+      // images[0] می‌فرستد، همه‌ی عکس‌ها (تا سقف ۴ تا، که اسپم نشود) را جدا می‌فرستد
+      case 'PRODUCT_PHOTOS':
+        for (const key of block.images.slice(0, 4)) {
+          await this.sendPhoto(
+            chatId,
+            this.productImageUrl(block.productId, key),
+            block.productName,
+          );
+        }
+        return;
       case 'CART_SUMMARY': {
         const lines = block.items.map(
           (i) =>
@@ -722,11 +792,7 @@ export class TelegramService {
     return res.json().catch(() => null);
   }
 
-  private sendText(
-    chatId: string,
-    text: string,
-    keyboard?: TelegramInlineKeyboard,
-  ) {
+  private sendText(chatId: string, text: string, keyboard?: TelegramKeyboard) {
     return this.callApi('sendMessage', {
       chat_id: chatId,
       text,

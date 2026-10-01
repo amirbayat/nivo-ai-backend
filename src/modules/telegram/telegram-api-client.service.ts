@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { TelegramInlineKeyboard } from './telegram.types';
+import type { TelegramKeyboard } from './telegram.types';
 
 // docs/PRD-telegram-bot-channel.md بخش ۹.۱ — نسخه‌ی سبک و مستقل از callApi/sendText/sendPhoto
 // موجود در TelegramService، چون ConversationEngineService/StoreService (برای پوش اعلان
@@ -63,7 +63,7 @@ export class TelegramApiClientService {
     return res.json().catch(() => null);
   }
 
-  sendText(chatId: string, text: string, keyboard?: TelegramInlineKeyboard) {
+  sendText(chatId: string, text: string, keyboard?: TelegramKeyboard) {
     return this.callApi('sendMessage', {
       chat_id: chatId,
       text,
@@ -75,7 +75,7 @@ export class TelegramApiClientService {
     chatId: string,
     photoUrl: string,
     caption: string,
-    keyboard?: TelegramInlineKeyboard,
+    keyboard?: TelegramKeyboard,
   ) {
     return this.callApi('sendPhoto', {
       chat_id: chatId,
@@ -93,7 +93,7 @@ export class TelegramApiClientService {
     filename: string,
     mimeType: string,
     caption: string,
-    keyboard?: TelegramInlineKeyboard,
+    keyboard?: TelegramKeyboard,
   ) {
     const form = new FormData();
     form.append('chat_id', chatId);

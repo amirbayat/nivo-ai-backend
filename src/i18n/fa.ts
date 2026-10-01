@@ -190,6 +190,9 @@ export const fa = {
     cartEmpty: 'سبد خرید خالی است',
     cartCleared: 'سبد خرید خالی شد',
     noPendingOrder: 'سفارشی در انتظار پرداخت پیدا نکردم',
+    // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۳ — جواب ثابت وقتی مشتری صریح عکس
+    // بیشتر خواسته و محصول پیدا شد (نه caption تولیدی، چون خودِ عکس‌ها پیام اصلی‌اند)
+    photosCaption: (productName: string) => `عکس‌های ${productName} 📸`,
     receiptReceived: 'رسید دریافت شد و برای فروشنده ارسال شد — منتظر تایید باش',
     faqStub: 'این سؤال رو یادداشت کردم، به‌زودی جواب می‌دم',
     handoffToHuman: 'الان شما رو به یکی از همکارها وصل می‌کنم',
@@ -237,6 +240,14 @@ export const fa = {
     storeSearchResults: '🔎 این فروشگاه‌ها پیدا شدند، یکی رو انتخاب کنید:',
     storeSearchEmpty:
       'فروشگاهی با این اسم پیدا نشد. اسم دیگه‌ای امتحان کنید یا از لینک مستقیم فروشگاه استفاده کنید.',
+    // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۱ بند ۱ — قبلاً هر عکسی بیرون از
+    // AWAITING_PAYMENT پیام گمراه‌کننده‌ی «سفارشی پیدا نکردم» می‌گرفت
+    photoNotExpected:
+      'فعلاً نمی‌تونم عکس رو ببینم 🙏 میشه با متن بگی چی می‌خوای؟',
+    // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۲ — منوی ثابت Reply Keyboard
+    menuOrders: '📦 سفارش‌های من',
+    menuCart: '🛒 سبد فعلی',
+    menuIntro: 'از این دکمه‌ها هم می‌تونی استفاده کنی:',
     // docs/PRD-telegram-bot-channel.md بخش ۹.۱ — اتصال تلگرام شخصی فروشنده برای اعلان‌ها
     sellerConnected: (storeName: string) =>
       `تلگرام شما به فروشگاه «${storeName}» وصل شد ✅ از این به بعد وقتی مشتری‌ای نیاز به پاسخ انسانی داشت یا رسیدی فرستاد، همین‌جا بهتون اطلاع می‌دیم.`,
