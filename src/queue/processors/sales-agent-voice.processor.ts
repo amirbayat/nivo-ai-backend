@@ -329,8 +329,10 @@ export class SalesAgentVoiceProcessor {
     const apiUrl = this.config.get<string>('API_URL');
     // main.ts: setGlobalPrefix('api/v1') روی همه‌ی روت‌ها هست، API_URL فقط origin خالی است —
     // بدون این پیشوند تلگرام موقع دانلود فایل صوتی 404 می‌گیرد (همون باگ productImageUrl در
-    // telegram.service.ts)
-    const audioUrl = `${apiUrl}/api/v1/v2/chat/${conversationId}/voice/${voiceKey}`;
+    // telegram.service.ts). voiceKey هم شامل پیشوند «conversationId/» است (storage.service.ts
+    // uploadImage) — باید encode شود وگرنه «/» داخلش روت :key را به چند سگمنت می‌شکند و سرور
+    // تلگرام موقع دانلود 404 می‌گیرد
+    const audioUrl = `${apiUrl}/api/v1/v2/chat/${conversationId}/voice/${encodeURIComponent(voiceKey)}`;
     await this.telegram.sendVoiceReady(chatId, audioUrl);
   }
 }
