@@ -13,6 +13,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import type { ConversationState } from '@prisma/client';
 import { JwtGuard } from '../../common/guards/jwt.guard';
 import { AdminGuard } from '../../common/guards/admin.guard';
 import { AdminService } from './admin.service';
@@ -211,6 +212,25 @@ export class AdminController {
       storeId,
       variant,
       reason,
+      from: from ? new Date(from) : undefined,
+      to: to ? new Date(to) : undefined,
+      page: page ? parseInt(page, 10) : undefined,
+    });
+  }
+
+  // فیدبک کاربر ۱۴۰۵/۰۷/۰۱ — لیست عمومی و قابل‌مرور همه‌ی مکالمات (نه فقط failed)، فیلترپذیر
+  // روی فروشگاه/وضعیت/تاریخ؛ جزئیات کامل هر ردیف با کلیک روی /trace زیر گرفته می‌شود
+  @Get('sales-agent/conversations')
+  getSalesAgentConversations(
+    @Query('storeId') storeId?: string,
+    @Query('state') state?: ConversationState,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('page') page?: string,
+  ) {
+    return this.adminService.getConversations({
+      storeId,
+      state,
       from: from ? new Date(from) : undefined,
       to: to ? new Date(to) : undefined,
       page: page ? parseInt(page, 10) : undefined,

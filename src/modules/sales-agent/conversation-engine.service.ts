@@ -369,6 +369,144 @@ export class ConversationEngineService {
     }
   }
 
+  // فیدبک کاربر ۱۴۰۵/۰۷/۰۱ — doBrowse() قبلاً کارت همه‌ی محصولات کاندید را مستقل از متن پاسخ
+  // attach می‌کرد (مثلاً مشتری می‌پرسید «برای فرانت‌اند کدوم بهتره؟»، جواب درست React بود ولی
+  // کارت دوره‌ی پایتون هم زیرش می‌ماند). این متد مخصوص همون حالت چندمحصولیه: دقیقاً همون سیستم
+  // پرامپت callCaption را دارد، فقط به‌جای generateText از generateObject استفاده می‌کند تا
+  // کنار متن پاسخ، شناسه‌ی محصولات واقعاً مرتبط را هم برگرداند — یک فراخوان AI، نه دوتا.
+  private async callCaptionWithRelevance(
+    facts: string,
+    model: string,
+    category: string | null,
+    candidateProductIds: string[],
+    customerQuestion?: string,
+  ): Promise<{
+    text: string;
+    relevantProductIds: string[];
+    inputTokens: number;
+    outputTokens: number;
+  }> {
+    const tone = toneForCategory(category);
+    const { object, usage } = await generateObject({
+      model: this.aiProvider.buildClient(undefined, {
+        supportsStructuredOutputs: true,
+      })(model),
+      schema: z.object({
+        text: z.string(),
+        relevantProductIds: z.array(z.string()),
+      }),
+      system: `تو دستیار فروش یک فروشگاه در دایرکت اینستاگرام هستی. فقط و فقط از «واقعیت‌های»
+داده‌شده یک پیام فارسی کوتاه (حداکثر ۲-۳ جمله)، دوستانه و محاوره‌ای بساز — هیچ عدد/اسم/شماره‌ی
+تازه‌ای که در واقعیت‌ها نیامده اضافه نکن، و پیشنهاد بعدی اختراع نکن. هرگز تعداد دقیق موجودی
+انبار را اعلام نکن (حتی اگر مشتری صریح بپرسد)، فقط «موجود است» یا «فعلاً ناموجود».
+لحن نوشتار باید ${tone} باشد.${
+        customerQuestion
+          ? '\nمشتری زیر «سوال مشتری» یک سوال مشخص پرسیده — مستقیم و دقیق با استفاده از همین واقعیت‌ها جوابش را بده؛ اگر واقعیت‌ها جوابش را ندارند، صادقانه بگو که این اطلاعات را نداری.'
+          : ''
+      }
+علاوه‌بر متن پاسخ، در relevantProductIds فقط شناسه‌ی محصولاتی را برگردان که واقعاً به
+سوال/نیاز مشتری مرتبط‌اند (مثلاً اگر مشتری پرسیده «برای فرانت‌اند کدوم بهتره؟» و جواب یک محصول
+خاص است، فقط همان را برگردان، نه بقیه‌ی محصولات نامرتبط). اگر مشتری چیز خاصی نپرسیده و معرفی
+کلی می‌خواهد، همه‌ی شناسه‌های کاندید را برگردان. شناسه‌های کاندید: ${candidateProductIds.join(', ')}`,
+      prompt: customerQuestion
+        ? `سوال مشتری: ${customerQuestion}\n\nواقعیت‌ها:\n${facts}`
+        : facts,
+      temperature: 0.3,
+    });
+    return {
+      text: object.text.trim(),
+      relevantProductIds: object.relevantProductIds,
+      inputTokens: usage.inputTokens ?? 0,
+      outputTokens: usage.outputTokens ?? 0,
+    };
+  }
+
+  // همون fallback دومرحله‌ای caption()، فقط با خروجی relevantProductIds اضافه؛ اگر هر دو
+  // تلاش شکست خورد یا مدل خروجی غیرمنتظره داد، fallback امن «همه‌ی کاندیدها مرتبط‌اند» است —
+  // نه اینکه هیچ محصولی نشان داده نشود
+  private async captionWithRelevance(
+    facts: string,
+    conversation: ConversationWithStore,
+    candidateProductIds: string[],
+    customerQuestion?: string,
+  ): Promise<{ text: string; relevantProductIds: string[] }> {
+    const primaryModel = resolveModel(conversation.abVariant);
+    const category = conversation.store.category;
+    const started = Date.now();
+    try {
+      const { text, relevantProductIds, inputTokens, outputTokens } =
+        await this.callCaptionWithRelevance(
+          facts,
+          primaryModel,
+          category,
+          candidateProductIds,
+          customerQuestion,
+        );
+      await this.logAiCall(conversation, 'CAPTION', true, Date.now() - started);
+      await this.logTextCreditUsage(
+        conversation,
+        primaryModel,
+        inputTokens,
+        outputTokens,
+      );
+      return {
+        text,
+        relevantProductIds:
+          relevantProductIds.length > 0
+            ? relevantProductIds
+            : candidateProductIds,
+      };
+    } catch {
+      await this.logAiCall(
+        conversation,
+        'CAPTION',
+        false,
+        Date.now() - started,
+      );
+      if (primaryModel === defaultModel()) {
+        return { text: facts, relevantProductIds: candidateProductIds };
+      }
+      const fallbackStarted = Date.now();
+      try {
+        const { text, relevantProductIds, inputTokens, outputTokens } =
+          await this.callCaptionWithRelevance(
+            facts,
+            defaultModel(),
+            category,
+            candidateProductIds,
+            customerQuestion,
+          );
+        await this.logAiCall(
+          conversation,
+          'CAPTION',
+          true,
+          Date.now() - fallbackStarted,
+        );
+        await this.logTextCreditUsage(
+          conversation,
+          defaultModel(),
+          inputTokens,
+          outputTokens,
+        );
+        return {
+          text,
+          relevantProductIds:
+            relevantProductIds.length > 0
+              ? relevantProductIds
+              : candidateProductIds,
+        };
+      } catch {
+        await this.logAiCall(
+          conversation,
+          'CAPTION',
+          false,
+          Date.now() - fallbackStarted,
+        );
+        return { text: facts, relevantProductIds: candidateProductIds };
+      }
+    }
+  }
+
   private async searchProducts(storeId: string, query?: string | null) {
     // docs/PRD-telegram-bot-channel.md بخش ۹.۳ — کد محصول (روی محتوای تبلیغاتی) قبل از
     // جستجوی نام امتحان می‌شود؛ اگر دقیقاً مچ شد، فقط همان یکی برگردانده می‌شود
@@ -1021,9 +1159,42 @@ export class ConversationEngineService {
     }
 
     const isFirstReply = conversation.currentState === 'GREETING';
+
+    // همون دلیل showProduct بالا — بدون عدد موجودی در واقعیت‌ها
+    const facts = `این محصولات فروشگاه است: ${products.map((p) => `${p.name} (${p.basePrice} تومان)${p.stock === 0 ? ' — فعلاً ناموجود' : ''}${p.description ? ` — توضیحات: ${truncateDescriptionForFacts(p.description)}` : ''}`).join('، ')}`;
+    // فیدبک کاربر ۱۴۰۵/۰۷/۰۱ — سوال واقعی مشتری (مثلاً «سرفصل‌هاش چیه؟») را هم به caption
+    // می‌دهیم تا به‌جای یک معرفی کلی، مستقیم همان سوال را از facts بالا جواب بدهد
+    //
+    // فیدبک دوم ۱۴۰۵/۰۷/۰۱ — وقتی چند محصول کاندید داریم، باید caption قبل از ساخت uiBlock
+    // صدا زده بشه تا بر اساس خودِ پاسخ، فقط محصولات واقعاً مرتبط کارتشون نشون داده بشه (قبلاً
+    // uiBlock از روی همه‌ی products ساخته می‌شد، مستقل از اینکه پاسخ متنی فقط یکیشون رو توصیه
+    // کرده بود — مثلاً «برای فرانت‌اند React بهتره» ولی کارت دوره‌ی پایتون هم زیرش می‌موند)
+    const relevantProducts =
+      products.length > 1
+        ? await (async () => {
+            const { text, relevantProductIds } =
+              await this.captionWithRelevance(
+                facts,
+                conversation,
+                products.map((p) => p.id),
+                customerMessage,
+              );
+            const filtered = products.filter((p) =>
+              relevantProductIds.includes(p.id),
+            );
+            return {
+              text,
+              products: filtered.length > 0 ? filtered : products,
+            };
+          })()
+        : {
+            text: await this.caption(facts, conversation, customerMessage),
+            products,
+          };
+
     const uiBlock: UiBlock = {
       type: 'PRODUCT_CARD',
-      products: products.map((p) => ({
+      products: relevantProducts.products.map((p) => ({
         id: p.id,
         name: p.name,
         basePrice: p.basePrice,
@@ -1034,21 +1205,19 @@ export class ConversationEngineService {
     const nextState: ConversationState = 'BROWSING';
     await this.persistTransition(conversation, nextState, {
       cart: this.getContext(conversation).cart,
-      lastShownProducts: products.map((p) => ({ id: p.id, name: p.name })),
+      lastShownProducts: relevantProducts.products.map((p) => ({
+        id: p.id,
+        name: p.name,
+      })),
     });
     await this.resetClarifyAttempts(conversation);
 
-    // همون دلیل showProduct بالا — بدون عدد موجودی در واقعیت‌ها
-    const facts = `این محصولات فروشگاه است: ${products.map((p) => `${p.name} (${p.basePrice} تومان)${p.stock === 0 ? ' — فعلاً ناموجود' : ''}${p.description ? ` — توضیحات: ${truncateDescriptionForFacts(p.description)}` : ''}`).join('، ')}`;
-    // فیدبک کاربر ۱۴۰۵/۰۷/۰۱ — سوال واقعی مشتری (مثلاً «سرفصل‌هاش چیه؟») را هم به caption
-    // می‌دهیم تا به‌جای یک معرفی کلی، مستقیم همان سوال را از facts بالا جواب بدهد
-    const reply = await this.caption(facts, conversation, customerMessage);
     // فیدبک اول پایلوت: اولین پاسخ مکالمه (بعد از GREETING) یک خط راهنمای ثابت (نه
     // LLM-generated، برای پایداری) جلوی لیست محصولات می‌گیرد — قبلاً مشتری بدون هیچ
     // توضیحی مستقیم می‌رسید به لیست محصولات و نمی‌فهمید چیکار باید بکند
     const finalReply = isFirstReply
-      ? `${await this.buildGreeting(conversation)}\n\n${reply}`
-      : reply;
+      ? `${await this.buildGreeting(conversation)}\n\n${relevantProducts.text}`
+      : relevantProducts.text;
     await this.logReply(conversation, finalReply, uiBlock, undefined, {
       intent: parsed.intent,
       handler: 'doBrowse',

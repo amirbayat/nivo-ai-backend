@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import type { ConversationState } from '@prisma/client';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import * as XLSX from 'xlsx';
@@ -1198,6 +1199,116 @@ export class AdminService {
         };
       }),
     );
+
+    return { items, total, page };
+  }
+
+  // فیدبک کاربر ۱۴۰۵/۰۷/۰۱ — برخلاف getFailedMessages (فقط پیام‌های نافهم)، این یک لیست
+  // عمومی و قابل‌مرور همه‌ی مکالمات است، فیلترپذیر روی فروشگاه/وضعیت/تاریخ. جزئیات کامل هر
+  // مکالمه (مسیر/reasoning) عمداً این‌جا decode نمی‌شود — برای همون getConversationTrace موجود
+  // (درخواست جدا، فقط وقتی ادمین روی یک ردیف کلیک می‌کند) باقی می‌ماند تا کوئری لیست سبک بماند.
+  // حداکثر ۴ کوئری مستقل از اندازه‌ی کل جدول (count، لیست صفحه، آخرین پیام، تعداد failed) —
+  // همون الگوی bounded-page-size که getFailedMessages/getBuyerIntentDiscovery دارند.
+  async getConversations(params: {
+    storeId?: string;
+    state?: ConversationState;
+    from?: Date;
+    to?: Date;
+    page?: number;
+  }) {
+    const page = params.page && params.page > 0 ? params.page : 1;
+    const pageSize = 20;
+    const where = {
+      ...(params.storeId ? { storeId: params.storeId } : {}),
+      ...(params.state ? { currentState: params.state } : {}),
+      ...((params.from ?? params.to)
+        ? {
+            createdAt: {
+              ...(params.from ? { gte: params.from } : {}),
+              ...(params.to ? { lte: params.to } : {}),
+            },
+          }
+        : {}),
+    };
+
+    const [total, conversations] = await Promise.all([
+      this.prisma.salesConversation.count({ where }),
+      this.prisma.salesConversation.findMany({
+        where,
+        orderBy: { updatedAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        select: {
+          id: true,
+          storeId: true,
+          currentState: true,
+          abVariant: true,
+          createdAt: true,
+          updatedAt: true,
+          store: { select: { name: true } },
+          customer: { select: { fullName: true, phone: true, channel: true } },
+        },
+      }),
+    ]);
+
+    if (conversations.length === 0) return { items: [], total, page };
+
+    const conversationIds = conversations.map((c) => c.id);
+    const [lastMessages, agentReplies, stuckConversationIds] =
+      await Promise.all([
+        this.prisma.conversationEvent.findMany({
+          where: {
+            conversationId: { in: conversationIds },
+            type: { in: ['CUSTOMER_MESSAGE', 'AGENT_REPLY'] },
+          },
+          orderBy: [{ conversationId: 'asc' }, { createdAt: 'desc' }],
+          distinct: ['conversationId'],
+          select: { conversationId: true, payload: true, createdAt: true },
+        }),
+        this.prisma.conversationEvent.findMany({
+          where: {
+            conversationId: { in: conversationIds },
+            type: 'AGENT_REPLY',
+          },
+          select: { conversationId: true, payload: true },
+        }),
+        getStuckConversationIds(this.prisma, conversationIds),
+      ]);
+
+    const lastMessageByConversation = new Map(
+      lastMessages.map((e) => [e.conversationId, e]),
+    );
+    const failedCountByConversation = new Map<string, number>();
+    for (const e of agentReplies) {
+      const flag = (e.payload as { flag?: string })?.flag;
+      if (flag !== 'UNCLEAR' && flag !== 'NO_KB_MATCH') continue;
+      failedCountByConversation.set(
+        e.conversationId,
+        (failedCountByConversation.get(e.conversationId) ?? 0) + 1,
+      );
+    }
+
+    const items = conversations.map((c) => {
+      const lastMessage = lastMessageByConversation.get(c.id);
+      const lastMessagePayload = lastMessage?.payload as
+        { text?: string } | undefined;
+      return {
+        id: c.id,
+        storeId: c.storeId,
+        storeName: c.store.name,
+        customerName: c.customer.fullName,
+        customerPhone: c.customer.phone,
+        channel: c.customer.channel,
+        currentState: c.currentState,
+        abVariant: c.abVariant,
+        lastMessagePreview: lastMessagePayload?.text ?? '',
+        lastMessageAt: lastMessage?.createdAt ?? null,
+        failedTurnCount: failedCountByConversation.get(c.id) ?? 0,
+        endedInHandoff: stuckConversationIds.has(c.id),
+        createdAt: c.createdAt,
+        updatedAt: c.updatedAt,
+      };
+    });
 
     return { items, total, page };
   }
