@@ -313,13 +313,49 @@ export class SalesAgentService {
   async getVoiceAudio(conversationId: string, key: string): Promise<Buffer> {
     const events = await this.prisma.conversationEvent.findMany({
       where: { conversationId, type: 'AGENT_REPLY' },
-      select: { payload: true },
+      select: { id: true, payload: true },
     });
-    const owns = events.some(
+    const event = events.find(
       (e) => (e.payload as { voiceKey?: string })?.voiceKey === key,
     );
-    if (!owns) throw new NotFoundException(fa.salesAgent.conversationNotFound);
+    if (!event) throw new NotFoundException(fa.salesAgent.conversationNotFound);
+    // docs/PRD-sales-agent-voice.md بخش ۶.۵ — این GET هم از وب (audio src) هم از سرورهای تلگرام
+    // (sendVoice با URL) فچ می‌شود؛ طبق متن صریح سند، این فقط یک پروکسی ضعیف («دانلود شد») است،
+    // نه معادل «شنیده شد» — همان یک‌بار اول ثبت می‌شود، نه هر فچ تکراری (کش هم‌مرورگر کمک می‌کند)
+    const payload = event.payload as { voiceDownloadedAt?: string };
+    if (!payload.voiceDownloadedAt) {
+      await this.prisma.conversationEvent.update({
+        where: { id: event.id },
+        data: {
+          payload: { ...payload, voiceDownloadedAt: new Date().toISOString() },
+        },
+      });
+    }
     return this.storage.downloadImage(key);
+  }
+
+  // docs/PRD-sales-agent-voice.md بخش ۶.۵ — سیگنال واقعی روی وب: onPlay خودِ تگ audio، یک‌بار
+  // پینگ می‌زند. برخلاف voiceDownloadedAt بالا، این واقعاً معادل «شنیده شد» است (نه فقط فچ)
+  async markVoiceHeard(
+    conversationId: string,
+    sessionToken: string,
+    key: string,
+  ): Promise<void> {
+    await this.loadOwned(conversationId, sessionToken);
+    const events = await this.prisma.conversationEvent.findMany({
+      where: { conversationId, type: 'AGENT_REPLY' },
+      select: { id: true, payload: true },
+    });
+    const event = events.find(
+      (e) => (e.payload as { voiceKey?: string })?.voiceKey === key,
+    );
+    if (!event) throw new NotFoundException(fa.salesAgent.conversationNotFound);
+    const payload = event.payload as { voiceHeardAt?: string };
+    if (payload.voiceHeardAt) return;
+    await this.prisma.conversationEvent.update({
+      where: { id: event.id },
+      data: { payload: { ...payload, voiceHeardAt: new Date().toISOString() } },
+    });
   }
 
   // پول کوتاه وب (حداکثر ۱۵ ثانیه هر ۲ ثانیه، طبق سند) — فقط همون یک event مشخص را چک می‌کند

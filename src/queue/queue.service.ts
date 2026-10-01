@@ -257,6 +257,12 @@ export class QueueService implements OnApplicationBootstrap {
       {},
       { repeat: { cron: ABANDONED_CART_REMINDER_CRON } },
     );
+    // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۰ بند ۲ — همان صف/همان cron، job name جدا
+    await this.abandonedCartReminderQueue.add(
+      'send-second-reminders',
+      {},
+      { repeat: { cron: ABANDONED_CART_REMINDER_CRON } },
+    );
     this.logger.log(
       `Abandoned cart reminder job scheduled: ${ABANDONED_CART_REMINDER_CRON}`,
     );

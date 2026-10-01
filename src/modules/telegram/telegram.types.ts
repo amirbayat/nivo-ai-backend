@@ -25,13 +25,15 @@ export interface TelegramMessage {
   // force_reply بات جواب می‌دهد، تلگرام این فیلد را با همان پیام اصلی پر می‌کند؛ conversationId
   // از متن همان پیام اصلی (که ما ساختیم) استخراج می‌شود، نیازی به session state جدا نیست
   reply_to_message?: TelegramMessage;
+  // docs/PRD-sales-agent-voice.md بخش ۶.۴ — تنها سیگنال در دسترس برای تخمین جنسیت خریدار
+  from?: { id: number; first_name?: string };
 }
 
 export interface TelegramCallbackQuery {
   id: string;
   data?: string;
   message?: TelegramMessage;
-  from: { id: number };
+  from: { id: number; first_name?: string };
 }
 
 export interface TelegramUpdate {

@@ -57,6 +57,8 @@ const HANDOFF_CLARIFY_THRESHOLD = 4;
 // وویس به‌ازای هر مکالمه (جلوی مکالمه‌ای که هر پاسخش وویس می‌گیرد)
 const VOICE_MIN_REPLY_CHARS = 200;
 const VOICE_MAX_PER_CONVERSATION = 10;
+// docs/PRD-sales-agent-voice.md بخش ۶.۳ — سقف وویس‌های پشت‌سرهم بدون یک پاسخ متنی‌تنها در میانه
+const VOICE_MAX_CONSECUTIVE = 2;
 
 // docs/PRD-sales-agent-voice.md بخش ۶.۲ — TTS پارامتر «حداکثر مدت» ندارد؛ با نرخ گفتار
 // فارسی ~۱۴-۱۶ کاراکتر/ثانیه، ~۴۵۰ کاراکتر تقریباً معادل ۳۰ ثانیه است (تخمین اولیه، بعد
@@ -735,6 +737,16 @@ export class ConversationEngineService {
     }
 
     const verdict = await this.classifySatisfactionReply(text, conversation);
+    // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۰ بند ۳ — بدون این، نرخ جواب‌دهی/نسبت
+    // POSITIVE-NEGATIVE-UNRELATED قابل محاسبه نبود (verdict قبلاً فقط برای انتخاب پاسخ مصرف
+    // می‌شد و بعدش دور ریخته می‌شد). همان الگوی AI_TRACE موجود (handler:'parseIntent')، صفر migration
+    await this.prisma.conversationEvent.create({
+      data: {
+        conversationId: conversation.id,
+        type: 'AI_TRACE',
+        payload: { handler: 'satisfactionClassify', verdict },
+      },
+    });
 
     if (verdict === 'UNRELATED') {
       await this.prisma.salesConversation.update({
@@ -1705,18 +1717,41 @@ answered=false بده (به‌جای حدس‌زدن).`,
     // voice.reason در AI_TRACE (docs/PRD-admin-ai-decision-trace-log.md بخش ۱) به همین نیاز دارد
     let wantsVoice = false;
     let voiceReason:
-      'TOO_SHORT' | 'CONVERSATION_CAP' | 'VOICE_VARIANT_OFF' | undefined;
+      | 'TOO_SHORT'
+      | 'CONVERSATION_CAP'
+      | 'VOICE_VARIANT_OFF'
+      | 'CONSECUTIVE_CAP'
+      | undefined;
     if (text.length > VOICE_MIN_REPLY_CHARS) {
       // docs/PRD-sales-agent-voice.md بخش ۶.۱ — گروه OFF باید واقعاً هیچ وویسی نبیند، نه
       // فقط اینکه پخش نشود؛ پس قبل از reserveVoiceSlot چک می‌شود (سهمیه‌ی مکالمه هم دست‌نخورده می‌ماند)
       if (conversation.voiceVariant === 'OFF') {
         voiceReason = 'VOICE_VARIANT_OFF';
+      } else if (
+        conversation.consecutiveVoiceReplyCount >= VOICE_MAX_CONSECUTIVE
+      ) {
+        // docs/PRD-sales-agent-voice.md بخش ۶.۳ — حتی اگر واجد شرایط باشد (طول کافی، سقف کل
+        // مکالمه هم خالی)، بعد از ۲ تای پشت‌سرهم باید فقط متن بماند
+        voiceReason = 'CONSECUTIVE_CAP';
       } else {
         wantsVoice = await this.reserveVoiceSlot(conversation.id);
         if (!wantsVoice) voiceReason = 'CONVERSATION_CAP';
       }
     } else {
       voiceReason = 'TOO_SHORT';
+    }
+    // شمارنده‌ی متوالی: با هر پاسخی که وویس گرفت زیاد می‌شود، با هر پاسخی که نگرفت صفر می‌شود؛
+    // وقتی از قبل هم صفر بود و همچنان وویس نگرفت، نیازی به نوشتن دوباره نیست
+    if (wantsVoice) {
+      await this.prisma.salesConversation.update({
+        where: { id: conversation.id },
+        data: { consecutiveVoiceReplyCount: { increment: 1 } },
+      });
+    } else if (conversation.consecutiveVoiceReplyCount > 0) {
+      await this.prisma.salesConversation.update({
+        where: { id: conversation.id },
+        data: { consecutiveVoiceReplyCount: 0 },
+      });
     }
 
     const payload: Prisma.InputJsonObject = {

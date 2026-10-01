@@ -237,4 +237,36 @@ export class AdminController {
       to: to ? new Date(to) : undefined,
     });
   }
+
+  // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۰ بند ۳
+  @Get('sales-agent/followup-instrumentation')
+  getFollowUpInstrumentation(
+    @Query('storeId') storeId?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    return this.adminService.getFollowUpInstrumentation({
+      storeId,
+      from: from ? new Date(from) : undefined,
+      to: to ? new Date(to) : undefined,
+    });
+  }
+
+  @Get('sales-agent/cart-recovery-instrumentation')
+  getCartRecoveryInstrumentation(
+    @Query('storeId') storeId?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    return this.adminService.getCartRecoveryInstrumentation({
+      storeId,
+      from: from ? new Date(from) : undefined,
+      to: to ? new Date(to) : undefined,
+    });
+  }
+
+  @Get('sales-agent/ad-placement-instrumentation')
+  getAdPlacementInstrumentation(@Query('storeId') storeId?: string) {
+    return this.adminService.getAdPlacementInstrumentation({ storeId });
+  }
 }

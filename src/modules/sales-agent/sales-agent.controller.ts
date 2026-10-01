@@ -140,6 +140,21 @@ export class SalesAgentController {
     res.send(buffer);
   }
 
+  // docs/PRD-sales-agent-voice.md بخش ۶.۵ — onPlay تگ audio وب؛ نیاز به session-token دارد
+  // (برخلاف GET بالا که عمومی است) چون این واقعاً یک سیگنال معنادار آماری می‌سازد، نه صرف سرو فایل
+  @Post('chat/:conversationId/voice/:key/heard')
+  markVoiceHeard(
+    @Param('conversationId') conversationId: string,
+    @Headers('x-session-token') sessionToken: string,
+    @Param('key') key: string,
+  ) {
+    return this.salesAgentService.markVoiceHeard(
+      conversationId,
+      sessionToken,
+      key,
+    );
+  }
+
   // محتوای عمومی ویترین (نه خصوصی مثل رسید) — بدون auth، چون باید در <img> مرورگر مشتری
   // ناشناس هم لود شود؛ مالکیت/تعلق کلید به همین محصول/فروشگاه در سرویس چک می‌شود
   @SkipThrottle()

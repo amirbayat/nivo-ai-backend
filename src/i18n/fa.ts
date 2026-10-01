@@ -226,10 +226,21 @@ export const fa = {
       'خوشحالیم که راضی بودی! هر وقت باز چیزی خواستی، همین‌جا هستیم 🌟',
     satisfactionNegativeAck:
       'بابت این تجربه متاسفیم 🙏 همین الان به فروشنده اطلاع دادیم تا پیگیری کنه.',
-    // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۴ — سبد رهاشده: یادآوری یک‌باره، بدون
-    // فراخوان AI (پیام ثابت)، وقتی مکالمه در CART_REVIEW/AWAITING_PAYMENT بیش از حد بماند
-    abandonedCartReminder:
-      'هنوز منتظر تکمیل خریدتیم 🙂 اگه سوالی مونده یا نیاز به کمک داری، همین‌جا بگو.',
+    // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۴ + بخش ۵.۱۰ بند ۱ — سبد رهاشده: یادآوری
+    // یک‌باره، بدون فراخوان AI (پیام ثابت)، وقتی مکالمه در CART_REVIEW/AWAITING_PAYMENT بیش از حد
+    // بماند؛ اگه اسم اولین آیتم سبد در دسترس بود شخصی‌سازی می‌شود، وگرنه متن ژنریک قبلی
+    abandonedCartReminder: (firstItemName?: string) =>
+      firstItemName
+        ? `هنوز منتظر تکمیل خرید «${firstItemName}» هستیم 🙂 اگه سوالی مونده یا نیاز به کمک داری، همین‌جا بگو.`
+        : 'هنوز منتظر تکمیل خریدتیم 🙂 اگه سوالی مونده یا نیاز به کمک داری، همین‌جا بگو.',
+    // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۰ بند ۲ — یادآوری دوم (۱۸ ساعت بعد از
+    // اولی)، فقط وقتی فروشگاه از قبل یک StoreDiscountCode فعال داشته باشد
+    abandonedCartReminderWithDiscount: (
+      code: string,
+      discountLabel: string,
+      firstItemName?: string,
+    ) =>
+      `${firstItemName ? `«${firstItemName}» هنوز توی سبدته` : 'سبد خریدت هنوز تکمیل نشده'} 🙂 برای این‌که زودتر تمومش کنی، یه کد تخفیف ${discountLabel} داریم: ${code}`,
   },
   telegram: {
     startNeedsLink:

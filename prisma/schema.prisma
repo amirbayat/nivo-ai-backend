@@ -2065,6 +2065,11 @@ model Store {
   // در transitionToHandoff برای انتخاب پیام «الان»/«فردا» استفاده می‌شود
   workingHoursStart             String?
   workingHoursEnd               String?
+  // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۰ بند ۴ — سوئیچ فروشنده برای خاموش‌کردن
+  // پیام‌های خودکار (دغدغه‌ی برند/اسپم)؛ دو فیلد جدا چون دو پایپ‌لاین کاملاً مستقل‌اند
+  // (PostPurchaseFollowUpService / AbandonedCartReminderService)
+  postPurchaseFollowUpEnabled   Boolean           @default(true)
+  abandonedCartReminderEnabled  Boolean           @default(true)
   createdAt                     DateTime          @default(now())
   updatedAt                     DateTime          @updatedAt
 
@@ -2260,39 +2265,46 @@ enum ConversationState {
 // اصلی نیوو (بالای همین فایل) گرفته شده و جدول `conversations` را دارد؛ این‌جا کاملاً یک
 // دامنه‌ی جدا (مکالمه‌ی خرید مشتری ناشناس با یک فروشگاه) است.
 model SalesConversation {
-  id                          String            @id @default(uuid())
-  storeId                     String
-  store                       Store             @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  customerId                  String
-  customer                    Customer          @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  currentState                ConversationState @default(GREETING)
-  contextData                 Json              @default("{}") // { cart: [{productId, name, unitPrice, qty}] }
-  isMutedForHuman             Boolean           @default(false)
+  id                                String            @id @default(uuid())
+  storeId                           String
+  store                             Store             @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  customerId                        String
+  customer                          Customer          @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  currentState                      ConversationState @default(GREETING)
+  contextData                       Json              @default("{}") // { cart: [{productId, name, unitPrice, qty}] }
+  isMutedForHuman                   Boolean           @default(false)
   // docs/PRD-conversation-history.md — پر می‌شود وقتی خریدار «گفتگوی جدید» می‌زند یا سفارش
   // این مکالمه تأیید/رد می‌شود (currentState به COMPLETED/REJECTED می‌رود)؛ مکالمه‌ی آرشیوشده
   // دیگر «فعال» فرض نمی‌شود (resolveActiveConversation تلگرام، شروع تازه‌ی وب)
-  archivedAt                  DateTime?
-  clarifyAttempts             Int               @default(0)
+  archivedAt                        DateTime?
+  clarifyAttempts                   Int               @default(0)
   // A/B تست مدل‌های AI (فیدبک اول پایلوت) — یک‌بار در startChat تصادفی تعیین می‌شود و تا
   // آخر عمر مکالمه ثابت می‌ماند (کلید MODEL_VARIANTS، نه خودِ اسم مدل OpenRouter)
-  abVariant                   String?
+  abVariant                         String?
   // docs/PRD-sales-agent-voice.md بخش ۳ — سقف تعداد وویس تولیدشده به‌ازای این مکالمه (جلوی
   // مکالمه‌ای که هر پاسخش وویس می‌گیرد)؛ افزایش اتمیک در logReply با updateMany شرطی
-  voiceGenerationCount        Int               @default(0)
+  voiceGenerationCount              Int               @default(0)
+  // docs/PRD-sales-agent-voice.md بخش ۶.۳ — برخلاف voiceGenerationCount (سقف کل مکالمه)، این
+  // شمارنده‌ی وویس‌های پشت‌سرهم بدون پاسخ متنی‌تنها در میانه است؛ با هر پاسخی که وویس نگرفت صفر
+  // می‌شود، با هر پاسخی که وویس گرفت یکی زیاد می‌شود (logReply)
+  consecutiveVoiceReplyCount        Int               @default(0)
   // docs/PRD-sales-agent-voice.md بخش ۶.۱ — A/B تست جدا از abVariant (عمود متفاوت: انتخاب
   // مدل در برابر انتخاب «وویس بفرستیم یا نه»)؛ یک‌بار در ساخت مکالمه تصادفی تعیین می‌شود.
   // وقتی OFF است، logReply اصلاً reserveVoiceSlot را صدا نمی‌زند — این گروه هیچ وویسی نمی‌بیند.
-  voiceVariant                VoiceVariant      @default(ON)
+  voiceVariant                      VoiceVariant      @default(ON)
   // docs/PRD-seller-credit-billing.md بخش «تصمیم معماری» — یک‌بار در ساخت مکالمه (startChat
   // وب / /start تلگرام) تعیین می‌شود و تا آخر عمر مکالمه ثابت می‌ماند (بر خلاف abVariant که
   // فقط انتخاب مدل است، این تعیین می‌کند اصلاً AI صدا زده شود یا نه)
-  billingMode                 BillingMode       @default(FREE)
+  billingMode                       BillingMode       @default(FREE)
   // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۴ — سبد رهاشده: وقتی مکالمه در
   // CART_REVIEW/AWAITING_PAYMENT بیش از حد بماند، یک یادآوری یک‌باره فرستاده می‌شود؛ این فیلد
   // جلوی تکرار یادآوری برای همان مکالمه را می‌گیرد
-  abandonedCartReminderSentAt DateTime?
-  createdAt                   DateTime          @default(now())
-  updatedAt                   DateTime          @updatedAt
+  abandonedCartReminderSentAt       DateTime?
+  // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۰ بند ۲ — یادآوری دوم (۱۸ ساعت بعد از اولی)
+  // با کد تخفیف خودکار، فقط اگر فروشگاه از قبل یک StoreDiscountCode فعال داشته باشد
+  secondAbandonedCartReminderSentAt DateTime?
+  createdAt                         DateTime          @default(now())
+  updatedAt                         DateTime          @updatedAt
 
   events      ConversationEvent[]
   order       Order?
@@ -2302,6 +2314,7 @@ model SalesConversation {
   @@index([storeId, isMutedForHuman])
   @@index([customerId, createdAt])
   @@index([currentState, abandonedCartReminderSentAt])
+  @@index([currentState, secondAbandonedCartReminderSentAt])
   @@map("sales_conversations")
 }
 
@@ -2487,15 +2500,19 @@ model StoreDiscountCode {
 // نام فروشگاه در تلگرام (بخش ۹.۲ سند بات تلگرام)؛ بدون مزایده، یک بازه‌ی زمانی ثابت با قیمت
 // ثابت، خریداری‌شده از همان Store.creditBalanceToman (نه یک تراکنش پرداخت جدا)
 model AdPlacement {
-  id         String            @id @default(uuid())
-  storeId    String
-  store      Store             @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  placement  AdPlacementType   @default(TELEGRAM_STORE_SEARCH)
-  startsAt   DateTime
-  endsAt     DateTime
-  priceToman Int // مبلغ واقعی کسرشده از کیف‌پول — برای شفافیت/گزارش، نه محاسبه‌ی مجدد
-  status     AdPlacementStatus @default(ACTIVE)
-  createdAt  DateTime          @default(now())
+  id              String            @id @default(uuid())
+  storeId         String
+  store           Store             @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  placement       AdPlacementType   @default(TELEGRAM_STORE_SEARCH)
+  startsAt        DateTime
+  endsAt          DateTime
+  priceToman      Int // مبلغ واقعی کسرشده از کیف‌پول — برای شفافیت/گزارش، نه محاسبه‌ی مجدد
+  status          AdPlacementStatus @default(ACTIVE)
+  // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۰ بند ۳ — طبق تصمیم خودِ سند تبلیغات،
+  // فقط «نشان داده شد یا نه» لازم است، نه نرخ کلیک؛ هر بار که این جایگاه boosted در نتایج
+  // جستجوی تلگرام ظاهر می‌شود یک واحد زیاد می‌شود (TelegramService.searchStores)
+  impressionCount Int               @default(0)
+  createdAt       DateTime          @default(now())
 
   @@index([placement, status, startsAt, endsAt])
   @@map("ad_placements")

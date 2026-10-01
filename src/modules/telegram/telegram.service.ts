@@ -29,6 +29,11 @@ import type {
   TelegramUpdate,
 } from './telegram.types';
 
+// docs/PRD-product-strategy-and-roadmap.md بخش ۶ آیتم #۲۱ — از ۵ نتیجه‌ی نمایش‌داده‌شده‌ی سرچ
+// فروشگاه، حداکثر همین تعداد می‌توانند ⭐ باشند؛ حل «۳۰ نفر هم‌زمان بخرن» را به «همه نوبتی دیده
+// می‌شوند» تبدیل می‌کند، نه «هرکی اول خرید همیشه برنده است»
+const SPONSORED_SLOT_CAP = 2;
+
 // docs/PRD-telegram-bot-channel.md بخش ۴ — آداپتور کانال تلگرام؛ هسته‌ی ایجنت
 // (ConversationEngineService) هیچ تغییری نمی‌بیند، این سرویس فقط پیام‌های تلگرام را به همان
 // handleMessage/handleAction/handleReceiptUpload موجود وصل می‌کند.
@@ -182,7 +187,7 @@ export class TelegramService {
       await this.sendText(chatId, fa.store.notFound);
       return;
     }
-    await this.startChatForStore(chatId, store);
+    await this.startChatForStore(chatId, store, message.from?.first_name);
   }
 
   // docs/PRD-telegram-bot-channel.md بخش ۹.۱ — Store.telegramConnectToken یک‌بارمصرف است،
@@ -214,7 +219,11 @@ export class TelegramService {
 
   // مشترک بین دیپ‌لینک مستقیم (?start=<slug>) و انتخاب از نتایج جستجوی نام (بخش ۹.۲،
   // callback_data: 'st:<storeId>') — قبلاً فقط داخل handleStart بود
-  private async startChatForStore(chatId: string, store: Store): Promise<void> {
+  private async startChatForStore(
+    chatId: string,
+    store: Store,
+    firstName?: string,
+  ): Promise<void> {
     const existing = await this.prisma.customer.findUnique({
       where: {
         storeId_telegramChatId: { storeId: store.id, telegramChatId: chatId },
@@ -253,6 +262,9 @@ export class TelegramService {
           storeId: store.id,
           channel: 'TELEGRAM',
           telegramChatId: chatId,
+          // docs/PRD-sales-agent-voice.md بخش ۶.۴ — فقط همین یک‌بار، در ساخت Customer؛ هیچ‌جای
+          // دیگر بازنویسی نمی‌شود (fullName فیلد عمومی موجود روی Customer است)
+          fullName: firstName,
           salesConversations: {
             create: {
               storeId: store.id,
@@ -338,10 +350,36 @@ export class TelegramService {
     // docs/PRD-seller-advertising-placements.md بخش ۳ — نتایج مرتبط عوض نمی‌شوند، فقط رتبه‌ی
     // فروشگاه‌های تبلیغ‌شده در همین نتایج بالاتر می‌رود؛ ۱۰ تا می‌گیریم تا بعد از رتبه‌بندی هم
     // ۵ تای نهایی معنی‌دار بماند
-    const stores = await this.prisma.store.findMany({
-      where: { status: 'ACTIVE', name: { contains: q, mode: 'insensitive' } },
+    // docs/PRD-product-strategy-and-roadmap.md بخش ۶ آیتم #۲۲ — قبلاً فقط اسم فروشگاه مچ می‌شد؛
+    // یعنی خریداری که «خرید کفش» یا «کفش نایک» تایپ می‌کرد (قصد خرید/دسته‌بندی، نه اسم فروشگاه)
+    // هیچ نتیجه‌ای نمی‌گرفت، حتی اگه یک فروشگاه دقیقاً دسته‌بندی «کیف و کفش» یا محصولی به اسم
+    // «کفش نایک» داشت. الان اول اسم/دسته‌بندی فروشگاه مچ می‌شود؛ اگه کافی نبود (کمتر از ۱۰ تا)،
+    // فروشگاه‌هایی که حداقل یک محصول با این نام دارند هم اضافه می‌شوند (همان الگوی contains
+    // insensitive که searchProducts برای جستجوی داخل‌فروشگاهی استفاده می‌کند)
+    const nameOrCategoryMatches = await this.prisma.store.findMany({
+      where: {
+        status: 'ACTIVE',
+        OR: [
+          { name: { contains: q, mode: 'insensitive' } },
+          { category: { contains: q, mode: 'insensitive' } },
+        ],
+      },
       take: 10,
     });
+    let stores = nameOrCategoryMatches;
+    if (stores.length < 10) {
+      const matchedIds = nameOrCategoryMatches.map((s) => s.id);
+      const productMatches = await this.prisma.product.findMany({
+        where: {
+          name: { contains: q, mode: 'insensitive' },
+          store: { status: 'ACTIVE', id: { notIn: matchedIds } },
+        },
+        distinct: ['storeId'],
+        select: { store: true },
+        take: 10 - stores.length,
+      });
+      stores = [...stores, ...productMatches.map((p) => p.store)];
+    }
     if (stores.length === 0) {
       await this.sendText(chatId, fa.telegram.storeSearchEmpty);
       return;
@@ -353,18 +391,49 @@ export class TelegramService {
         status: 'ACTIVE',
         endsAt: { gt: new Date() },
       },
-      select: { storeId: true },
+      select: { storeId: true, impressionCount: true },
     });
-    const boostedIds = new Set(activePlacements.map((p) => p.storeId));
-    const top = [...stores]
-      .sort(
-        (a, b) => Number(boostedIds.has(b.id)) - Number(boostedIds.has(a.id)),
-      )
-      .slice(0, 5);
+    // docs/PRD-product-strategy-and-roadmap.md بخش ۶ آیتم #۲۱ — قبلاً هر چندتا فروشگاه تبلیغ‌شده
+    // که مچ می‌شدند همه بالا می‌رفتند (حتی هر ۵ تای نمایش‌داده‌شده)، و بین خودشان هم ترتیب
+    // مشخصی نداشتند (خروجی بدون ORDER BY پستگرس). الان: حداکثر SPONSORED_SLOT_CAP تا از نتایج
+    // نهایی می‌توانند ⭐ باشند، و از بین همه‌ی تبلیغ‌شده‌های مچ‌شده، آن‌هایی انتخاب می‌شوند که
+    // impressionCount کمتری دارند (چرخش بر اساس کمترین نمایش) — نه یک برنده‌ی ثابت همیشگی.
+    const leastShownFirst = [...activePlacements].sort(
+      (a, b) => a.impressionCount - b.impressionCount,
+    );
+    const featuredIds = new Set(
+      leastShownFirst.slice(0, SPONSORED_SLOT_CAP).map((p) => p.storeId),
+    );
+    const featuredOrder = new Map(
+      leastShownFirst.map((p, i) => [p.storeId, i]),
+    );
+    const featuredStores = stores
+      .filter((s) => featuredIds.has(s.id))
+      .sort((a, b) => featuredOrder.get(a.id)! - featuredOrder.get(b.id)!);
+    const organicStores = stores.filter((s) => !featuredIds.has(s.id));
+    const top = [...featuredStores, ...organicStores].slice(0, 5);
+
+    const shownFeaturedIds = top
+      .filter((s) => featuredIds.has(s.id))
+      .map((s) => s.id);
+    if (shownFeaturedIds.length > 0) {
+      // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۰ بند ۳ — فقط شمارش «نشان داده شد»،
+      // طبق تصمیم خودِ PRD-seller-advertising-placements.md که نرخ کلیک را عمداً خارج از فاز
+      // گذاشت؛ فقط همان‌هایی که واقعاً در ۵ تای نهایی دیده شدند زیاد می‌شوند (نه کل ۱۰ تای اولیه)
+      await this.prisma.adPlacement.updateMany({
+        where: {
+          storeId: { in: shownFeaturedIds },
+          placement: 'TELEGRAM_STORE_SEARCH',
+          status: 'ACTIVE',
+          endsAt: { gt: new Date() },
+        },
+        data: { impressionCount: { increment: 1 } },
+      });
+    }
     const keyboard: TelegramInlineKeyboard = {
       inline_keyboard: top.map((s) => [
         {
-          text: boostedIds.has(s.id) ? `⭐ ${s.name}` : s.name,
+          text: featuredIds.has(s.id) ? `⭐ ${s.name}` : s.name,
           callback_data: `st:${s.id}`,
         },
       ]),
@@ -391,7 +460,7 @@ export class TelegramService {
         await this.sendText(chatId, fa.store.notFound);
         return;
       }
-      await this.startChatForStore(chatId, store);
+      await this.startChatForStore(chatId, store, cq.from.first_name);
       return;
     }
     // docs/PRD-telegram-bot-channel.md بخش ۹.۱ — این دو روی چت خودِ فروشنده اجرا می‌شوند

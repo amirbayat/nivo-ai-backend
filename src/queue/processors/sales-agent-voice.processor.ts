@@ -8,6 +8,7 @@ import { StorageService } from '../../storage/storage.service';
 import { KieProviderService } from '../../common/services/kie-provider.service';
 import { TelegramService } from '../../modules/telegram/telegram.service';
 import { toneForCategory } from '../../modules/sales-agent/tone-by-category';
+import { voiceForBuyer } from '../../modules/sales-agent/voice-gender';
 import { CreditService } from '../../modules/sales-agent/credit.service';
 import type { SalesAgentVoiceJobData } from '../../modules/sales-agent/sales-agent.types';
 
@@ -15,9 +16,6 @@ const POLL_INTERVAL_MS = 3_000;
 const MAX_POLL_ATTEMPTS = 40; // ~۲ دقیقه سقف — TTS باید خیلی سریع‌تر از رندر ویدیو باشد
 // تایید شده توسط کاربر مستقیم از kie.ai — نسخه‌ی lite (نه نسخه‌ی کامل که سند اولیه فرض کرده بود)
 const DEFAULT_TTS_MODEL_SLUG = 'google/gemini-3-8-flash-lite-tts';
-// صدای پیش‌فرض — تنها گزینه‌ای که با تست دستی واقعی تایید شده کار می‌کند؛ انتخاب صدای
-// متفاوت بر اساس جنسیت مخاطب فیچر بعدی است (docs/PRD-sales-agent-voice.md)، فعلاً ثابت
-const DEFAULT_VOICE = 'Kore';
 
 // همان نرخ استفاده‌شده در video-edit.processor.ts (بخش ۶.۵ سند آن — ۰.۰۰۵ $ = ۱۰۰۰ credit)
 const KIE_USD_PER_CREDIT = 0.005;
@@ -45,15 +43,24 @@ export class SalesAgentVoiceProcessor {
     try {
       const conversation = await this.prisma.salesConversation.findUnique({
         where: { id: conversationId },
-        select: { storeId: true, customerId: true, billingMode: true },
+        select: {
+          storeId: true,
+          customerId: true,
+          billingMode: true,
+          customer: { select: { fullName: true } },
+        },
       });
+      // docs/PRD-sales-agent-voice.md بخش ۶.۴ — تخمین جنسیت خریدار از اسم تلگرام (اگر در
+      // دسترس بود) و انتخاب صدای مخالف آن؛ وقتی اسم نیست/ناشناس است، صدای خنثی پیش‌فرض
+      const voice = voiceForBuyer(conversation?.customer.fullName);
       const { key, toneVariant } = await this.generateAndUpload(
         text,
         storeCategory,
         conversationId,
         conversation,
+        voice,
       );
-      await this.finishEvent(eventId, key, traceEventId, toneVariant);
+      await this.finishEvent(eventId, key, traceEventId, toneVariant, voice);
       await this.pushToTelegramIfNeeded(conversationId, key);
     } catch (err) {
       this.logger.error(
@@ -72,6 +79,7 @@ export class SalesAgentVoiceProcessor {
       customerId: string | null;
       billingMode: BillingMode;
     } | null,
+    voice: string,
   ): Promise<{ key: string; toneVariant: string }> {
     const modelSlug =
       this.config.get<string>('KIE_TTS_MODEL_SLUG') ?? DEFAULT_TTS_MODEL_SLUG;
@@ -84,7 +92,7 @@ export class SalesAgentVoiceProcessor {
     // جدا ندارد — به‌صورت دستورالعمل طبیعی داخل متن تزریق می‌شود (الگوی مستند رسمی Gemini TTS)؛
     // فقط پذیرفته‌شدنش توسط API تایید شده، تاثیر واقعی‌اش روی صدا هنوز با گوش چک نشده
     const { taskId } = await this.kie.createTask(modelSlug, {
-      speakers: [{ speaker_id: 'Speaker 1', voice: DEFAULT_VOICE }],
+      speakers: [{ speaker_id: 'Speaker 1', voice }],
       dialogue_turns: [
         { speaker_id: 'Speaker 1', text: `با لحن ${tone} بگو: ${text}` },
       ],
@@ -125,6 +133,7 @@ export class SalesAgentVoiceProcessor {
     voiceKey: string | null,
     traceEventId?: string,
     toneVariant?: string,
+    voiceName?: string,
   ): Promise<void> {
     const event = await this.prisma.conversationEvent.findUnique({
       where: { id: eventId },
@@ -152,7 +161,7 @@ export class SalesAgentVoiceProcessor {
     const voice: Prisma.InputJsonObject = voiceKey
       ? {
           generated: true,
-          voiceName: DEFAULT_VOICE,
+          voiceName: voiceName ?? '',
           toneVariant: toneVariant ?? '',
         }
       : { generated: false, reason: 'FAILED' };

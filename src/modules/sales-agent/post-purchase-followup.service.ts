@@ -28,6 +28,7 @@ export class PostPurchaseFollowUpService {
         status: 'APPROVED',
         satisfactionFollowUpSentAt: null,
         updatedAt: { lte: threshold },
+        store: { postPurchaseFollowUpEnabled: true },
       },
       include: { conversation: { include: { customer: true } } },
       take: 200,

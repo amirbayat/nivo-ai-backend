@@ -169,6 +169,20 @@ function manualLimitKey(userId: string) {
   return `manual_limit:${userId}`;
 }
 
+// docs/PRD-buyer-purchase-intent-taxonomy.md بخش ۴.۱ — یک taxonomy واحد با فیلد journey_stage،
+// نه چند taxonomy جدا؛ اینجا همان نگاشت گروه‌های ثابت بخش ۳ (A-D,G پیش‌از‌خرید؛ E پرداخت؛
+// F پس‌از‌خرید) روی BuyerNeedTag برای ستون journey_stage صفحه‌ی کشف ادمین (بخش ۵.۲)
+const PAYMENT_STAGE_TAGS = new Set(['PAYMENT_ISSUE']);
+const POST_PURCHASE_STAGE_TAGS = new Set(['POST_PURCHASE_SUPPORT']);
+
+function buyerNeedJourneyStage(
+  tag: string,
+): 'PRE_PURCHASE' | 'PAYMENT' | 'POST_PURCHASE' {
+  if (PAYMENT_STAGE_TAGS.has(tag)) return 'PAYMENT';
+  if (POST_PURCHASE_STAGE_TAGS.has(tag)) return 'POST_PURCHASE';
+  return 'PRE_PURCHASE';
+}
+
 @Injectable()
 export class AdminService {
   private readonly logger = new Logger(AdminService.name);
@@ -1305,7 +1319,12 @@ export class AdminService {
     // گروه‌بندی ساده‌ی متن‌محور (طبق PRD بخش ۵.۳ — خوشه‌بندی هوشمندتر عمداً فاز بعد است)
     const unmatchedGroups = new Map<
       string,
-      { count: number; conversationId: string; createdAt: Date }
+      {
+        count: number;
+        conversationId: string;
+        createdAt: Date;
+        nearestIntent: string;
+      }
     >();
     // «Potential misclassification» بخش ۵.۱ — بر خلاف unmatched، این‌ها گروه‌بندی نمی‌شوند
     // (هر رخداد جدا قابل‌بررسی است، نه یک برچسب تکراری)؛ فقط ۵۰ مورد اخیر (بدون صفحه‌بندی کامل،
@@ -1343,12 +1362,14 @@ export class AdminService {
         if (e.createdAt > existing.createdAt) {
           existing.conversationId = e.conversationId;
           existing.createdAt = e.createdAt;
+          existing.nearestIntent = payload.intent ?? '';
         }
       } else {
         unmatchedGroups.set(label, {
           count: 1,
           conversationId: e.conversationId,
           createdAt: e.createdAt,
+          nearestIntent: payload.intent ?? '',
         });
       }
     }
@@ -1405,13 +1426,175 @@ export class AdminService {
         sampleMessage:
           (sampleMessages[i]?.payload as { text?: string })?.text ?? '',
         lastSeenAt: g.createdAt,
+        // docs/PRD-buyer-purchase-intent-taxonomy.md بخش ۵.۲ — «نزدیک‌ترین intent موجود»: همان
+        // intent اجرایی تک‌برچسبی که در همان AI_TRACE کنار این unmatchedBuyerNeed کلاسیفای شده
+        // بود (نه یک محاسبه‌ی شباهت جدا — طبق بخش ۵.۳، خوشه‌بندی هوشمند عمداً خارج از این فاز است)
+        nearestIntent: g.nearestIntent,
       }))
       .sort((a, b) => b.count - a.count);
 
     const buyerNeedCounts = Array.from(buyerNeedCountMap.entries())
-      .map(([tag, count]) => ({ tag, count }))
+      .map(([tag, count]) => ({
+        tag,
+        count,
+        journeyStage: buyerNeedJourneyStage(tag),
+      }))
       .sort((a, b) => b.count - a.count);
 
     return { buyerNeedCounts, unmatched, lowConfidence };
+  }
+
+  // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۰ بند ۳ — نرخ جواب‌دهی + نسبت
+  // POSITIVE/NEGATIVE/UNRELATED فالوآپ رضایت. مبنا: هر Order که satisfactionFollowUpSentAt دارد
+  // یعنی فالوآپ فرستاده شده؛ «جواب» یعنی یک AI_TRACE با handler:'satisfactionClassify' که بعد از
+  // همان لحظه برای همان مکالمه ثبت شده (conversation-engine.service.ts's doSatisfactionReply)
+  async getFollowUpInstrumentation(params: {
+    storeId?: string;
+    from?: Date;
+    to?: Date;
+  }) {
+    const orders = await this.prisma.order.findMany({
+      where: {
+        satisfactionFollowUpSentAt: { not: null },
+        ...(params.storeId ? { storeId: params.storeId } : {}),
+        ...((params.from ?? params.to)
+          ? {
+              satisfactionFollowUpSentAt: {
+                not: null,
+                ...(params.from ? { gte: params.from } : {}),
+                ...(params.to ? { lte: params.to } : {}),
+              },
+            }
+          : {}),
+      },
+      select: { conversationId: true, satisfactionFollowUpSentAt: true },
+    });
+    if (orders.length === 0) {
+      return {
+        sentCount: 0,
+        respondedCount: 0,
+        responseRate: 0,
+        verdictCounts: { POSITIVE: 0, NEGATIVE: 0, UNRELATED: 0 },
+      };
+    }
+
+    const events = await this.prisma.conversationEvent.findMany({
+      where: {
+        conversationId: { in: orders.map((o) => o.conversationId) },
+        type: 'AI_TRACE',
+      },
+      orderBy: { createdAt: 'asc' },
+      select: { conversationId: true, payload: true, createdAt: true },
+    });
+    const classifyEventsByConversation = new Map<
+      string,
+      { verdict: string; createdAt: Date }[]
+    >();
+    for (const e of events) {
+      const payload = e.payload as { handler?: string; verdict?: string };
+      if (payload.handler !== 'satisfactionClassify' || !payload.verdict) {
+        continue;
+      }
+      const list = classifyEventsByConversation.get(e.conversationId) ?? [];
+      list.push({ verdict: payload.verdict, createdAt: e.createdAt });
+      classifyEventsByConversation.set(e.conversationId, list);
+    }
+
+    const verdictCounts = { POSITIVE: 0, NEGATIVE: 0, UNRELATED: 0 };
+    let respondedCount = 0;
+    for (const order of orders) {
+      const candidates = (
+        classifyEventsByConversation.get(order.conversationId) ?? []
+      ).filter((e) => e.createdAt >= order.satisfactionFollowUpSentAt!);
+      if (candidates.length === 0) continue;
+      respondedCount++;
+      const verdict = candidates[0].verdict as keyof typeof verdictCounts;
+      if (verdict in verdictCounts) verdictCounts[verdict]++;
+    }
+
+    return {
+      sentCount: orders.length,
+      respondedCount,
+      responseRate: respondedCount / orders.length,
+      verdictCounts,
+    };
+  }
+
+  // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۰ بند ۳ — نرخ بازیابی سبد رهاشده. رابطه‌ی
+  // Order/SalesConversation یک‌به‌یک است (Order.conversationId @unique)، و چون این سرویس فقط
+  // یک‌بار برای هر مکالمه فیر می‌شود (abandonedCartReminderSentAt: null بودن شرط کوئری است)، هر
+  // سفارش APPROVED روی این مکالمه قطعاً نتیجه‌ی بعد از یادآوری است
+  async getCartRecoveryInstrumentation(params: {
+    storeId?: string;
+    from?: Date;
+    to?: Date;
+  }) {
+    const conversations = await this.prisma.salesConversation.findMany({
+      where: {
+        abandonedCartReminderSentAt: { not: null },
+        ...(params.storeId ? { storeId: params.storeId } : {}),
+        ...((params.from ?? params.to)
+          ? {
+              abandonedCartReminderSentAt: {
+                not: null,
+                ...(params.from ? { gte: params.from } : {}),
+                ...(params.to ? { lte: params.to } : {}),
+              },
+            }
+          : {}),
+      },
+      select: { id: true },
+    });
+    if (conversations.length === 0) {
+      return { remindersSent: 0, recoveredCount: 0, recoveryRate: 0 };
+    }
+
+    const recoveredCount = await this.prisma.order.count({
+      where: {
+        conversationId: { in: conversations.map((c) => c.id) },
+        status: 'APPROVED',
+      },
+    });
+
+    return {
+      remindersSent: conversations.length,
+      recoveredCount,
+      recoveryRate: recoveredCount / conversations.length,
+    };
+  }
+
+  // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۰ بند ۳ + PRD-seller-advertising-placements.md
+  // بخش ۵ — طبق تصمیم خودِ سند تبلیغات، فقط «نشان داده شد یا نه» لازم است، نه نرخ کلیک
+  async getAdPlacementInstrumentation(params: { storeId?: string }) {
+    const placements = await this.prisma.adPlacement.findMany({
+      where: params.storeId ? { storeId: params.storeId } : {},
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        storeId: true,
+        store: { select: { name: true } },
+        placement: true,
+        status: true,
+        startsAt: true,
+        endsAt: true,
+        impressionCount: true,
+      },
+    });
+    return {
+      items: placements.map((p) => ({
+        id: p.id,
+        storeId: p.storeId,
+        storeName: p.store.name,
+        placement: p.placement,
+        status: p.status,
+        startsAt: p.startsAt,
+        endsAt: p.endsAt,
+        impressionCount: p.impressionCount,
+      })),
+      totalImpressions: placements.reduce(
+        (sum, p) => sum + p.impressionCount,
+        0,
+      ),
+    };
   }
 }

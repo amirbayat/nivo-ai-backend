@@ -13,4 +13,11 @@ export class AbandonedCartReminderProcessor {
     await this.reminder.sendDueReminders();
     this.logger.log('Abandoned cart reminder pass completed');
   }
+
+  // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۰ بند ۲
+  @Process('send-second-reminders')
+  async handleSecond() {
+    await this.reminder.sendDueSecondReminders();
+    this.logger.log('Second abandoned cart reminder pass completed');
+  }
 }

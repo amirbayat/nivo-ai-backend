@@ -1,4 +1,10 @@
-import { IsOptional, IsString, Matches, MaxLength } from 'class-validator';
+import {
+  IsBoolean,
+  IsOptional,
+  IsString,
+  Matches,
+  MaxLength,
+} from 'class-validator';
 import { fa } from '../../../i18n/fa';
 
 // docs/PRD-product-strategy-and-roadmap.md بخش ۳.۲ — فیلدهای ساختاریافته‌ی سطح فروشگاه،
@@ -26,4 +32,13 @@ export class UpdateStoreDto {
   @IsOptional()
   @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, { message: fa.store.invalidTimeFormat })
   workingHoursEnd?: string;
+
+  // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۰ بند ۴
+  @IsOptional()
+  @IsBoolean()
+  postPurchaseFollowUpEnabled?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  abandonedCartReminderEnabled?: boolean;
 }
