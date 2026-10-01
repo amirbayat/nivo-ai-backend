@@ -4,7 +4,8 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { embed, cosineSimilarity, generateObject } from 'ai';
+import { embed, cosineSimilarity, generateObject, generateText } from 'ai';
+import type { RepairTextFunction } from 'ai';
 import { z } from 'zod';
 import type { StoreKbKind, CanonicalProduct } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -57,6 +58,63 @@ function composeFinalDescription(
   if (!specs?.length) return description;
   const specsBlock = specs.map((s) => `- ${s.label}: ${s.value}`).join('\n');
   return `${description}\n\nمشخصات:\n${specsBlock}`;
+}
+
+// سقف‌های خروجی تولیدشده توسط AI قبل از persist در DB (CanonicalProduct/ProductEnrichmentDraft/
+// Product.description). عمداً این‌ها در خودِ zod schema بالا به‌صورت .max() نیستند — اگر آنجا
+// بودند و مدل بیشتر می‌نوشت، generateObject دوباره با AI_NoObjectGeneratedError («response did
+// not match schema») می‌ترکید، یعنی همان باگی که اینجا داریم حلش می‌کنیم. این توابع بعد از
+// این‌که generateObject یک شیء معتبر برگرداند صدا زده می‌شوند و truncate/dedupe می‌کنند، reject
+// نمی‌کنند.
+const MAX_SUGGESTED_DESCRIPTION_CHARS = 1000;
+const MAX_SUGGESTED_QUESTIONS = 6;
+const MAX_QUESTION_CHARS = 200;
+const MAX_SUGGESTED_SPECS = 8;
+const MAX_SPEC_LABEL_CHARS = 40;
+const MAX_SPEC_VALUE_CHARS = 120;
+const MAX_SOURCE_NOTE_CHARS = 300;
+
+function clampSpecs(
+  specs: { label: string; value: string }[] | undefined,
+): { label: string; value: string }[] | undefined {
+  const clamped = specs
+    ?.map((s) => ({
+      label: s.label.trim().slice(0, MAX_SPEC_LABEL_CHARS),
+      value: s.value.trim().slice(0, MAX_SPEC_VALUE_CHARS),
+    }))
+    .filter((s) => s.label && s.value)
+    .slice(0, MAX_SUGGESTED_SPECS);
+  return clamped?.length ? clamped : undefined;
+}
+
+function clampEnrichmentOutput<
+  T extends {
+    suggestedDescription: string;
+    suggestedQuestions: string[];
+    suggestedSpecs?: { label: string; value: string }[];
+    sourceNote?: string;
+  },
+>(input: T): T {
+  const suggestedQuestions: string[] = [];
+  const seen = new Set<string>();
+  for (const q of input.suggestedQuestions) {
+    const trimmed = q.trim().slice(0, MAX_QUESTION_CHARS);
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    suggestedQuestions.push(trimmed);
+    if (suggestedQuestions.length >= MAX_SUGGESTED_QUESTIONS) break;
+  }
+
+  return {
+    ...input,
+    suggestedDescription: input.suggestedDescription
+      .trim()
+      .slice(0, MAX_SUGGESTED_DESCRIPTION_CHARS),
+    suggestedQuestions,
+    suggestedSpecs: clampSpecs(input.suggestedSpecs),
+    sourceNote:
+      input.sourceNote?.trim().slice(0, MAX_SOURCE_NOTE_CHARS) || undefined,
+  };
 }
 
 const ADMIN_RESOURCE_SYSTEM_PROMPT = `تو دستیار تیم محتوای نیوو هستی. یک ادمین یک منبع متنی
@@ -126,7 +184,44 @@ export class StoreKbService {
     private readonly asr: AsrService,
     private readonly mediaTranscode: MediaTranscodeService,
   ) {
-    this.provider = this.aiProvider.buildClient();
+    // supportsStructuredOutputs=true — بدون این، @ai-sdk/openai-compatible فقط
+    // response_format: {type:'json_object'} می‌فرستد (JSON معتبر ولی بدون تضمین سمت سرور برای
+    // شکل schema)، و مدل آزاد است اسم/نوع فیلدها را خودش حدس بزند (دقیقاً علت
+    // AI_NoObjectGeneratedError «response did not match schema» که برای adminGenerateEnrichmentDraft
+    // دیده شد). همان الگوی nivo-cal.service.ts/chat.service.ts/sales-agent-qa.service.ts.
+    this.provider = this.aiProvider.buildClient(undefined, {
+      supportsStructuredOutputs: true,
+    });
+  }
+
+  // دفاع لایه‌ی دوم برای AI_NoObjectGeneratedError: ریشه‌ی اصلی مشکل با supportsStructuredOutputs
+  // بالا فیکس می‌شود، ولی اگر OpenRouter یک درخواست را به زیر-providerای route کند که json_schema
+  // سخت‌گیر را کامل رعایت نمی‌کند، بازهم ممکن است رخ دهد. اینجا یک بار با همان خروجی نادرست +
+  // پیام دقیق خطای zod (که مسیر/نوع دقیق فیلد درست یا گم‌شده را می‌گوید، مثلاً «suggestedDescription
+  // expected string received undefined») از مدل می‌خواهیم فقط ساختار را اصلاح کند — چیزی اختراع
+  // نمی‌شود. عمداً از کلاینت بدون tools استفاده می‌کند (نه همان کلاینتی که وب‌سرچ دارد) چون در این
+  // مرحله فقط بازنویسی متن لازم است، نه یک جستجوی وب جدید.
+  private repairStructuredOutput(): RepairTextFunction {
+    return async ({ text, error }) => {
+      try {
+        const { text: repaired } = await generateText({
+          model: this.provider('openai/gpt-5.4-mini'),
+          system: `خروجی زیر باید دقیقاً یک شیء JSON معتبر مطابق schema مورد انتظار باشد ولی رد
+شده. با توجه به پیام خطای اعتبارسنجی (که اسم/نوع دقیق فیلدهای درست را می‌گوید)، همان محتوا را در
+ساختار صحیح بازنویسی کن — هیچ اطلاعات جدیدی اضافه نکن، فقط شکل/اسم فیلدها را اصلاح کن. فقط خودِ
+JSON را برگردان، بدون توضیح یا markdown fence.`,
+          prompt: `خروجی نادرست:\n${text}\n\nخطای اعتبارسنجی:\n${error.message}`,
+        });
+        return repaired;
+      } catch (repairErr) {
+        this.logger.warn(
+          `structured output repair failed: ${
+            repairErr instanceof Error ? repairErr.message : String(repairErr)
+          }`,
+        );
+        return null;
+      }
+    };
   }
 
   // ابزار داخلی فروشنده روی فرم محصول (میکروفون کنار توضیحات) — فیدبک کاربر ۱۴۰۵/۰۷/۰۱.
@@ -288,6 +383,7 @@ export class StoreKbService {
 فقط از متن واقعی استخراج کن، چیزی اضافه نکن. اگر متن هیچ نکته‌ی قابل‌استفاده‌ای نداشت،
 آرایه‌ی خالی برگردان.`,
       prompt: extracted.text,
+      experimental_repairText: this.repairStructuredOutput(),
     });
 
     return object.candidates;
@@ -367,24 +463,30 @@ export class StoreKbService {
       // درخواست با خطا می‌ترکید (دقیقاً همون چیزی که فروشنده می‌دید: «تولید پیشنهاد با خطا
       // مواجه شد»). اینجا محدودیت سخت‌گیرانه را برمی‌داریم و بازه‌ی ۴-۶ را خودمان بعد از جواب
       // اعمال می‌کنیم — یک جواب کوتاه/بلندتر از حد نباید کل فیچر را بترکاند.
-      const { object, usage } = await generateObject({
+      const { object: rawObject, usage } = await generateObject({
         model: withWebSearch
-          ? this.aiProvider.buildClient(undefined, undefined, {
-              tools: PRODUCT_ENRICHMENT_WEB_SEARCH_TOOLS,
-              max_tool_calls: 5,
-            })(model)
+          ? this.aiProvider.buildClient(
+              undefined,
+              { supportsStructuredOutputs: true },
+              {
+                tools: PRODUCT_ENRICHMENT_WEB_SEARCH_TOOLS,
+                max_tool_calls: 5,
+              },
+            )(model)
           : this.provider(model),
+        // suggestedSpecs/sourceNote همیشه (نه فقط withWebSearch) در schema هستند، صرفاً optional —
+        // یک z.object شرطی با ternary باعث می‌شد TypeScript نوع این دو فیلد را «unknown» استنتاج
+        // کند (چون z.object نمی‌تواند شکل دقیق یک spread شرطی را در compile-time حل کند)، و این
+        // دقیقاً همان کلمپ/اعتبارسنجی بعدی (clampEnrichmentOutput) را به خطر می‌انداخت. مدل در
+        // حالت بدون وب‌سرچ طبق BASIC_SUGGESTIONS_SYSTEM_PROMPT اصلاً درخواست این دو فیلد را
+        // نمی‌بیند، پس عملاً خالی می‌مانند.
         schema: z.object({
           suggestedDescription: z.string(),
           suggestedQuestions: z.array(z.string()).min(1),
-          ...(withWebSearch
-            ? {
-                suggestedSpecs: z
-                  .array(z.object({ label: z.string(), value: z.string() }))
-                  .optional(),
-                sourceNote: z.string().optional(),
-              }
-            : {}),
+          suggestedSpecs: z
+            .array(z.object({ label: z.string(), value: z.string() }))
+            .optional(),
+          sourceNote: z.string().optional(),
         }),
         system: withWebSearch
           ? `تو دستیار یک فروشنده‌ی فروشگاه آنلاین ایرانی هستی. نام محصول زیر را در وب جستجو کن
@@ -400,7 +502,9 @@ sourceNote را خالی بگذار. پاسخ را فقط به‌صورت یک �
         prompt: `دسته‌بندی فروشگاه: ${store.category ?? 'نامشخص'}
 نام محصول: ${product.name}
 توضیح فعلی: ${product.description ?? '(هنوز توضیحی ثبت نشده)'}${commentsHint}`,
+        experimental_repairText: this.repairStructuredOutput(),
       });
+      const object = clampEnrichmentOutput(rawObject);
 
       if (withWebSearch) {
         const { costToman } = await this.pricing.calcCost(
@@ -547,11 +651,15 @@ sourceNote را خالی بگذار. پاسخ را فقط به‌صورت یک �
         };
       }
 
-      const { object, usage } = await generateObject({
-        model: this.aiProvider.buildClient(undefined, undefined, {
-          tools: PRODUCT_ENRICHMENT_WEB_SEARCH_TOOLS,
-          max_tool_calls: 5,
-        })(model),
+      const { object: rawObject, usage } = await generateObject({
+        model: this.aiProvider.buildClient(
+          undefined,
+          { supportsStructuredOutputs: true },
+          {
+            tools: PRODUCT_ENRICHMENT_WEB_SEARCH_TOOLS,
+            max_tool_calls: 5,
+          },
+        )(model),
         schema: z.object({
           suggestedDescription: z.string(),
           suggestedQuestions: z.array(z.string()).min(1),
@@ -572,7 +680,9 @@ sourceNote را خالی بگذار. پاسخ را فقط به‌صورت یک �
         prompt: `دسته‌بندی فروشگاه: ${product.store.category ?? 'نامشخص'}
 نام محصول: ${product.name}
 توضیح فعلی: ${product.description ?? '(هنوز توضیحی ثبت نشده)'}${commentsHint}`,
+        experimental_repairText: this.repairStructuredOutput(),
       });
+      const object = clampEnrichmentOutput(rawObject);
 
       // فروشنده هیچ درخواستی نداده و اعتبارش کسر نمی‌شود، ولی هزینه‌ی واقعی همچنان برای
       // دید تحلیلی/آمار هزینه‌ی پلتفرم ثبت می‌شود (storeId فقط برای گزارش‌گیری، نه کسر از کیف‌پول)
@@ -656,8 +766,9 @@ sourceNote را خالی بگذار. پاسخ را فقط به‌صورت یک �
 
 --- منبع ارائه‌شده توسط ادمین ---
 ${resourceText.slice(0, MAX_EXTRACTED_CHARS)}`,
+      experimental_repairText: this.repairStructuredOutput(),
     });
-    return object;
+    return clampEnrichmentOutput(object);
   }
 
   // بخش مشترک بین حالت معمولی (withWebSearch=false) و حالت cache-hit بخش ۲.۴ (که description
@@ -677,8 +788,9 @@ ${resourceText.slice(0, MAX_EXTRACTED_CHARS)}`,
       prompt: `دسته‌بندی فروشگاه: ${store.category ?? 'نامشخص'}
 نام محصول: ${product.name}
 توضیح فعلی: ${product.description ?? '(هنوز توضیحی ثبت نشده)'}${commentsHint}`,
+      experimental_repairText: this.repairStructuredOutput(),
     });
-    return object;
+    return clampEnrichmentOutput(object);
   }
 
   // ورود سریع محصول از لینک صفحه‌ی موجود (بخش ۲.۵) — فقط پیش‌نمایش، هیچ‌چیز خودکار ذخیره
@@ -720,12 +832,15 @@ ${resourceText.slice(0, MAX_EXTRACTED_CHARS)}`,
       prompt: `عنوان صفحه: ${page.title ?? '(نامشخص)'}
 توضیح OG: ${page.ogDescription ?? '(ندارد)'}
 متن صفحه: ${page.text || '(متن قابل‌استخراجی نبود)'}`,
+      experimental_repairText: this.repairStructuredOutput(),
     });
 
     return {
-      name: object.name,
-      suggestedDescription: object.suggestedDescription,
-      suggestedSpecs: object.suggestedSpecs,
+      name: object.name.trim(),
+      suggestedDescription: object.suggestedDescription
+        .trim()
+        .slice(0, MAX_SUGGESTED_DESCRIPTION_CHARS),
+      suggestedSpecs: clampSpecs(object.suggestedSpecs),
       priceHint: object.priceHint ?? undefined,
       imageUrls: page.imageUrls,
     };
