@@ -2056,10 +2056,13 @@ model Store {
   // docs/PRD-seller-credit-billing.md بخش ۱/۵ — اعتبار AI فروشگاه به تومان؛ بعد از تمام‌شدن
   // سهمیه‌ی رایگان روزانه، مصرف واقعی هر فراخوانی AI از همین فیلد کم می‌شود
   creditBalanceToman            Int               @default(0)
-  // فیدبک کاربر ۱۴۰۵/۰۷/۰۱ — برای فروشنده‌ای که هنوز اعتبار نخریده (billingMode!==PAID)،
-  // حداکثر ۳ مکالمه‌ی مجزا وویس می‌گیرند؛ با اولین وویسِ هر مکالمه‌ی تازه زیاد می‌شود
+  // فیدبک کاربر ۱۴۰۵/۰۷/۱۲ — برای فروشنده‌ای که هنوز اعتبار نخریده (billingMode!==PAID)،
+  // حداکثر به‌تعداد FREE_DAILY_QUOTA (همون سقف ۱۰ خریدار جدید رایگان در روز) مکالمه‌ی مجزای
+  // وویس **در روز** می‌گیرند؛ با اولین وویسِ هر مکالمه‌ی تازه زیاد می‌شود، نیمه‌شب با
+  // freeVoiceQuotaResetAt به‌صورت تنبل (lazy، بدون cron) صفر می‌شود
   // (conversation-engine.service.ts's logReply/reserveFreeVoiceConversationSlot)
   freeVoiceConversationsUsed    Int               @default(0)
+  freeVoiceQuotaResetAt         DateTime?
   // docs/PRD-seller-multi-bank-card-rotation.md — سیاست انتخاب کارت وقتی چند StoreBankCard
   // فعال دارد؛ lastCardIndex فقط برای EQUAL (round-robin واقعی، نه رندوم)
   cardDisplayPolicy             CardDisplayPolicy @default(EQUAL)
@@ -2441,6 +2444,11 @@ model CreditUsageEvent {
   kind           CreditUsageKind
   costToman      Int // مصرف = مقدار مثبت که از balance کم می‌شود؛ TOPUP هم مقدار مثبتی است که اضافه می‌شود
   isFreeQuota    Boolean            @default(false) // true یعنی جزو سهمیه‌ی رایگان بوده، balance کم نشده
+  // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۷.۱ — داده‌ی واقعی توکن/هزینه‌ی
+  // دلاری هر مصرف، برای جایگزینی تخمین هزینه‌ی هر «چت» با عدد اندازه‌گیری‌شده‌ی واقعی
+  tokensInput    Int                @default(0)
+  tokensOutput   Int                @default(0)
+  costUsdMicros  Int                @default(0) // دلار × ۱٬۰۰۰٬۰۰۰ — مستقل از نوسان نرخ ارز
   createdAt      DateTime           @default(now())
 
   @@index([storeId, createdAt])

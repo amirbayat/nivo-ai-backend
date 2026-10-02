@@ -14,6 +14,14 @@ export class CreditService {
     private readonly pricing: PricingService,
   ) {}
 
+  // تک سورس عدد سهمیه‌ی رایگان روزانه — فیدبک کاربر ۱۴۰۵/۰۷/۱۲: سقف رایگان روزانه‌ی وویس هم
+  // باید دقیقاً همین عدد را بخواند، نه یک ثابت جدا (conversation-engine.service.ts's
+  // reserveFreeVoiceConversationSlot). وقتی فاز ۳ این عدد را از SalesAgentGlobalConfig
+  // بخواند (بخش ۶.۴ سند)، این متد async می‌شود و همه‌ی مصرف‌کننده‌ها خودکار همگام می‌مانند.
+  getFreeDailyQuota(): number {
+    return FREE_DAILY_QUOTA;
+  }
+
   // فقط یک‌بار، لحظه‌ی ساخت مکالمه (startChat وب / handleStart تلگرام) صدا زده می‌شود —
   // نتیجه روی SalesConversation.billingMode می‌ماند و تا آخر عمر مکالمه دوباره چک نمی‌شود
   // (docs/PRD-seller-credit-billing.md — تصمیم معماری «gate یک‌بار در شروع مکالمه»)
@@ -44,7 +52,7 @@ export class CreditService {
     outputTokens: number;
   }): Promise<void> {
     if (params.billingMode === 'BLOCKED') return; // safety net — نباید اصلاً به اینجا برسد
-    const { costToman } = await this.pricing.calcCost(
+    const { costToman, costUsdMicros } = await this.pricing.calcCost(
       params.inputTokens,
       params.outputTokens,
       params.model,
@@ -57,6 +65,9 @@ export class CreditService {
       kind: 'TEXT_REPLY',
       costToman,
       isFreeQuota: params.billingMode === 'FREE',
+      tokensInput: params.inputTokens,
+      tokensOutput: params.outputTokens,
+      costUsdMicros,
     });
   }
 
@@ -72,7 +83,9 @@ export class CreditService {
     usdCost: number;
   }): Promise<void> {
     if (params.billingMode === 'BLOCKED') return;
-    const { costToman } = await this.pricing.calcFlatCostToman(params.usdCost);
+    const { costToman, costUsdMicros } = await this.pricing.calcFlatCostToman(
+      params.usdCost,
+    );
     await this.logUsage({
       storeId: params.storeId,
       customerId: params.customerId,
@@ -81,6 +94,7 @@ export class CreditService {
       kind: 'VOICE_TTS',
       costToman,
       isFreeQuota: params.billingMode === 'FREE',
+      costUsdMicros,
     });
   }
 
@@ -92,6 +106,9 @@ export class CreditService {
     kind: CreditUsageKind;
     costToman: number;
     isFreeQuota: boolean;
+    tokensInput?: number;
+    tokensOutput?: number;
+    costUsdMicros?: number;
   }): Promise<void> {
     await this.prisma.creditUsageEvent.create({
       data: {
@@ -102,6 +119,9 @@ export class CreditService {
         kind: params.kind,
         costToman: params.costToman,
         isFreeQuota: params.isFreeQuota,
+        tokensInput: params.tokensInput ?? 0,
+        tokensOutput: params.tokensOutput ?? 0,
+        costUsdMicros: params.costUsdMicros ?? 0,
       },
     });
     // decrement ساده، نه شرطی — طبق تصمیم معماری، چون هزینه‌ی واقعی فقط بعد از فراخوان

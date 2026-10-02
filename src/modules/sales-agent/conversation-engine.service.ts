@@ -4022,13 +4022,37 @@ answered=false بده (به‌جای حدس‌زدن).`,
     return result.count > 0;
   }
 
-  // همان الگوی atomic شرطی بالا — فیدبک کاربر ۱۴۰۵/۰۷/۰۱: فروشنده‌ی بدون اعتبار حداکثر ۳
-  // مکالمه‌ی مجزا وویس می‌گیرد؛ فقط یک‌بار به‌ازای هر مکالمه (روی اولین وویسش) صدا زده می‌شود
+  // همان الگوی atomic شرطی بالا — فیدبک کاربر ۱۴۰۵/۰۷/۱۲: فروشنده‌ی بدون اعتبار حداکثر
+  // FREE_DAILY_QUOTA (همون عدد ۱۰ خریدار رایگان در روز، از CreditService.getFreeDailyQuota
+  // خوانده می‌شود تا یک سورس بیشتر نداشته باشیم) مکالمه‌ی مجزای وویس **در روز** می‌گیرد؛ فقط
+  // یک‌بار به‌ازای هر مکالمه (روی اولین وویسش) صدا زده می‌شود. برای کاربر با اعتبار خریداری‌شده
+  // (billingMode === 'PAID') این تابع اصلاً صدا زده نمی‌شود (چک بالادستی در logReply) — یعنی
+  // نامحدود است.
   private async reserveFreeVoiceConversationSlot(
     storeId: string,
   ): Promise<boolean> {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    // ریست تنبل روزانه (lazy، بدون cron) — همان الگوی snapshot/lazy-check بخش ۶.۲ سند:
+    // اگر آخرین ریست قبل از امروز بوده، شمارنده صفر و تاریخ ریست به امروز می‌شود
+    await this.prisma.store.updateMany({
+      where: {
+        id: storeId,
+        OR: [
+          { freeVoiceQuotaResetAt: null },
+          { freeVoiceQuotaResetAt: { lt: todayStart } },
+        ],
+      },
+      data: {
+        freeVoiceConversationsUsed: 0,
+        freeVoiceQuotaResetAt: todayStart,
+      },
+    });
+
+    const quota = this.creditService.getFreeDailyQuota();
     const result = await this.prisma.store.updateMany({
-      where: { id: storeId, freeVoiceConversationsUsed: { lt: 3 } },
+      where: { id: storeId, freeVoiceConversationsUsed: { lt: quota } },
       data: { freeVoiceConversationsUsed: { increment: 1 } },
     });
     return result.count > 0;
