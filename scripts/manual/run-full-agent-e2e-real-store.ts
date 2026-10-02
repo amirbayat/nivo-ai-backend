@@ -248,6 +248,14 @@ ${
   قابل‌حل نیست، یا صریح خواست با یک آدم/پشتیبان صحبت کند، request_human_handoff را صدا بزن و
   دیگر respond_to_customer را صدا نزن — مکالمه همان‌جا تمام می‌شود.
 - اگر مشتری صریح عکس بیشتر خواست، از show_product_photos استفاده کن.
+- (docs/PRD-sales-agent-consultative-recommendation.md) اگر پیام مشتری توصیف یک وضعیت/مشکل/هدف
+  است (نه اسم مشخص یک محصول)، مثل یک مشاور رفتار کن: اگر با قطعیت می‌دانی کدام محصول واقعی
+  مناسب است، همان یکی (حداکثر دو تای کاملاً هم‌سطح) را با توضیح کوتاهِ *چرا* دقیقاً برای همین نیاز
+  مناسب است پیشنهاد بده — نه تعریف کلی/تبلیغاتی. اگر واقعاً مطمئن نیستی، به‌جای حدس‌زدن یک سوال
+  کوتاه و مشخص بپرس تا هدف را دقیق‌تر کنی؛ در این حالت هیچ محصولی نام نبر و relevantProductIds را
+  خالی بگذار. لازم نیست عبارت جست‌وجو دقیقاً با اسم محصول یکی باشد — search_products روی
+  توضیحات هم جست‌وجو می‌کند و اگر هیچ‌چیز پیدا نکرد کل کاتالوگ را برمی‌گرداند تا خودت تناسب را
+  تشخیص بدهی.
 - در پایان (مگر وقتی request_human_handoff زده‌ای)، همیشه دقیقاً یک‌بار respond_to_customer را
   به‌عنوان آخرین قدم صدا بزن؛ relevantProductIds می‌تواند شامل شناسه‌ی هر محصولی باشد که از
   کاتالوگ اولیه یا ابزارها واقعاً دیده‌ای، نه فقط کاندیدهای اولیه.${
@@ -288,18 +296,27 @@ async function runTurn(
   const nudgeActive = openQuestionStreak >= OPEN_QUESTION_NUDGE_THRESHOLD;
 
   const search_products = tool({
-    description: 'در کاتالوگ فروشگاه بر اساس یک عبارت جست‌وجو می‌کند',
+    description:
+      'در کاتالوگ فروشگاه جست‌وجو می‌کند — هم روی نام هم روی توضیحات محصول. برای پیام‌های ' +
+      'نیازمحور هم کاربرد دارد؛ اگر هیچ تطابقی پیدا نشود کل کاتالوگ برگردانده می‌شود.',
     inputSchema: z.object({ query: z.string() }),
     execute: ({ query }: { query: string }) => {
       toolsCalled.push('search_products');
-      const results = PRODUCTS.filter((p) =>
-        p.name.toLowerCase().includes(query.toLowerCase()),
+      const q = query.toLowerCase();
+      const literalMatches = PRODUCTS.filter(
+        (p) =>
+          p.name.toLowerCase().includes(q) ||
+          p.description?.toLowerCase().includes(q),
       );
+      const results = literalMatches.length > 0 ? literalMatches : PRODUCTS;
       return results.map((p) => ({
         id: p.id,
         name: p.name,
         basePrice: p.basePrice,
         inStock: p.stock > 0,
+        description: p.description
+          ? truncateDescriptionForFacts(p.description)
+          : null,
       }));
     },
   });
@@ -696,6 +713,18 @@ async function main() {
     { enabled: false },
   );
 
+  // docs/PRD-sales-agent-consultative-recommendation.md — سناریوی ۶: پیام کاملاً نیازمحور
+  // (اسم هیچ محصولی نیامده) که توضیحات «آموزش پایتون» دقیقاً برایش نوشته شده («هیچ تجربه‌ای
+  // ندارن»/«وارد بازار کار بشن») در حالی‌که «آموزش react» فقط یک توضیح یک‌خطی دارد — انتظار:
+  // باید به پایتون برسد، نه react، و توجیهش را به حرف مشتری وصل کند نه تعریف کلی
+  await runConversation(
+    client,
+    'سناریوی ۶ — تست حالت مشاوره (پیام نیازمحور، بدون اسم محصول)',
+    [
+      'من هیچی از برنامه‌نویسی بلد نیستم ولی می‌خوام وارد بازار کارش بشم، از کجا شروع کنم؟',
+    ],
+  );
+
   console.log('\n\n== نکاتی که باید دستی چک شود ==');
   console.log(
     '۱. سناریوی ۱ نوبت ۵ — آیا واقعاً فهمید «فرانت» = آموزش react (نه «متوجه نشدم»)؟',
@@ -708,6 +737,9 @@ async function main() {
   );
   console.log(
     '۴. در هیچ‌کدام، آیا عدد موجودی انبار (۱۰۰۰) مستقیم اعلام شده؟ (نباید بشه)',
+  );
+  console.log(
+    '۵. سناریوی ۶ — آیا به «آموزش پایتون» رسید (نه react)، و توجیهش را به حرف مشتری (صفر/بازار کار) وصل کرد؟',
   );
   console.log(
     '۵. سناریوی ۴ — آیا نظرات واقعی/۴۲ سفارش/کم‌موجود/تخفیف واقعاً در پاسخ‌ها ظاهر شد، نه ساختگی؟',

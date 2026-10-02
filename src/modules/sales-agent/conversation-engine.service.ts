@@ -96,6 +96,11 @@ function truncateDescriptionForFacts(description: string): string {
 // در پنل (طبق عادت این پروژه)؛ فقط با داده‌ی واقعی فاز ۳ کالیبره می‌شود
 const OPEN_QUESTION_NUDGE_THRESHOLD = 3;
 
+// docs/PRD-sales-agent-consultative-recommendation.md بخش ۳.۲ — همان آستانه و همان توجیه
+// (کاتالوگ کوچک کامل در پرامپت جا می‌شود) که PRD-sales-agent-implicit-need-detection.md بخش ۳
+// قبلاً برای رد embeddings/pgvector استدلال کرده بود؛ بالاتر از این سقف نیاز به retrieval واقعی دارد
+const CONSULTATION_FULL_CATALOG_FALLBACK_CAP = 30;
+
 // همون سند، بخش ۴.۴ — عمداً «نرم»: مدل همچنان آزاد است FAQ را جواب بدهد، فقط موظف است در
 // همان پاسخ یک قدم به جلو هم اضافه کند؛ هرگز به مشتری اعلام محدودیت/امتناع از جواب نمی‌کند
 const OPEN_QUESTION_NUDGE_INSTRUCTION = `مشتری چند پیام پشت‌سرهم فقط سوال اطلاعاتی پرسیده بدون
@@ -863,6 +868,39 @@ export class ConversationEngineService {
     });
   }
 
+  // docs/PRD-sales-agent-consultative-recommendation.md بخش ۳.۲ — فقط برای ابزار search_products
+  // در FULL_AGENT؛ عمداً متد مشترک searchProducts بالا را دست نمی‌زند چون مسیرهای قدیمی
+  // RULE_BASED/SIMPLE_AGENT (هنوز برای مکالمه‌های از قبل روی آن استراتژی زنده‌اند) هم از آن
+  // استفاده می‌کنند و نباید رفتارشان بی‌سروصدا عوض شود
+  private async searchProductsForConsultation(storeId: string, query: string) {
+    const exact = await this.prisma.product.findFirst({
+      where: { storeId, code: { equals: query, mode: 'insensitive' } },
+    });
+    if (exact) return [exact];
+
+    const literalMatches = await this.prisma.product.findMany({
+      where: {
+        storeId,
+        OR: [
+          { name: { contains: query, mode: 'insensitive' } },
+          { description: { contains: query, mode: 'insensitive' } },
+        ],
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 8,
+    });
+    if (literalMatches.length > 0) return literalMatches;
+
+    // هیچ تطابق تحت‌اللفظی‌ای نبود — احتمالاً پیام نیازمحور است، نه اسم محصول (مثل «پیجم رشد
+    // نمی‌کنه»). کل کاتالوگ را تا سقف ثابت برگردان تا خودِ مدل با توضیحات واقعی هر محصول
+    // استدلال کند؛ بالاتر از این سقف خارج از محدوده‌ی این طراحی است (نیاز به retrieval واقعی دارد)
+    return this.prisma.product.findMany({
+      where: { storeId },
+      orderBy: { createdAt: 'desc' },
+      take: CONSULTATION_FULL_CATALOG_FALLBACK_CAP,
+    });
+  }
+
   // docs/PRD-sales-agent-tool-calling-architecture.md بخش ۳.۲ — فیکس باگ واقعی کاربر (پیام
   // فالو-آپ «من اگر بخوام فرانت بشم چی؟» گم می‌شد چون parseIntent هیچ تاریخچه‌ای نمی‌دید).
   // ConversationEvent همین الان این داده را دارد، هیچ migration جدا لازم نیست. پیام همین نوبت
@@ -1167,6 +1205,14 @@ ${
 - اگر مشتری قبلاً محصولی را دیده (طبق سبد/تاریخچه/لنگر پایین) و فقط سوال عمومی پرسید، به‌جای
   جست‌وجوی دوباره روی همان محصول تمرکز کن.
 - اگر مشتری صریح عکس بیشتر خواست، از show_product_photos استفاده کن.
+- (docs/PRD-sales-agent-consultative-recommendation.md) اگر پیام مشتری توصیف یک وضعیت/مشکل/هدف
+  است (نه اسم مشخص یک محصول)، مثل یک مشاور رفتار کن: اگر با قطعیت می‌دانی کدام محصول واقعی
+  مناسب است، همان یکی (حداکثر دو تای کاملاً هم‌سطح) را با توضیح کوتاهِ *چرا* دقیقاً برای همین نیاز
+  مناسب است پیشنهاد بده — نه تعریف کلی/تبلیغاتی. اگر واقعاً مطمئن نیستی، به‌جای حدس‌زدن یک سوال
+  کوتاه و مشخص بپرس تا هدف را دقیق‌تر کنی؛ در این حالت هیچ محصولی نام نبر و relevantProductIds را
+  خالی بگذار. لازم نیست عبارت جست‌وجو دقیقاً با اسم محصول یکی باشد — search_products روی
+  توضیحات هم جست‌وجو می‌کند و اگر هیچ‌چیز پیدا نکرد کل کاتالوگ را برمی‌گرداند تا خودت تناسب را
+  تشخیص بدهی.
 - در پایان (مگر وقتی request_human_handoff زده‌ای)، همیشه دقیقاً یک‌بار respond_to_customer را
   به‌عنوان آخرین قدم صدا بزن؛ relevantProductIds می‌تواند شامل شناسه‌ی هر محصولی باشد که از
   کاتالوگ اولیه یا ابزارها واقعاً دیده‌ای، نه فقط کاندیدهای اولیه.
@@ -1358,10 +1404,15 @@ ${ctx.anchoredProductId ? `\nمحصول لنگر فعلی (تمرکز مکالم
 
     const searchProductsTool = tool({
       description:
-        'در کاتالوگ فروشگاه بر اساس یک عبارت جست‌وجو می‌کند — اگر کاتالوگ اولیه کافی نیست یا مشتری چیز دیگری خواست از این استفاده کن',
+        'در کاتالوگ فروشگاه جست‌وجو می‌کند — هم روی نام هم روی توضیحات محصول. برای پیام‌های ' +
+        'نیازمحور (مثل «پیجم رشد نمی‌کنه») هم کاربرد دارد، نه فقط وقتی مشتری اسم محصول را گفته؛ ' +
+        'اگر هیچ تطابقی پیدا نشود کل کاتالوگ فروشگاه برگردانده می‌شود تا خودت تناسب را تشخیص بدهی.',
       inputSchema: z.object({ query: z.string() }),
       execute: async ({ query }: { query: string }) => {
-        const results = await this.searchProducts(storeId, query);
+        const results = await this.searchProductsForConsultation(
+          storeId,
+          query,
+        );
         for (const p of results) {
           seenProducts.set(p.id, {
             id: p.id,
@@ -1377,6 +1428,9 @@ ${ctx.anchoredProductId ? `\nمحصول لنگر فعلی (تمرکز مکالم
           name: p.name,
           basePrice: p.basePrice,
           inStock: p.stock > 0,
+          description: p.description
+            ? truncateDescriptionForFacts(p.description)
+            : null,
         }));
       },
     });
