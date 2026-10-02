@@ -417,7 +417,7 @@ export class SalesAgentService {
   async setResponseStrategy(
     conversationId: string,
     sessionToken: string,
-    responseStrategy: 'RULE_BASED' | 'SIMPLE_AGENT',
+    responseStrategy: 'RULE_BASED' | 'SIMPLE_AGENT' | 'FULL_AGENT',
   ) {
     await this.loadOwned(conversationId, sessionToken);
     await this.prisma.salesConversation.update({

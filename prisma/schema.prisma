@@ -2080,6 +2080,10 @@ model Store {
   // (PostPurchaseFollowUpService / AbandonedCartReminderService)
   postPurchaseFollowUpEnabled   Boolean           @default(true)
   abandonedCartReminderEnabled  Boolean           @default(true)
+  // docs/PRD-sales-agent-persuasion-principles.md بخش ۶ — کلید کلی فروشنده برای ۶ اصل
+  // متقاعدسازی (Cialdini) در FULL_AGENT؛ هم‌خانواده‌ی دو سوئیچ بالا. effective یک محصول =
+  // این AND Product.persuasionTechniquesEnabled خودش
+  persuasionTechniquesEnabled   Boolean           @default(true)
   createdAt                     DateTime          @default(now())
   updatedAt                     DateTime          @updatedAt
 
@@ -2152,6 +2156,10 @@ model Product {
   // تبلیغاتی‌اش می‌گذارد؛ خریدار به‌جای اسم محصول می‌تواند کد را بگوید (searchProducts اول
   // یک exact match روی این را امتحان می‌کند). یکتا فقط در سطح فروشگاه، نه سراسری.
   code              String?
+  // docs/PRD-sales-agent-persuasion-principles.md بخش ۶ — اولین فیلد boolean روی Product؛
+  // مستقل از Store.persuasionTechniquesEnabled (effective = AND هر دو) تا فروشنده بتواند
+  // فقط یک محصول خاص (مثلاً حساس/قانونی) را از لحن ترغیبی مستثنا کند
+  persuasionTechniquesEnabled Boolean @default(true)
   createdAt         DateTime @default(now())
   // docs/PRD-product-display-focus-and-variations.md §۲.۴ — کد کوتاه یکتای سراسری برای لینک
   // اختصاصی تلگرام این محصول (payload محدودیت ۶۴ کاراکتری `/start` را دارد، UUID خام جا
@@ -2359,6 +2367,10 @@ model SalesConversation {
   // (agent ساده) برای تصمیم «چی بگو/کدام محصول را نشان بده» در doBrowse؛ یک‌بار در ساخت
   // مکالمه تصادفی (۵۰/۵۰) تعیین می‌شود و تا آخر عمر مکالمه ثابت می‌ماند (هم‌الگوی voiceVariant)
   responseStrategy                  ResponseStrategy  @default(RULE_BASED)
+  // docs/PRD-sales-agent-tool-calling-architecture.md بخش ۴.۲ — شمارنده‌ی نوبت‌های پشت‌سرهم
+  // بدون «پیشرفت» واقعی (update_cart موفق/create_order)؛ فقط برای FULL_AGENT مصرف می‌شود —
+  // بعد از رسیدن به آستانه، نادج نرم به‌سمت تصمیم خرید فعال می‌شود (بخش ۴.۴)
+  openQuestionStreak                Int               @default(0)
   // docs/PRD-seller-credit-billing.md بخش «تصمیم معماری» — یک‌بار در ساخت مکالمه (startChat
   // وب / /start تلگرام) تعیین می‌شود و تا آخر عمر مکالمه ثابت می‌ماند (بر خلاف abVariant که
   // فقط انتخاب مدل است، این تعیین می‌کند اصلاً AI صدا زده شود یا نه)
@@ -2401,6 +2413,10 @@ enum VoiceVariant {
 enum ResponseStrategy {
   RULE_BASED
   SIMPLE_AGENT
+  // docs/PRD-sales-agent-tool-calling-architecture.md — ایجنت ابزارمحور یکپارچه برای کل
+  // مکالمه (نه فقط تصمیم doBrowse مثل SIMPLE_AGENT)؛ فعلاً فقط دستی/تست (pickResponseStrategy
+  // تغییر نکرده)، هیچ مکالمه‌ی واقعی تصادفی بهش نمی‌رسد
+  FULL_AGENT
 }
 
 // یک ردیف به‌ازای هر فراخوان واقعی AI (متن/وویس/ASR) + هر شارژ اعتبار — لاگ مصرف به تفکیک

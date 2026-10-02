@@ -41,4 +41,10 @@ export class UpdateStoreDto {
   @IsOptional()
   @IsBoolean()
   abandonedCartReminderEnabled?: boolean;
+
+  // docs/PRD-sales-agent-persuasion-principles.md بخش ۶ — کلید کلی فروشنده برای ۶ اصل
+  // متقاعدسازی در FULL_AGENT؛ هم‌خانواده‌ی دو فیلد بالا
+  @IsOptional()
+  @IsBoolean()
+  persuasionTechniquesEnabled?: boolean;
 }

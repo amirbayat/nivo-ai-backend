@@ -173,6 +173,16 @@ export type SalesAgentVoiceJobData = {
   traceEventId?: string;
 };
 
+// docs/PRD-sales-agent-persuasion-principles.md بخش ۸ — خودِ مدل در respond_to_customer این را
+// خوداظهاری می‌کند (هیچ راه برنامه‌نویسی‌شده‌ای برای تشخیص «کدام اصل در متن استفاده شد» نیست)
+export type PersuasionTechnique =
+  | 'COMMITMENT_CONSISTENCY'
+  | 'SOCIAL_PROOF'
+  | 'AUTHORITY'
+  | 'LIKING'
+  | 'RECIPROCITY'
+  | 'SCARCITY';
+
 // docs/PRD-admin-ai-decision-trace-log.md بخش ۱ — محتوای ConversationEvent(AI_TRACE)، همراه
 // هر AGENT_REPLY که واقعاً از یک تصمیم/فراخوان AI آمده باشد (نه پاسخ‌های قانون‌محور ثابت)
 export type AiTraceData = {
@@ -186,4 +196,8 @@ export type AiTraceData = {
   buyerNeeds?: BuyerNeedTag[];
   unmatchedBuyerNeed?: string;
   intentConfidence?: 'HIGH' | 'MEDIUM' | 'LOW';
+  // docs/PRD-sales-agent-persuasion-principles.md بخش ۸ — فقط روی trace سطح runFullAgentTurn
+  // پر می‌شود (handler: 'runFullAgentTurn')؛ خالی/نبودن یعنی هیچ تکنیکی استفاده نشد
+  persuasionTechniquesUsed?: PersuasionTechnique[];
+  usedGeneralKnowledge?: boolean;
 };

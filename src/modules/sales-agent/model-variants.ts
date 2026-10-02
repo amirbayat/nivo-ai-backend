@@ -28,13 +28,17 @@ export function pickVoiceVariant(): 'ON' | 'OFF' {
   return Math.random() < 0.5 ? 'ON' : 'OFF';
 }
 
-// docs/PRD-sales-agent-response-strategy-ab.md بخش ۸ — eval واقعی (۴ اجرای مستقل) نشان داد
-// Track B (agent) به‌طور پیوسته از Track A دقیق‌تر است (~۷۷-۸۴٪ در برابر ~۶۰-۶۱٪)، ولی
-// هزینه/تاخیر واقعی‌اش هنوز اندازه‌گیری نشده (قطعاً چند فراخوان بیشتر از Track A دارد) — تا آن
-// اندازه‌گیری انجام نشود، پیش‌فرض محتاطانه RULE_BASED می‌ماند. کد Track B کامل و پشت
-// SIMPLE_AGENT آماده است (doBrowse)، فقط فعلاً هیچ مکالمه‌ی واقعی‌ای تصادفی به آن نمی‌رسد.
-export function pickResponseStrategy(): 'RULE_BASED' | 'SIMPLE_AGENT' {
-  return 'RULE_BASED';
+// docs/PRD-sales-agent-tool-calling-architecture.md بخش ۷ (فاز ۴) — ۱۴۰۵/۰۷/۱۲: بعد از
+// تست زنده‌ی FULL_AGENT با API واقعی (باگ فالو-آپ فیکس تایید شد، نادج درست کار می‌کند، هیچ
+// عدد/موجودی ساختگی/فاش‌شده دیده نشد)، کاربر صریحاً تصمیم به کات‌اوور کامل (۱۰۰٪) گرفت — بدون
+// صبر برای داده‌ی ترافیک واقعی از فاز ۳ (سوییچ دستی)، آگاهانه. RULE_BASED/SIMPLE_AGENT دیگر
+// برای مکالمه‌ی تصادفی جدید انتخاب نمی‌شوند (کدشان حذف نشده، فقط دیگر از اینجا صدا زده نمی‌شوند؛
+// برگشت احتمالی فقط همین یک خط است). گپ شناخته‌شده‌ی پذیرفته‌شده: چون parseIntent دیگر برای این
+// مکالمه‌ها اجرا نمی‌شود، آنالیتیکس buyerNeeds (docs/PRD-buyer-preference-personalization.md)
+// از این به بعد برای مکالمات جدید جمع نمی‌شود.
+export function pickResponseStrategy():
+  'RULE_BASED' | 'SIMPLE_AGENT' | 'FULL_AGENT' {
+  return 'FULL_AGENT';
 }
 
 export function resolveModel(variant: string | null | undefined): string {

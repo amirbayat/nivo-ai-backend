@@ -3,7 +3,7 @@ import { InjectQueue } from '@nestjs/bull';
 import type { Queue } from 'bull';
 import { generateObject, generateText, tool, stepCountIs } from 'ai';
 import { z } from 'zod';
-import type { ConversationState, Prisma } from '@prisma/client';
+import type { ConversationState, Order, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
 import { mimeTypeForExt } from '../../common/validators/chat-image.validator';
@@ -28,6 +28,7 @@ import type {
   ConversationContext,
   EngineResult,
   ParsedIntent,
+  PersuasionTechnique,
   SalesAction,
   SalesAgentVoiceJobData,
   UiBlock,
@@ -91,6 +92,63 @@ function truncateDescriptionForFacts(description: string): string {
   return `${description.slice(0, DESCRIPTION_FACTS_MAX_CHARS)}...`;
 }
 
+// docs/PRD-sales-agent-tool-calling-architecture.md بخش ۴.۳ — ثابت در کد، نه تنظیم قابل‌پیکربندی
+// در پنل (طبق عادت این پروژه)؛ فقط با داده‌ی واقعی فاز ۳ کالیبره می‌شود
+const OPEN_QUESTION_NUDGE_THRESHOLD = 3;
+
+// همون سند، بخش ۴.۴ — عمداً «نرم»: مدل همچنان آزاد است FAQ را جواب بدهد، فقط موظف است در
+// همان پاسخ یک قدم به جلو هم اضافه کند؛ هرگز به مشتری اعلام محدودیت/امتناع از جواب نمی‌کند
+const OPEN_QUESTION_NUDGE_INSTRUCTION = `مشتری چند پیام پشت‌سرهم فقط سوال اطلاعاتی پرسیده بدون
+نزدیک‌شدن به تصمیم خرید. این‌بار جواب را با معرفی دقیقاً یک محصول مشخص (مرتبط‌ترین با کل بحث تا
+الان) و یک دعوت صریح به اضافه‌کردن به سبد تمام کن — حتی اگر مشتری دوباره فقط سوال پرسیده. هرگز نگو
+سوالاتت تموم شده یا از جواب‌دادن امتناع نکن؛ فقط مکالمه را به‌سمت یک تصمیم مشخص هدایت کن.`;
+
+// docs/PRD-sales-agent-tool-calling-architecture.md بخش ۳.۳ — یک محصول کمینه برای facts/ابزارهای
+// FULL_AGENT؛ همون شکلی که seenProducts/uiBlock derivation نیاز دارند
+type CompactProduct = {
+  id: string;
+  name: string;
+  basePrice: number;
+  stock: number;
+  images: string[];
+  description?: string | null;
+};
+
+// docs/PRD-sales-agent-persuasion-principles.md بخش ۳.۲/۳.۳/۳.۴ — ثابت در کد (نه تنظیم پنل)،
+// همون عادت این پروژه برای آستانه‌ها
+const AUTHORITY_MIN_ORDER_COUNT = 5;
+const LOW_STOCK_THRESHOLD = 5;
+const URGENT_DISCOUNT_WINDOW_HOURS = 72;
+
+// همون سند، بخش ۳/۳.۵ — فقط وقتی یک محصول واقعاً نشانه‌ی «[متقاعدسازی: مجاز]» دارد (یعنی
+// persuasionTechniquesEnabled هم‌زمان روی فروشگاه و خودِ محصول روشن است) این تکنیک‌ها به‌کار
+// می‌روند؛ برای بقیه‌ی محصولات این بخش کلاً نادیده گرفته می‌شود
+const PERSUASION_INSTRUCTION = `اگر جلوی یک محصول در واقعیت‌ها نشانه‌ی «[متقاعدسازی: مجاز]» آمده،
+می‌توانی طبیعی و کوتاه (نه فشار فروش) از تکنیک‌های متقاعدسازی اخلاقی زیر استفاده کنی — همیشه فقط با
+سیگنال‌های واقعی که همان‌جا آمده، هرگز با عدد/ادعای ساختگی؛ برای محصولاتی که این نشانه را ندارند
+اصلاً از این تکنیک‌ها استفاده نکن، فقط واقعیت خام را بگو:
+۱. تعهد و ثبات: قبل از پیشنهاد، هدف خودِ مشتری را در یک جمله‌ی کوتاه echo کن، بعد پیشنهادت را
+   دقیقاً به همان هدف وصل کن.
+۲. اثبات اجتماعی: اگر نظر خریدار واقعی زیر محصول آمده، طبیعی به آن اشاره کن — اگر هم‌زمان خودِ
+   محصول یک چیز عمومی/شناخته‌شده هم هست (طبق بند دانش عمومی پایین)، وقتی مشتری صریح نظر/رضایت
+   می‌پرسد می‌توانی این دو را در یک جمله‌ی کوتاه ترکیب کنی: اول یک اشاره‌ی خیلی کوتاه به جایگاه/
+   محبوبیت عمومی آن موضوع در دنیا، بلافاصله بعدش نظر واقعی خریدارهای همین فروشگاه — نه این‌که
+   یکی را به‌جای دیگری بگویی.
+۳. اقتدار: اگر «تعداد سفارش واقعی» زیر محصول آمده، می‌توانی به آن اشاره کنی.
+۴. علاقه: لحن گرم و همدلانه داشته باش (طبق لحن بالا).
+۵. تقابل: همیشه اول یک جواب واقعاً کامل و مفید بده، بعد پیشنهاد بده.
+۶. کمیابی: فقط اگر «موجودی محدود» (هرگز عدد دقیق) یا یک کد تخفیف واقعی با مهلت نزدیک زیر آمده،
+   به آن اشاره کن — هرگز فوریت ساختگی نساز.
+علاوه‌بر این شش‌تا: اگر خودِ محصول یک چیز عمومی و واقعاً شناخته‌شده در دنیاست (مثلاً یک فریم‌ورک/
+تکنولوژی/برند معروف، نه یک محصول اختصاصی این فروشگاه)، فقط در همین حالت اجازه داری یک جمله‌ی کوتاه
+از دانش عمومی خودت درباره‌ی خودِ آن موضوع (نه درباره‌ی این دوره/محصول مشخص فروشگاه) اضافه کنی —
+مثلاً میزان محبوبیت/تقاضای بازار کار. اگر مطمئن نیستی این موضوع واقعاً به‌اندازه‌ی کافی شناخته‌شده
+است، این کار را نکن. هیچ‌وقت بیشتر از یکی-دوتا از این تکنیک‌ها را هم‌زمان در یک پاسخ فشار نده.
+در respond_to_customer، هرکدام از ۶ اصل بالا را که واقعاً در همین متن استفاده کردی در
+persuasionTechniquesUsed بگذار (برای ثبت/گزارش داخلی فروشنده، نه چیزی که مشتری ببیند) و اگر از
+دانش عمومی خودت (بند بالا) استفاده کردی usedGeneralKnowledge را true کن — اگر هیچ‌کدام را استفاده
+نکردی، این‌ها را خالی/false بگذار، صادقانه.`;
+
 @Injectable()
 export class ConversationEngineService {
   constructor(
@@ -129,6 +187,110 @@ export class ConversationEngineService {
 
   private cartTotal(cart: CartItem[]): number {
     return cart.reduce((sum, item) => sum + item.unitPrice * item.qty, 0);
+  }
+
+  // docs/PRD-sales-agent-persuasion-principles.md بخش ۳.۲ — تعداد سفارش واقعاً تاییدشده
+  // (status=APPROVED) که این محصول را داشته‌اند؛ Order.items رابطه‌ی مستقیم به Product نیست
+  // (آرایه‌ی JSON است)، پس کانتینمنت JSONB لازم است — همون الگوی $executeRaw که برای کسر
+  // اتمیک کد تخفیف در doCreateOrder استفاده می‌شود
+  private async countApprovedOrdersForProduct(
+    storeId: string,
+    productId: string,
+  ): Promise<number> {
+    const rows = await this.prisma.$queryRaw<{ count: bigint }[]>`
+      SELECT COUNT(*)::bigint AS count FROM orders
+      WHERE "storeId" = ${storeId}
+        AND status = 'APPROVED'
+        AND items @> ${JSON.stringify([{ productId }])}::jsonb
+    `;
+    return Number(rows[0]?.count ?? 0);
+  }
+
+  // همون سند بخش ۳.۳ — فقط وقتی مهلت واقعی نزدیک است (نه هر کد تخفیف فعالی) تا حس فوریت
+  // دروغین نسازیم؛ یک کد تخفیف با ۳۰ روز مهلت را «فرصت محدود» نامیدن گمراه‌کننده است
+  private async findUrgentActiveDiscount(
+    storeId: string,
+  ): Promise<{ code: string; expiresAt: Date } | null> {
+    const soon = new Date(
+      Date.now() + URGENT_DISCOUNT_WINDOW_HOURS * 60 * 60 * 1000,
+    );
+    const discount = await this.prisma.storeDiscountCode.findFirst({
+      where: {
+        storeId,
+        isActive: true,
+        expiresAt: { not: null, gt: new Date(), lte: soon },
+      },
+      orderBy: { expiresAt: 'asc' },
+    });
+    if (!discount) return null;
+    if (
+      discount.maxRedemptions != null &&
+      discount.redemptionCount >= discount.maxRedemptions
+    ) {
+      return null;
+    }
+    return { code: discount.code, expiresAt: discount.expiresAt! };
+  }
+
+  // docs/PRD-sales-agent-persuasion-principles.md بخش ۳/۶.۳ — نشانه‌ی «[متقاعدسازی: مجاز]» +
+  // سیگنال‌های واقعی اضافه، فقط وقتی هم فروشگاه هم خودِ محصول persuasionTechniquesEnabled روشن
+  // دارند. اگر خاموش باشد، رشته‌ی خالی برمی‌گردد — PERSUASION_INSTRUCTION به مدل می‌گوید فقط
+  // برای محصولات نشان‌دار از این تکنیک‌ها استفاده کند. هم در facts کاتالوگ اولیه (buildProductFactsLine)
+  // هم در خروجی ابزار get_product_details استفاده می‌شود
+  private async buildPersuasionNote(
+    storeId: string,
+    product: {
+      id: string;
+      stock: number;
+      persuasionTechniquesEnabled: boolean;
+    },
+    storePersuasionEnabled: boolean,
+  ): Promise<string> {
+    if (!storePersuasionEnabled || !product.persuasionTechniquesEnabled) {
+      return '';
+    }
+    const signals: string[] = [];
+    const comments = await this.commentsFactsSuffix(product.id);
+    if (comments) signals.push(comments.replace(/^\n/, ''));
+    const orderCount = await this.countApprovedOrdersForProduct(
+      storeId,
+      product.id,
+    );
+    if (orderCount >= AUTHORITY_MIN_ORDER_COUNT) {
+      signals.push(
+        `تاکنون ${orderCount} سفارش واقعی تاییدشده برای این محصول ثبت شده`,
+      );
+    }
+    if (product.stock > 0 && product.stock <= LOW_STOCK_THRESHOLD) {
+      signals.push(
+        'موجودی این محصول محدود است (فقط عبارت کلی بگو، هرگز عدد دقیق)',
+      );
+    }
+    const signalsText = signals.length
+      ? ` — سیگنال‌های واقعی: ${signals.join('؛ ')}`
+      : '';
+    return ` [متقاعدسازی: مجاز]${signalsText}`;
+  }
+
+  private async buildProductFactsLine(
+    storeId: string,
+    product: {
+      id: string;
+      name: string;
+      basePrice: number;
+      stock: number;
+      description?: string | null;
+      persuasionTechniquesEnabled: boolean;
+    },
+    storePersuasionEnabled: boolean,
+  ): Promise<string> {
+    const base = `${product.name} (شناسه: ${product.id}, ${product.basePrice} تومان)${product.stock === 0 ? ' — فعلاً ناموجود' : ''}${product.description ? ` — توضیحات: ${truncateDescriptionForFacts(product.description)}` : ''}`;
+    const note = await this.buildPersuasionNote(
+      storeId,
+      product,
+      storePersuasionEnabled,
+    );
+    return `${base}${note}`;
   }
 
   // یک ردیف آماری به‌ازای هر فراخوانی واقعی مدل (چه موفق، چه شکست‌خورده) — بخش C پلن
@@ -701,6 +863,31 @@ export class ConversationEngineService {
     });
   }
 
+  // docs/PRD-sales-agent-tool-calling-architecture.md بخش ۳.۲ — فیکس باگ واقعی کاربر (پیام
+  // فالو-آپ «من اگر بخوام فرانت بشم چی؟» گم می‌شد چون parseIntent هیچ تاریخچه‌ای نمی‌دید).
+  // ConversationEvent همین الان این داده را دارد، هیچ migration جدا لازم نیست. پیام همین نوبت
+  // (که handleMessage همین الان، قبل از فراخوانی runFullAgentTurn، ثبت کرده) عمداً از تاریخچه
+  // کنار گذاشته می‌شود — چون همان متن جدا به‌عنوان prompt به generateText پاس داده می‌شود
+  private async buildRecentTranscript(conversationId: string): Promise<string> {
+    const events = await this.prisma.conversationEvent.findMany({
+      where: {
+        conversationId,
+        type: { in: ['CUSTOMER_MESSAGE', 'AGENT_REPLY'] },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 9,
+    });
+    const history = events.slice(1).reverse();
+    if (history.length === 0) return '';
+    return history
+      .map((e) => {
+        const payload = e.payload as { text?: string };
+        const speaker = e.type === 'CUSTOMER_MESSAGE' ? 'مشتری' : 'فروشنده';
+        return `${speaker}: ${payload.text ?? ''}`;
+      })
+      .join('\n');
+  }
+
   // docs/PRD-sales-agent-response-strategy-ab.md بخش ۱ (Track B) — جایگزین agent-محور همین یک
   // تصمیم (captionWithRelevance)، نه کل conversation-engine. برخلاف Track A که سیگنال‌های
   // needType/storeRelevance/pitchReadiness را از بیرون می‌گیرد، این مسیر خودش با ابزار تصمیم
@@ -925,6 +1112,736 @@ relevantProductIds را خالی بگذار.${
     }
   }
 
+  // docs/PRD-sales-agent-tool-calling-architecture.md — کل این بخش. برخلاف
+  // callAgentCaptionWithRelevance (Track B) که فقط یک تصمیم (doBrowse) را agent-محور می‌کند،
+  // این یک نوبت کامل مکالمه (سبد/سفارش/تخفیف/FAQ/ارجاع انسانی) را با یک زنجیره‌ی
+  // generateText چندمرحله‌ای تصمیم می‌گیرد — جایگزین کامل parseIntent+switch+do* برای
+  // مکالمه‌هایی که responseStrategy=FULL_AGENT دارند.
+  private buildFullAgentSystemPrompt(
+    conversation: ConversationWithStore,
+    ctx: ConversationContext,
+    catalogFacts: string,
+    transcript: string,
+    nudgeActive: boolean,
+    persuasionEnabled: boolean,
+    urgentDiscount: { code: string; expiresAt: Date } | null,
+  ): string {
+    const tone = toneForCategory(conversation.store.category);
+    const store = conversation.store;
+    const storeProfile = [
+      store.category && `حوزه‌ی فعالیت: ${store.category}`,
+      store.brandIntro && `معرفی فروشگاه: ${store.brandIntro}`,
+      store.shippingInfo && `ارسال: ${store.shippingInfo}`,
+      store.returnPolicy && `شرایط مرجوعی/گارانتی: ${store.returnPolicy}`,
+    ]
+      .filter(Boolean)
+      .join('\n');
+    const cartSummary = ctx.cart.length
+      ? `سبد فعلی مشتری: ${ctx.cart.map((i) => `${i.name} × ${i.qty}`).join('، ')} — جمع ${this.cartTotal(ctx.cart)} تومان`
+      : 'سبد فعلی مشتری خالی است.';
+
+    return `تو دستیار فروش یک فروشگاه در دایرکت اینستاگرام هستی و با ابزارهای زیر مستقیماً سبد/
+سفارش مشتری را مدیریت می‌کنی، نه فقط متن می‌نویسی. لحن نوشتار باید ${tone} باشد.
+${storeProfile ? `\nاطلاعات فروشگاه:\n${storeProfile}\n` : ''}
+کاتالوگ اولیه (برای جست‌وجوی دقیق‌تر یا محصولی که اینجا نیست از search_products استفاده کن):
+${catalogFacts}
+
+${cartSummary}
+${
+  transcript
+    ? `\nتاریخچه‌ی اخیر مکالمه (حتماً برای فهمیدن منظور پیام‌های ناقص/ادامه‌دار مشتری — مثل «پس اگه بخوام X بشم چی؟» بعد از بحث قبلی — این را در نظر بگیر):\n${transcript}\n`
+    : ''
+}
+قوانین حیاتی:
+- هیچ عدد/اسم/شماره‌ای که از ابزارها یا واقعیت‌های بالا نیامده اختراع نکن.
+- هرگز تعداد دقیق موجودی انبار را اعلام نکن، فقط «موجود است» یا «فعلاً ناموجود».
+- قبل از هر ادعای قیمت/موجودی/جزئیات محصولی که در کاتالوگ اولیه نبود، حتماً search_products یا
+  get_product_details را صدا بزن — حدس نزن.
+- افزودن/حذف واقعی از سبد فقط با update_cart انجام می‌شود؛ هرگز فقط در متن بگو «به سبد اضافه
+  کردم» بدون این‌که واقعاً این ابزار را صدا زده باشی.
+- ثبت نهایی سفارش فقط با create_order انجام می‌شود، و فقط وقتی مشتری صریحاً تایید خرید کرده
+  (نه صرفاً علاقه نشان داده).
+- اگر مشتری مشکل پرداخت یا سوال پس از خرید (مثل سفارش قبلاً ثبت‌شده) دارد که با ابزارهای بالا
+  قابل‌حل نیست، یا صریح خواست با یک آدم/پشتیبان صحبت کند، request_human_handoff را صدا بزن و
+  دیگر respond_to_customer را صدا نزن — مکالمه همان‌جا تمام می‌شود.
+- اگر مشتری قبلاً محصولی را دیده (طبق سبد/تاریخچه/لنگر پایین) و فقط سوال عمومی پرسید، به‌جای
+  جست‌وجوی دوباره روی همان محصول تمرکز کن.
+- اگر مشتری صریح عکس بیشتر خواست، از show_product_photos استفاده کن.
+- در پایان (مگر وقتی request_human_handoff زده‌ای)، همیشه دقیقاً یک‌بار respond_to_customer را
+  به‌عنوان آخرین قدم صدا بزن؛ relevantProductIds می‌تواند شامل شناسه‌ی هر محصولی باشد که از
+  کاتالوگ اولیه یا ابزارها واقعاً دیده‌ای، نه فقط کاندیدهای اولیه.
+${ctx.anchoredProductId ? `\nمحصول لنگر فعلی (تمرکز مکالمه): ${ctx.anchoredProductId}` : ''}${
+      persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''
+    }${
+      persuasionEnabled && urgentDiscount
+        ? `\n\nیک کد تخفیف واقعی و زمان‌دار همین الان فعال است: «${urgentDiscount.code}»، تا ${urgentDiscount.expiresAt.toLocaleString('fa-IR')} معتبر. اگر به مکالمه مرتبط است (مثلاً مشتری نزدیک تصمیم خرید است)، می‌توانی طبیعی مطرحش کنی، حتی اگر مشتری نپرسیده — وگرنه لازم نیست اشاره کنی.`
+        : ''
+    }${nudgeActive ? `\n\n${OPEN_QUESTION_NUDGE_INSTRUCTION}` : ''}`;
+  }
+
+  // docs/PRD-sales-agent-tool-calling-architecture.md بخش ۳.۴ — نرده‌ی حفاظتی حیاتی: قیمت/
+  // موجودی/مبلغ سفارش هرگز از متن تولیدی مدل گرفته نمی‌شود، همیشه از خروجی واقعی ابزاری که
+  // همین نوبت صدا زده شده
+  private deriveFullAgentUiBlock(args: {
+    orderResult: {
+      cardNumber: string;
+      ownerName: string;
+      amount: number;
+    } | null;
+    cartResult: { cart: CartItem[]; total: number } | null;
+    photosResult: {
+      productId: string;
+      productName: string;
+      images: string[];
+    } | null;
+    relevantProductIds: string[];
+    seenProducts: Map<string, CompactProduct>;
+  }): UiBlock {
+    const {
+      orderResult,
+      cartResult,
+      photosResult,
+      relevantProductIds,
+      seenProducts,
+    } = args;
+    if (orderResult) {
+      return {
+        type: 'PAYMENT_INSTRUCTIONS',
+        cardNumber: orderResult.cardNumber,
+        ownerName: orderResult.ownerName,
+        amount: orderResult.amount,
+      };
+    }
+    if (cartResult) {
+      return {
+        type: 'CART_SUMMARY',
+        items: cartResult.cart,
+        total: cartResult.total,
+      };
+    }
+    if (photosResult) {
+      return {
+        type: 'PRODUCT_PHOTOS',
+        productId: photosResult.productId,
+        productName: photosResult.productName,
+        images: photosResult.images,
+      };
+    }
+    if (relevantProductIds.length > 0) {
+      const matched = relevantProductIds
+        .map((id) => seenProducts.get(id))
+        .filter((p): p is CompactProduct => !!p)
+        .slice(0, 3);
+      if (matched.length > 0) {
+        return {
+          type: 'PRODUCT_CARD',
+          products: matched.map((p) => ({
+            id: p.id,
+            name: p.name,
+            basePrice: p.basePrice,
+            stock: p.stock,
+            images: p.images,
+          })),
+        };
+      }
+    }
+    return { type: 'NONE' };
+  }
+
+  // آخرین خط دفاع وقتی یک جهش واقعی (افزودن به سبد/ثبت سفارش/پاک‌کردن سبد) قبلاً اتفاق افتاده
+  // ولی مدل بعدش نتوانست respond_to_customer را سالم تولید کند — هرگز این حالت را با retry کامل
+  // حلقه‌ی ابزار جبران نمی‌کنیم (ریسک جهش دوباره، مثلاً دوبار افزودن به سبد)؛ فقط یک متن امن از
+  // روی واقعیت‌های واقعی (caption() همان الگوی قدیمی) می‌سازیم
+  private async salvageReplyAfterMutation(
+    conversation: ConversationWithStore,
+    orderResult: {
+      cardNumber: string;
+      ownerName: string;
+      amount: number;
+    } | null,
+    cartResult: { cart: CartItem[]; total: number } | null,
+  ): Promise<EngineResult> {
+    if (orderResult) {
+      const uiBlock: UiBlock = {
+        type: 'PAYMENT_INSTRUCTIONS',
+        cardNumber: orderResult.cardNumber,
+        ownerName: orderResult.ownerName,
+        amount: orderResult.amount,
+      };
+      const facts = `سفارش ثبت شد. مبلغ قابل پرداخت ${orderResult.amount} تومان به شماره کارت ${orderResult.cardNumber} به نام ${orderResult.ownerName}. بعد از واریز، عکس رسید را بفرست.`;
+      const reply = await this.caption(facts, conversation);
+      await this.logReply(conversation, reply, uiBlock);
+      return { reply, uiBlocks: [uiBlock], state: conversation.currentState };
+    }
+    if (cartResult) {
+      const uiBlock: UiBlock = {
+        type: 'CART_SUMMARY',
+        items: cartResult.cart,
+        total: cartResult.total,
+      };
+      const facts = cartResult.cart.length
+        ? `سبد فعلی: ${cartResult.cart.map((i) => `${i.name} × ${i.qty}`).join('، ')} — جمع کل ${cartResult.total} تومان`
+        : fa.salesAgent.cartEmpty;
+      const reply = await this.caption(facts, conversation);
+      await this.logReply(conversation, reply, uiBlock);
+      return { reply, uiBlocks: [uiBlock], state: conversation.currentState };
+    }
+    return this.doClarifyUnclear(conversation);
+  }
+
+  // یک تلاش کامل (بدون fallback مدل) — چون ابزارهای این حلقه اثر واقعی روی DB دارند (سبد/
+  // سفارش)، runFullAgentTurn پایین فقط وقتی اجازه‌ی retry با مدل دیگر می‌دهد که هنوز هیچ
+  // جهشی اتفاق نیفتاده باشد (mutationHappened=false) — وگرنه دوبار افزودن به سبد ممکن بود
+  private async callFullAgentTurn(
+    conversation: ConversationWithStore,
+    customerMessage: string,
+    model: string,
+  ): Promise<{
+    engineResult: EngineResult;
+    inputTokens: number;
+    outputTokens: number;
+  }> {
+    let ctx = this.getContext(conversation);
+    const storeId = conversation.storeId;
+
+    let mutationHappened = false;
+    let progressHappened = false;
+    let handoffResult: EngineResult | null = null;
+    let cartResult: { cart: CartItem[]; total: number } | null = null;
+    let orderResult: {
+      cardNumber: string;
+      ownerName: string;
+      amount: number;
+    } | null = null;
+    let photosResult: {
+      productId: string;
+      productName: string;
+      images: string[];
+    } | null = null;
+
+    const initialProducts = await this.searchProducts(storeId);
+    const seenProducts = new Map<string, CompactProduct>(
+      initialProducts.map((p) => [
+        p.id,
+        {
+          id: p.id,
+          name: p.name,
+          basePrice: p.basePrice,
+          stock: p.stock,
+          images: p.images,
+          description: p.description,
+        },
+      ]),
+    );
+    // docs/PRD-sales-agent-persuasion-principles.md بخش ۶.۳ — کلید فروشگاه؛ اگر خاموش باشد صفر
+    // کوئری اضافه (نه فقط نادیده‌گرفتن) — نه findUrgentActiveDiscount صدا زده می‌شود نه
+    // buildPersuasionNote چیزی برمی‌گرداند
+    const storePersuasionEnabled =
+      conversation.store.persuasionTechniquesEnabled;
+    const catalogFacts =
+      initialProducts.length === 0
+        ? 'فعلاً هیچ محصولی در فروشگاه نیست.'
+        : `این محصولات فروشگاه است: ${(
+            await Promise.all(
+              initialProducts.map((p) =>
+                this.buildProductFactsLine(storeId, p, storePersuasionEnabled),
+              ),
+            )
+          ).join('، ')}`;
+    const urgentDiscount = storePersuasionEnabled
+      ? await this.findUrgentActiveDiscount(storeId)
+      : null;
+
+    const transcript = await this.buildRecentTranscript(conversation.id);
+    const nudgeActive =
+      conversation.openQuestionStreak >= OPEN_QUESTION_NUDGE_THRESHOLD;
+
+    const searchProductsTool = tool({
+      description:
+        'در کاتالوگ فروشگاه بر اساس یک عبارت جست‌وجو می‌کند — اگر کاتالوگ اولیه کافی نیست یا مشتری چیز دیگری خواست از این استفاده کن',
+      inputSchema: z.object({ query: z.string() }),
+      execute: async ({ query }: { query: string }) => {
+        const results = await this.searchProducts(storeId, query);
+        for (const p of results) {
+          seenProducts.set(p.id, {
+            id: p.id,
+            name: p.name,
+            basePrice: p.basePrice,
+            stock: p.stock,
+            images: p.images,
+            description: p.description,
+          });
+        }
+        return results.map((p) => ({
+          id: p.id,
+          name: p.name,
+          basePrice: p.basePrice,
+          inStock: p.stock > 0,
+        }));
+      },
+    });
+
+    const getProductDetailsTool = tool({
+      description:
+        'جزئیات کامل یک محصول (توضیحات کامل، قیمت، موجودی) را با شناسه‌اش برمی‌گرداند',
+      inputSchema: z.object({ productId: z.string() }),
+      execute: async ({ productId }: { productId: string }) => {
+        const product = await this.prisma.product.findUnique({
+          where: { id: productId },
+        });
+        if (!product || product.storeId !== storeId) {
+          return { error: 'محصولی با این شناسه در این فروشگاه پیدا نشد' };
+        }
+        seenProducts.set(product.id, {
+          id: product.id,
+          name: product.name,
+          basePrice: product.basePrice,
+          stock: product.stock,
+          images: product.images,
+          description: product.description,
+        });
+        const persuasionNote = await this.buildPersuasionNote(
+          storeId,
+          product,
+          storePersuasionEnabled,
+        );
+        return {
+          id: product.id,
+          name: product.name,
+          basePrice: product.basePrice,
+          inStock: product.stock > 0,
+          description: product.description
+            ? truncateDescriptionForFacts(product.description)
+            : null,
+          ...(persuasionNote ? { persuasion: persuasionNote.trim() } : {}),
+        };
+      },
+    });
+
+    const updateCartTool = tool({
+      description:
+        'محصولی را به سبد مشتری اضافه یا از آن حذف می‌کند — تنها راه واقعی تغییر سبد، تغییر فقط در متن کافی نیست',
+      inputSchema: z.object({
+        productId: z.string(),
+        qty: z.number().optional(),
+        remove: z.boolean().optional(),
+      }),
+      execute: async ({
+        productId,
+        qty,
+        remove,
+      }: {
+        productId: string;
+        qty?: number;
+        remove?: boolean;
+      }) => {
+        const product = await this.prisma.product.findUnique({
+          where: { id: productId },
+        });
+        if (!product || product.storeId !== storeId) {
+          return { error: 'محصولی با این شناسه در این فروشگاه پیدا نشد' };
+        }
+        const mutation = this.computeCartMutation(
+          ctx.cart,
+          product,
+          qty ?? 1,
+          !!remove,
+        );
+        if (!mutation.ok) {
+          return { error: 'موجودی این محصول کافی نیست' };
+        }
+        ctx = { ...ctx, cart: mutation.cart };
+        mutationHappened = true;
+        await this.persistTransition(conversation, 'CART_REVIEW', ctx);
+        await this.resetClarifyAttempts(conversation);
+        const total = this.cartTotal(ctx.cart);
+        cartResult = { cart: ctx.cart, total };
+        if (!remove) progressHappened = true;
+        return {
+          cart: ctx.cart.map((i) => ({
+            name: i.name,
+            qty: i.qty,
+            unitPrice: i.unitPrice,
+          })),
+          total,
+        };
+      },
+    });
+
+    const viewCartTool = tool({
+      description: 'محتوای فعلی سبد مشتری را برمی‌گرداند',
+      inputSchema: z.object({}),
+      execute: () => {
+        const total = this.cartTotal(ctx.cart);
+        cartResult = { cart: ctx.cart, total };
+        return {
+          cart: ctx.cart.map((i) => ({
+            name: i.name,
+            qty: i.qty,
+            unitPrice: i.unitPrice,
+          })),
+          total,
+        };
+      },
+    });
+
+    const applyDiscountTool = tool({
+      description:
+        'یک کد تخفیف را روی سبد فعلی اعتبارسنجی و اعمال می‌کند (پیش‌نمایش، نه ثبت نهایی)',
+      inputSchema: z.object({ code: z.string() }),
+      execute: async ({ code }: { code: string }) => {
+        const preview = await this.previewDiscount(
+          storeId,
+          this.cartTotal(ctx.cart),
+          code,
+        );
+        if (!preview.valid) {
+          return {
+            error:
+              preview.reason === 'MISSING'
+                ? 'کد تخفیف نامشخص است'
+                : 'این کد تخفیف معتبر نیست یا منقضی/تمام‌شده',
+          };
+        }
+        ctx = {
+          ...ctx,
+          appliedDiscount: {
+            id: preview.id,
+            code: preview.code,
+            amountToman: preview.amountToman,
+          },
+        };
+        mutationHappened = true;
+        await this.persistTransition(conversation, 'CART_REVIEW', ctx);
+        return { amountToman: preview.amountToman, newTotal: preview.newTotal };
+      },
+    });
+
+    const createOrderTool = tool({
+      description:
+        'سفارش نهایی را از روی سبد فعلی ثبت می‌کند و اطلاعات واقعی پرداخت را برمی‌گرداند — فقط بعد از تایید صریح مشتری صدا بزن',
+      inputSchema: z.object({}),
+      execute: async () => {
+        const created = await this.executeCreateOrder(conversation, ctx);
+        if (created.empty) {
+          return { error: 'سبد خالی است، چیزی برای ثبت سفارش نیست' };
+        }
+        mutationHappened = true;
+        progressHappened = true;
+        orderResult = {
+          cardNumber: created.cardNumber,
+          ownerName: created.ownerName,
+          amount: created.order.totalAmount,
+        };
+        return {
+          amount: created.order.totalAmount,
+          cardNumber: created.cardNumber,
+          ownerName: created.ownerName,
+        };
+      },
+    });
+
+    const cancelOrderTool = tool({
+      description: 'سبد فعلی را کاملاً خالی می‌کند (انصراف مشتری از خرید فعلی)',
+      inputSchema: z.object({}),
+      execute: async () => {
+        if (
+          !['GREETING', 'BROWSING', 'CART_REVIEW'].includes(
+            conversation.currentState,
+          )
+        ) {
+          return { error: 'در این مرحله چیزی برای لغو نیست' };
+        }
+        ctx = await this.resetCartState(conversation, ctx);
+        mutationHappened = true;
+        cartResult = { cart: [], total: 0 };
+        return { ok: true };
+      },
+    });
+
+    const answerFaqTool = tool({
+      description:
+        'جواب واقعی یک سؤال (باکس دانش فروشگاه / توضیح محصولات اخیر / پروفایل فروشگاه) را جست‌وجو می‌کند',
+      inputSchema: z.object({ question: z.string() }),
+      execute: async ({ question }: { question: string }) => {
+        const found = await this.findFaqAnswer(conversation, ctx, question);
+        return found ?? { matched: false };
+      },
+    });
+
+    const requestHumanHandoffTool = tool({
+      description:
+        'مکالمه را به یک فروشنده‌ی انسانی ارجاع می‌دهد — برای درخواست صریح صحبت با انسان یا مشکلاتی (پرداخت/پس از خرید) که ابزاری برای حلش نداری',
+      inputSchema: z.object({ reason: z.string().optional() }),
+      execute: async () => {
+        handoffResult = await this.transitionToHandoff(
+          conversation,
+          'CUSTOMER_REQUESTED',
+        );
+        mutationHappened = true;
+        return { done: true };
+      },
+    });
+
+    const showProductPhotosTool = tool({
+      description:
+        'همه‌ی عکس‌های یک محصول را برمی‌گرداند — برای درخواست صریح عکس بیشتر',
+      inputSchema: z.object({ productId: z.string() }),
+      execute: async ({ productId }: { productId: string }) => {
+        const product = await this.prisma.product.findUnique({
+          where: { id: productId },
+        });
+        if (
+          !product ||
+          product.storeId !== storeId ||
+          product.images.length === 0
+        ) {
+          return { error: 'عکسی برای این محصول پیدا نشد' };
+        }
+        photosResult = {
+          productId: product.id,
+          productName: product.name,
+          images: product.images,
+        };
+        return { images: product.images };
+      },
+    });
+
+    // بدون execute — دقیقاً مثل respond_to_customer در callAgentCaptionWithRelevance (Track B)،
+    // حلقه‌ی چندمرحله‌ای SDK بعد از این فراخوان خودش متوقف می‌شود
+    //
+    // docs/PRD-sales-agent-persuasion-principles.md بخش ۸ — دو فیلد خوداظهاری متقاعدسازی فقط
+    // وقتی storePersuasionEnabled باشد به schema اضافه می‌شوند؛ تست زنده نشان داد وقتی این فیلدها
+    // همیشه اجباری بمانند ولی PERSUASION_INSTRUCTION (تعریف ۶ اصل) اصلاً در پرامپت نیست، مدل
+    // مجبور به حدس‌زدن کورکورانه می‌شود و برچسب‌های غلط/بی‌ربط (مثلاً AUTHORITY بدون هیچ ادعای
+    // واقعی) می‌سازد — پس وقتی خاموش است، این فیلدها اصلاً در schema نیستند، نه فقط optional
+    const respondToCustomer = tool({
+      description:
+        'پاسخ نهایی به مشتری را اعلام می‌کند — دقیقاً یک‌بار، به‌عنوان آخرین قدم (مگر وقتی request_human_handoff زده‌ای)',
+      inputSchema: storePersuasionEnabled
+        ? z.object({
+            text: z
+              .string()
+              .describe('متن فارسی کوتاه (حداکثر ۲-۳ جمله) برای مشتری'),
+            relevantProductIds: z
+              .array(z.string())
+              .describe(
+                'شناسه‌ی محصول(های) واقعاً مرتبط برای نمایش کارت — اگر موضوعی ندارد خالی بگذار',
+              ),
+            // برای لاگ ادمین؛ خوداظهاری خودِ مدل، نه چیزی که سرور بتواند مستقل از متن تشخیص دهد
+            persuasionTechniquesUsed: z
+              .array(
+                z.enum([
+                  'COMMITMENT_CONSISTENCY',
+                  'SOCIAL_PROOF',
+                  'AUTHORITY',
+                  'LIKING',
+                  'RECIPROCITY',
+                  'SCARCITY',
+                ]),
+              )
+              .describe(
+                'کدام‌یک از ۶ اصل متقاعدسازی را واقعاً در همین متن استفاده کردی — اگر هیچ‌کدام، خالی بگذار',
+              ),
+            usedGeneralKnowledge: z
+              .boolean()
+              .describe(
+                'آیا در همین متن از دانش عمومی خودت (نه facts فروشگاه) درباره‌ی محبوبیت/شناخته‌شده‌بودن یک محصول استفاده کردی',
+              ),
+          })
+        : z.object({
+            text: z
+              .string()
+              .describe('متن فارسی کوتاه (حداکثر ۲-۳ جمله) برای مشتری'),
+            relevantProductIds: z
+              .array(z.string())
+              .describe(
+                'شناسه‌ی محصول(های) واقعاً مرتبط برای نمایش کارت — اگر موضوعی ندارد خالی بگذار',
+              ),
+          }),
+    });
+
+    const result = await generateText({
+      model: this.aiProvider.buildClient(undefined, {
+        supportsStructuredOutputs: true,
+      })(model),
+      tools: {
+        search_products: searchProductsTool,
+        get_product_details: getProductDetailsTool,
+        update_cart: updateCartTool,
+        view_cart: viewCartTool,
+        apply_discount: applyDiscountTool,
+        create_order: createOrderTool,
+        cancel_order: cancelOrderTool,
+        answer_faq: answerFaqTool,
+        request_human_handoff: requestHumanHandoffTool,
+        show_product_photos: showProductPhotosTool,
+        respond_to_customer: respondToCustomer,
+      },
+      // docs/PRD-sales-agent-tool-calling-architecture.md بخش ۲.۳ — سقف هزینه‌ی فروشنده:
+      // تعداد قدم ابزار در هر نوبت محدود است، نه بی‌نهایت (Track B مشابه از ۴ استفاده می‌کند؛
+      // اینجا چون کل مکالمه‌ست نه فقط doBrowse، کمی بیشتر لازم است)
+      stopWhen: stepCountIs(6),
+      system: this.buildFullAgentSystemPrompt(
+        conversation,
+        ctx,
+        catalogFacts,
+        transcript,
+        nudgeActive,
+        storePersuasionEnabled,
+        urgentDiscount,
+      ),
+      prompt: customerMessage,
+      temperature: 0.3,
+    });
+
+    if (handoffResult) {
+      return {
+        engineResult: handoffResult,
+        inputTokens: result.usage.inputTokens ?? 0,
+        outputTokens: result.usage.outputTokens ?? 0,
+      };
+    }
+
+    const finalCall = result.toolCalls.find(
+      (c) => c.toolName === 'respond_to_customer',
+    ) as
+      | {
+          input: {
+            text: string;
+            relevantProductIds: string[];
+            persuasionTechniquesUsed?: PersuasionTechnique[];
+            usedGeneralKnowledge?: boolean;
+          };
+        }
+      | undefined;
+
+    if (!finalCall) {
+      if (mutationHappened) {
+        const engineResult = await this.salvageReplyAfterMutation(
+          conversation,
+          orderResult,
+          cartResult,
+        );
+        return {
+          engineResult,
+          inputTokens: result.usage.inputTokens ?? 0,
+          outputTokens: result.usage.outputTokens ?? 0,
+        };
+      }
+      throw new Error(
+        'FULL_AGENT did not call respond_to_customer within step limit',
+      );
+    }
+
+    const text = finalCall.input.text.trim();
+    const relevantProductIds = finalCall.input.relevantProductIds ?? [];
+    const uiBlock = this.deriveFullAgentUiBlock({
+      orderResult,
+      cartResult,
+      photosResult,
+      relevantProductIds,
+      seenProducts,
+    });
+
+    // docs/PRD-sales-agent-tool-calling-architecture.md بخش ۴.۱/۴.۲ — سرور-محور، نه خوداظهاری
+    // مدل: فقط update_cart(موفق،remove=false)/create_order موفق «پیشرفت» حساب می‌شود
+    await this.prisma.salesConversation.update({
+      where: { id: conversation.id },
+      data: progressHappened
+        ? { openQuestionStreak: 0 }
+        : { openQuestionStreak: { increment: 1 } },
+    });
+
+    await this.logReply(conversation, text, uiBlock, undefined, {
+      intent: 'FULL_AGENT',
+      handler: 'runFullAgentTurn',
+      factsOrPrompt: customerMessage,
+      model,
+      ...(finalCall.input.persuasionTechniquesUsed?.length
+        ? { persuasionTechniquesUsed: finalCall.input.persuasionTechniquesUsed }
+        : {}),
+      ...(finalCall.input.usedGeneralKnowledge
+        ? { usedGeneralKnowledge: true }
+        : {}),
+    });
+
+    return {
+      engineResult: {
+        reply: text,
+        uiBlocks: [uiBlock],
+        state: conversation.currentState,
+      },
+      inputTokens: result.usage.inputTokens ?? 0,
+      outputTokens: result.usage.outputTokens ?? 0,
+    };
+  }
+
+  // ورودی واحد از handleMessage — همون fallback دومرحله‌ای بقیه‌ی فایل (مدل A/B → defaultModel)،
+  // با یک تفاوت مهم: چون ابزارهای بالا اثر واقعی DB دارند، retry با مدل دیگر فقط وقتی اجازه داده
+  // می‌شود که callFullAgentTurn هنوز هیچ جهشی ثبت نکرده باشد (خودش این را با throw/no-throw
+  // مدیریت می‌کند — بعد از جهش هرگز throw نمی‌کند، فقط salvage امن برمی‌گرداند)
+  private async runFullAgentTurn(
+    conversation: ConversationWithStore,
+    text: string,
+  ): Promise<EngineResult> {
+    const primaryModel = resolveModel(conversation.abVariant);
+    const started = Date.now();
+    try {
+      const { engineResult, inputTokens, outputTokens } =
+        await this.callFullAgentTurn(conversation, text, primaryModel);
+      await this.logAiCall(
+        conversation,
+        'AGENT_CAPTION',
+        true,
+        Date.now() - started,
+      );
+      await this.logTextCreditUsage(
+        conversation,
+        primaryModel,
+        inputTokens,
+        outputTokens,
+      );
+      return engineResult;
+    } catch {
+      await this.logAiCall(
+        conversation,
+        'AGENT_CAPTION',
+        false,
+        Date.now() - started,
+      );
+      if (primaryModel === defaultModel()) {
+        return this.doClarifyUnclear(conversation);
+      }
+      const fallbackStarted = Date.now();
+      try {
+        const { engineResult, inputTokens, outputTokens } =
+          await this.callFullAgentTurn(conversation, text, defaultModel());
+        await this.logAiCall(
+          conversation,
+          'AGENT_CAPTION',
+          true,
+          Date.now() - fallbackStarted,
+        );
+        await this.logTextCreditUsage(
+          conversation,
+          defaultModel(),
+          inputTokens,
+          outputTokens,
+        );
+        return engineResult;
+      } catch {
+        await this.logAiCall(
+          conversation,
+          'AGENT_CAPTION',
+          false,
+          Date.now() - fallbackStarted,
+        );
+        return this.doClarifyUnclear(conversation);
+      }
+    }
+  }
+
   private resolveProductRef(
     ctx: ConversationContext,
     parsed: ParsedIntent,
@@ -1005,6 +1922,14 @@ relevantProductIds را خالی بگذار.${
 
     if (this.billingBlocked(conversation)) {
       return this.transitionToHandoff(conversation, 'BILLING_BLOCKED');
+    }
+
+    // docs/PRD-sales-agent-tool-calling-architecture.md بخش ۳.۱ — شاخه‌ی کاملاً جدید و
+    // افزودنی، دقیقاً مثل الگوی امن SIMPLE_AGENT قبلی: parseIntent+switch+do* زیرش دست‌نخورده
+    // می‌ماند، فقط برای مکالمه‌های FULL_AGENT اصلاً اجرا نمی‌شود (هیچ مکالمه‌ی واقعی تصادفی به
+    // اینجا نمی‌رسد چون pickResponseStrategy هنوز همیشه RULE_BASED برمی‌گرداند)
+    if (conversation.responseStrategy === 'FULL_AGENT') {
+      return this.runFullAgentTurn(conversation, text);
     }
 
     const parsed = await this.parseIntent(text, conversation);
@@ -1375,20 +2300,27 @@ relevantProductIds را خالی بگذار.${
     return { reply, uiBlocks: [], state: conversation.currentState };
   }
 
-  // docs/PRD-customer-comments-and-discounts.md بخش ۹ — فقط پیش‌نمایش/اعتبارسنجی؛ مصرف واقعی
-  // (atomic increment) در doCreateOrder اتفاق می‌افتد، چون ممکن است خریدار قبل از پرداخت پشیمان شود
-  private async doApplyDiscount(
-    conversation: ConversationWithStore,
-    ctx: ConversationContext,
+  // اعتبارسنجی/پیش‌نمایش خالص (بدون پرسیست) — docs/PRD-sales-agent-tool-calling-architecture.md
+  // بخش ۳.۳ (ابزار apply_discount) هم عیناً همین تابع را صدا می‌زند
+  private async previewDiscount(
+    storeId: string,
+    cartTotal: number,
     rawCode: string | null | undefined,
-  ): Promise<EngineResult> {
-    if (!rawCode) {
-      return this.doClarify(conversation, fa.salesAgent.discountCodeMissing);
-    }
+  ): Promise<
+    | {
+        valid: true;
+        id: string;
+        code: string;
+        amountToman: number;
+        newTotal: number;
+      }
+    | { valid: false; reason: 'MISSING' | 'INVALID' }
+  > {
+    if (!rawCode) return { valid: false, reason: 'MISSING' };
     const normalized = rawCode.trim().toUpperCase();
     const discount = await this.prisma.storeDiscountCode.findFirst({
       where: {
-        storeId: conversation.storeId,
+        storeId,
         code: normalized,
         isActive: true,
         OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
@@ -1398,29 +2330,58 @@ relevantProductIds را خالی بگذار.${
       discount &&
       (discount.maxRedemptions == null ||
         discount.redemptionCount < discount.maxRedemptions);
-    if (!valid) {
-      return this.doClarify(conversation, fa.salesAgent.discountCodeInvalid);
-    }
+    if (!valid) return { valid: false, reason: 'INVALID' };
 
-    const total = this.cartTotal(ctx.cart);
     const amountToman =
       discount.kind === 'PERCENT'
-        ? Math.floor((total * discount.value) / 100)
-        : Math.min(discount.value, total);
+        ? Math.floor((cartTotal * discount.value) / 100)
+        : Math.min(discount.value, cartTotal);
+    return {
+      valid: true,
+      id: discount.id,
+      code: normalized,
+      amountToman,
+      newTotal: cartTotal - amountToman,
+    };
+  }
+
+  // docs/PRD-customer-comments-and-discounts.md بخش ۹ — فقط پیش‌نمایش/اعتبارسنجی؛ مصرف واقعی
+  // (atomic increment) در doCreateOrder اتفاق می‌افتد، چون ممکن است خریدار قبل از پرداخت پشیمان شود
+  private async doApplyDiscount(
+    conversation: ConversationWithStore,
+    ctx: ConversationContext,
+    rawCode: string | null | undefined,
+  ): Promise<EngineResult> {
+    const preview = await this.previewDiscount(
+      conversation.storeId,
+      this.cartTotal(ctx.cart),
+      rawCode,
+    );
+    if (!preview.valid) {
+      return this.doClarify(
+        conversation,
+        preview.reason === 'MISSING'
+          ? fa.salesAgent.discountCodeMissing
+          : fa.salesAgent.discountCodeInvalid,
+      );
+    }
 
     const nextCtx: ConversationContext = {
       ...ctx,
-      appliedDiscount: { id: discount.id, code: discount.code, amountToman },
+      appliedDiscount: {
+        id: preview.id,
+        code: preview.code,
+        amountToman: preview.amountToman,
+      },
     };
     await this.persistTransition(conversation, 'CART_REVIEW', nextCtx);
 
-    const newTotal = total - amountToman;
     const uiBlock: UiBlock = {
       type: 'CART_SUMMARY',
       items: ctx.cart,
-      total: newTotal,
+      total: preview.newTotal,
     };
-    const facts = `کد تخفیف ${normalized} اعمال شد — ${amountToman} تومان تخفیف. جمع جدید سبد: ${newTotal} تومان`;
+    const facts = `کد تخفیف ${preview.code} اعمال شد — ${preview.amountToman} تومان تخفیف. جمع جدید سبد: ${preview.newTotal} تومان`;
     const reply = await this.caption(facts, conversation);
     await this.logReply(conversation, reply, uiBlock, undefined, {
       intent: 'APPLY_DISCOUNT',
@@ -1872,6 +2833,38 @@ relevantProductIds را خالی بگذار.${
     );
   }
 
+  // محاسبه‌ی خالص (بدون DB) تغییر سبد — docs/PRD-sales-agent-tool-calling-architecture.md
+  // بخش ۳.۳ (ابزار update_cart) هم عیناً همین تابع را صدا می‌زند، نه این‌که منطق را تکرار کند
+  private computeCartMutation(
+    cart: CartItem[],
+    product: { id: string; name: string; basePrice: number; stock: number },
+    qty: number,
+    remove: boolean,
+  ): { ok: true; cart: CartItem[] } | { ok: false } {
+    let next = [...cart];
+    const existingIdx = next.findIndex((i) => i.productId === product.id);
+
+    if (remove) {
+      next = next.filter((i) => i.productId !== product.id);
+    } else {
+      if (product.stock < qty) return { ok: false };
+      if (existingIdx >= 0) {
+        next[existingIdx] = {
+          ...next[existingIdx],
+          qty: next[existingIdx].qty + qty,
+        };
+      } else {
+        next.push({
+          productId: product.id,
+          name: product.name,
+          unitPrice: product.basePrice,
+          qty,
+        });
+      }
+    }
+    return { ok: true, cart: next };
+  }
+
   // منطق مشترک تغییر سبد — هم از مسیر NLU (doUpdateCart، productQuery/productIndex حدسی)
   // هم از مسیر قطعی دکمه‌ها (handleAction، productId مستقیم) صدا زده می‌شود
   private async applyCartUpdate(
@@ -1882,29 +2875,11 @@ relevantProductIds را خالی بگذار.${
     remove: boolean,
     intent: string,
   ): Promise<EngineResult> {
-    let cart = [...ctx.cart];
-    const existingIdx = cart.findIndex((i) => i.productId === product.id);
-
-    if (remove) {
-      cart = cart.filter((i) => i.productId !== product.id);
-    } else {
-      if (product.stock < qty) {
-        return this.doClarify(conversation, fa.salesAgent.insufficientStock);
-      }
-      if (existingIdx >= 0) {
-        cart[existingIdx] = {
-          ...cart[existingIdx],
-          qty: cart[existingIdx].qty + qty,
-        };
-      } else {
-        cart.push({
-          productId: product.id,
-          name: product.name,
-          unitPrice: product.basePrice,
-          qty,
-        });
-      }
+    const mutation = this.computeCartMutation(ctx.cart, product, qty, remove);
+    if (!mutation.ok) {
+      return this.doClarify(conversation, fa.salesAgent.insufficientStock);
     }
+    const cart = mutation.cart;
 
     const nextState: ConversationState = 'CART_REVIEW';
     await this.persistTransition(conversation, nextState, { ...ctx, cart });
@@ -1950,12 +2925,18 @@ relevantProductIds را خالی بگذار.${
     return { reply, uiBlocks: [uiBlock], state: conversation.currentState };
   }
 
-  private async doCreateOrder(
+  // منطق خالص DB (بدون caption/logReply) — docs/PRD-sales-agent-tool-calling-architecture.md
+  // بخش ۳.۳ (ابزار create_order) هم عیناً همین تابع را صدا می‌زند، نه این‌که idempotency/چرخش
+  // کارت/کسر اتمیک تخفیف را بازنویسی کند
+  private async executeCreateOrder(
     conversation: ConversationWithStore,
     ctx: ConversationContext,
-  ): Promise<EngineResult> {
+  ): Promise<
+    | { empty: true }
+    | { empty: false; order: Order; cardNumber: string; ownerName: string }
+  > {
     if (ctx.cart.length === 0) {
-      return this.doClarify(conversation, fa.salesAgent.cartEmpty);
+      return { empty: true };
     }
 
     // idempotent: اگر سفارش این مکالمه از قبل هست، همان را برمی‌گرداند (بدون ساخت تکراری)
@@ -2016,13 +2997,25 @@ relevantProductIds را خالی بگذار.${
     const nextState: ConversationState = 'AWAITING_PAYMENT';
     await this.persistTransition(conversation, nextState, ctx, 'createOrder');
 
+    return { empty: false, order, cardNumber, ownerName };
+  }
+
+  private async doCreateOrder(
+    conversation: ConversationWithStore,
+    ctx: ConversationContext,
+  ): Promise<EngineResult> {
+    const created = await this.executeCreateOrder(conversation, ctx);
+    if (created.empty) {
+      return this.doClarify(conversation, fa.salesAgent.cartEmpty);
+    }
+
     const uiBlock: UiBlock = {
       type: 'PAYMENT_INSTRUCTIONS',
-      cardNumber,
-      ownerName,
-      amount: order.totalAmount,
+      cardNumber: created.cardNumber,
+      ownerName: created.ownerName,
+      amount: created.order.totalAmount,
     };
-    const facts = `سفارش ثبت شد. مبلغ قابل پرداخت ${order.totalAmount} تومان به شماره کارت ${cardNumber} به نام ${ownerName}. بعد از واریز، عکس رسید را بفرست.`;
+    const facts = `سفارش ثبت شد. مبلغ قابل پرداخت ${created.order.totalAmount} تومان به شماره کارت ${created.cardNumber} به نام ${created.ownerName}. بعد از واریز، عکس رسید را بفرست.`;
     const reply = await this.caption(facts, conversation);
     await this.logReply(conversation, reply, uiBlock, undefined, {
       intent: 'CHECKOUT',
@@ -2030,7 +3023,7 @@ relevantProductIds را خالی بگذار.${
       factsOrPrompt: facts,
       model: resolveModel(conversation.abVariant),
     });
-    return { reply, uiBlocks: [uiBlock], state: nextState };
+    return { reply, uiBlocks: [uiBlock], state: 'AWAITING_PAYMENT' };
   }
 
   async handleReceiptUpload(
@@ -2105,6 +3098,24 @@ relevantProductIds را خالی بگذار.${
     );
   }
 
+  // docs/PRD-sales-agent-tool-calling-architecture.md بخش ۳.۳ (ابزار cancel_order) — همون
+  // پرسیست doCancel، جدا از caption/logReply چون آنجا متن پایانی را خودِ respond_to_customer می‌سازد.
+  // لغو سبد سیگنالی درباره‌ی لنگر محصول نیست — صریحاً حفظش می‌کنیم تا خاموش پاک نشود
+  private async resetCartState(
+    conversation: ConversationWithStore,
+    ctx: ConversationContext,
+  ): Promise<ConversationContext> {
+    const nextCtx: ConversationContext = {
+      cart: [],
+      lastShownProducts: [],
+      anchoredProductId: ctx.anchoredProductId,
+      anchorHesitationStreak: ctx.anchorHesitationStreak,
+    };
+    await this.persistTransition(conversation, 'BROWSING', nextCtx);
+    await this.resetClarifyAttempts(conversation);
+    return nextCtx;
+  }
+
   private async doCancel(
     conversation: ConversationWithStore,
   ): Promise<EngineResult> {
@@ -2115,17 +3126,7 @@ relevantProductIds را خالی بگذار.${
     ) {
       return this.doClarify(conversation, fa.salesAgent.nothingToConfirm);
     }
-    const nextState: ConversationState = 'BROWSING';
-    // لغو سبد سیگنالی درباره‌ی لنگر محصول نیست — صریحاً حفظش می‌کنیم تا این‌جا خاموش پاک نشود
-    const { anchoredProductId, anchorHesitationStreak } =
-      this.getContext(conversation);
-    await this.persistTransition(conversation, nextState, {
-      cart: [],
-      lastShownProducts: [],
-      anchoredProductId,
-      anchorHesitationStreak,
-    });
-    await this.resetClarifyAttempts(conversation);
+    await this.resetCartState(conversation, this.getContext(conversation));
     const facts = fa.salesAgent.cartCleared;
     const reply = await this.caption(facts, conversation);
     await this.logReply(conversation, reply, { type: 'NONE' }, undefined, {
@@ -2134,7 +3135,46 @@ relevantProductIds را خالی بگذار.${
       factsOrPrompt: facts,
       model: resolveModel(conversation.abVariant),
     });
-    return { reply, uiBlocks: [], state: nextState };
+    return { reply, uiBlocks: [], state: 'BROWSING' };
+  }
+
+  // docs/PRD-sales-agent-tool-calling-architecture.md بخش ۳.۳ (ابزار answer_faq) — عیناً همون
+  // ترتیب سه‌لایه‌ی doFaq (باکس دانش → توضیح محصولات اخیر → پروفایل فروشگاه)، فقط بدون
+  // caption/logReply چون متن نهایی را خودِ respond_to_customer می‌سازد؛ doFaq دست‌نخورده می‌ماند
+  private async findFaqAnswer(
+    conversation: ConversationWithStore,
+    ctx: ConversationContext,
+    question: string,
+  ): Promise<{
+    source: 'STORE_KB' | 'PRODUCT_DESCRIPTION' | 'STORE_PROFILE';
+    fact: string;
+  } | null> {
+    const match = await this.storeKb.retrieveRelevant(
+      conversation.storeId,
+      question,
+    );
+    if (match) {
+      return {
+        source: 'STORE_KB',
+        fact: `سؤال مشتری: ${match.question}\nجواب واقعی: ${match.answer}`,
+      };
+    }
+    const fromDescription = await this.tryAnswerFromProductDescriptions(
+      conversation,
+      ctx,
+      question,
+    );
+    if (fromDescription) {
+      return { source: 'PRODUCT_DESCRIPTION', fact: fromDescription };
+    }
+    const fromStoreProfile = await this.tryAnswerFromStoreProfile(
+      conversation,
+      question,
+    );
+    if (fromStoreProfile) {
+      return { source: 'STORE_PROFILE', fact: fromStoreProfile };
+    }
+    return null;
   }
 
   // getStoreFaqAnswer فعلاً stub است (طبق ساده‌سازی پلن گام ۱) — بدون FaqEntry واقعی
@@ -2601,6 +3641,12 @@ answered=false بده (به‌جای حدس‌زدن).`,
         factsOrPrompt: trace.factsOrPrompt,
         model: trace.model,
         ...(trace.kbSource ? { kbSource: trace.kbSource } : {}),
+        // docs/PRD-sales-agent-persuasion-principles.md بخش ۸ — فقط روی trace سطح
+        // runFullAgentTurn پر می‌شود؛ خوداظهاری خودِ مدل در respond_to_customer
+        ...(trace.persuasionTechniquesUsed?.length
+          ? { persuasionTechniquesUsed: trace.persuasionTechniquesUsed }
+          : {}),
+        ...(trace.usedGeneralKnowledge ? { usedGeneralKnowledge: true } : {}),
         voice: wantsVoice
           ? { generated: true }
           : { generated: false, reason: voiceReason },

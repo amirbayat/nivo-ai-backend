@@ -1,4 +1,11 @@
-import { IsInt, IsOptional, IsString, Min, MaxLength } from 'class-validator';
+import {
+  IsBoolean,
+  IsInt,
+  IsOptional,
+  IsString,
+  Min,
+  MaxLength,
+} from 'class-validator';
 import { fa } from '../../../i18n/fa';
 
 // گام ۳ سند PRD-mvp-launch-plan.md — ویرایش سریع از تب «محصولات» پنل فروشنده
@@ -30,4 +37,10 @@ export class UpdateProductDto {
   @IsString({ message: fa.validation.required })
   @MaxLength(40, { message: fa.validation.stringTooLong })
   code?: string;
+
+  // docs/PRD-sales-agent-persuasion-principles.md بخش ۶ — کلید به‌ازای این محصول؛ حتی وقتی
+  // فروشگاه روشن است، فروشنده می‌تواند این یک محصول را مستثنا کند
+  @IsOptional()
+  @IsBoolean()
+  persuasionTechniquesEnabled?: boolean;
 }

@@ -1,4 +1,11 @@
-import { IsInt, IsOptional, IsString, Min, MaxLength } from 'class-validator';
+import {
+  IsBoolean,
+  IsInt,
+  IsOptional,
+  IsString,
+  Min,
+  MaxLength,
+} from 'class-validator';
 import { fa } from '../../../i18n/fa';
 
 // گام ۰ سند PRD-mvp-launch-plan.md — قدم ۳ ویزارد ثبت‌نام فروشنده (فقط محصول تکی، بدون واریانت/عکس)
@@ -28,4 +35,11 @@ export class CreateProductDto {
   @IsString({ message: fa.validation.required })
   @MaxLength(40, { message: fa.validation.stringTooLong })
   code?: string;
+
+  // docs/PRD-sales-agent-persuasion-principles.md بخش ۶ — فرم پنل فروشنده همیشه این فیلد را
+  // می‌فرستد (حتی در ساخت محصول تازه)، پس باید اینجا هم whitelist باشد وگرنه ValidationPipe
+  // (forbidNonWhitelisted) درخواست را رد می‌کند
+  @IsOptional()
+  @IsBoolean()
+  persuasionTechniquesEnabled?: boolean;
 }
