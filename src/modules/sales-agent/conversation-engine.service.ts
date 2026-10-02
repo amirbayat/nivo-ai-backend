@@ -3888,6 +3888,11 @@ answered=false بده (به‌جای حدس‌زدن).`,
     } else {
       voiceReason = 'TOO_SHORT';
     }
+    // فیدبک کاربر ۱۴۰۵/۰۷/۱۲ — «چرا تلگرام وویس نمیده» قبلاً فقط از DB (AI_TRACE، وقتی اصلاً
+    // ساخته می‌شد) قابل بازسازی بود؛ یک خط لاگ ساده روی بک‌اند کافی است که سریع با grep دیده شود
+    this.logger.log(
+      `voice decision conversation=${conversation.id} billingMode=${conversation.billingMode} voiceVariant=${conversation.voiceVariant} replyChars=${text.length} voiceGenCount=${conversation.voiceGenerationCount} consecutiveVoiceCount=${conversation.consecutiveVoiceReplyCount} -> ${wantsVoice ? 'GENERATE' : `SKIP(${voiceReason})`}`,
+    );
     // شمارنده‌ی متوالی: با هر پاسخی که وویس گرفت زیاد می‌شود، با هر پاسخی که نگرفت صفر می‌شود؛
     // وقتی از قبل هم صفر بود و همچنان وویس نگرفت، نیازی به نوشتن دوباره نیست
     if (wantsVoice) {
@@ -3902,11 +3907,20 @@ answered=false بده (به‌جای حدس‌زدن).`,
       });
     }
 
+    // docs/PRD-admin-ai-decision-trace-log.md — قبلاً voice فقط داخل AI_TRACE ثبت می‌شد که
+    // فقط برای پاسخ‌های AI-محور ساخته می‌شود (trace پارامتر اختیاری)؛ پاسخ‌های قانون‌محور ثابت
+    // (فاکتور/سبد/handoff/...) که trace ندارند هیچ‌وقت در پنل ادمین معلوم نمی‌کرد وویس گرفته‌اند
+    // یا نه و چرا. چون AGENT_REPLY (همین event) همیشه برای هر پاسخی ساخته می‌شود، voice هم
+    // همیشه همین‌جا ثبت می‌شود — finishEvent در sales-agent-voice.processor.ts بعداً این فیلد
+    // را با نتیجه‌ی نهایی (موفق/ناموفق) آپدیت می‌کند
     const payload: Prisma.InputJsonObject = {
       text,
       uiBlock,
       ...(flag ? { flag } : {}),
       ...(wantsVoice ? { voicePending: true } : {}),
+      voice: wantsVoice
+        ? { generated: true }
+        : { generated: false, reason: voiceReason },
     };
 
     const event = await this.prisma.conversationEvent.create({

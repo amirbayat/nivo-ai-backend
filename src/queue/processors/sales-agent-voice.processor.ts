@@ -55,6 +55,9 @@ export class SalesAgentVoiceProcessor {
         conversation,
         voice,
       );
+      this.logger.log(
+        `voice generation succeeded for event=${eventId} conversation=${conversationId} channel=${conversation?.customer.channel ?? 'unknown'}`,
+      );
       await this.finishEvent(eventId, key, traceEventId, toneVariant, voice);
       await this.pushToTelegramIfNeeded(conversationId, key);
     } catch (err) {
@@ -152,7 +155,7 @@ export class SalesAgentVoiceProcessor {
         storeId: true,
         customerId: true,
         billingMode: true,
-        customer: { select: { fullName: true } },
+        customer: { select: { fullName: true, channel: true } },
         store: { select: { category: true } },
       },
     });
@@ -280,11 +283,25 @@ export class SalesAgentVoiceProcessor {
       where: { id: eventId },
     });
     if (event) {
-      const { voicePending, ...rest } = event.payload as Prisma.InputJsonObject;
+      const { voicePending, voice, ...rest } =
+        event.payload as Prisma.InputJsonObject & {
+          voice?: Prisma.InputJsonObject;
+        };
       void voicePending;
+      void voice;
+      // فیدبک کاربر ۱۴۰۵/۰۷/۱۲ — قبلاً وقتی تولید شکست می‌خورد، این فیلد را اصلاً لمس نمی‌کرد
+      // و voice:{generated:true} که logReply اولیه نوشته بود برای همیشه همین‌طور گمراه‌کننده
+      // می‌ماند؛ حالا همیشه با نتیجه‌ی واقعی نهایی می‌شود (مثل بخش trace پایین)
+      const finalVoice: Prisma.InputJsonObject = voiceKey
+        ? {
+            generated: true,
+            voiceName: voiceName ?? '',
+            toneVariant: toneVariant ?? '',
+          }
+        : { generated: false, reason: 'FAILED' };
       const payload: Prisma.InputJsonObject = voiceKey
-        ? { ...rest, voiceKey }
-        : { ...rest };
+        ? { ...rest, voiceKey, voice: finalVoice }
+        : { ...rest, voice: finalVoice };
       await this.prisma.conversationEvent.update({
         where: { id: eventId },
         data: { payload },
@@ -322,9 +339,22 @@ export class SalesAgentVoiceProcessor {
       where: { id: conversationId },
       include: { customer: true },
     });
-    if (conversation?.customer.channel !== 'TELEGRAM') return;
+    if (conversation?.customer.channel !== 'TELEGRAM') {
+      // فیدبک کاربر ۱۴۰۵/۰۷/۱۲ — این برنچ قبلاً کاملاً بی‌صدا بود (return خالی)؛ برای
+      // مکالمه‌های وب طبیعی است (هیچ وقت صدا زده نمی‌شود چون پول‌کردن سمت وب جداست)، ولی اگر
+      // یک مکالمه‌ی تلگرامی به‌هر دلیلی channel اشتباه داشته باشد همین‌جا معلوم می‌شود
+      this.logger.debug(
+        `voice ready for conversation=${conversationId} but channel=${conversation?.customer.channel ?? 'unknown'} (not TELEGRAM) — skip push`,
+      );
+      return;
+    }
     const chatId = conversation.customer.telegramChatId;
-    if (!chatId) return;
+    if (!chatId) {
+      this.logger.warn(
+        `voice ready for TELEGRAM conversation=${conversationId} but customer has no telegramChatId — cannot push`,
+      );
+      return;
+    }
 
     const apiUrl = this.config.get<string>('API_URL');
     // main.ts: setGlobalPrefix('api/v1') روی همه‌ی روت‌ها هست، API_URL فقط origin خالی است —
@@ -334,5 +364,8 @@ export class SalesAgentVoiceProcessor {
     // تلگرام موقع دانلود 404 می‌گیرد
     const audioUrl = `${apiUrl}/api/v1/v2/chat/${conversationId}/voice/${encodeURIComponent(voiceKey)}`;
     await this.telegram.sendVoiceReady(chatId, audioUrl);
+    this.logger.log(
+      `voice pushed to telegram chatId=${chatId} conversation=${conversationId}`,
+    );
   }
 }

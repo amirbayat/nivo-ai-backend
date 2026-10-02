@@ -1330,7 +1330,14 @@ export class AdminService {
       id: string;
       createdAt: Date;
       customerMessage?: string;
-      agentReply?: { text: string; flag?: string };
+      agentReply?: {
+        text: string;
+        flag?: string;
+        // فیدبک کاربر ۱۴۰۵/۰۷/۱۲ — برخلاف trace (فقط روی پاسخ‌های AI-محور ساخته می‌شود)،
+        // این فیلد روی AGENT_REPLY خودش نشسته که همیشه برای هر پاسخی ساخته می‌شود؛ پس
+        // برای پاسخ‌های قانون‌محور ثابت (فاکتور/سبد/handoff/...) هم وویس قابل دیدن است
+        voice?: { generated: boolean; reason?: string };
+      };
       trace?: Record<string, unknown>;
       // docs/PRD-buyer-purchase-intent-taxonomy.md بخش ۴.۲ — trace سطح classification
       // (handler:'parseIntent')، به پیام مشتری می‌چسبد نه به پاسخ ربات
@@ -1348,7 +1355,11 @@ export class AdminService {
         items.push({
           id: e.id,
           createdAt: e.createdAt,
-          agentReply: e.payload as { text: string; flag?: string },
+          agentReply: e.payload as {
+            text: string;
+            flag?: string;
+            voice?: { generated: boolean; reason?: string };
+          },
         });
       } else {
         // AI_TRACE — دو نوع: (۱) handler:'parseIntent'، همیشه بلافاصله بعد از CUSTOMER_MESSAGE
