@@ -379,14 +379,14 @@ export class SalesAgentVoiceProcessor {
       return;
     }
 
-    const apiUrl = this.config.get<string>('API_URL');
-    // main.ts: setGlobalPrefix('api/v1') روی همه‌ی روت‌ها هست، API_URL فقط origin خالی است —
-    // بدون این پیشوند تلگرام موقع دانلود فایل صوتی 404 می‌گیرد (همون باگ productImageUrl در
-    // telegram.service.ts). voiceKey هم شامل پیشوند «conversationId/» است (storage.service.ts
-    // uploadImage) — باید encode شود وگرنه «/» داخلش روت :key را به چند سگمنت می‌شکند و سرور
-    // تلگرام موقع دانلود 404 می‌گیرد
-    const audioUrl = `${apiUrl}/api/v1/v2/chat/${conversationId}/voice/${encodeURIComponent(voiceKey)}`;
-    await this.telegram.sendVoiceReady(chatId, audioUrl);
+    // فیدبک کاربر ۱۴۰۵/۰۷/۱۲ — قبلاً اینجا فقط یک URL به تلگرام داده می‌شد تا خودش فایل را
+    // fetch کند؛ با اینکه آن URL با curl دستی کاملاً سالم بود، تلگرام همچنان «failed to get
+    // HTTP URL content» می‌داد (به احتمال زیاد چون سرورهای تلگرام نمی‌توانند از بیرون به
+    // بک‌اند میزبانی‌شده در ایران وصل شوند). حالا بایت فایل همین‌جا از storage دوباره خوانده و
+    // مستقیم آپلود می‌شود (sendVoiceReadyBuffer) — این مسیر فقط به اتصال خروجی ما به تلگرام
+    // نیاز دارد، نه اتصال ورودی تلگرام به ما.
+    const buffer = await this.storage.downloadImage(voiceKey);
+    await this.telegram.sendVoiceReadyBuffer(chatId, buffer);
     this.logger.log(
       `voice pushed to telegram chatId=${chatId} conversation=${conversationId}`,
     );

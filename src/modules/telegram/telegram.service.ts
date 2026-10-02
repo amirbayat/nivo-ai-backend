@@ -95,12 +95,27 @@ export class TelegramService {
   }
 
   // docs/PRD-sales-agent-voice.md بخش ۱.۵ — صدا زده می‌شود از sales-agent-voice.processor.ts
-  // وقتی وویس یک پاسخ آماده شد و مکالمه از کانال تلگرام است (تلگرام برخلاف وب پول‌کردن ندارد،
-  // چون وبهوک push-based است؛ همین لحظه که وویس آماده شد مستقیم push می‌شود). عمداً sendAudio
-  // (نه sendVoice بومی) چون sendVoice نیازمند OGG/Opus است و ترنسکود آن فعلاً خارج از این فاز
-  // است (بخش ۱.۵ سند) — mp3 با sendAudio هم صدا را می‌رساند، فقط ظاهرش حباب صدای بومی نیست.
-  async sendVoiceReady(chatId: string, audioUrl: string): Promise<void> {
-    await this.callApi('sendAudio', { chat_id: chatId, audio: audioUrl });
+  // وقتی وویس یک پاسخ آماده شد و مکالمه از کانال تلگرام است. عمداً sendAudio (نه sendVoice
+  // بومی) چون sendVoice نیازمند OGG/Opus است و ترنسکود آن فعلاً خارج از این فاز است.
+  //
+  // فیدبک کاربر ۱۴۰۵/۰۷/۱۲ — قبلاً اینجا فقط URL فایل به تلگرام داده می‌شد (sendAudio با
+  // audio=url) تا خودِ سرور تلگرام آن را fetch کند؛ با curl مستقیم تایید شد که آن URL کاملاً
+  // سالم/در دسترس است (۲۰۰، MP3 معتبر با Content-Type درست)، ولی تلگرام همچنان «Bad Request:
+  // failed to get HTTP URL content» برمی‌گرداند — یعنی مشکل از سمت ما قابل‌مشاهده نیست، بلکه
+  // سرورهای تلگرام قادر به fetchکردن از بک‌اند میزبانی‌شده در ایران نیستند (برخلاف sendPhoto/
+  // sendVideo که همچنان با URL کار می‌کنند چون معمولاً silent fail می‌شوند و کسی متوجه نشده،
+  // نه چون واقعاً متفاوت‌اند). راه‌حل مطمئنی که از این وابستگی رد می‌شود (و عیناً همون الگوی
+  // sendPhotoBuffer در telegram-api-client.service.ts است): خودِ بایت فایل مستقیم آپلود شود،
+  // نه یک URL برای fetchکردن.
+  async sendVoiceReadyBuffer(chatId: string, buffer: Buffer): Promise<void> {
+    const form = new FormData();
+    form.append('chat_id', chatId);
+    form.append(
+      'audio',
+      new Blob([new Uint8Array(buffer)], { type: 'audio/mpeg' }),
+      'voice.mp3',
+    );
+    await this.callApi('sendAudio', form);
   }
 
   // فیدبک کاربر ۱۴۰۵/۰۷/۱۲ — تا وقتی وویس آماده نشده (تا ~۲ دقیقه طول می‌کشد)، مشتری هیچ
@@ -955,7 +970,7 @@ export class TelegramService {
 
   private async callApi(
     method: string,
-    body: Record<string, unknown>,
+    body: Record<string, unknown> | FormData,
   ): Promise<unknown> {
     if (!this.botToken) {
       // قبلاً اینجا بی‌صدا null برمی‌گشت — یعنی اگر TELEGRAM_BOT_TOKEN روی این پراسس ست
@@ -966,12 +981,17 @@ export class TelegramService {
       );
       return null;
     }
+    // فیدبک کاربر ۱۴۰۵/۰۷/۱۲ — عیناً همون الگوی دوگانه‌ی TelegramApiClientService
+    // (sendPhotoBuffer)؛ برای sendVoiceReadyBuffer لازم است چون body اینجا بایت فایل است، نه JSON
+    const isForm = body instanceof FormData;
     let res: Response;
     try {
       res = await fetch(`${this.apiBaseUrl}/bot${this.botToken}/${method}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...this.relayHeaders },
-        body: JSON.stringify(body),
+        headers: isForm
+          ? this.relayHeaders
+          : { 'Content-Type': 'application/json', ...this.relayHeaders },
+        body: isForm ? body : JSON.stringify(body),
       });
     } catch (err) {
       this.logger.error(
@@ -984,9 +1004,10 @@ export class TelegramService {
     if (!res.ok) {
       // فیدبک کاربر ۱۴۰۵/۰۷/۱۲ — قبلاً body درخواست (شامل خودِ URL فایل، برای sendAudio/
       // sendPhoto/sendVideo) لاگ نمی‌شد؛ برای دیباگ «failed to get HTTP URL content» باید
-      // دقیقاً همون URLـی که به تلگرام داده شده دیده شود، نه فقط کد خطا
+      // دقیقاً همون URLـی که به تلگرام داده شده دیده شود، نه فقط کد خطا (برای FormData معنی‌دار
+      // نیست، JSON.stringify آن {} می‌دهد)
       this.logger.error(
-        `telegram ${method} failed: ${res.status} ${await res.text()} — body=${JSON.stringify(body)}`,
+        `telegram ${method} failed: ${res.status} ${await res.text()}${isForm ? '' : ` — body=${JSON.stringify(body)}`}`,
       );
     } else {
       this.logger.debug(`telegram ${method} ok`);
@@ -1048,7 +1069,8 @@ export class TelegramService {
   }
 
   // docs/PRD-product-video.md — ویدیوی معرفی محصول؛ همیشه mp4 است (normalizeVideoForProviders
-  // در store.service.ts)، همون‌طور که sendVoiceReady بالا عمداً mp3 را با sendAudio می‌فرستد
+  // در store.service.ts). برخلاف sendVoiceReadyBuffer بالا، همچنان با URL کار می‌کند — اگر
+  // این هم روزی همون خطای «failed to get HTTP URL content» را گرفت، همون الگوی بافر را بگیرد
   private sendVideo(chatId: string, videoUrl: string) {
     return this.callApi('sendVideo', { chat_id: chatId, video: videoUrl });
   }
