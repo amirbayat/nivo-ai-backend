@@ -45,6 +45,9 @@ type ProductLike = {
   stock: number;
   images: string[];
   description?: string | null;
+  // docs/PRD-product-video.md
+  videoKey?: string | null;
+  videoDurationSec?: number | null;
 };
 
 // آستانه‌ی handoff: بعد از این تعداد پیام پیاپی نامفهوم/بی‌نتیجه، مکالمه به انسان سپرده
@@ -149,6 +152,9 @@ type CompactProduct = {
   stock: number;
   images: string[];
   description?: string | null;
+  // docs/PRD-product-video.md
+  videoKey?: string | null;
+  videoDurationSec?: number | null;
 };
 
 // docs/PRD-sales-agent-persuasion-principles.md بخش ۳.۲/۳.۳/۳.۴ — ثابت در کد (نه تنظیم پنل)،
@@ -1361,6 +1367,8 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
             basePrice: p.basePrice,
             stock: p.stock,
             images: p.images,
+            videoKey: p.videoKey,
+            videoDurationSec: p.videoDurationSec,
           })),
         };
       }
@@ -2810,6 +2818,8 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           basePrice: product.basePrice,
           stock: product.stock,
           images: product.images,
+          videoKey: product.videoKey,
+          videoDurationSec: product.videoDurationSec,
         },
       ],
     };
@@ -3029,6 +3039,8 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         basePrice: p.basePrice,
         stock: p.stock,
         images: p.images,
+        videoKey: p.videoKey,
+        videoDurationSec: p.videoDurationSec,
       })),
     };
     const nextState: ConversationState = 'BROWSING';

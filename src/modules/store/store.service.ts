@@ -12,6 +12,7 @@ import * as XLSX from 'xlsx';
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
+import { MediaTranscodeService } from '../../common/services/media-transcode.service';
 import { mimeTypeForExt } from '../../common/validators/chat-image.validator';
 import { CreateStoreDto } from './dto/create-store.dto';
 import { CreateProductDto } from './dto/create-product.dto';
@@ -59,6 +60,7 @@ export class StoreService {
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
     private readonly telegramApi: TelegramApiClientService,
+    private readonly mediaTranscode: MediaTranscodeService,
   ) {}
 
   list(sellerId: string) {
@@ -353,6 +355,98 @@ export class StoreService {
     const ext = key.split('.').pop() ?? '';
     const buffer = await this.storage.downloadImage(key);
     return { buffer, mimeType: mimeTypeForExt(ext) };
+  }
+
+  // docs/PRD-product-video.md — یک ویدیوی معرفی کوتاه برای محصول (تک‌فیلد، نه گالری)؛
+  // عیناً همون سقف فرمت/magic-bytes که video-edit.service.ts/caption-studio.service.ts
+  // استفاده می‌کنند (فقط mp4/mov ورودی قبول می‌شود، همیشه به mp4 نرمال‌سازی می‌شود)
+  private static readonly MAX_PRODUCT_VIDEO_BYTES = 50 * 1024 * 1024;
+  private static readonly MAX_PRODUCT_VIDEO_DURATION_SEC = 90;
+  private static readonly PRODUCT_VIDEO_MIME_EXT: Record<string, string> = {
+    'video/mp4': 'mp4',
+    'video/quicktime': 'mov',
+  };
+
+  // امضای مشترک ISO-BMFF (mp4/mov) — همون الگوی video-edit.service.ts، تشخیص با magic
+  // bytes نه فقط mimetype ادعایی کلاینت
+  private matchesVideoMagicBytes(buffer: Buffer): boolean {
+    return (
+      buffer.length > 8 && buffer.subarray(4, 8).toString('ascii') === 'ftyp'
+    );
+  }
+
+  async uploadProductVideo(
+    sellerId: string,
+    storeId: string,
+    productId: string,
+    file: Express.Multer.File,
+  ) {
+    const product = await this.getOwnedProduct(sellerId, storeId, productId);
+    if (file.size > StoreService.MAX_PRODUCT_VIDEO_BYTES) {
+      throw new BadRequestException(fa.store.videoTooLarge);
+    }
+    const ext = StoreService.PRODUCT_VIDEO_MIME_EXT[file.mimetype];
+    if (!ext || !this.matchesVideoMagicBytes(file.buffer)) {
+      throw new BadRequestException(fa.store.videoOnly);
+    }
+
+    let storeBuffer = file.buffer;
+    let storeExt = ext;
+    try {
+      const normalized = await this.mediaTranscode.normalizeVideoForProviders(
+        file.buffer,
+        ext,
+      );
+      storeBuffer = normalized.buffer;
+      storeExt = normalized.ext;
+    } catch {
+      throw new BadRequestException(fa.store.videoTranscodeFailed);
+    }
+
+    const durationSec = await this.mediaTranscode.getVideoDuration(
+      storeBuffer,
+      storeExt,
+    );
+    if (durationSec > StoreService.MAX_PRODUCT_VIDEO_DURATION_SEC) {
+      throw new BadRequestException(fa.store.videoTooLong);
+    }
+
+    const key = await this.storage.uploadImage(storeBuffer, storeExt);
+    if (product.videoKey) {
+      await this.storage.deleteObject(product.videoKey).catch(() => undefined);
+    }
+    return this.prisma.product.update({
+      where: { id: productId },
+      data: { videoKey: key, videoDurationSec: Math.round(durationSec) },
+    });
+  }
+
+  async removeProductVideo(
+    sellerId: string,
+    storeId: string,
+    productId: string,
+  ) {
+    const product = await this.getOwnedProduct(sellerId, storeId, productId);
+    if (product.videoKey) {
+      await this.storage.deleteObject(product.videoKey).catch(() => undefined);
+    }
+    return this.prisma.product.update({
+      where: { id: productId },
+      data: { videoKey: null, videoDurationSec: null },
+    });
+  }
+
+  // بدون چک مالکیت (سلر) — محتوای عمومی ویترین، باید برای مرورگر خریدار ناشناس هم قابل‌پخش
+  // باشد؛ فقط چک می‌کند کلید واقعاً videoKey همین محصول است تا کلید دلخواه سرو نشود. برخلاف
+  // getProductImage (کل بافر)، اینجا فقط وجود/مالکیت را تایید می‌کند — پخش واقعی با Range
+  // request توسط خودِ کنترلر (sales-agent.controller.ts) با storage.getObjectStream انجام می‌شود
+  async assertProductVideoKey(productId: string, key: string): Promise<void> {
+    const product = await this.prisma.product.findUnique({
+      where: { id: productId },
+    });
+    if (!product || product.videoKey !== key) {
+      throw new NotFoundException(fa.store.videoNotFound);
+    }
   }
 
   // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۴ — عکس پروفایل فروشگاه؛ همون الگوی

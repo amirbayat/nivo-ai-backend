@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Headers,
+  NotFoundException,
   Param,
   Post,
   Res,
@@ -16,6 +17,8 @@ import { SalesAgentService } from './sales-agent.service';
 import { SendMessageDto } from './dto/send-message.dto';
 import { SetResponseStrategyDto } from './dto/set-response-strategy.dto';
 import { StoreService } from '../store/store.service';
+import { StorageService } from '../../storage/storage.service';
+import { fa } from '../../i18n/fa';
 
 // docs/PRD-mvp-launch-plan.md گام ۱ — بدون JwtGuard: مشتری این فروشگاه یک User نیست،
 // هویتش فقط sessionToken است که خودِ /chat/start صادر می‌کند (سند بخش ۲.۱: Customer ≠ User).
@@ -26,6 +29,7 @@ export class SalesAgentController {
   constructor(
     private readonly salesAgentService: SalesAgentService,
     private readonly storeService: StoreService,
+    private readonly storage: StorageService,
   ) {}
 
   @Post('stores/:slug/chat/start')
@@ -208,5 +212,47 @@ export class SalesAgentController {
     res.setHeader('Content-Type', mimeType);
     res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
     res.send(buffer);
+  }
+
+  // docs/PRD-product-video.md — محتوای عمومی ویترین (بدون auth)، با پشتیبانی Range request
+  // (عیناً الگوی nivo-cal-public.controller.ts) چون ویدیو برخلاف عکس بدون seek تجربه‌ی بدی
+  // دارد؛ همیشه mp4 است (normalizeVideoForProviders در store.service.ts)
+  @SkipThrottle()
+  @Get('products/:productId/video/:key')
+  async getProductVideo(
+    @Param('productId') productId: string,
+    @Param('key') key: string,
+    @Headers('range') range: string | undefined,
+    @Res() res: Response,
+  ) {
+    await this.storeService.assertProductVideoKey(productId, key);
+
+    let size: number;
+    try {
+      const stat = await this.storage.statObject(key);
+      size = stat.size;
+    } catch {
+      throw new NotFoundException(fa.store.videoNotFound);
+    }
+
+    res.setHeader('Content-Type', 'video/mp4');
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    res.setHeader('Accept-Ranges', 'bytes');
+
+    const match = range ? /bytes=(\d+)-(\d*)/.exec(range) : null;
+    if (match) {
+      const start = Number(match[1]);
+      const end = match[2] ? Number(match[2]) : size - 1;
+      const stream = await this.storage.getObjectStream(key, { start, end });
+      res.status(206);
+      res.setHeader('Content-Range', `bytes ${start}-${end}/${size}`);
+      res.setHeader('Content-Length', String(end - start + 1));
+      stream.pipe(res);
+      return;
+    }
+
+    res.setHeader('Content-Length', String(size));
+    const stream = await this.storage.getObjectStream(key);
+    stream.pipe(res);
   }
 }

@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import * as crypto from 'crypto';
@@ -32,6 +33,8 @@ import type { EngineResult } from './sales-agent.types';
 
 @Injectable()
 export class SalesAgentService {
+  private readonly logger = new Logger(SalesAgentService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly engine: ConversationEngineService,
@@ -295,35 +298,71 @@ export class SalesAgentService {
       throw new BadRequestException(fa.salesAgent.invalidSession);
     }
 
-    const ext = file.originalname.split('.').pop() || 'webm';
-    const mp3Buffer = await this.mediaTranscode.extractAudio(file.buffer, ext);
-    const products = await this.prisma.product.findMany({
-      where: { storeId: conversation.storeId },
-      select: { name: true },
-      take: 8,
-    });
-    const vocabHint = buildAsrVocabHint(
-      conversation.store.name,
-      products.map((p) => p.name),
-    );
-    // فقط متن نهایی لازم است (نه timestamp کلمه‌ای) — VOICE_MESSAGE_ASR_CHAIN طبق
-    // فیدبک کاربر ۱۴۰۵/۰۷/۰۱ (دقت whisper هنوز ضعیف است) chirp-3 را هم امتحان می‌کند
-    const transcript = await this.asr.transcribeWithFallback(
-      mp3Buffer,
-      this.aiProvider.sharedApiKey,
-      'fa',
-      vocabHint,
-      VOICE_MESSAGE_ASR_CHAIN,
-      false,
-    );
+    // فیدبک کاربر: قبلاً هر خطای extractAudio/ASR (مثلاً یک 400 غیرمنتظره از یکی از مدل‌های
+    // VOICE_MESSAGE_ASR_CHAIN — طبق asr.service.ts فقط خطای ۴۲۹/۵xx باعث fallback می‌شود، نه
+    // هر خطا) بدون catch تا کنترلر بالا می‌رفت و یک 500 خام («خطای داخلی سرور») به مشتری
+    // می‌رسید، بدون هیچ راهنمایی. حالا مثل مسیر مشابه تلگرام (telegram.service.ts handleVoice)
+    // خطا لاگ می‌شود (جزئیات واقعی — مدل/status/requestId از قبل داخل asr.service.ts لاگ
+    // می‌شود) و یک پاسخ عادیِ شکل-مکالمه (نه یک HTTP error) با راهنمایی برمی‌گردد.
+    let transcriptText: string;
+    try {
+      const ext = file.originalname.split('.').pop() || 'webm';
+      const mp3Buffer = await this.mediaTranscode.extractAudio(
+        file.buffer,
+        ext,
+      );
+      const products = await this.prisma.product.findMany({
+        where: { storeId: conversation.storeId },
+        select: { name: true },
+        take: 8,
+      });
+      const vocabHint = buildAsrVocabHint(
+        conversation.store.name,
+        products.map((p) => p.name),
+      );
+      // فقط متن نهایی لازم است (نه timestamp کلمه‌ای) — VOICE_MESSAGE_ASR_CHAIN طبق
+      // فیدبک کاربر ۱۴۰۵/۰۷/۰۱ (دقت whisper هنوز ضعیف است) chirp-3 را هم امتحان می‌کند
+      const transcript = await this.asr.transcribeWithFallback(
+        mp3Buffer,
+        this.aiProvider.sharedApiKey,
+        'fa',
+        vocabHint,
+        VOICE_MESSAGE_ASR_CHAIN,
+        false,
+      );
+      transcriptText = transcript.text.trim();
+    } catch (err) {
+      this.logger.error(
+        `submitVoiceMessage failed (conversation=${conversationId}): ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+        err instanceof Error ? err.stack : undefined,
+      );
+      return {
+        reply: fa.salesAgent.voiceProcessingFailed,
+        uiBlocks: [],
+        state: conversation.currentState,
+        transcript: '',
+      };
+    }
+
+    if (!transcriptText) {
+      return {
+        reply: fa.salesAgent.voiceProcessingFailed,
+        uiBlocks: [],
+        state: conversation.currentState,
+        transcript: '',
+      };
+    }
+
     const result = await this.engine.handleMessage(
       conversation,
-      transcript.text,
+      transcriptText,
     );
     const withVoice = await this.attachVoicePending(conversationId, result);
     // متن تبدیل‌شده به فرانت هم برمی‌گردد تا حباب «مشتری» واقعی (نه ساختگی) نشان داده شود —
     // بدون این، کلاینت اصلاً نمی‌داند ASR چه چیزی شنیده
-    return { ...withVoice, transcript: transcript.text };
+    return { ...withVoice, transcript: transcriptText };
   }
 
   // سرو فایل صوتی — عمومی + کلید غیرقابل‌حدس (همان الگوی محصول عمومی)، نه session-token، چون

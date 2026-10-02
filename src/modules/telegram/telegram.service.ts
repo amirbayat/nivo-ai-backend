@@ -822,6 +822,12 @@ export class TelegramService {
     return `${apiUrl}/api/v1/v2/stores/${storeId}/logo/${key}`;
   }
 
+  // docs/PRD-product-video.md — عیناً همون الگوی productImageUrl بالا
+  private productVideoUrl(productId: string, key: string): string {
+    const apiUrl = this.config.get<string>('API_URL');
+    return `${apiUrl}/api/v1/v2/products/${productId}/video/${key}`;
+  }
+
   private async sendEngineResult(
     chatId: string,
     result: EngineResult,
@@ -856,6 +862,14 @@ export class TelegramService {
             : null;
           if (!p.images[0] || !photoResult?.ok) {
             await this.sendText(chatId, caption, keyboard);
+          }
+          // docs/PRD-product-video.md — جدا از عکس/کپشن، یک پیام ویدیوی مجزا (تلگرام یک
+          // پیام sendPhoto را با ویدیو ترکیب نمی‌کند)
+          if (p.videoKey) {
+            await this.sendVideo(
+              chatId,
+              this.productVideoUrl(p.id, p.videoKey),
+            );
           }
         }
         return;
@@ -985,6 +999,12 @@ export class TelegramService {
       caption,
       ...(keyboard ? { reply_markup: keyboard } : {}),
     });
+  }
+
+  // docs/PRD-product-video.md — ویدیوی معرفی محصول؛ همیشه mp4 است (normalizeVideoForProviders
+  // در store.service.ts)، همون‌طور که sendVoiceReady بالا عمداً mp3 را با sendAudio می‌فرستد
+  private sendVideo(chatId: string, videoUrl: string) {
+    return this.callApi('sendVideo', { chat_id: chatId, video: videoUrl });
   }
 
   private answerCallbackQuery(callbackQueryId: string) {

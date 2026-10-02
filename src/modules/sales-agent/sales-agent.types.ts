@@ -35,6 +35,9 @@ export type UiBlock =
         basePrice: number;
         stock: number;
         images: string[];
+        // docs/PRD-product-video.md
+        videoKey?: string | null;
+        videoDurationSec?: number | null;
       }[];
     }
   // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۳ — برخلاف PRODUCT_CARD که فقط

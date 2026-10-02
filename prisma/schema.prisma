@@ -2154,6 +2154,11 @@ model Product {
   basePrice         Int // تومان
   stock             Int      @default(0)
   images            String[] @default([]) // فاز بعد (پنل فروشنده) پر می‌شود — در ویزارد ثبت‌نام خالی می‌ماند
+  // docs/PRD-product-video.md — یک ویدیوی معرفی کوتاه (نه گالری)؛ videoDurationSec موقع آپلود
+  // از MediaTranscodeService.getVideoDuration گرفته می‌شود تا UI خریدار بدون لود کامل فایل
+  // مدت را نشان دهد
+  videoKey          String?
+  videoDurationSec  Int?
   // دستیار تکمیل محصول با AI (docs/PRD-seller-knowledge-base.md بخش ۱.۱) — قبلاً اصلاً وجود نداشت
   description       String?  @db.Text
   // docs/PRD-telegram-bot-channel.md بخش ۹.۳ — کد کوتاه اختیاری که فروشنده روی محتوای

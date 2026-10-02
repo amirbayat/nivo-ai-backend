@@ -142,6 +142,13 @@ export const fa = {
     tooManyImages: 'هر محصول حداکثر ۴ عکس می‌تواند داشته باشد',
     imageOnly: 'فقط فایل تصویر پذیرفته می‌شود',
     logoNotFound: 'عکس پروفایل فروشگاه یافت نشد',
+    // docs/PRD-product-video.md
+    videoOnly: 'فقط فایل ویدیو (mp4 یا mov) پذیرفته می‌شود',
+    videoTooLarge: 'حجم ویدیو نباید بیشتر از ۵۰ مگابایت باشد',
+    videoTooLong: 'مدت ویدیو نباید بیشتر از ۹۰ ثانیه باشد',
+    videoTranscodeFailed:
+      'پردازش ویدیو با مشکل مواجه شد، فایل دیگه‌ای امتحان کن',
+    videoNotFound: 'ویدیوی محصول یافت نشد',
     bankCardNotFound: 'این کارت بانکی یافت نشد',
     lastActiveBankCard: 'حداقل یک کارت بانکی باید فعال بماند',
     urlNotReadable:
@@ -179,6 +186,10 @@ export const fa = {
     orderNotFound: 'سفارش یافت نشد',
     nothingToConfirm: 'چیزی برای تایید نیست — اول یک محصول به سبد اضافه کن',
     didNotUnderstand: 'متوجه نشدم، می‌تونی دوباره بگی چی می‌خوای؟',
+    // فیدبک کاربر: پیام صوتی وب قبلاً در خطای ASR/ترنسکود یک 500 خام می‌گرفت؛ حالا مثل تلگرام
+    // یک پاسخ عادی و راهنما برمی‌گردد
+    voiceProcessingFailed:
+      'متأسفانه نتونستم پیام صوتی رو پردازش کنم 🙏 میشه لطفاً به‌صورت متن بفرستی؟',
     didNotUnderstandWithHint: (productNames: string[]) =>
       `متوجه نشدم 🙁 می‌تونی مثلاً بگی «${productNames.join('» یا «')} رو میخوام» یا از لیست بالا دکمه‌ی «افزودن به سبد» رو بزنی.`,
     firstGreeting: (storeName: string) =>
