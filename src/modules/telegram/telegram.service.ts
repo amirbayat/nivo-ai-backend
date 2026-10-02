@@ -971,8 +971,11 @@ export class TelegramService {
       throw err;
     }
     if (!res.ok) {
+      // فیدبک کاربر ۱۴۰۵/۰۷/۱۲ — قبلاً body درخواست (شامل خودِ URL فایل، برای sendAudio/
+      // sendPhoto/sendVideo) لاگ نمی‌شد؛ برای دیباگ «failed to get HTTP URL content» باید
+      // دقیقاً همون URLـی که به تلگرام داده شده دیده شود، نه فقط کد خطا
       this.logger.error(
-        `telegram ${method} failed: ${res.status} ${await res.text()}`,
+        `telegram ${method} failed: ${res.status} ${await res.text()} — body=${JSON.stringify(body)}`,
       );
     } else {
       this.logger.debug(`telegram ${method} ok`);
