@@ -128,11 +128,18 @@ export class AsrService {
     // base64 در بدنه‌ی JSON، نه multipart/form-data — دقیقاً همان الگوی موجود frame_images در
     // video-generation.service.ts (data:...;base64,...)، هم برای یکدستی با بقیه‌ی کد، هم چون
     // ارسال Buffer به‌عنوان Blob/BlobPart در این نسخه‌ی TypeScript با تایپ‌های lib.dom تداخل دارد
+    // فیدبک کاربر + لاگ واقعی ۱۴۰۵/۰۷/۱۰: google/chirp-3 اصلاً response_format="verbose_json"
+    // را پشتیبانی نمی‌کند ("The selected model does not support response_format \"verbose_json\".
+    // Use \"json\" instead." — همیشه ۴۰۰ خام، نه ۴۲۹/۵xx) پس هیچ‌وقت وارد فالبک نمی‌شد و هر
+    // وویس‌پیامی (چه تلگرام چه وب، چون هر دو VOICE_MESSAGE_ASR_CHAIN را با wordTimestamps=false
+    // صدا می‌زنند) همیشه همینجا شکست می‌خورد. وقتی timestamp سطح کلمه لازم نیست، verbose_json
+    // هم لازم نیست — همان شرط wordTimestamps برای response_format هم استفاده می‌شود
+    const responseFormat = wordTimestamps ? 'verbose_json' : 'json';
     const body = {
       model,
       input_audio: { data: audioBuffer.toString('base64'), format: 'mp3' },
       language,
-      response_format: 'verbose_json',
+      response_format: responseFormat,
       ...(wordTimestamps ? { timestamp_granularities: ['word'] } : {}),
       ...(prompt ? { prompt } : {}),
     };
@@ -145,7 +152,7 @@ export class AsrService {
     // بشود حدس زد آیا مشکل مختص یک فایل خاص، فرمت request، یا مسیر relay بوده یا نه
     this.logger.log(
       `ASR ${model} request → POST ${url} | via=${this.aiProvider.fetch ? 'proxy-fetch(undici+dispatcher)' : 'global-fetch'} | ` +
-        `body: model=${model} language=${language} response_format=verbose_json timestamp_granularities=${wordTimestamps ? '[word]' : '[]'} ` +
+        `body: model=${model} language=${language} response_format=${responseFormat} timestamp_granularities=${wordTimestamps ? '[word]' : '[]'} ` +
         `input_audio.format=mp3 audioBytes=${audioBuffer.length} (base64Len=${body.input_audio.data.length}) | ` +
         `prompt=${prompt ? 'yes' : 'no'} | ` +
         `extraHeaders=${JSON.stringify(Object.keys(this.aiProvider.extraHeaders ?? {}))}`,
