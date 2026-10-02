@@ -659,9 +659,15 @@ export class TelegramService {
     try {
       await this.withTypingIndicator(chatId, async () => {
         const oggBuffer = await this.downloadFile(message.voice!.file_id);
+        this.logger.log(
+          `handleVoice conversation=${conversation.id} ogg duration=${message.voice!.duration}s mimeType=${message.voice!.mime_type ?? 'n/a'} bytes=${oggBuffer.length}`,
+        );
         const mp3Buffer = await this.mediaTranscode.extractAudio(
           oggBuffer,
           'ogg',
+        );
+        this.logger.log(
+          `handleVoice conversation=${conversation.id} extractAudio ogg→mp3 bytes=${oggBuffer.length}→${mp3Buffer.length}`,
         );
         const products = await this.prisma.product.findMany({
           where: { storeId: conversation.storeId },
@@ -679,6 +685,9 @@ export class TelegramService {
           vocabHint,
           VOICE_MESSAGE_ASR_CHAIN,
           false,
+        );
+        this.logger.log(
+          `handleVoice conversation=${conversation.id} transcribed model=${transcript.modelUsed} text="${transcript.text.slice(0, 200)}"`,
         );
         if (!transcript.text.trim()) {
           await this.sendText(chatId, fa.telegram.voiceNotUnderstood);
@@ -1023,6 +1032,14 @@ export class TelegramService {
       `${this.apiBaseUrl}/file/bot${this.botToken}/${filePath}`,
       { headers: this.relayHeaders },
     );
+    // قبلاً اینجا res.ok چک نمی‌شد — اگر دانلود فایل شکست می‌خورد (۴۰۴/مشکل relay)، بدنه‌ی
+    // خطا (معمولاً چند بایت متن/JSON) به‌جای صدای واقعی به ffmpeg/ASR می‌رسید؛ خروجی یا کرش
+    // می‌کرد یا متن بی‌معنی/خالی تولید می‌شد، بدون این‌که هیچ‌جا مشخص شود دانلود اصلاً شکست خورده
+    if (!res.ok) {
+      throw new Error(
+        `telegram file download failed: ${res.status} path=${filePath}`,
+      );
+    }
     const arrayBuffer = await res.arrayBuffer();
     return Buffer.from(arrayBuffer);
   }

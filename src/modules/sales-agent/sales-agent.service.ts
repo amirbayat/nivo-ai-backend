@@ -307,9 +307,15 @@ export class SalesAgentService {
     let transcriptText: string;
     try {
       const ext = file.originalname.split('.').pop() || 'webm';
+      this.logger.log(
+        `submitVoiceMessage conversation=${conversationId} upload mimetype=${file.mimetype} ext=${ext} bytes=${file.buffer.length}`,
+      );
       const mp3Buffer = await this.mediaTranscode.extractAudio(
         file.buffer,
         ext,
+      );
+      this.logger.log(
+        `submitVoiceMessage conversation=${conversationId} extractAudio bytes=${file.buffer.length}→${mp3Buffer.length}`,
       );
       const products = await this.prisma.product.findMany({
         where: { storeId: conversation.storeId },
@@ -331,6 +337,9 @@ export class SalesAgentService {
         false,
       );
       transcriptText = transcript.text.trim();
+      this.logger.log(
+        `submitVoiceMessage conversation=${conversationId} transcribed model=${transcript.modelUsed} text="${transcriptText.slice(0, 200)}"`,
+      );
     } catch (err) {
       this.logger.error(
         `submitVoiceMessage failed (conversation=${conversationId}): ${

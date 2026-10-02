@@ -202,6 +202,13 @@ export class AsrService {
       throw new AsrAvailabilityError(`ASR ${model} error: ${message}`);
     }
 
+    // لاگ موفقیت — بدون این، از لاگ قبلی (درخواست) فقط معلوم می‌شد چیزی ارسال شد، نه این‌که
+    // مدل واقعاً چه متنی برگرداند؛ برای تشخیص «ترنسکرایب غلط/خالی» (نه کرش) این لاگ لازم است
+    this.logger.log(
+      `ASR ${model} response ← text="${(json.text ?? '').slice(0, 200)}" language=${json.language ?? 'n/a'} ` +
+        `words=${json.words?.length ?? 0} durationSec=${json.duration ?? 0}`,
+    );
+
     return {
       text: json.text ?? '',
       words: (json.words ?? []).map((w) => ({
