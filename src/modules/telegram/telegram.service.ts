@@ -377,9 +377,8 @@ export class TelegramService {
       await this.logCustomerMessage(conversation.id, message.text ?? '');
       return;
     }
-    const result = await this.engine.handleMessage(
-      conversation,
-      message.text ?? '',
+    const result = await this.withTypingIndicator(chatId, () =>
+      this.engine.handleMessage(conversation, message.text ?? ''),
     );
     await this.sendEngineResult(chatId, result);
   }
@@ -637,7 +636,9 @@ export class TelegramService {
 
     const buffer = await this.downloadFile(largest.file_id);
     const key = await this.storage.uploadImage(buffer, 'jpg', conversation.id);
-    const result = await this.engine.handleReceiptUpload(conversation, key);
+    const result = await this.withTypingIndicator(chatId, () =>
+      this.engine.handleReceiptUpload(conversation, key),
+    );
     await this.sendEngineResult(chatId, result);
   }
 
@@ -645,37 +646,58 @@ export class TelegramService {
   // MediaTranscodeService.extractAudio که caption-transcribe.processor.ts استفاده می‌کند
   // (تبدیل به mp3 واقعی، نه فقط تغییر پسوند) → AsrService.transcribeWithFallback موجود؛ متن
   // خروجی دقیقاً مثل این‌که مشتری تایپ کرده باشد وارد engine.handleMessage می‌شود
+  //
+  // فیدبک: قبلاً وقتی ASR متن خالی برمی‌گرداند یا هر مرحله (دانلود/ترنسکود/ASR) throw می‌کرد،
+  // تابع بی‌صدا return می‌شد — catch عمومی handleUpdate فقط سرور را لاگ می‌کند و هیچ پاسخی به
+  // مشتری نمی‌رسد، یعنی از دید مشتری بات اصلاً جواب نمی‌داد. هر دو مسیر حالا یک پیام واقعی
+  // برمی‌گردانند.
   private async handleVoice(message: TelegramMessage): Promise<void> {
     const chatId = String(message.chat.id);
     const conversation = await this.resolveActiveConversation(chatId);
     if (!conversation || conversation.isMutedForHuman || !message.voice) return;
 
-    const oggBuffer = await this.downloadFile(message.voice.file_id);
-    const mp3Buffer = await this.mediaTranscode.extractAudio(oggBuffer, 'ogg');
-    const products = await this.prisma.product.findMany({
-      where: { storeId: conversation.storeId },
-      select: { name: true },
-      take: 8,
-    });
-    const vocabHint = buildAsrVocabHint(
-      conversation.store.name,
-      products.map((p) => p.name),
-    );
-    const transcript = await this.asr.transcribeWithFallback(
-      mp3Buffer,
-      this.aiProvider.sharedApiKey,
-      'fa',
-      vocabHint,
-      VOICE_MESSAGE_ASR_CHAIN,
-      false,
-    );
-    if (!transcript.text.trim()) return;
+    try {
+      await this.withTypingIndicator(chatId, async () => {
+        const oggBuffer = await this.downloadFile(message.voice!.file_id);
+        const mp3Buffer = await this.mediaTranscode.extractAudio(
+          oggBuffer,
+          'ogg',
+        );
+        const products = await this.prisma.product.findMany({
+          where: { storeId: conversation.storeId },
+          select: { name: true },
+          take: 8,
+        });
+        const vocabHint = buildAsrVocabHint(
+          conversation.store.name,
+          products.map((p) => p.name),
+        );
+        const transcript = await this.asr.transcribeWithFallback(
+          mp3Buffer,
+          this.aiProvider.sharedApiKey,
+          'fa',
+          vocabHint,
+          VOICE_MESSAGE_ASR_CHAIN,
+          false,
+        );
+        if (!transcript.text.trim()) {
+          await this.sendText(chatId, fa.telegram.voiceNotUnderstood);
+          return;
+        }
 
-    const result = await this.engine.handleMessage(
-      conversation,
-      transcript.text,
-    );
-    await this.sendEngineResult(chatId, result);
+        const result = await this.engine.handleMessage(
+          conversation,
+          transcript.text,
+        );
+        await this.sendEngineResult(chatId, result);
+      });
+    } catch (err) {
+      this.logger.error(
+        `handleVoice failed: ${err instanceof Error ? err.message : String(err)}`,
+        err instanceof Error ? err.stack : undefined,
+      );
+      await this.sendText(chatId, fa.telegram.voiceNotUnderstood);
+    }
   }
 
   private async logCustomerMessage(
@@ -918,6 +940,27 @@ export class TelegramService {
       text,
       ...(keyboard ? { reply_markup: keyboard } : {}),
     });
+  }
+
+  // فیدبک: نوبت FULL_AGENT می‌تواند ۵-۱۵ ثانیه طول بکشد (طبق تست‌های eval واقعی) و بدون هیچ
+  // نشانه‌ای مشتری فکر می‌کند بات جواب نمی‌دهد. «در حال تایپ» تلگرام بعد از ~۵ ثانیه خودش محو
+  // می‌شود، پس برای نوبت‌های طولانی‌تر باید هر چند ثانیه دوباره فرستاده شود تا کار fn تمام شود.
+  private async withTypingIndicator<T>(
+    chatId: string,
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    const sendTyping = () =>
+      void this.callApi('sendChatAction', {
+        chat_id: chatId,
+        action: 'typing',
+      });
+    sendTyping();
+    const interval = setInterval(sendTyping, 4000);
+    try {
+      return await fn();
+    } finally {
+      clearInterval(interval);
+    }
   }
 
   // docs/PRD-telegram-bot-channel.md بخش ۹.۱ — تلگرام reply_to_message را روی پیام بعدی

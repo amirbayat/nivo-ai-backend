@@ -546,6 +546,10 @@ async function runTurn(
       ),
       prompt: customerMessage,
       temperature: 0.3,
+      // تست کلید بودجه‌ی محدود دارد (docs/PRD-full-agent-engineering-review.md) — بدون سقف،
+      // OpenRouter درخواست را رد می‌کند چون سقف پیش‌فرض مدل (۶۵۵۳۶) را حساب می‌کند، نه مصرف
+      // واقعی؛ production هم همین مشکل را دارد اگر موجودی کلید کم شود (یافته‌ی جدید این تست).
+      maxOutputTokens: 4096,
     });
 
     if (handoff) {
