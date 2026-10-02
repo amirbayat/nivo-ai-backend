@@ -1181,18 +1181,27 @@ relevantProductIds را خالی بگذار.${
     return `تو دستیار فروش یک فروشگاه در دایرکت اینستاگرام هستی و با ابزارهای زیر مستقیماً سبد/
 سفارش مشتری را مدیریت می‌کنی، نه فقط متن می‌نویسی. لحن نوشتار باید ${tone} باشد.
 ${storeProfile ? `\nاطلاعات فروشگاه:\n${storeProfile}\n` : ''}
-کاتالوگ اولیه (برای جست‌وجوی دقیق‌تر یا محصولی که اینجا نیست از search_products استفاده کن):
+چند نمونه از محصولات فروشگاه (فقط چند نمونه‌ی کلی، لزوماً ربطی به بحث فعلی ندارند — برای
+جست‌وجوی دقیق یا محصولی که اینجا نیست از search_products استفاده کن):
 ${catalogFacts}
 
 ${cartSummary}
 ${
-  transcript
-    ? `\nتاریخچه‌ی اخیر مکالمه (حتماً برای فهمیدن منظور پیام‌های ناقص/ادامه‌دار مشتری — مثل «پس اگه بخوام X بشم چی؟» بعد از بحث قبلی — این را در نظر بگیر):\n${transcript}\n`
+  ctx.lastShownProducts?.length
+    ? `\nآخرین محصولاتی که واقعاً در همین مکالمه مطرح/پیشنهاد شده‌اند: ${ctx.lastShownProducts.map((p) => p.name).join('، ')}\n`
     : ''
-}
+}${
+      transcript
+        ? `\nتاریخچه‌ی اخیر مکالمه (حتماً برای فهمیدن منظور پیام‌های ناقص/ادامه‌دار مشتری — مثل «پس اگه بخوام X بشم چی؟» بعد از بحث قبلی — این را در نظر بگیر):\n${transcript}\n`
+        : ''
+    }
 قوانین حیاتی:
 - هیچ عدد/اسم/شماره‌ای که از ابزارها یا واقعیت‌های بالا نیامده اختراع نکن.
 - هرگز تعداد دقیق موجودی انبار را اعلام نکن، فقط «موجود است» یا «فعلاً ناموجود».
+- اگر پیام مشتری مبهم است و اسم هیچ محصولی را نمی‌آورد (مثل «کدوم بهتره؟»، «فرقشون چیه؟»،
+  «همینو بذار تو سبد»)، منظورش تقریباً همیشه «آخرین محصولاتی که مطرح/پیشنهاد شده‌اند» (بالا) یا
+  تاریخچه‌ی اخیر مکالمه است — نه «چند نمونه از محصولات فروشگاه» که فقط یک نمونه‌ی کلی و تصادفی از
+  کل کاتالوگ است و ممکن است هیچ ربطی به این گفتگوی خاص نداشته باشد.
 - قبل از هر ادعای قیمت/موجودی/جزئیات محصولی که در کاتالوگ اولیه نبود، حتماً search_products یا
   get_product_details را صدا بزن — حدس نزن.
 - افزودن/حذف واقعی از سبد فقط با update_cart انجام می‌شود؛ هرگز فقط در متن بگو «به سبد اضافه
@@ -1379,6 +1388,14 @@ ${ctx.anchoredProductId ? `\nمحصول لنگر فعلی (تمرکز مکالم
         },
       ]),
     );
+    // باگ واقعی زنده (۱۴۰۵/۰۷/۱۹) — عمداً جدا از seenProducts: آن Map همیشه شامل «کاتالوگ اولیه»
+    // (۵ محصول با جدیدترین createdAt، بی‌ربط به روند گفتگو) هم هست، پس عضویت در seenProducts
+    // کافی نیست تا بفهمیم مدل واقعاً این نوبت رویش جست‌وجو/لوکاپ زده یا نه — دیده شد که مدل گاهی
+    // relevantProductIds را به شناسه‌ی محصولاتی که فقط در کاتالوگ اولیه بودند (و اصلاً در متن
+    // پاسخش هم نبودند) ست می‌کند. این Set فقط محصولاتی را نگه می‌دارد که همین نوبت واقعاً با
+    // search_products/get_product_details صدا زده شده‌اند — تنها شرط قابل‌اعتماد برای این‌که
+    // بگوییم مدل واقعاً این نوبت رویش تمرکز داشته
+    const toolFetchedProductIds = new Set<string>();
     // docs/PRD-sales-agent-persuasion-principles.md بخش ۶.۳ — کلید فروشگاه؛ اگر خاموش باشد صفر
     // کوئری اضافه (نه فقط نادیده‌گرفتن) — نه findUrgentActiveDiscount صدا زده می‌شود نه
     // buildPersuasionNote چیزی برمی‌گرداند
@@ -1422,6 +1439,7 @@ ${ctx.anchoredProductId ? `\nمحصول لنگر فعلی (تمرکز مکالم
             images: p.images,
             description: p.description,
           });
+          toolFetchedProductIds.add(p.id);
         }
         return results.map((p) => ({
           id: p.id,
@@ -1454,6 +1472,7 @@ ${ctx.anchoredProductId ? `\nمحصول لنگر فعلی (تمرکز مکالم
           images: product.images,
           description: product.description,
         });
+        toolFetchedProductIds.add(product.id);
         const persuasionNote = await this.buildPersuasionNote(
           storeId,
           product,
@@ -1798,13 +1817,36 @@ ${ctx.anchoredProductId ? `\nمحصول لنگر فعلی (تمرکز مکالم
       seenProducts,
     });
 
+    // باگ واقعی زنده (۱۴۰۵/۰۷/۱۹): FULL_AGENT هیچ‌وقت ctx.lastShownProducts را نمی‌نوشت (برخلاف
+    // مسیر قدیمی RULE_BASED که همین فیلد را دقیقاً برای همین مشکل دارد) — یعنی «کاتالوگ اولیه»ی
+    // هر نوبت (۵ محصول با جدیدترین createdAt، کاملاً بی‌ربط به روند گفتگو) تنها منبع ساختاریافته‌ی
+    // باقی‌مانده بود. وقتی مشتری با یک پیام مبهم («کدوم بهتره؟») بدون اسم محصول ادامه می‌داد، مدل
+    // به‌جای کندوکاو در متن خام تاریخچه، به همین کاتالوگ بی‌ربط برمی‌گشت — دیده‌شده زنده: مشتری
+    // داشت بین دو غذای سگ مقایسه می‌کرد، مدل ناگهان رفت سراغ دان پرنده.
+    //
+    // فیکس اول (ناکافی، دیده شد با تست زنده): صرفاً فیلتر با seenProducts کافی نیست، چون
+    // seenProducts همیشه شامل همان کاتالوگ اولیه‌ی بی‌ربط هم هست — تست زنده نشان داد مدل گاهی
+    // relevantProductIds را به شناسه‌ی محصولی می‌دهد که اصلاً در متن پاسخش نیامده، فقط چون در
+    // کاتالوگ اولیه بوده. فیکس نهایی: فقط محصولاتی که همین نوبت واقعاً با search_products/
+    // get_product_details صدا زده شده‌اند (toolFetchedProductIds) واجد شرایط lastShownProducts اند.
+    const lastShownProducts = relevantProductIds
+      .filter((id) => toolFetchedProductIds.has(id))
+      .map((id) => seenProducts.get(id))
+      .filter((p): p is CompactProduct => !!p)
+      .map((p) => ({ id: p.id, name: p.name }));
+
     // docs/PRD-sales-agent-tool-calling-architecture.md بخش ۴.۱/۴.۲ — سرور-محور، نه خوداظهاری
     // مدل: فقط update_cart(موفق،remove=false)/create_order موفق «پیشرفت» حساب می‌شود
     await this.prisma.salesConversation.update({
       where: { id: conversation.id },
-      data: progressHappened
-        ? { openQuestionStreak: 0 }
-        : { openQuestionStreak: { increment: 1 } },
+      data: {
+        ...(progressHappened
+          ? { openQuestionStreak: 0 }
+          : { openQuestionStreak: { increment: 1 } }),
+        ...(lastShownProducts.length
+          ? { contextData: { ...ctx, lastShownProducts } }
+          : {}),
+      },
     });
 
     await this.logReply(conversation, text, uiBlock, undefined, {
