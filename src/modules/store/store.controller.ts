@@ -156,6 +156,25 @@ export class StoreController {
     return this.storeService.removeProductImage(user.sub, id, productId, key);
   }
 
+  // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۴ — عکس پروفایل فروشگاه (یک فایل، نه آرایه)
+  @Post(':id/logo')
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: 5 * 1024 * 1024 } }),
+  )
+  uploadStoreLogo(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException(fa.errors.validation);
+    return this.storeService.uploadStoreLogo(user.sub, id, file);
+  }
+
+  @Delete(':id/logo')
+  removeStoreLogo(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    return this.storeService.removeStoreLogo(user.sub, id);
+  }
+
   // docs/PRD-product-display-focus-and-variations.md §۲.۴ — کد کوتاه لینک تلگرامی این
   // محصول را برمی‌گرداند (در صورت نبود، همین‌جا می‌سازد)؛ فرانت خودش لینک کامل
   // https://t.me/<bot>?start=p_<shortCode> را می‌سازد

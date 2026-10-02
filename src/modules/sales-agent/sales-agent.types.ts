@@ -200,4 +200,19 @@ export type AiTraceData = {
   // پر می‌شود (handler: 'runFullAgentTurn')؛ خالی/نبودن یعنی هیچ تکنیکی استفاده نشد
   persuasionTechniquesUsed?: PersuasionTechnique[];
   usedGeneralKnowledge?: boolean;
+  // docs/PRD-full-agent-engineering-review.md بخش ۵ — فقط روی trace سطح runFullAgentTurn پر
+  // می‌شوند؛ همه‌شان همین الان، رایگان، در حافظه‌ی callFullAgentTurn موجودند (local variable)،
+  // فقط باید serialize شوند — هدف: پیداکردن باگ «کارت/پاسخ اشتباه» در یک نگاه، بدون نیاز به
+  // حدس‌زدن یا reproduce دستی
+  relevantProductIdsRaw?: string[];
+  lastShownProducts?: { id: string; name: string }[];
+  toolsCalled?: { name: string; args: unknown }[];
+  initialCatalogProductIds?: string[];
+  stepsUsed?: number;
+  mutationHappened?: boolean;
+  progressHappened?: boolean;
+  isFallbackAttempt?: boolean;
+  // docs/PRD-full-agent-engineering-review.md بخش ۴/۱۱ — اعداد+«تومان» در متن نهایی که با هیچ
+  // قیمت/مبلغ واقعی این نوبت مطابقت نداشتند؛ فقط لاگ است، هرگز رفتار/پاسخ را عوض نمی‌کند
+  suspiciousPriceClaims?: number[];
 };

@@ -355,6 +355,58 @@ export class StoreService {
     return { buffer, mimeType: mimeTypeForExt(ext) };
   }
 
+  // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۴ — عکس پروفایل فروشگاه؛ همون الگوی
+  // addProductImages بالا، تک‌فیلد نه آرایه (عکس قبلی، اگر بود، جایگزین می‌شود)
+  async uploadStoreLogo(
+    sellerId: string,
+    storeId: string,
+    file: Express.Multer.File,
+  ) {
+    const store = await this.getOwned(sellerId, storeId);
+    if (!file.mimetype.startsWith('image/')) {
+      throw new BadRequestException(fa.store.imageOnly);
+    }
+    const ext = file.mimetype.split('/')[1]?.replace('jpeg', 'jpg') ?? 'jpg';
+    const key = await this.storage.uploadImage(file.buffer, ext);
+    if (store.logoImageKey) {
+      await this.storage
+        .deleteObject(store.logoImageKey)
+        .catch(() => undefined);
+    }
+    return this.prisma.store.update({
+      where: { id: storeId },
+      data: { logoImageKey: key },
+    });
+  }
+
+  async removeStoreLogo(sellerId: string, storeId: string) {
+    const store = await this.getOwned(sellerId, storeId);
+    if (store.logoImageKey) {
+      await this.storage
+        .deleteObject(store.logoImageKey)
+        .catch(() => undefined);
+    }
+    return this.prisma.store.update({
+      where: { id: storeId },
+      data: { logoImageKey: null },
+    });
+  }
+
+  // بدون چک مالکیت — محتوای عمومی ویترین، باید در <img> مرورگر مشتری ناشناس و در پیام
+  // /start تلگرام (فچ از سمت سرورهای تلگرام) هم لود شود؛ فقط چک می‌کند کلید واقعاً همون
+  // logoImageKey همین فروشگاه است تا کلید دلخواه سرو نشود
+  async getStoreLogo(storeId: string, key: string) {
+    const store = await this.prisma.store.findUnique({
+      where: { id: storeId },
+    });
+    if (!store || store.logoImageKey !== key) {
+      throw new NotFoundException(fa.store.logoNotFound);
+    }
+    const ext = key.split('.').pop() ?? '';
+    const buffer = await this.storage.downloadImage(key);
+    return { buffer, mimeType: mimeTypeForExt(ext) };
+  }
+
   // parse-and-commit (نه دو-مرحله‌ای پیش‌نمایش) — فقط محصول جدید می‌سازد، upsert نیست چون
   // کلید طبیعی (SKU) نداریم؛ الگوی برگرفته از admin.service.ts importModels
   async importProducts(sellerId: string, storeId: string, buffer: Buffer) {

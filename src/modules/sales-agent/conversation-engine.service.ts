@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
 import type { Queue } from 'bull';
 import { generateObject, generateText, tool, stepCountIs } from 'ai';
@@ -92,6 +92,29 @@ function truncateDescriptionForFacts(description: string): string {
   return `${description.slice(0, DESCRIPTION_FACTS_MAX_CHARS)}...`;
 }
 
+const PERSIAN_DIGITS = '۰۱۲۳۴۵۶۷۸۹';
+function toWesternDigits(input: string): string {
+  return input.replace(/[۰-۹]/g, (d) => String(PERSIAN_DIGITS.indexOf(d)));
+}
+
+// docs/PRD-full-agent-engineering-review.md بخش ۴/۱۱ — چک سبک، فقط observability (هرگز پاسخ
+// مشتری را عوض/بلاک نمی‌کند): اگر متن نهایی یک عدد+«تومان» دارد که با هیچ‌کدام از قیمت‌های واقعی
+// (محصولات دیده‌شده این نوبت، جمع سبد، مبلغ سفارش، مبلغ تخفیف) مطابقت ندارد، فقط برای لاگ ادمین
+// علامت می‌خورد — چون این هیچ خط دفاعی کدمحوری نداشت، فقط یک دستورالعمل متنی «عدد اختراع نکن»
+function findSuspiciousPriceClaims(
+  text: string,
+  knownAmounts: Set<number>,
+): number[] {
+  const normalized = toWesternDigits(text).replace(/[,٬]/g, '');
+  const matches = normalized.matchAll(/(\d{3,})\s*تومان/g);
+  const suspicious = new Set<number>();
+  for (const m of matches) {
+    const amount = Number(m[1]);
+    if (!knownAmounts.has(amount)) suspicious.add(amount);
+  }
+  return [...suspicious];
+}
+
 // docs/PRD-sales-agent-tool-calling-architecture.md بخش ۴.۳ — ثابت در کد، نه تنظیم قابل‌پیکربندی
 // در پنل (طبق عادت این پروژه)؛ فقط با داده‌ی واقعی فاز ۳ کالیبره می‌شود
 const OPEN_QUESTION_NUDGE_THRESHOLD = 3;
@@ -103,10 +126,19 @@ const CONSULTATION_FULL_CATALOG_FALLBACK_CAP = 30;
 
 // همون سند، بخش ۴.۴ — عمداً «نرم»: مدل همچنان آزاد است FAQ را جواب بدهد، فقط موظف است در
 // همان پاسخ یک قدم به جلو هم اضافه کند؛ هرگز به مشتری اعلام محدودیت/امتناع از جواب نمی‌کند
+// docs/PRD-full-agent-engineering-review.md بخش ۳.۱ — قبلاً هیچ قانون صریح اولویتی بین این
+// دستورالعمل و قانون «حالت مشاوره» («اگر مطمئن نیستی سوال بپرس») بالا وجود نداشت؛ هر دو همزمان
+// روی دقیقاً همان مشتری (متقاعدسازی روشن + نادج فعال + پیام نیازمحور مبهم) قابل‌فعال‌شدن بودند و
+// با هم تناقض داشتند. تصمیم صریح: این دستورالعمل برنده می‌شود، ولی به‌جای حدس‌زدن/اختراع‌کردن یک
+// محصول نامرتبط، باید از search_products برای پیداکردن نزدیک‌ترین محصول واقعی به کل بحث استفاده
+// شود — نه سکوت/امتناع، ولی نه حدس کورکورانه هم.
 const OPEN_QUESTION_NUDGE_INSTRUCTION = `مشتری چند پیام پشت‌سرهم فقط سوال اطلاعاتی پرسیده بدون
-نزدیک‌شدن به تصمیم خرید. این‌بار جواب را با معرفی دقیقاً یک محصول مشخص (مرتبط‌ترین با کل بحث تا
-الان) و یک دعوت صریح به اضافه‌کردن به سبد تمام کن — حتی اگر مشتری دوباره فقط سوال پرسیده. هرگز نگو
-سوالاتت تموم شده یا از جواب‌دادن امتناع نکن؛ فقط مکالمه را به‌سمت یک تصمیم مشخص هدایت کن.`;
+نزدیک‌شدن به تصمیم خرید. این دستورالعمل روی قانون «اگر مطمئن نیستی سوال بپرس» در بخش «حالت مشاوره»
+بالا اولویت دارد: دیگر وقت سوال‌پرسیدن تمام شده. اگر هنوز دنبال محصول مناسب نگشته‌ای، همین الان
+search_products را با بهترین خلاصه‌ای که از کل بحث تا الان داری صدا بزن؛ بعد از نتیجه، یک محصول
+واقعی و مشخص (مرتبط‌ترین نتیجه‌ی واقعی، نه یک حدس) را با توضیح کوتاهِ چرا به بحث مرتبط است معرفی کن
+و صریح دعوت به اضافه‌کردن به سبد کن — حتی اگر مشتری دوباره فقط سوال پرسیده. هرگز نگو سوالاتت تموم
+شده یا از جواب‌دادن امتناع نکن؛ فقط مکالمه را به‌سمت یک تصمیم مشخص هدایت کن.`;
 
 // docs/PRD-sales-agent-tool-calling-architecture.md بخش ۳.۳ — یک محصول کمینه برای facts/ابزارهای
 // FULL_AGENT؛ همون شکلی که seenProducts/uiBlock derivation نیاز دارند
@@ -141,7 +173,10 @@ const PERSUASION_INSTRUCTION = `اگر جلوی یک محصول در واقعی�
    یکی را به‌جای دیگری بگویی.
 ۳. اقتدار: اگر «تعداد سفارش واقعی» زیر محصول آمده، می‌توانی به آن اشاره کنی.
 ۴. علاقه: لحن گرم و همدلانه داشته باش (طبق لحن بالا).
-۵. تقابل: همیشه اول یک جواب واقعاً کامل و مفید بده، بعد پیشنهاد بده.
+۵. تقابل: اگر واقعاً یک چیز اضافه/رایگان واقعی به مشتری می‌دهی (مثل یک نکته‌ی کاربردی رایگان
+   مرتبط با نیازش، یک راهنمای کوچک، یا ارسال رایگان/امتیاز واقعی فروشگاه)، طبیعی اشاره کن که این
+   یک لطف اضافه از طرف فروشگاه است — هرگز ادعای رایگان‌بودن/هدیه‌ی ساختگی نساز؛ اگر چیز واقعی‌ای
+   برای دادن نداری، اصلاً از این اصل استفاده نکن.
 ۶. کمیابی: فقط اگر «موجودی محدود» (هرگز عدد دقیق) یا یک کد تخفیف واقعی با مهلت نزدیک زیر آمده،
    به آن اشاره کن — هرگز فوریت ساختگی نساز.
 علاوه‌بر این شش‌تا: اگر خودِ محصول یک چیز عمومی و واقعاً شناخته‌شده در دنیاست (مثلاً یک فریم‌ورک/
@@ -156,6 +191,8 @@ persuasionTechniquesUsed بگذار (برای ثبت/گزارش داخلی فر�
 
 @Injectable()
 export class ConversationEngineService {
+  private readonly logger = new Logger(ConversationEngineService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly aiProvider: AiProviderService,
@@ -894,6 +931,19 @@ export class ConversationEngineService {
     // هیچ تطابق تحت‌اللفظی‌ای نبود — احتمالاً پیام نیازمحور است، نه اسم محصول (مثل «پیجم رشد
     // نمی‌کنه»). کل کاتالوگ را تا سقف ثابت برگردان تا خودِ مدل با توضیحات واقعی هر محصول
     // استدلال کند؛ بالاتر از این سقف خارج از محدوده‌ی این طراحی است (نیاز به retrieval واقعی دارد)
+    //
+    // docs/PRD-full-agent-engineering-review.md بخش ۴/۹ — این سقف دقیقاً روی لبه‌ی پایینی همان
+    // آستانه‌ای نشسته که PRD-sales-agent-implicit-need-detection.md گفته بود باید بازبینی شود؛
+    // بدون این لاگ هیچ راهی برای فهمیدن این‌که یک فروشگاه واقعی از این سقف رد شده نبود.
+    const totalActive = await this.prisma.product.count({
+      where: { storeId },
+    });
+    if (totalActive > CONSULTATION_FULL_CATALOG_FALLBACK_CAP) {
+      this.logger.warn(
+        `consultation fallback cap hit: store ${storeId} has ${totalActive} ` +
+          `products (cap ${CONSULTATION_FULL_CATALOG_FALLBACK_CAP}), query="${query}"`,
+      );
+    }
     return this.prisma.product.findMany({
       where: { storeId },
       orderBy: { createdAt: 'desc' },
@@ -1211,24 +1261,25 @@ ${
 - اگر مشتری مشکل پرداخت یا سوال پس از خرید (مثل سفارش قبلاً ثبت‌شده) دارد که با ابزارهای بالا
   قابل‌حل نیست، یا صریح خواست با یک آدم/پشتیبان صحبت کند، request_human_handoff را صدا بزن و
   دیگر respond_to_customer را صدا نزن — مکالمه همان‌جا تمام می‌شود.
-- اگر مشتری قبلاً محصولی را دیده (طبق سبد/تاریخچه/لنگر پایین) و فقط سوال عمومی پرسید، به‌جای
-  جست‌وجوی دوباره روی همان محصول تمرکز کن.
+- اگر مشتری قبلاً محصولی را دیده (طبق سبد/تاریخچه/آخرین محصولات مطرح‌شده بالا) و فقط سوال عمومی
+  پرسید، به‌جای جست‌وجوی دوباره روی همان محصول تمرکز کن.
 - اگر مشتری صریح عکس بیشتر خواست، از show_product_photos استفاده کن.
+- همیشه اول به سوال/نیاز واقعی مشتری یک جواب کامل و مفید بده، بعد (در صورت نیاز) پیشنهاد یا دعوت
+  به خرید را اضافه کن — نه برعکس.
 - (docs/PRD-sales-agent-consultative-recommendation.md) اگر پیام مشتری توصیف یک وضعیت/مشکل/هدف
   است (نه اسم مشخص یک محصول)، مثل یک مشاور رفتار کن: اگر با قطعیت می‌دانی کدام محصول واقعی
   مناسب است، همان یکی (حداکثر دو تای کاملاً هم‌سطح) را با توضیح کوتاهِ *چرا* دقیقاً برای همین نیاز
   مناسب است پیشنهاد بده — نه تعریف کلی/تبلیغاتی. اگر واقعاً مطمئن نیستی، به‌جای حدس‌زدن یک سوال
   کوتاه و مشخص بپرس تا هدف را دقیق‌تر کنی؛ در این حالت هیچ محصولی نام نبر و relevantProductIds را
-  خالی بگذار. لازم نیست عبارت جست‌وجو دقیقاً با اسم محصول یکی باشد — search_products روی
-  توضیحات هم جست‌وجو می‌کند و اگر هیچ‌چیز پیدا نکرد کل کاتالوگ را برمی‌گرداند تا خودت تناسب را
-  تشخیص بدهی.
+  خالی بگذار — **مگر این‌که دستورالعمل «مشتری چند پیام پشت‌سرهم فقط سوال پرسیده» (اگر پایین
+  حاضر باشد) فعال باشد، که آن وقت آن دستورالعمل اولویت دارد** (پایین توضیح داده شده دقیقاً چطور).
+  لازم نیست عبارت جست‌وجو دقیقاً با اسم محصول یکی باشد — search_products روی توضیحات هم
+  جست‌وجو می‌کند و اگر هیچ‌چیز پیدا نکرد کل کاتالوگ را برمی‌گرداند تا خودت تناسب را تشخیص بدهی.
 - در پایان (مگر وقتی request_human_handoff زده‌ای)، همیشه دقیقاً یک‌بار respond_to_customer را
   به‌عنوان آخرین قدم صدا بزن؛ relevantProductIds فقط باید شامل محصولاتی باشد که واقعاً در متن
   همین پاسخ نام برده‌ای یا معرفی کرده‌ای — هرگز شناسه‌ی محصولی از «چند نمونه از محصولات فروشگاه»
   را صرفاً چون آنجا بوده اضافه نکن، مگر همان محصول را واقعاً در پاسخت هم آورده باشی.
-${ctx.anchoredProductId ? `\nمحصول لنگر فعلی (تمرکز مکالمه): ${ctx.anchoredProductId}` : ''}${
-      persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''
-    }${
+${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       persuasionEnabled && urgentDiscount
         ? `\n\nیک کد تخفیف واقعی و زمان‌دار همین الان فعال است: «${urgentDiscount.code}»، تا ${urgentDiscount.expiresAt.toLocaleString('fa-IR')} معتبر. اگر به مکالمه مرتبط است (مثلاً مشتری نزدیک تصمیم خرید است)، می‌توانی طبیعی مطرحش کنی، حتی اگر مشتری نپرسیده — وگرنه لازم نیست اشاره کنی.`
         : ''
@@ -1365,6 +1416,7 @@ ${ctx.anchoredProductId ? `\nمحصول لنگر فعلی (تمرکز مکالم
     conversation: ConversationWithStore,
     customerMessage: string,
     model: string,
+    isFallbackAttempt = false,
   ): Promise<{
     engineResult: EngineResult;
     inputTokens: number;
@@ -1537,9 +1589,16 @@ ${ctx.anchoredProductId ? `\nمحصول لنگر فعلی (تمرکز مکالم
         if (!mutation.ok) {
           return { error: 'موجودی این محصول کافی نیست' };
         }
-        ctx = { ...ctx, cart: mutation.cart };
+        // بخش ۱.۳/۱.۴ docs/PRD-full-agent-engineering-review.md — ترتیب عمداً برعکس شد: قبلاً
+        // ctx/mutationHappened قبل از تایید persist ست می‌شدند؛ اگر persistTransition throw
+        // می‌کرد (خطای گذرای DB)، SDK خطا را به مدل برمی‌گرداند و مدل می‌توانست دوباره همین ابزار
+        // را صدا بزند، این‌بار روی ctx ای که از قبل (بدون persist موفق) تغییر کرده بود — یعنی
+        // تعداد می‌توانست دوبرابر شود. حالا دقیقاً مثل cancel_order/request_human_handoff: فقط
+        // بعد از موفقیت persist، ctx/مینی‌حالت لوکال آپدیت می‌شوند.
+        const nextCtx = { ...ctx, cart: mutation.cart };
+        await this.persistTransition(conversation, 'CART_REVIEW', nextCtx);
+        ctx = nextCtx;
         mutationHappened = true;
-        await this.persistTransition(conversation, 'CART_REVIEW', ctx);
         await this.resetClarifyAttempts(conversation);
         const total = this.cartTotal(ctx.cart);
         cartResult = { cart: ctx.cart, total };
@@ -1590,7 +1649,8 @@ ${ctx.anchoredProductId ? `\nمحصول لنگر فعلی (تمرکز مکالم
                 : 'این کد تخفیف معتبر نیست یا منقضی/تمام‌شده',
           };
         }
-        ctx = {
+        // بخش ۱.۳/۱.۴ docs/PRD-full-agent-engineering-review.md — همان ترتیب امن update_cart
+        const nextCtx = {
           ...ctx,
           appliedDiscount: {
             id: preview.id,
@@ -1598,8 +1658,9 @@ ${ctx.anchoredProductId ? `\nمحصول لنگر فعلی (تمرکز مکالم
             amountToman: preview.amountToman,
           },
         };
+        await this.persistTransition(conversation, 'CART_REVIEW', nextCtx);
+        ctx = nextCtx;
         mutationHappened = true;
-        await this.persistTransition(conversation, 'CART_REVIEW', ctx);
         return { amountToman: preview.amountToman, newTotal: preview.newTotal };
       },
     });
@@ -1748,39 +1809,79 @@ ${ctx.anchoredProductId ? `\nمحصول لنگر فعلی (تمرکز مکالم
           }),
     });
 
-    const result = await generateText({
-      model: this.aiProvider.buildClient(undefined, {
-        supportsStructuredOutputs: true,
-      })(model),
-      tools: {
-        search_products: searchProductsTool,
-        get_product_details: getProductDetailsTool,
-        update_cart: updateCartTool,
-        view_cart: viewCartTool,
-        apply_discount: applyDiscountTool,
-        create_order: createOrderTool,
-        cancel_order: cancelOrderTool,
-        answer_faq: answerFaqTool,
-        request_human_handoff: requestHumanHandoffTool,
-        show_product_photos: showProductPhotosTool,
-        respond_to_customer: respondToCustomer,
-      },
-      // docs/PRD-sales-agent-tool-calling-architecture.md بخش ۲.۳ — سقف هزینه‌ی فروشنده:
-      // تعداد قدم ابزار در هر نوبت محدود است، نه بی‌نهایت (Track B مشابه از ۴ استفاده می‌کند؛
-      // اینجا چون کل مکالمه‌ست نه فقط doBrowse، کمی بیشتر لازم است)
-      stopWhen: stepCountIs(6),
-      system: this.buildFullAgentSystemPrompt(
-        conversation,
-        ctx,
-        catalogFacts,
-        transcript,
-        nudgeActive,
-        storePersuasionEnabled,
-        urgentDiscount,
-      ),
-      prompt: customerMessage,
-      temperature: 0.3,
-    });
+    // docs/PRD-full-agent-engineering-review.md بخش ۵ — قبلاً factsOrPrompt لاگ‌شده در AI_TRACE
+    // برای FULL_AGENT فقط دوباره‌ی customerMessage بود (برچسب «نمایش کامل prompt/facts» در ادمین
+    // گمراه‌کننده بود)؛ حالا متن واقعی پرامپت سیستم همین‌جا یک‌بار ساخته و هم به generateText هم
+    // به logReply پاس داده می‌شود
+    const systemPrompt = this.buildFullAgentSystemPrompt(
+      conversation,
+      ctx,
+      catalogFacts,
+      transcript,
+      nudgeActive,
+      storePersuasionEnabled,
+      urgentDiscount,
+    );
+
+    let result;
+    try {
+      result = await generateText({
+        model: this.aiProvider.buildClient(undefined, {
+          supportsStructuredOutputs: true,
+        })(model),
+        tools: {
+          search_products: searchProductsTool,
+          get_product_details: getProductDetailsTool,
+          update_cart: updateCartTool,
+          view_cart: viewCartTool,
+          apply_discount: applyDiscountTool,
+          create_order: createOrderTool,
+          cancel_order: cancelOrderTool,
+          answer_faq: answerFaqTool,
+          request_human_handoff: requestHumanHandoffTool,
+          show_product_photos: showProductPhotosTool,
+          respond_to_customer: respondToCustomer,
+        },
+        // docs/PRD-sales-agent-tool-calling-architecture.md بخش ۲.۳ — سقف هزینه‌ی فروشنده:
+        // تعداد قدم ابزار در هر نوبت محدود است، نه بی‌نهایت (Track B مشابه از ۴ استفاده می‌کند؛
+        // اینجا چون کل مکالمه‌ست نه فقط doBrowse، کمی بیشتر لازم است)
+        stopWhen: stepCountIs(6),
+        system: systemPrompt,
+        prompt: customerMessage,
+        temperature: 0.3,
+      });
+    } catch (err) {
+      // بخش ۱.۱/۱.۴ docs/PRD-full-agent-engineering-review.md — یافته‌ی بحرانی: قبلاً این
+      // generateText هیچ try/catch نداشت. اگر قدم اول همین نوبت یک جهش واقعی را با موفقیت persist
+      // می‌کرد (مثلاً create_order/update_cart) ولی قدم دوم به بعد (rate limit، تایم‌اوت، ۵xx بعد
+      // از تمام‌شدن retry داخلی SDK) throw می‌کرد، این throw مستقیم از اینجا خارج می‌شد، از کنار
+      // چک mutationHappened پایین رد می‌شد (چون اصلاً به آن خط نمی‌رسید)، و به catch خالی
+      // runFullAgentTurn می‌رسید — جایی که اصلاً خبر نداشت جهشی رخ داده. نتیجه: یا retry کامل حلقه
+      // با مدل دیگر (ریسک دوبار افزودن به سبد/دوبار سفارش)، یا یک پیام عمومی «متوجه نشدم» بدون
+      // هیچ اشاره‌ای به جهشی که واقعاً در DB ثبت شده بود. حالا دقیقاً همان مسیر salvage که برای
+      // نبودن respond_to_customer طراحی شده بود، برای این throw هم صدا زده می‌شود — بدون رسیدن به
+      // catch بیرونی runFullAgentTurn و بدون retry کامل حلقه.
+      if (handoffResult) {
+        return {
+          engineResult: handoffResult,
+          inputTokens: 0,
+          outputTokens: 0,
+        };
+      }
+      if (mutationHappened) {
+        const engineResult = await this.salvageReplyAfterMutation(
+          conversation,
+          orderResult,
+          cartResult,
+        );
+        return {
+          engineResult,
+          inputTokens: 0,
+          outputTokens: 0,
+        };
+      }
+      throw err;
+    }
 
     if (handoffResult) {
       return {
@@ -1821,8 +1922,49 @@ ${ctx.anchoredProductId ? `\nمحصول لنگر فعلی (تمرکز مکالم
       );
     }
 
+    // docs/PRD-full-agent-engineering-review.md بخش ۵ — برای AI_TRACE ادمین؛ همه‌ی ابزارهایی
+    // که همین نوبت واقعاً صدا زده شدند (respond_to_customer جدا هم به‌عنوان text/relevantProductIds
+    // ثبت می‌شود، پس اینجا تکرار نمی‌شود) — نشان می‌دهد مدل واقعاً جست‌وجو کرده یا از حافظه جواب داده
+    const toolsCalled = result.toolCalls
+      .filter((c) => c.toolName !== 'respond_to_customer')
+      .map((c) => ({ name: c.toolName, args: c.input }));
+
     const text = finalCall.input.text.trim();
     const relevantProductIds = finalCall.input.relevantProductIds ?? [];
+
+    // بخش ۴/۱۱ docs/PRD-full-agent-engineering-review.md — جمع تمام مبلغ‌های واقعی این نوبت
+    // (قیمت محصولات دیده‌شده، جمع/تک‌تک آیتم‌های سبد، مبلغ سفارش، مبلغ تخفیف) برای چک سبک پایین
+    const knownAmounts = new Set<number>();
+    for (const p of seenProducts.values()) knownAmounts.add(p.basePrice);
+    for (const item of ctx.cart) {
+      knownAmounts.add(item.unitPrice);
+      knownAmounts.add(item.unitPrice * item.qty);
+    }
+    knownAmounts.add(this.cartTotal(ctx.cart));
+    // نکته‌ی TS: چون cartResult/orderResult فقط داخل closure ابزارها reassign می‌شوند، کامپایلر
+    // تایپ آن‌ها را در این نقطه (خارج از closure) فقط «null» می‌بیند و هر narrowing مستقیم را به
+    // never می‌رساند — cast صریح به تایپ اعلان‌شده این مشکل را دور می‌زند
+    const cartResultTotal = (
+      cartResult as { cart: CartItem[]; total: number } | null
+    )?.total;
+    if (cartResultTotal !== undefined) knownAmounts.add(cartResultTotal);
+    const orderResultAmount = (
+      orderResult as {
+        cardNumber: string;
+        ownerName: string;
+        amount: number;
+      } | null
+    )?.amount;
+    if (orderResultAmount !== undefined) knownAmounts.add(orderResultAmount);
+    if (ctx.appliedDiscount) knownAmounts.add(ctx.appliedDiscount.amountToman);
+    const suspiciousPriceClaims = findSuspiciousPriceClaims(text, knownAmounts);
+    if (suspiciousPriceClaims.length) {
+      this.logger.warn(
+        `suspicious price claim in FULL_AGENT reply: conversation ${conversation.id}, ` +
+          `amounts=[${suspiciousPriceClaims.join(', ')}], text="${text}"`,
+      );
+    }
+
     const uiBlock = this.deriveFullAgentUiBlock({
       orderResult,
       cartResult,
@@ -1867,7 +2009,7 @@ ${ctx.anchoredProductId ? `\nمحصول لنگر فعلی (تمرکز مکالم
     await this.logReply(conversation, text, uiBlock, undefined, {
       intent: 'FULL_AGENT',
       handler: 'runFullAgentTurn',
-      factsOrPrompt: customerMessage,
+      factsOrPrompt: systemPrompt,
       model,
       ...(finalCall.input.persuasionTechniquesUsed?.length
         ? { persuasionTechniquesUsed: finalCall.input.persuasionTechniquesUsed }
@@ -1875,6 +2017,15 @@ ${ctx.anchoredProductId ? `\nمحصول لنگر فعلی (تمرکز مکالم
       ...(finalCall.input.usedGeneralKnowledge
         ? { usedGeneralKnowledge: true }
         : {}),
+      relevantProductIdsRaw: relevantProductIds,
+      lastShownProducts,
+      toolsCalled,
+      initialCatalogProductIds: initialProducts.map((p) => p.id),
+      stepsUsed: result.steps.length,
+      mutationHappened,
+      progressHappened,
+      isFallbackAttempt,
+      ...(suspiciousPriceClaims.length ? { suspiciousPriceClaims } : {}),
     });
 
     return {
@@ -1927,7 +2078,12 @@ ${ctx.anchoredProductId ? `\nمحصول لنگر فعلی (تمرکز مکالم
       const fallbackStarted = Date.now();
       try {
         const { engineResult, inputTokens, outputTokens } =
-          await this.callFullAgentTurn(conversation, text, defaultModel());
+          await this.callFullAgentTurn(
+            conversation,
+            text,
+            defaultModel(),
+            true,
+          );
         await this.logAiCall(
           conversation,
           'AGENT_CAPTION',
@@ -3669,6 +3825,11 @@ answered=false بده (به‌جای حدس‌زدن).`,
       }),
     ]);
     conversation.currentState = nextState;
+    // بخش ۱.۴ docs/PRD-full-agent-engineering-review.md — قبلاً فقط ردیف DB آپدیت می‌شد، نه
+    // آبجکت درون‌حافظه‌ای؛ چون runFullAgentTurn همین آبجکت conversation را بین تلاش اول و
+    // fallback پاس می‌دهد (بدون fetch دوباره)، بدون این خط هر retry از وضعیت قبل از جهش
+    // (نه چیزی که واقعاً در DB نشسته) ادامه می‌داد
+    conversation.contextData = context;
   }
 
   private async logReply(
@@ -3758,6 +3919,32 @@ answered=false بده (به‌جای حدس‌زدن).`,
           ? { persuasionTechniquesUsed: trace.persuasionTechniquesUsed }
           : {}),
         ...(trace.usedGeneralKnowledge ? { usedGeneralKnowledge: true } : {}),
+        // docs/PRD-full-agent-engineering-review.md بخش ۵ — observability؛ فقط روی trace سطح
+        // runFullAgentTurn پر می‌شوند
+        ...(trace.relevantProductIdsRaw
+          ? { relevantProductIdsRaw: trace.relevantProductIdsRaw }
+          : {}),
+        ...(trace.lastShownProducts
+          ? { lastShownProducts: trace.lastShownProducts }
+          : {}),
+        ...(trace.toolsCalled
+          ? {
+              toolsCalled:
+                trace.toolsCalled as unknown as Prisma.InputJsonValue,
+            }
+          : {}),
+        ...(trace.initialCatalogProductIds
+          ? { initialCatalogProductIds: trace.initialCatalogProductIds }
+          : {}),
+        ...(trace.stepsUsed !== undefined
+          ? { stepsUsed: trace.stepsUsed }
+          : {}),
+        ...(trace.mutationHappened ? { mutationHappened: true } : {}),
+        ...(trace.progressHappened ? { progressHappened: true } : {}),
+        ...(trace.isFallbackAttempt ? { isFallbackAttempt: true } : {}),
+        ...(trace.suspiciousPriceClaims?.length
+          ? { suspiciousPriceClaims: trace.suspiciousPriceClaims }
+          : {}),
         voice: wantsVoice
           ? { generated: true }
           : { generated: false, reason: voiceReason },

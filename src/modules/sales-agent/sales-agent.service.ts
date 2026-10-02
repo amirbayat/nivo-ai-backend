@@ -83,7 +83,9 @@ export class SalesAgentService {
     return {
       conversationId,
       sessionToken,
+      storeId: store.id,
       storeName: store.name,
+      storeLogoKey: store.logoImageKey,
       responseStrategy: customer.salesConversations[0].responseStrategy,
       ...(initial
         ? {
@@ -131,7 +133,9 @@ export class SalesAgentService {
     return {
       conversationId: fresh.id,
       sessionToken,
+      storeId: conversation.storeId,
       storeName: conversation.store.name,
+      storeLogoKey: conversation.store.logoImageKey,
       responseStrategy: fresh.responseStrategy,
       ...(initial
         ? {
@@ -405,7 +409,9 @@ export class SalesAgentService {
     });
     return {
       state: conversation.currentState,
+      storeId: conversation.storeId,
       storeName: conversation.store.name,
+      storeLogoKey: conversation.store.logoImageKey,
       responseStrategy: conversation.responseStrategy,
       events,
     };

@@ -190,4 +190,23 @@ export class SalesAgentController {
     res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
     res.send(buffer);
   }
+
+  // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۴ — عکس پروفایل فروشگاه؛ عیناً همون الگوی
+  // getProductImage بالا (بدون auth، باید در <img> مرورگر مشتری ناشناس و در فچ سرورهای تلگرام
+  // هم لود شود)
+  @SkipThrottle()
+  @Get('stores/:storeId/logo/:key')
+  async getStoreLogo(
+    @Param('storeId') storeId: string,
+    @Param('key') key: string,
+    @Res() res: Response,
+  ) {
+    const { buffer, mimeType } = await this.storeService.getStoreLogo(
+      storeId,
+      key,
+    );
+    res.setHeader('Content-Type', mimeType);
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    res.send(buffer);
+  }
 }

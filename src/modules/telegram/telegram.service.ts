@@ -313,6 +313,15 @@ export class TelegramService {
 
     const conversation = await this.loadConversation(conversationId);
     if (!conversation) return;
+    // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۴ — عکس پروفایل فروشگاه، فقط همین یک‌بار
+    // در شروع مکالمه (مثل منوی پایین، بالا)؛ اگر فروشگاه عکس ندارد اصلاً فراخوانی نمی‌شود
+    if (store.logoImageKey) {
+      await this.sendPhoto(
+        chatId,
+        this.storeLogoUrl(store.id, store.logoImageKey),
+        store.name,
+      );
+    }
     const result = product
       ? await this.engine.showProduct(conversation, product)
       : await this.engine.startBrowse(conversation);
@@ -783,6 +792,12 @@ export class TelegramService {
     // sendPhoto با 404 مواجه می‌شود و کل uiBlock (عکس + دکمه‌ی افزودن به سبد) بی‌صدا حذف
     // می‌شود، چون callApi روی پاسخ ناموفق throw نمی‌کند، فقط لاگ می‌کند
     return `${apiUrl}/api/v1/v2/products/${productId}/images/${key}`;
+  }
+
+  // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۴ — عیناً همون الگوی productImageUrl بالا
+  private storeLogoUrl(storeId: string, key: string): string {
+    const apiUrl = this.config.get<string>('API_URL');
+    return `${apiUrl}/api/v1/v2/stores/${storeId}/logo/${key}`;
   }
 
   private async sendEngineResult(

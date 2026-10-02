@@ -2084,6 +2084,10 @@ model Store {
   // متقاعدسازی (Cialdini) در FULL_AGENT؛ هم‌خانواده‌ی دو سوئیچ بالا. effective یک محصول =
   // این AND Product.persuasionTechniquesEnabled خودش
   persuasionTechniquesEnabled   Boolean           @default(true)
+  // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۴ — عکس پروفایل فروشگاه؛ همون الگوی
+  // Product.images (کلید MinIO، نه URL مستقیم) — در چت وب بالای هدر و در پیام /start تلگرام
+  // نمایش داده می‌شود. برخلاف images محصول، تک‌فیلد است نه آرایه (یک فروشگاه یک لوگو دارد)
+  logoImageKey                  String?
   createdAt                     DateTime          @default(now())
   updatedAt                     DateTime          @updatedAt
 

@@ -14,6 +14,11 @@
 // بدون هیچ نشانه‌ی تصمیم خرید — انتظار: از نوبت ۴ (openQuestionStreak>=3 در ابتدای نوبت) نادج
 // فعال شود.
 //
+// سناریوی هفتم («conv7»، docs/PRD-full-agent-engineering-review.md بخش ۳.۱/۳.۵) ترکیب
+// متقاعدسازی+نادج+حالت مشاوره را همزمان تست می‌کند — دقیقاً همان ترکیبی که آن بررسی نشان داد
+// هیچ eval ای قبلاً همزمان تست نکرده بود، برای تایید قانون اولویت صریح جدید بین نادج و «حالت
+// مشاوره».
+//
 // اجرا: npx ts-node --transpile-only scripts/manual/run-full-agent-e2e-real-store.ts [variantKey]
 import { config as loadEnv } from 'dotenv';
 import { resolve } from 'node:path';
@@ -36,10 +41,15 @@ const fakeConfig = {
 } as unknown as ConfigService;
 
 const OPEN_QUESTION_NUDGE_THRESHOLD = 3;
+// docs/PRD-full-agent-engineering-review.md بخش ۳.۱ — عیناً کپی نسخه‌ی فیکس‌شده (اولویت صریح
+// روی قانون «حالت مشاوره»)
 const OPEN_QUESTION_NUDGE_INSTRUCTION = `مشتری چند پیام پشت‌سرهم فقط سوال اطلاعاتی پرسیده بدون
-نزدیک‌شدن به تصمیم خرید. این‌بار جواب را با معرفی دقیقاً یک محصول مشخص (مرتبط‌ترین با کل بحث تا
-الان) و یک دعوت صریح به اضافه‌کردن به سبد تمام کن — حتی اگر مشتری دوباره فقط سوال پرسیده. هرگز نگو
-سوالاتت تموم شده یا از جواب‌دادن امتناع نکن؛ فقط مکالمه را به‌سمت یک تصمیم مشخص هدایت کن.`;
+نزدیک‌شدن به تصمیم خرید. این دستورالعمل روی قانون «اگر مطمئن نیستی سوال بپرس» در بخش «حالت مشاوره»
+بالا اولویت دارد: دیگر وقت سوال‌پرسیدن تمام شده. اگر هنوز دنبال محصول مناسب نگشته‌ای، همین الان
+search_products را با بهترین خلاصه‌ای که از کل بحث تا الان داری صدا بزن؛ بعد از نتیجه، یک محصول
+واقعی و مشخص (مرتبط‌ترین نتیجه‌ی واقعی، نه یک حدس) را با توضیح کوتاهِ چرا به بحث مرتبط است معرفی کن
+و صریح دعوت به اضافه‌کردن به سبد کن — حتی اگر مشتری دوباره فقط سوال پرسیده. هرگز نگو سوالاتت تموم
+شده یا از جواب‌دادن امتناع نکن؛ فقط مکالمه را به‌سمت یک تصمیم مشخص هدایت کن.`;
 
 // docs/PRD-sales-agent-persuasion-principles.md — عیناً کپی PERSUASION_INSTRUCTION
 // (conversation-engine.service.ts)
@@ -56,7 +66,10 @@ const PERSUASION_INSTRUCTION = `اگر جلوی یک محصول در واقعی�
    یکی را به‌جای دیگری بگویی.
 ۳. اقتدار: اگر «تعداد سفارش واقعی» زیر محصول آمده، می‌توانی به آن اشاره کنی.
 ۴. علاقه: لحن گرم و همدلانه داشته باش (طبق لحن بالا).
-۵. تقابل: همیشه اول یک جواب واقعاً کامل و مفید بده، بعد پیشنهاد بده.
+۵. تقابل: اگر واقعاً یک چیز اضافه/رایگان واقعی به مشتری می‌دهی (مثل یک نکته‌ی کاربردی رایگان
+   مرتبط با نیازش، یک راهنمای کوچک، یا ارسال رایگان/امتیاز واقعی فروشگاه)، طبیعی اشاره کن که این
+   یک لطف اضافه از طرف فروشگاه است — هرگز ادعای رایگان‌بودن/هدیه‌ی ساختگی نساز؛ اگر چیز واقعی‌ای
+   برای دادن نداری، اصلاً از این اصل استفاده نکن.
 ۶. کمیابی: فقط اگر «موجودی محدود» (هرگز عدد دقیق) یا یک کد تخفیف واقعی با مهلت نزدیک زیر آمده،
    به آن اشاره کن — هرگز فوریت ساختگی نساز.
 علاوه‌بر این شش‌تا: اگر خودِ محصول یک چیز عمومی و واقعاً شناخته‌شده در دنیاست (مثلاً یک فریم‌ورک/
@@ -208,6 +221,7 @@ function buildSystemPrompt(
   transcript: string[],
   nudgeActive: boolean,
   persuasion?: PersuasionConfig,
+  lastShownProducts?: { id: string; name: string }[],
 ): string {
   const tone = toneForCategory(STORE.category);
   const storeProfile = [
@@ -226,18 +240,27 @@ function buildSystemPrompt(
   return `تو دستیار فروش یک فروشگاه در دایرکت اینستاگرام هستی و با ابزارهای زیر مستقیماً سبد/
 سفارش مشتری را مدیریت می‌کنی، نه فقط متن می‌نویسی. لحن نوشتار باید ${tone} باشد.
 ${storeProfile ? `\nاطلاعات فروشگاه:\n${storeProfile}\n` : ''}
-کاتالوگ اولیه (برای جست‌وجوی دقیق‌تر یا محصولی که اینجا نیست از search_products استفاده کن):
+چند نمونه از محصولات فروشگاه (فقط چند نمونه‌ی کلی، لزوماً ربطی به بحث فعلی ندارند — برای
+جست‌وجوی دقیق یا محصولی که اینجا نیست از search_products استفاده کن):
 ${catalogFacts(PRODUCTS, persuasion)}
 
 ${cartSummary}
 ${
-  transcriptText
-    ? `\nتاریخچه‌ی اخیر مکالمه (حتماً برای فهمیدن منظور پیام‌های ناقص/ادامه‌دار مشتری — مثل «پس اگه بخوام X بشم چی؟» بعد از بحث قبلی — این را در نظر بگیر):\n${transcriptText}\n`
+  lastShownProducts?.length
+    ? `\nآخرین محصولاتی که واقعاً در همین مکالمه مطرح/پیشنهاد شده‌اند: ${lastShownProducts.map((p) => p.name).join('، ')}\n`
     : ''
-}
+}${
+    transcriptText
+      ? `\nتاریخچه‌ی اخیر مکالمه (حتماً برای فهمیدن منظور پیام‌های ناقص/ادامه‌دار مشتری — مثل «پس اگه بخوام X بشم چی؟» بعد از بحث قبلی — این را در نظر بگیر):\n${transcriptText}\n`
+      : ''
+  }
 قوانین حیاتی:
 - هیچ عدد/اسم/شماره‌ای که از ابزارها یا واقعیت‌های بالا نیامده اختراع نکن.
 - هرگز تعداد دقیق موجودی انبار را اعلام نکن، فقط «موجود است» یا «فعلاً ناموجود».
+- اگر پیام مشتری مبهم است و اسم هیچ محصولی را نمی‌آورد (مثل «کدوم بهتره؟»، «فرقشون چیه؟»،
+  «همینو بذار تو سبد»)، منظورش تقریباً همیشه «آخرین محصولاتی که مطرح/پیشنهاد شده‌اند» (بالا) یا
+  تاریخچه‌ی اخیر مکالمه است — نه «چند نمونه از محصولات فروشگاه» که فقط یک نمونه‌ی کلی و تصادفی از
+  کل کاتالوگ است و ممکن است هیچ ربطی به این گفتگوی خاص نداشته باشد.
 - قبل از هر ادعای قیمت/موجودی/جزئیات محصولی که در کاتالوگ اولیه نبود، حتماً search_products یا
   get_product_details را صدا بزن — حدس نزن.
 - افزودن/حذف واقعی از سبد فقط با update_cart انجام می‌شود؛ هرگز فقط در متن بگو «به سبد اضافه
@@ -247,18 +270,24 @@ ${
 - اگر مشتری مشکل پرداخت یا سوال پس از خرید (مثل سفارش قبلاً ثبت‌شده) دارد که با ابزارهای بالا
   قابل‌حل نیست، یا صریح خواست با یک آدم/پشتیبان صحبت کند، request_human_handoff را صدا بزن و
   دیگر respond_to_customer را صدا نزن — مکالمه همان‌جا تمام می‌شود.
+- اگر مشتری قبلاً محصولی را دیده (طبق سبد/تاریخچه/آخرین محصولات مطرح‌شده بالا) و فقط سوال عمومی
+  پرسید، به‌جای جست‌وجوی دوباره روی همان محصول تمرکز کن.
 - اگر مشتری صریح عکس بیشتر خواست، از show_product_photos استفاده کن.
+- همیشه اول به سوال/نیاز واقعی مشتری یک جواب کامل و مفید بده، بعد (در صورت نیاز) پیشنهاد یا دعوت
+  به خرید را اضافه کن — نه برعکس.
 - (docs/PRD-sales-agent-consultative-recommendation.md) اگر پیام مشتری توصیف یک وضعیت/مشکل/هدف
   است (نه اسم مشخص یک محصول)، مثل یک مشاور رفتار کن: اگر با قطعیت می‌دانی کدام محصول واقعی
   مناسب است، همان یکی (حداکثر دو تای کاملاً هم‌سطح) را با توضیح کوتاهِ *چرا* دقیقاً برای همین نیاز
   مناسب است پیشنهاد بده — نه تعریف کلی/تبلیغاتی. اگر واقعاً مطمئن نیستی، به‌جای حدس‌زدن یک سوال
   کوتاه و مشخص بپرس تا هدف را دقیق‌تر کنی؛ در این حالت هیچ محصولی نام نبر و relevantProductIds را
-  خالی بگذار. لازم نیست عبارت جست‌وجو دقیقاً با اسم محصول یکی باشد — search_products روی
-  توضیحات هم جست‌وجو می‌کند و اگر هیچ‌چیز پیدا نکرد کل کاتالوگ را برمی‌گرداند تا خودت تناسب را
-  تشخیص بدهی.
+  خالی بگذار — **مگر این‌که دستورالعمل «مشتری چند پیام پشت‌سرهم فقط سوال پرسیده» (اگر پایین
+  حاضر باشد) فعال باشد، که آن وقت آن دستورالعمل اولویت دارد** (پایین توضیح داده شده دقیقاً چطور).
+  لازم نیست عبارت جست‌وجو دقیقاً با اسم محصول یکی باشد — search_products روی توضیحات هم
+  جست‌وجو می‌کند و اگر هیچ‌چیز پیدا نکرد کل کاتالوگ را برمی‌گرداند تا خودت تناسب را تشخیص بدهی.
 - در پایان (مگر وقتی request_human_handoff زده‌ای)، همیشه دقیقاً یک‌بار respond_to_customer را
-  به‌عنوان آخرین قدم صدا بزن؛ relevantProductIds می‌تواند شامل شناسه‌ی هر محصولی باشد که از
-  کاتالوگ اولیه یا ابزارها واقعاً دیده‌ای، نه فقط کاندیدهای اولیه.${
+  به‌عنوان آخرین قدم صدا بزن؛ relevantProductIds فقط باید شامل محصولاتی باشد که واقعاً در متن
+  همین پاسخ نام برده‌ای یا معرفی کرده‌ای — هرگز شناسه‌ی محصولی از «چند نمونه از محصولات فروشگاه»
+  را صرفاً چون آنجا بوده اضافه نکن، مگر همان محصول را واقعاً در پاسخت هم آورده باشی.${
     persuasion?.enabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''
   }${
     persuasion?.enabled && persuasion.urgentDiscount
@@ -270,6 +299,7 @@ ${
 type TurnResult = {
   text: string;
   relevantProductIds: string[];
+  lastShownProducts: { id: string; name: string }[];
   toolsCalled: string[];
   progressHappened: boolean;
   handoff: boolean;
@@ -288,12 +318,16 @@ async function runTurn(
   openQuestionStreak: number,
   customerMessage: string,
   persuasion?: PersuasionConfig,
+  lastShownProducts?: { id: string; name: string }[],
 ): Promise<TurnResult> {
   let localCart = [...cart];
   let progressHappened = false;
   let handoff = false;
   const toolsCalled: string[] = [];
   const nudgeActive = openQuestionStreak >= OPEN_QUESTION_NUDGE_THRESHOLD;
+  // docs/PRD-full-agent-engineering-review.md بخش ۰.۱/۵ — عیناً کپی توی‌فچ‌شده‌ی production:
+  // فقط محصولاتی که همین نوبت واقعاً با search_products/get_product_details صدا زده شده‌اند
+  const toolFetchedProductIds = new Set<string>();
 
   const search_products = tool({
     description:
@@ -309,6 +343,7 @@ async function runTurn(
           p.description?.toLowerCase().includes(q),
       );
       const results = literalMatches.length > 0 ? literalMatches : PRODUCTS;
+      for (const p of results) toolFetchedProductIds.add(p.id);
       return results.map((p) => ({
         id: p.id,
         name: p.name,
@@ -328,6 +363,7 @@ async function runTurn(
       toolsCalled.push('get_product_details');
       const product = PRODUCTS.find((p) => p.id === productId);
       if (!product) return { error: 'محصولی با این شناسه پیدا نشد' };
+      toolFetchedProductIds.add(product.id);
       return {
         id: product.id,
         name: product.name,
@@ -501,7 +537,13 @@ async function runTurn(
         respond_to_customer,
       },
       stopWhen: stepCountIs(6),
-      system: buildSystemPrompt(cart, transcript, nudgeActive, persuasion),
+      system: buildSystemPrompt(
+        cart,
+        transcript,
+        nudgeActive,
+        persuasion,
+        lastShownProducts,
+      ),
       prompt: customerMessage,
       temperature: 0.3,
     });
@@ -510,6 +552,7 @@ async function runTurn(
       return {
         text: '[ارجاع به انسان]',
         relevantProductIds: [],
+        lastShownProducts: lastShownProducts ?? [],
         toolsCalled,
         progressHappened,
         handoff: true,
@@ -536,9 +579,20 @@ async function runTurn(
     if (!finalCall) {
       throw new Error('respond_to_customer صدا زده نشد (به سقف قدم رسید)');
     }
+    const relevantProductIds = finalCall.input.relevantProductIds ?? [];
+    // docs/PRD-full-agent-engineering-review.md بخش ۰.۱ — عیناً کپی فیکس production: فقط
+    // محصولاتی که همین نوبت واقعاً جست‌وجو شده‌اند واجد شرایط lastShownProducts اند
+    const nextLastShown = relevantProductIds
+      .filter((id) => toolFetchedProductIds.has(id))
+      .map((id) => PRODUCTS.find((p) => p.id === id))
+      .filter((p): p is Product => !!p)
+      .map((p) => ({ id: p.id, name: p.name }));
     return {
       text: finalCall.input.text.trim(),
-      relevantProductIds: finalCall.input.relevantProductIds ?? [],
+      relevantProductIds,
+      lastShownProducts: nextLastShown.length
+        ? nextLastShown
+        : (lastShownProducts ?? []),
       toolsCalled,
       progressHappened,
       handoff: false,
@@ -552,6 +606,7 @@ async function runTurn(
     return {
       text: '',
       relevantProductIds: [],
+      lastShownProducts: lastShownProducts ?? [],
       toolsCalled,
       progressHappened,
       handoff: false,
@@ -575,6 +630,7 @@ async function runConversation(
   let cart: CartItem[] = [];
   const transcript: string[] = [];
   let openQuestionStreak = 0;
+  let lastShownProducts: { id: string; name: string }[] = [];
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
   const startedAt = Date.now();
@@ -589,6 +645,7 @@ async function runConversation(
       openQuestionStreak,
       message,
       persuasion,
+      lastShownProducts,
     );
     const latencyMs = Date.now() - turnStarted;
     totalInputTokens += r.inputTokens;
@@ -601,6 +658,8 @@ async function runConversation(
         openQuestionStreak >= OPEN_QUESTION_NUDGE_THRESHOLD
           ? ' (نادج فعال بود)'
           : ''
+      } — lastShownProducts قبل از این نوبت: ${
+        lastShownProducts.map((p) => p.name).join('، ') || '—'
       }`,
     );
     if (r.error) {
@@ -615,7 +674,9 @@ async function runConversation(
       const names = r.relevantProductIds.map(
         (id) => PRODUCTS.find((p) => p.id === id)?.name ?? id,
       );
-      console.log(`   🛍️  محصولات مرتبط: ${names.join(' + ')}`);
+      console.log(
+        `   🛍️  محصولات مرتبط (خام، قبل از فیلتر): ${names.join(' + ')}`,
+      );
     }
     if (r.persuasionTechniquesUsed.length || r.usedGeneralKnowledge) {
       console.log(
@@ -627,6 +688,7 @@ async function runConversation(
     );
 
     cart = r.cart;
+    lastShownProducts = r.lastShownProducts;
     transcript.push(`مشتری: ${message}`);
     transcript.push(`فروشنده: ${r.text}`);
     openQuestionStreak = r.progressHappened ? 0 : openQuestionStreak + 1;
@@ -725,6 +787,31 @@ async function main() {
     ],
   );
 
+  // docs/PRD-full-agent-engineering-review.md بخش ۳.۱/۳.۵ — سناریوی ۷: دقیقاً همان ترکیبی که
+  // بررسی مهندسی نشان داد هیچ eval ای همزمان تست نکرده بود — متقاعدسازی روشن + نادج فعال (۳ نوبت
+  // اطلاعاتی بدون پیشرفت) + یک نوبت چهارم که دقیقاً مصداق «حالت مشاوره: اگر مطمئن نیستی سوال
+  // بپرس» است (مشتری صریح می‌گوید هنوز مطمئن نیست کدوم مناسبش است). انتظار بعد از فیکس بخش ۳.۱:
+  // باید طبق اولویت صریح جدید، به‌جای سوال‌پرسیدن، search_products را صدا بزند و یک محصول واقعی
+  // مشخص با دعوت به سبد پیشنهاد بدهد — نه یک سوال دیگر.
+  await runConversation(
+    client,
+    'سناریوی ۷ — ترکیب متقاعدسازی+نادج+حالت مشاوره (تست قانون اولویت بخش ۳.۱)',
+    [
+      'میخوام یاد بگیرم برنامه نویسی کار کنم',
+      'این دوره‌ها چقدر طول میکشه؟',
+      'بعدش واقعا میشه باهاش کار پیدا کرد؟',
+      'هنوز مطمئن نیستم کدومش دقیقا به‌دردم میخوره، فرق اصلیشون با هم چیه؟',
+    ],
+    {
+      enabled: true,
+      lowStockProductId: '54a65651-8c73-4978-8406-4454222ee0c1',
+      urgentDiscount: {
+        code: 'FALL20',
+        hoursLeftText: 'فقط تا ۴۸ ساعت دیگه معتبره',
+      },
+    },
+  );
+
   console.log('\n\n== نکاتی که باید دستی چک شود ==');
   console.log(
     '۱. سناریوی ۱ نوبت ۵ — آیا واقعاً فهمید «فرانت» = آموزش react (نه «متوجه نشدم»)؟',
@@ -749,6 +836,10 @@ async function main() {
   );
   console.log(
     '۷. سناریوی ۵ — آیا با خاموش‌بودن کلید، هیچ‌کدام از سیگنال‌های بالا (حتی دانش عمومی) ظاهر نشد؟',
+  );
+  console.log(
+    '۸. سناریوی ۷ نوبت ۴ — مهم‌ترین چک: آیا به‌جای یک سوال دیگر، یک محصول مشخص با دعوت به سبد ' +
+      'پیشنهاد داد (قانون اولویت نادج باید برنده شود، نه حالت مشاوره)؟',
   );
 }
 
