@@ -2,18 +2,22 @@
 // OpenRouter تأیید شده‌اند (چک دستی)، حدسی نیستند. کلید (نه خودِ slug) روی
 // SalesConversation.abVariant ذخیره می‌شود تا اگر بعداً slug یک مدل عوض شد، دیتای آماری
 // قدیمی بی‌معنی نشود.
-export const DEFAULT_VARIANT_KEY = 'gpt-5.4-mini';
+// docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۴ — ۱۴۰۵/۰۷/۱۹: gpt-5.4-mini به درخواست
+// کاربر از pool فروشنده حذف شد. claude-sonnet-5.5 جایگزین شد چون این کلید هم مدل fallback
+// پیش‌فرض است هم «شبکه‌ی ایمنی» کل موتور (resolveModel()/defaultModel() پایین) — نیاز به
+// باثبات‌ترین گزینه برای tool-calling داشت، نه لزوماً ارزان‌ترین.
+export const DEFAULT_VARIANT_KEY = 'claude-sonnet-5.5';
 
 export const MODEL_VARIANTS: Record<string, string> = {
-  'gpt-5.4-mini': 'openai/gpt-5.4-mini',
   'gpt-6-luna': 'openai/gpt-6-luna',
   'gpt-6.1-sol': 'openai/gpt-6.1-sol',
   'gemini-3.8-flash': 'google/gemini-3.8-flash',
   'claude-sonnet-5.5': 'anthropic/claude-sonnet-5.5',
   'grok-4.7': 'x-ai/grok-4.7',
-  // typesafe/jev-router ۱۴۰۵/۰۷/۰۱ از pool حذف شد — فیدبک کاربر: کیفیت پاسخ ضعیف بود.
-  // resolveModel() پایین یک fallback امن دارد، پس مکالمه‌های قدیمی که از قبل
-  // abVariant:'jev-router' دارند هم بدون کرش به مدل پیش‌فرض می‌افتند.
+  // typesafe/jev-router ۱۴۰۵/۰۷/۰۱ و gpt-5.4-mini ۱۴۰۵/۰۷/۱۹ از pool حذف شدند (اولی: کیفیت
+  // پاسخ ضعیف؛ دومی: فیدبک مستقیم کاربر). resolveModel() پایین یک fallback امن دارد، پس
+  // مکالمه‌های قدیمی که از قبل abVariant با یکی از این دو کلید دارند هم بدون کرش به مدل
+  // پیش‌فرض جدید می‌افتند.
 };
 
 const VARIANT_KEYS = Object.keys(MODEL_VARIANTS);

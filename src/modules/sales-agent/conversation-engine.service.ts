@@ -1223,8 +1223,9 @@ ${
   توضیحات هم جست‌وجو می‌کند و اگر هیچ‌چیز پیدا نکرد کل کاتالوگ را برمی‌گرداند تا خودت تناسب را
   تشخیص بدهی.
 - در پایان (مگر وقتی request_human_handoff زده‌ای)، همیشه دقیقاً یک‌بار respond_to_customer را
-  به‌عنوان آخرین قدم صدا بزن؛ relevantProductIds می‌تواند شامل شناسه‌ی هر محصولی باشد که از
-  کاتالوگ اولیه یا ابزارها واقعاً دیده‌ای، نه فقط کاندیدهای اولیه.
+  به‌عنوان آخرین قدم صدا بزن؛ relevantProductIds فقط باید شامل محصولاتی باشد که واقعاً در متن
+  همین پاسخ نام برده‌ای یا معرفی کرده‌ای — هرگز شناسه‌ی محصولی از «چند نمونه از محصولات فروشگاه»
+  را صرفاً چون آنجا بوده اضافه نکن، مگر همان محصول را واقعاً در پاسخت هم آورده باشی.
 ${ctx.anchoredProductId ? `\nمحصول لنگر فعلی (تمرکز مکالمه): ${ctx.anchoredProductId}` : ''}${
       persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''
     }${
@@ -1251,6 +1252,7 @@ ${ctx.anchoredProductId ? `\nمحصول لنگر فعلی (تمرکز مکالم
     } | null;
     relevantProductIds: string[];
     seenProducts: Map<string, CompactProduct>;
+    toolFetchedProductIds: Set<string>;
   }): UiBlock {
     const {
       orderResult,
@@ -1258,6 +1260,7 @@ ${ctx.anchoredProductId ? `\nمحصول لنگر فعلی (تمرکز مکالم
       photosResult,
       relevantProductIds,
       seenProducts,
+      toolFetchedProductIds,
     } = args;
     if (orderResult) {
       return {
@@ -1283,7 +1286,18 @@ ${ctx.anchoredProductId ? `\nمحصول لنگر فعلی (تمرکز مکالم
       };
     }
     if (relevantProductIds.length > 0) {
-      const matched = relevantProductIds
+      // باگ واقعی زنده (۱۴۰۵/۰۷/۱۹، همون مکانیزم lastShownProducts بالا) — relevantProductIds
+      // همیشه در برابر seenProducts resolve می‌شد که همیشه شامل «کاتالوگ اولیه»ی بی‌ربط هم هست؛
+      // یعنی حتی بعد از فیکس lastShownProducts (برای نوبت بعد)، خودِ کارت محصول همین نوبت
+      // هنوز می‌توانست محصول اشتباه نشان بدهد. فیکس: اگر این نوبت واقعاً یک ابزار جست‌وجو/جزئیات
+      // صدا زده شده (یعنی مدل فعالانه دنبال چیز خاصی می‌گشته)، فقط شناسه‌هایی که واقعاً از همان
+      // جست‌وجو برگشته‌اند مجازند؛ اگر هیچ ابزاری صدا نزده (یعنی احتمالاً دارد مستقیماً از همان
+      // کاتالوگ اولیه جواب می‌دهد، مثل «همه‌ی محصولاتتون رو نشون بدید»)، رفتار قبلی حفظ می‌شود.
+      const candidateIds =
+        toolFetchedProductIds.size > 0
+          ? relevantProductIds.filter((id) => toolFetchedProductIds.has(id))
+          : relevantProductIds;
+      const matched = candidateIds
         .map((id) => seenProducts.get(id))
         .filter((p): p is CompactProduct => !!p)
         .slice(0, 3);
@@ -1815,6 +1829,7 @@ ${ctx.anchoredProductId ? `\nمحصول لنگر فعلی (تمرکز مکالم
       photosResult,
       relevantProductIds,
       seenProducts,
+      toolFetchedProductIds,
     });
 
     // باگ واقعی زنده (۱۴۰۵/۰۷/۱۹): FULL_AGENT هیچ‌وقت ctx.lastShownProducts را نمی‌نوشت (برخلاف
