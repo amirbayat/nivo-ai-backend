@@ -1459,6 +1459,8 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           stock: p.stock,
           images: p.images,
           description: p.description,
+          videoKey: p.videoKey,
+          videoDurationSec: p.videoDurationSec,
         },
       ]),
     );
@@ -1512,6 +1514,8 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
             stock: p.stock,
             images: p.images,
             description: p.description,
+            videoKey: p.videoKey,
+            videoDurationSec: p.videoDurationSec,
           });
           toolFetchedProductIds.add(p.id);
         }
@@ -1545,6 +1549,8 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           stock: product.stock,
           images: product.images,
           description: product.description,
+          videoKey: product.videoKey,
+          videoDurationSec: product.videoDurationSec,
         });
         toolFetchedProductIds.add(product.id);
         const persuasionNote = await this.buildPersuasionNote(
