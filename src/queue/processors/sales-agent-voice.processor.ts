@@ -6,6 +6,7 @@ import type { BillingMode, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
 import { KieProviderService } from '../../common/services/kie-provider.service';
+import { MediaTranscodeService } from '../../common/services/media-transcode.service';
 import { TelegramService } from '../../modules/telegram/telegram.service';
 import { toneForCategory } from '../../modules/sales-agent/tone-by-category';
 import { voiceForBuyer } from '../../modules/sales-agent/voice-gender';
@@ -35,6 +36,7 @@ export class SalesAgentVoiceProcessor {
     private readonly config: ConfigService,
     private readonly telegram: TelegramService,
     private readonly creditService: CreditService,
+    private readonly mediaTranscode: MediaTranscodeService,
   ) {}
 
   @Process('generate')
@@ -155,7 +157,9 @@ export class SalesAgentVoiceProcessor {
         storeId: true,
         customerId: true,
         billingMode: true,
-        customer: { select: { fullName: true, channel: true } },
+        customer: {
+          select: { fullName: true, channel: true, telegramChatId: true },
+        },
         store: { select: { category: true } },
       },
     });
@@ -166,12 +170,19 @@ export class SalesAgentVoiceProcessor {
     conversationId: string,
   ): Promise<string> {
     const buffer = await this.kie.downloadResult(resultUrl);
-    // فیدبک زنده‌ی کاربر ۱۴۰۵/۰۷/۰۹ — خروجی واقعی Kie یک فایل WAV است (resultUrl خودش با
-    // .wav تمام می‌شود)، نه mp3؛ هیچ ترنسکودی هم انجام نمی‌شود. قبلاً این‌جا 'mp3' هاردکد شده
-    // بود و sales-agent.controller.ts هم Content-Type را audio/mpeg می‌فرستاد — مرورگر بایت‌های
-    // WAV را به‌عنوان mp3 نمی‌توانست دیکود کند و پخش به‌طور خاموش شکست می‌خورد (تگ audio هیچ
-    // خطایی هم به UI نشان نمی‌داد). تلگرام چون خودش فایل را دوباره پردازش می‌کند متاثر نمی‌شد.
-    return this.storage.uploadImage(buffer, 'wav', conversationId);
+    // فیدبک کاربر ۱۴۰۵/۰۷/۱۲ — خروجی واقعی Kie یک فایل WAV است (resultUrl خودش با .wav تمام
+    // می‌شود). قبلاً اینجا بدون ترنسکود مستقیم WAV ذخیره می‌شد، به این فرض که «تلگرام خودش
+    // فایل را دوباره پردازش می‌کند، فرقی نمی‌کند» — این فرض با خطای زنده‌ی تلگرام رد شد:
+    // sendAudio با وجود دانلود موفق HTTP (تست دستی با curl روی پروداکشن: ۲۰۰، فایل WAV سالم)
+    // با «Bad Request: failed to get HTTP URL content» رد می‌شد، چون طبق مستندات خودِ تلگرام
+    // sendAudio فقط MP3/M4A واقعی را می‌پذیرد. اینجا با ffmpeg (media-transcode worker، همون
+    // زیرساخت ویدیو) به MP3 تبدیل می‌شود — برخلاف extractAudio (مخصوص ASR، افت کیفیت عمدی)،
+    // نرخ نمونه‌ی منبع دست‌نخورده می‌ماند.
+    const mp3Buffer = await this.mediaTranscode.transcodeAudioToMp3(
+      buffer,
+      'wav',
+    );
+    return this.storage.uploadImage(mp3Buffer, 'mp3', conversationId);
   }
 
   // فیدبک کاربر ۱۴۰۵/۰۷/۰۱ — kieTaskId روی payload خودِ event نوشته می‌شود تا webhook بتواند
@@ -208,6 +219,7 @@ export class SalesAgentVoiceProcessor {
       storeId: string;
       customerId: string | null;
       billingMode: BillingMode;
+      customer: { telegramChatId: string | null };
     } | null,
     voice: string,
   ): Promise<{ key: string; toneVariant: string }> {
@@ -243,9 +255,20 @@ export class SalesAgentVoiceProcessor {
     );
     await this.persistTaskTracking(eventId, taskId, traceEventId);
 
+    // فیدبک کاربر ۱۴۰۵/۰۷/۱۲ — تا این مرحله (می‌تواند تا ~۲ دقیقه طول بکشد) مشتری تلگرامی
+    // هیچ نشانه‌ای نمی‌بیند؛ sendChatAction فقط ~۵ ثانیه نمایش داده می‌شود، پس باید هر چند
+    // ثانیه تکرار شود تا پاسخ واقعی برسد — هر تلاش پولینگ (هر ۳ ثانیه) یک بار کافی است
+    const telegramChatId = billing?.customer.telegramChatId;
+    if (telegramChatId) {
+      await this.telegram.sendRecordingVoiceAction(telegramChatId);
+    }
+
     let resultUrl: string | null = null;
     for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
       await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+      if (telegramChatId) {
+        await this.telegram.sendRecordingVoiceAction(telegramChatId);
+      }
       const status = await this.kie.pollTask(taskId);
       if (status.state === 'success') {
         resultUrl = status.resultUrls[0] ?? null;

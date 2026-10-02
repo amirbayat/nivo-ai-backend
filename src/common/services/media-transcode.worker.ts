@@ -25,6 +25,11 @@ export interface TranscodeVideoTask {
   inputExt: string;
 }
 
+export interface TranscodeAudioToMp3Task {
+  inputBuffer: Buffer;
+  inputExt: string;
+}
+
 export interface NormalizedVideo {
   buffer: Buffer;
   ext: 'mp4';
@@ -103,9 +108,13 @@ function runFfmpegWithProgress(
         for (const line of lines) {
           const match = /^out_time=(\d+):(\d+):(\d+(?:\.\d+)?)/.exec(line);
           if (!match) continue;
-          const outSec = Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]);
+          const outSec =
+            Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]);
           // تا ۹۹٪ — ۱۰۰٪ فقط بعد از resolve واقعی (موفقیت آپلود خروجی) در processor ست می‌شود
-          const percent = Math.min(99, Math.max(0, Math.round((outSec / durationSec) * 100)));
+          const percent = Math.min(
+            99,
+            Math.max(0, Math.round((outSec / durationSec) * 100)),
+          );
           onProgress(percent);
         }
       });
@@ -173,6 +182,34 @@ export async function extractAudio({
       '16000',
       '-b:a',
       '64k',
+      outPath,
+    ]);
+    return readFile(outPath);
+  });
+}
+
+// فیدبک کاربر ۱۴۰۵/۰۷/۱۲ — Kie TTS فقط WAV برمی‌گرداند (sales-agent-voice.processor.ts)؛ فرض
+// قبلی «تلگرام خودش فایل را دوباره پردازش می‌کند، فرقی نمی‌کند» غلط بود — sendAudio تلگرام
+// واقعاً فقط MP3/M4A را می‌پذیرد و با WAV، با وجود دانلود موفق HTTP، «Bad Request: failed to
+// get HTTP URL content» برمی‌گرداند (با curl مستقیم روی پروداکشن تایید شد: فایل خودش کاملاً
+// سالم/قابل‌پخش بود). برخلاف extractAudio بالا (مخصوص ASR، ۱۶kHz/۶۴kbps، افت کیفیت عمدی)، اینجا
+// نرخ نمونه‌ی منبع (معمولاً ۲۴kHz از Kie) دست‌نخورده می‌ماند — فقط container/codec عوض می‌شود
+export async function transcodeAudioToMp3({
+  inputBuffer,
+  inputExt,
+}: TranscodeAudioToMp3Task): Promise<Buffer> {
+  return withTempDir(async (dir) => {
+    const inPath = join(dir, `${randomUUID()}.${inputExt}`);
+    const outPath = join(dir, `${randomUUID()}.mp3`);
+    await writeFile(inPath, inputBuffer);
+    await runFfmpeg([
+      '-y',
+      '-i',
+      inPath,
+      '-c:a',
+      'libmp3lame',
+      '-b:a',
+      '128k',
       outPath,
     ]);
     return readFile(outPath);
@@ -292,7 +329,10 @@ export async function transcodeVideo({
   inputBuffer,
   inputExt,
 }: TranscodeVideoTask): Promise<Buffer> {
-  const normalized = await normalizeVideoForProviders({ inputBuffer, inputExt });
+  const normalized = await normalizeVideoForProviders({
+    inputBuffer,
+    inputExt,
+  });
   return normalized.buffer;
 }
 
@@ -453,7 +493,9 @@ export async function burnCaptions({
     const concatLines: string[] = ['ffconcat version 1.0'];
     frames.forEach((frame, i) => {
       concatLines.push(`file '${framePaths[i]}'`);
-      concatLines.push(`duration ${((frame.endMs - frame.startMs) / 1000).toFixed(3)}`);
+      concatLines.push(
+        `duration ${((frame.endMs - frame.startMs) / 1000).toFixed(3)}`,
+      );
     });
     // ffconcat: duration آخرین فایل فقط با تکرار همان فایل بدون duration اعمال می‌شود
     if (framePaths.length > 0) {
@@ -515,7 +557,9 @@ export async function burnCaptions({
         outPath,
       ],
       durationSec,
-      onProgress ? (percent) => onProgress(15 + Math.round(percent * 0.85)) : undefined,
+      onProgress
+        ? (percent) => onProgress(15 + Math.round(percent * 0.85))
+        : undefined,
     );
     return readFile(outPath);
   });

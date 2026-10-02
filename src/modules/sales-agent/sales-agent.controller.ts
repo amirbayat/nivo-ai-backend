@@ -155,9 +155,9 @@ export class SalesAgentController {
       conversationId,
       key,
     );
-    // فایل واقعاً WAV است (sales-agent-voice.processor.ts downloadAndStore) — قبلاً اینجا
-    // audio/mpeg فرستاده می‌شد و مرورگر دیکود می‌کرد fail می‌شد (پخش خاموش، بدون خطای قابل‌دیدن)
-    res.setHeader('Content-Type', 'audio/wav');
+    // فیدبک کاربر ۱۴۰۵/۰۷/۱۲ — sales-agent-voice.processor.ts downloadAndStore حالا WAV
+    // خروجی Kie را به MP3 ترنسکود می‌کند (sendAudio تلگرام فقط MP3/M4A واقعی را می‌پذیرد)
+    res.setHeader('Content-Type', 'audio/mpeg');
     res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
     res.send(buffer);
   }

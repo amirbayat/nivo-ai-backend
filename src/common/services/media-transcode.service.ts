@@ -6,6 +6,7 @@ import type {
   BurnCaptionsTask,
   ExtractAudioTask,
   NormalizedVideo,
+  TranscodeAudioToMp3Task,
   TranscodeVideoTask,
   VideoDimensions,
 } from './media-transcode.worker';
@@ -40,6 +41,15 @@ export class MediaTranscodeService implements OnModuleDestroy {
     // rewrap، کالرهایی مثل MinIO.putObject (چک isBuffer) یا Buffer.prototype.toString('base64')
     // (که روی Uint8Array خام نادیده گرفته می‌شود و یک رشته‌ی اعشاری comma-separated بی‌معنی
     // می‌دهد) بی‌سروصدا داده‌ی خراب تولید می‌کنند
+    return Buffer.from(result);
+  }
+
+  async transcodeAudioToMp3(
+    inputBuffer: Buffer,
+    inputExt: string,
+  ): Promise<Buffer> {
+    const task: TranscodeAudioToMp3Task = { inputBuffer, inputExt };
+    const result = await this.pool.run(task, { name: 'transcodeAudioToMp3' });
     return Buffer.from(result);
   }
 

@@ -103,6 +103,17 @@ export class TelegramService {
     await this.callApi('sendAudio', { chat_id: chatId, audio: audioUrl });
   }
 
+  // فیدبک کاربر ۱۴۰۵/۰۷/۱۲ — تا وقتی وویس آماده نشده (تا ~۲ دقیقه طول می‌کشد)، مشتری هیچ
+  // نشانه‌ای نمی‌بیند که ربات دارد صدا آماده می‌کند؛ sendChatAction نشانگر بومی تلگرام («در
+  // حال ضبط صدا...») است، نه یک پیام متنی جدا. طبق مستندات تلگرام هر ارسال فقط ~۵ ثانیه
+  // نمایش داده می‌شود، پس باید در حین انتظار تکرار شود (sales-agent-voice.processor.ts)
+  async sendRecordingVoiceAction(chatId: string): Promise<void> {
+    await this.callApi('sendChatAction', {
+      chat_id: chatId,
+      action: 'record_voice',
+    });
+  }
+
   async handleUpdate(update: TelegramUpdate): Promise<void> {
     try {
       if (update.callback_query) {
