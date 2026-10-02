@@ -269,7 +269,30 @@ export class TelegramService {
 
     let conversationId: string;
     if (existing?.salesConversations.length) {
-      conversationId = existing.salesConversations[0].id;
+      // فیدبک کاربر ۱۴۰۵/۰۷/۱۲: کاربری لینک /start را دوباره زد (یعنی صریحاً «از نو شروع کن»)
+      // ولی چون مکالمه‌ی قبلی هنوز archivedAt نداشت (نصفه‌کاره مانده بود، نه تکمیل/رد‌شده)،
+      // همان مکالمه‌ی قدیمی (با کارت/وضعیت کهنه) بی‌صدا ادامه پیدا می‌کرد — از دید کاربر
+      // انگار اصلاً سشن جدیدی شروع نشده بود. حالا دقیقاً مثل الگوی موجود restartConversation
+      // در sales-agent.service.ts («گفتگوی جدید» در وب): مکالمه‌ی قبلی آرشیو می‌شود و یک
+      // SalesConversation تازه برای همان Customer ساخته می‌شود — نه یک Customer جدید
+      const billingMode = await this.creditService.decideBillingMode(store.id);
+      const created = await this.prisma.$transaction(async (tx) => {
+        await tx.salesConversation.update({
+          where: { id: existing.salesConversations[0].id },
+          data: { archivedAt: new Date() },
+        });
+        return tx.salesConversation.create({
+          data: {
+            storeId: store.id,
+            customerId: existing.id,
+            abVariant: pickVariant(),
+            voiceVariant: pickVoiceVariant(),
+            responseStrategy: pickResponseStrategy(),
+            billingMode,
+          },
+        });
+      });
+      conversationId = created.id;
     } else if (existing) {
       // مشتری قبلاً این فروشگاه را دیده ولی مکالمه‌ی فعالی ندارد (آخرینش تکمیل/رد شده) —
       // docs/PRD-conversation-history.md: همان Customer می‌ماند، فقط یک مکالمه‌ی تازه

@@ -26,10 +26,13 @@ export function pickVariant(): string {
   return VARIANT_KEYS[Math.floor(Math.random() * VARIANT_KEYS.length)];
 }
 
-// docs/PRD-sales-agent-voice.md بخش ۶.۱ — A/B تست جدا از انتخاب مدل بالا (عمود متفاوت:
-// «وویس بفرستیم یا نه»)، یک‌بار در ساخت مکالمه تصادفی (۵۰/۵۰) تعیین می‌شود.
+// docs/PRD-sales-agent-voice.md بخش ۶.۱ — قبلاً یک A/B تصادفی ۵۰/۵۰ بود (نیمی از مکالمه‌ها
+// هیچ‌وقت وویس نمی‌گرفتند). کاربر ۱۴۰۵/۰۷/۱۲ صریحاً خواست وویس کلاً روشن باشد (فیدبک: روی
+// تلگرام اصلاً وویس نمی‌داد) — عیناً همان کات‌اوور pickResponseStrategy پایین؛ کد قدیمی حذف
+// نشده، فقط دیگر OFF برنمی‌گرداند. محدودیت‌های دیگر (VOICE_MIN_REPLY_CHARS، سقف
+// freeVoiceConversationsUsed و...) در conversation-engine.service.ts دست‌نخورده می‌مانند.
 export function pickVoiceVariant(): 'ON' | 'OFF' {
-  return Math.random() < 0.5 ? 'ON' : 'OFF';
+  return 'ON';
 }
 
 // docs/PRD-sales-agent-tool-calling-architecture.md بخش ۷ (فاز ۴) — ۱۴۰۵/۰۷/۱۲: بعد از
