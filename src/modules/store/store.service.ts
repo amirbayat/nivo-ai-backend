@@ -5,7 +5,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import type { OrderStatus, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import type { OrderStatus } from '@prisma/client';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import * as XLSX from 'xlsx';
@@ -27,6 +28,7 @@ import {
   parseProductVideos,
   type ProductVideoItem,
 } from './product-video.types';
+import { clampProductSpecs } from './product-specs.types';
 
 // docs/PRD-product-strategy-and-roadmap.md بخش ۳.۱ — چک‌لیست سطح فروشگاه
 const MIN_STORE_KB_ENTRIES = 3;
@@ -238,7 +240,15 @@ export class StoreService {
     await this.getOwnedProduct(sellerId, storeId, productId);
     if (dto.code)
       await this.assertProductCodeAvailable(storeId, dto.code, productId);
-    return this.prisma.product.update({ where: { id: productId }, data: dto });
+    const { specs: rawSpecs, ...rest } = dto;
+    const specs =
+      rawSpecs !== undefined
+        ? (clampProductSpecs(rawSpecs ?? undefined) ?? Prisma.DbNull)
+        : undefined;
+    return this.prisma.product.update({
+      where: { id: productId },
+      data: { ...rest, ...(specs !== undefined ? { specs } : {}) },
+    });
   }
 
   async deleteProduct(sellerId: string, storeId: string, productId: string) {

@@ -1,4 +1,5 @@
 import {
+  IsArray,
   IsBoolean,
   IsInt,
   IsOptional,
@@ -7,6 +8,7 @@ import {
   MaxLength,
 } from 'class-validator';
 import { fa } from '../../../i18n/fa';
+import type { ProductSpecItem } from '../product-specs.types';
 
 // گام ۳ سند PRD-mvp-launch-plan.md — ویرایش سریع از تب «محصولات» پنل فروشنده
 export class UpdateProductDto {
@@ -43,4 +45,10 @@ export class UpdateProductDto {
   @IsOptional()
   @IsBoolean()
   persuasionTechniquesEnabled?: boolean;
+
+  // docs/PRD-seller-knowledge-base.md بخش ۹.۲ (سوم) — فروشنده می‌تواند پیشنهاد AI را (بعد از
+  // اعمال محلی در فرم) مثل description با همین دکمه‌ی اصلی «ذخیره» persist کند؛ null برای پاک‌کردن
+  @IsOptional()
+  @IsArray()
+  specs?: ProductSpecItem[] | null;
 }

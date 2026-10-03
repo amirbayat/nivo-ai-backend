@@ -425,6 +425,41 @@ export class StoreController {
     );
   }
 
+  // docs/PRD-seller-knowledge-base.md بخش ۹.۲ (دوم، مورد ۵) — استخراج نام/مشخصات/توضیح از عکس
+  @Post(':id/products/:productId/ai-complete-from-photo')
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: 5 * 1024 * 1024 } }),
+  )
+  completeProductInfoFromPhoto(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('productId') productId: string,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException(fa.store.imageOnly);
+    return this.storeKbService.completeProductInfoFromPhoto(
+      user.sub,
+      id,
+      productId,
+      file,
+    );
+  }
+
+  // docs/PRD-seller-knowledge-base.md بخش ۹.۲ (دوم، مورد ۶) — تکمیل خودکار همه‌ی محصولات
+  // کم‌تکمیل فروشگاه (حداکثر ۲۰ تا در هر اجرا)، نتیجه یک‌جا برای صفحه‌ی مرور/تایید دسته‌ای
+  @Post(':id/products/ai-complete-bulk')
+  bulkCompleteProductInfo(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Query('withWebSearch') withWebSearch?: string,
+  ) {
+    return this.productEnrichmentService.sellerBulkComplete(
+      user.sub,
+      id,
+      withWebSearch === 'true',
+    );
+  }
+
   // باکس دانش فروشگاه (بخش ۳)
   @Get(':id/knowledge')
   listKb(

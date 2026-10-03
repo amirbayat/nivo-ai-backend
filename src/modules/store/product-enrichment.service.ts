@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StoreService } from './store.service';
 import { StoreKbService } from './store-kb.service';
@@ -14,6 +15,11 @@ const ACTIVE_DRAFT_STATUSES = [
   'PENDING_ADMIN_REVIEW',
   'PENDING_SELLER_REVIEW',
 ] as const;
+
+// docs/PRD-seller-knowledge-base.md بخش ۹.۲ (دوم، مورد ۶) — «سقف تعداد در هر اجرا ثابت و
+// بدون تنظیم‌پذیری» تا هزینه‌ی غیرمنتظره رخ ندهد؛ هم‌عدد PAGE_SIZE بالا هست ولی مفهوماً جدا
+// (آن صفحه‌بندی لیست ادمین است، این سقف واقعی یک اجرای تکمیل گروهی فروشنده)
+const SELLER_BULK_COMPLETE_CAP = 20;
 
 // docs/PRD-admin-product-enrichment-review.md — چرخه‌ی عمر ProductEnrichmentDraft: تولید محتوا
 // (StoreKbService.adminGenerateEnrichmentDraft) جدا از این سرویس است؛ این‌جا فقط lifecycle
@@ -154,7 +160,12 @@ export class ProductEnrichmentService {
       }),
       this.prisma.product.update({
         where: { id: productId },
-        data: { description: draft.suggestedDescription },
+        data: {
+          description: draft.suggestedDescription,
+          // docs/PRD-seller-knowledge-base.md بخش ۹.۲ (سوم) — قبلاً suggestedSpecs فقط به متن
+          // description چسبانده می‌شد؛ حالا جدا و ساختاریافته هم روی خودِ محصول ذخیره می‌شود
+          specs: draft.suggestedSpecs ?? Prisma.DbNull,
+        },
       }),
     ]);
     return updatedProduct;
@@ -175,6 +186,82 @@ export class ProductEnrichmentService {
       where: { id: draft.id },
       data: { status: 'SELLER_REJECTED', sellerDecidedAt: new Date() },
     });
+  }
+
+  // docs/PRD-seller-knowledge-base.md بخش ۹.۲ (دوم، مورد ۶) — نسخه‌ی scoped-به-فروشگاه
+  // adminListLowCompleteness بالا؛ عمداً groupBy را دوباره این‌جا می‌نویسد (به‌جای فراخوان متد
+  // خصوصی StoreService.relatedKbEntryCounts) — همون الگوی خودِ این فایل در adminListLowCompleteness
+  async sellerListLowCompleteness(sellerId: string, storeId: string) {
+    await this.storeService.getOwned(sellerId, storeId);
+    const products = await this.prisma.product.findMany({
+      where: { storeId },
+      orderBy: { createdAt: 'desc' },
+    });
+    const kbCounts = await this.prisma.storeKbEntry.groupBy({
+      by: ['relatedProductId'],
+      where: { storeId, isActive: true, relatedProductId: { not: null } },
+      _count: { _all: true },
+    });
+    const kbCountByProduct = new Map(
+      kbCounts.map((c) => [c.relatedProductId as string, c._count._all]),
+    );
+    return products
+      .map((p) => ({
+        id: p.id,
+        name: p.name,
+        completeness: computeProductCompleteness(
+          p,
+          kbCountByProduct.get(p.id) ?? 0,
+        ),
+      }))
+      .filter((p) => p.completeness.percent < 100)
+      .slice(0, SELLER_BULK_COMPLETE_CAP);
+  }
+
+  // تولید محتوا دقیقاً با همون متد تک‌محصولی StoreKbService.completeProductInfo انجام می‌شود —
+  // یعنی cache لایه‌ی CanonicalProduct و منطق کسر اعتبار عیناً تکرار می‌شود، فقط در یک حلقه.
+  // اگر اعتبار فروشگاه وسط حلقه تمام شود، completeProductInfo خودش exception می‌اندازد — همان
+  // لحظه حلقه متوقف می‌شود (ادامه دادن بی‌فایده است، همه‌ی موارد بعدی هم همین خطا را می‌گیرند)
+  async sellerBulkComplete(
+    sellerId: string,
+    storeId: string,
+    withWebSearch: boolean,
+  ) {
+    const lowCompleteness = await this.sellerListLowCompleteness(
+      sellerId,
+      storeId,
+    );
+    const items: Array<{
+      productId: string;
+      productName: string;
+      suggestedDescription?: string;
+      suggestedQuestions?: string[];
+      suggestedSpecs?: { label: string; value: string }[];
+      sourceNote?: string;
+      error?: string;
+    }> = [];
+    for (const p of lowCompleteness) {
+      try {
+        const result = await this.storeKb.completeProductInfo(
+          sellerId,
+          storeId,
+          p.id,
+          withWebSearch,
+        );
+        items.push({ productId: p.id, productName: p.name, ...result });
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : fa.store.productNotFound;
+        items.push({ productId: p.id, productName: p.name, error: message });
+        if (
+          withWebSearch &&
+          message === fa.store.insufficientCreditForWebSearch
+        ) {
+          break;
+        }
+      }
+    }
+    return { items };
   }
 
   // جلوی double-submit از یک تب ادمین قدیمی/رفرش‌نشده را می‌گیرد — اکشن فقط روی وضعیت

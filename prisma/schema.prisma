@@ -2190,6 +2190,11 @@ model Product {
   videos                      Json     @default("[]")
   // دستیار تکمیل محصول با AI (docs/PRD-seller-knowledge-base.md بخش ۱.۱) — قبلاً اصلاً وجود نداشت
   description                 String?  @db.Text
+  // docs/PRD-seller-knowledge-base.md بخش ۹.۲ (سوم) — [{ label: string, value: string }]؛ قبلاً
+  // suggestedSpecs فقط به متن description اضافه می‌شد (composeFinalDescription)، یعنی هیچ مشخصات
+  // ساختاریافته‌ای در DB نبود. nullable (نه آرایه‌ی پیش‌فرض خالی) چون اکثر محصولات قدیمی اصلاً
+  // specs ندارند و تمایز «هنوز enrich نشده» با «enrich شده ولی specs نداشت» مهم است
+  specs                       Json?
   // docs/PRD-telegram-bot-channel.md بخش ۹.۳ — کد کوتاه اختیاری که فروشنده روی محتوای
   // تبلیغاتی‌اش می‌گذارد؛ خریدار به‌جای اسم محصول می‌تواند کد را بگوید (searchProducts اول
   // یک exact match روی این را امتحان می‌کند). یکتا فقط در سطح فروشگاه، نه سراسری.

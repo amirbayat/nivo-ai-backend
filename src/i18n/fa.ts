@@ -156,6 +156,9 @@ export const fa = {
       'نتونستیم این لینک رو بخونیم — لطفاً اطلاعات محصول رو دستی وارد کن',
     insufficientCreditForWebSearch:
       'اعتبار فروشگاه برای تکمیل با جستجوی وب کافی نیست — از بخش «اعتبار هوش مصنوعی» شارژ کن',
+    // docs/PRD-seller-knowledge-base.md بخش ۹.۲ (دوم، مورد ۵)
+    insufficientCreditForPhotoEnrichment:
+      'اعتبار فروشگاه برای تکمیل از روی عکس کافی نیست — از بخش «اعتبار هوش مصنوعی» شارژ کن',
     productCodeTaken:
       'این کد قبلاً برای محصول دیگری در همین فروشگاه استفاده شده',
     telegramConnectTokenInvalid: 'این توکن اتصال تلگرام نامعتبر یا منقضی شده',

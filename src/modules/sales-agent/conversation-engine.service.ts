@@ -22,6 +22,10 @@ import {
   parseProductVideos,
   type ProductVideoItem,
 } from '../store/product-video.types';
+import {
+  parseProductSpecs,
+  formatSpecsForFacts,
+} from '../store/product-specs.types';
 import { CreditService } from './credit.service';
 import { AbuseGuardService } from './abuse-guard.service';
 import { TelegramApiClientService } from '../telegram/telegram-api-client.service';
@@ -71,6 +75,8 @@ type ProductLike = {
   description?: string | null;
   // docs/PRD-product-video.md بخش ۴ — ستون Json خام (Prisma.JsonValue)، با parseProductVideos می‌خوانیم
   videos?: unknown;
+  // docs/PRD-seller-knowledge-base.md بخش ۹.۲ (سوم) — ستون Json خام، با parseProductSpecs می‌خوانیم
+  specs?: unknown;
 };
 
 // آستانه‌ی handoff: بعد از این تعداد پیام پیاپی نامفهوم/بی‌نتیجه، مکالمه به انسان سپرده
@@ -385,11 +391,12 @@ export class ConversationEngineService {
       basePrice: number;
       stock: number;
       description?: string | null;
+      specs?: unknown;
       persuasionTechniquesEnabled: boolean;
     },
     storePersuasionEnabled: boolean,
   ): Promise<string> {
-    const base = `${product.name} (شناسه: ${product.id}, ${product.basePrice} تومان)${product.stock === 0 ? ' — فعلاً ناموجود' : ''}${product.description ? ` — توضیحات: ${truncateDescriptionForFacts(product.description)}` : ''}`;
+    const base = `${product.name} (شناسه: ${product.id}, ${product.basePrice} تومان)${product.stock === 0 ? ' — فعلاً ناموجود' : ''}${product.description ? ` — توضیحات: ${truncateDescriptionForFacts(product.description)}` : ''}${formatSpecsForFacts(parseProductSpecs(product.specs))}`;
     const note = await this.buildPersuasionNote(
       storeId,
       product,
@@ -1084,6 +1091,7 @@ export class ConversationEngineService {
           description: product.description
             ? truncateDescriptionForFacts(product.description)
             : null,
+          specs: parseProductSpecs(product.specs),
         };
       },
     });
@@ -1584,6 +1592,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           description: p.description
             ? truncateDescriptionForFacts(p.description)
             : null,
+          specs: parseProductSpecs(p.specs),
         }));
       },
     });
@@ -1622,6 +1631,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           description: product.description
             ? truncateDescriptionForFacts(product.description)
             : null,
+          specs: parseProductSpecs(product.specs),
           ...(persuasionNote ? { persuasion: persuasionNote.trim() } : {}),
         };
       },
@@ -3011,7 +3021,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     // عمداً بدون عدد موجودی در واقعیت‌هایی که به مدل داده می‌شود — caption() فقط از همین
     // واقعیت‌ها جمله می‌سازد، پس هر عددی اینجا باشد عیناً به مشتری گفته می‌شود. فروشنده
     // نمی‌خواهد تعداد واقعی موجودی افشا شود؛ فقط وضعیت موجود/ناموجود کافی است.
-    const facts = `مشتری از لینک مستقیم این محصول وارد شده: ${product.name} (${product.basePrice} تومان)${product.stock === 0 ? ' — فعلاً ناموجود' : ''}${product.description ? `\nتوضیحات محصول: ${truncateDescriptionForFacts(product.description)}` : ''}${await this.commentsFactsSuffix(product.id)}${await this.crossSellFactsSuffix(conversation.storeId, product.id)}`;
+    const facts = `مشتری از لینک مستقیم این محصول وارد شده: ${product.name} (${product.basePrice} تومان)${product.stock === 0 ? ' — فعلاً ناموجود' : ''}${product.description ? `\nتوضیحات محصول: ${truncateDescriptionForFacts(product.description)}` : ''}${formatSpecsForFacts(parseProductSpecs(product.specs))}${await this.commentsFactsSuffix(product.id)}${await this.crossSellFactsSuffix(conversation.storeId, product.id)}`;
     // skipGreeting=true چون finalReply پایین همیشه (بدون قید isFirstReply) یک buildGreeting
     // جلوی همین reply می‌چسباند — بدون این پرچم، caption() خودش هم یک «سلام!» جدا می‌ساخت
     const reply = await this.caption(facts, conversation, undefined, true);
@@ -3067,7 +3077,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     const isFirstReply = conversation.currentState === 'GREETING';
 
     // همون دلیل showProduct بالا — بدون عدد موجودی در واقعیت‌ها
-    const facts = `این محصولات فروشگاه است: ${products.map((p) => `${p.name} (${p.basePrice} تومان)${p.stock === 0 ? ' — فعلاً ناموجود' : ''}${p.description ? ` — توضیحات: ${truncateDescriptionForFacts(p.description)}` : ''}`).join('، ')}`;
+    const facts = `این محصولات فروشگاه است: ${products.map((p) => `${p.name} (${p.basePrice} تومان)${p.stock === 0 ? ' — فعلاً ناموجود' : ''}${p.description ? ` — توضیحات: ${truncateDescriptionForFacts(p.description)}` : ''}${formatSpecsForFacts(parseProductSpecs(p.specs))}`).join('، ')}`;
 
     // docs/PRD-sales-agent-response-strategy-ab.md بخش ۱، جدول Track A — جدول تصمیمی که
     // docs/PRD-sales-agent-implicit-need-detection.md فاز ۱ محاسبه می‌کرد ولی تا امروز هیچ‌جا
@@ -4171,10 +4181,10 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
 
     const products = await this.prisma.product.findMany({
       where: { id: { in: recentIds }, storeId: conversation.storeId },
-      select: { name: true, description: true },
+      select: { name: true, description: true, specs: true },
     });
     const withDescription = products.filter(
-      (p): p is { name: string; description: string } =>
+      (p): p is (typeof products)[number] & { description: string } =>
         !!p.description?.trim(),
     );
     if (withDescription.length === 0) return null;
@@ -4190,7 +4200,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
 answered=true و یک پیام فارسی کوتاه (۲-۳ جمله، لحن ${tone}) بده — هیچ چیزی (قیمت/موجودی/مشخصات)
 که در توضیحات نیامده حدس نزن یا اختراع نکن. اگر توضیحات ربطی به این سؤال ندارد یا کافی نیست،
 answered=false بده (به‌جای حدس‌زدن).`,
-        prompt: `توضیح محصولات:\n${withDescription.map((p) => `${p.name}: ${p.description}`).join('\n')}\n\nسؤال مشتری: ${question}`,
+        prompt: `توضیح محصولات:\n${withDescription.map((p) => `${p.name}: ${p.description}${formatSpecsForFacts(parseProductSpecs(p.specs))}`).join('\n')}\n\nسؤال مشتری: ${question}`,
       });
       await this.logTextCreditUsage(
         conversation,

@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { embed, cosineSimilarity, generateObject, generateText } from 'ai';
-import type { RepairTextFunction } from 'ai';
+import type { RepairTextFunction, UserModelMessage } from 'ai';
 import { z } from 'zod';
 import type { StoreKbKind, CanonicalProduct } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -22,6 +22,8 @@ import { fa } from '../../i18n/fa';
 import { PricingService } from '../usage/pricing.service';
 import { StoreService } from './store.service';
 import { CommentsService } from '../comments/comments.service';
+import { defaultModel } from '../sales-agent/model-variants';
+import { clampProductSpecs } from './product-specs.types';
 
 // docs/PRD-seller-knowledge-base.md بخش ۲.۳ — دقیقاً همان shape که chat.service.ts's
 // OPENROUTER_WEB_SEARCH_TOOLS استفاده می‌کند (کپی محلی، نه import — آن فایل چیزی export نمی‌کند
@@ -48,18 +50,6 @@ function normalizeProductName(name: string): string {
   return name.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
-// docs/PRD-admin-product-enrichment-review.md بخش ۲ — Product فیلد مجزا برای specs ندارد؛
-// ترکیب همین‌جا (وقت تولید) انجام می‌شود تا ادمین/فروشنده دقیقاً متنی را که روی
-// Product.description نوشته خواهد شد تایید کنند، نه یک ترکیب نامرئی وقت اعمال
-function composeFinalDescription(
-  description: string,
-  specs?: { label: string; value: string }[],
-): string {
-  if (!specs?.length) return description;
-  const specsBlock = specs.map((s) => `- ${s.label}: ${s.value}`).join('\n');
-  return `${description}\n\nمشخصات:\n${specsBlock}`;
-}
-
 // سقف‌های خروجی تولیدشده توسط AI قبل از persist در DB (CanonicalProduct/ProductEnrichmentDraft/
 // Product.description). عمداً این‌ها در خودِ zod schema بالا به‌صورت .max() نیستند — اگر آنجا
 // بودند و مدل بیشتر می‌نوشت، generateObject دوباره با AI_NoObjectGeneratedError («response did
@@ -69,23 +59,7 @@ function composeFinalDescription(
 const MAX_SUGGESTED_DESCRIPTION_CHARS = 1000;
 const MAX_SUGGESTED_QUESTIONS = 6;
 const MAX_QUESTION_CHARS = 200;
-const MAX_SUGGESTED_SPECS = 8;
-const MAX_SPEC_LABEL_CHARS = 40;
-const MAX_SPEC_VALUE_CHARS = 120;
 const MAX_SOURCE_NOTE_CHARS = 300;
-
-function clampSpecs(
-  specs: { label: string; value: string }[] | undefined,
-): { label: string; value: string }[] | undefined {
-  const clamped = specs
-    ?.map((s) => ({
-      label: s.label.trim().slice(0, MAX_SPEC_LABEL_CHARS),
-      value: s.value.trim().slice(0, MAX_SPEC_VALUE_CHARS),
-    }))
-    .filter((s) => s.label && s.value)
-    .slice(0, MAX_SUGGESTED_SPECS);
-  return clamped?.length ? clamped : undefined;
-}
 
 function clampEnrichmentOutput<
   T extends {
@@ -111,7 +85,7 @@ function clampEnrichmentOutput<
       .trim()
       .slice(0, MAX_SUGGESTED_DESCRIPTION_CHARS),
     suggestedQuestions,
-    suggestedSpecs: clampSpecs(input.suggestedSpecs),
+    suggestedSpecs: clampProductSpecs(input.suggestedSpecs),
     sourceNote:
       input.sourceNote?.trim().slice(0, MAX_SOURCE_NOTE_CHARS) || undefined,
   };
@@ -566,6 +540,111 @@ sourceNote را خالی بگذار. پاسخ را فقط به‌صورت یک �
     }
   }
 
+  // docs/PRD-seller-knowledge-base.md بخش ۹.۲ (دوم، مورد ۵) — فروشنده یک عکس (برچسب کالا یا
+  // خودِ کالا) آپلود می‌کند، مدل vision نام/مشخصات/پیش‌نویس توضیح را از روی عکس استخراج می‌کند.
+  // هزینه مثل withWebSearch از اعتبار فروشگاه کسر می‌شود (همون CreditUsageKind.PRODUCT_ENRICHMENT،
+  // enum جدید لازم نیست). عمداً از CanonicalProduct cache استفاده نمی‌کند — آن لایه بر اساس نام
+  // نرمال‌شده‌ی متنی است، نه محتوای عکس، و این دو هم‌خوان‌سازی مطمئنی ندارند.
+  async completeProductInfoFromPhoto(
+    sellerId: string,
+    storeId: string,
+    productId: string,
+    file: Express.Multer.File,
+  ) {
+    const store = await this.storeService.getOwned(sellerId, storeId);
+    const product = await this.prisma.product.findUnique({
+      where: { id: productId },
+    });
+    if (!product || product.storeId !== storeId) {
+      throw new NotFoundException(fa.store.productNotFound);
+    }
+    if (!file.mimetype.startsWith('image/')) {
+      throw new BadRequestException(fa.store.imageOnly);
+    }
+    if (store.creditBalanceToman <= 0) {
+      throw new BadRequestException(
+        fa.store.insufficientCreditForPhotoEnrichment,
+      );
+    }
+
+    // docs/PRD-full-agent-engineering-review.md‌وار همون الگوی verifyReceiptAmount
+    // (conversation-engine.service.ts) — تنها الگوی تاییدشده‌ی ورودی تصویر به generateObject در
+    // این کدبیس: base64 data URL داخل یک پیام role:'user'، نه URL
+    const model = defaultModel();
+    const dataUrl = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
+    const commentsHint = await this.commentsHint(productId);
+    const visionMessage: UserModelMessage = {
+      role: 'user',
+      content: [
+        { type: 'image', image: dataUrl },
+        {
+          type: 'text',
+          text: `این عکس یک محصول فروشگاه آنلاین ایرانی است (دسته‌بندی فروشگاه: ${
+            store.category ?? 'نامشخص'
+          }، نام فعلی محصول: ${product.name}). از روی خودِ عکس (برچسب کالا یا ظاهر کالا) این‌ها
+را استخراج کن: اگر نام دقیق‌تری از نام فعلی روی عکس دیدی در suggestedName بگذار (وگرنه خالی
+بگذار)، مشخصات فنی واقعاً قابل‌مشاهده (جنس/سایز/رنگ/وزن/...) را در suggestedSpecs، و یک توضیح
+فروش‌محور فارسی (۲-۴ جمله) در suggestedDescription بنویس. هرگز چیزی که در عکس دیده نمی‌شود حدس
+نزن یا اختراع نکن — اگر عکس اطلاعات کمی داشت، فقط همان مقدار کم را برگردان. هرگز قیمت/موجودی
+پیشنهاد نده. پاسخ را فقط به‌صورت یک شیء JSON معتبر مطابق اسکیمای داده‌شده برگردان.${commentsHint}`,
+        },
+      ],
+    };
+
+    try {
+      const { object: rawObject, usage } = await generateObject({
+        model: this.aiProvider.buildClient(undefined, {
+          supportsStructuredOutputs: true,
+        })(model),
+        schema: z.object({
+          suggestedName: z.string().optional(),
+          suggestedDescription: z.string(),
+          suggestedSpecs: z
+            .array(z.object({ label: z.string(), value: z.string() }))
+            .optional(),
+        }),
+        messages: [visionMessage],
+        experimental_repairText: this.repairStructuredOutput(),
+      });
+
+      const { costToman } = await this.pricing.calcCost(
+        usage.inputTokens ?? 0,
+        usage.outputTokens ?? 0,
+        model,
+      );
+      await this.prisma.creditUsageEvent.create({
+        data: {
+          storeId,
+          model,
+          kind: 'PRODUCT_ENRICHMENT',
+          costToman,
+          isFreeQuota: false,
+        },
+      });
+      await this.prisma.store.update({
+        where: { id: storeId },
+        data: { creditBalanceToman: { decrement: costToman } },
+      });
+
+      return {
+        suggestedName:
+          rawObject.suggestedName?.trim().slice(0, 200) || undefined,
+        suggestedDescription: rawObject.suggestedDescription
+          .trim()
+          .slice(0, MAX_SUGGESTED_DESCRIPTION_CHARS),
+        suggestedSpecs: clampProductSpecs(rawObject.suggestedSpecs),
+      };
+    } catch (err) {
+      this.logger.error(
+        `completeProductInfoFromPhoto failed for product=${productId}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+        err instanceof Error ? err.stack : undefined,
+      );
+      throw err;
+    }
+  }
+
   // docs/PRD-admin-product-enrichment-review.md بخش ۲ — نسخه‌ی ادمین‌محور completeProductInfo
   // بالا: بدون sellerId/getOwned (ادمین مالک فروشگاه نیست)، بدون چک/کسر اعتبار فروشنده (این
   // ابتکار از طرف ادمین است، نه درخواست فروشنده — هزینه‌ی عملیاتی پلتفرم است). چرخه‌ی عمر
@@ -596,10 +675,7 @@ sourceNote را خالی بگذار. پاسخ را فقط به‌صورت یک �
         opts.resourceText,
       );
       return {
-        suggestedDescription: composeFinalDescription(
-          object.suggestedDescription,
-          object.suggestedSpecs,
-        ),
+        suggestedDescription: object.suggestedDescription,
         suggestedQuestions: object.suggestedQuestions.slice(0, 6),
         suggestedSpecs: object.suggestedSpecs,
       };
@@ -640,10 +716,7 @@ sourceNote را خالی بگذار. پاسخ را فقط به‌صورت یک �
         const specs = freshCanonical.specs as
           { label: string; value: string }[] | undefined;
         return {
-          suggestedDescription: composeFinalDescription(
-            freshCanonical.richDescription,
-            specs,
-          ),
+          suggestedDescription: freshCanonical.richDescription,
           suggestedQuestions: basic.suggestedQuestions.slice(0, 6),
           suggestedSpecs: specs,
           sourceNote:
@@ -724,10 +797,7 @@ sourceNote را خالی بگذار. پاسخ را فقط به‌صورت یک �
       });
 
       return {
-        suggestedDescription: composeFinalDescription(
-          object.suggestedDescription,
-          object.suggestedSpecs,
-        ),
+        suggestedDescription: object.suggestedDescription,
         suggestedQuestions: object.suggestedQuestions.slice(0, 6),
         suggestedSpecs: object.suggestedSpecs,
         sourceNote: object.sourceNote,
@@ -840,7 +910,7 @@ ${resourceText.slice(0, MAX_EXTRACTED_CHARS)}`,
       suggestedDescription: object.suggestedDescription
         .trim()
         .slice(0, MAX_SUGGESTED_DESCRIPTION_CHARS),
-      suggestedSpecs: clampSpecs(object.suggestedSpecs),
+      suggestedSpecs: clampProductSpecs(object.suggestedSpecs),
       priceHint: object.priceHint ?? undefined,
       imageUrls: page.imageUrls,
     };
