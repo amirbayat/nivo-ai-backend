@@ -6,6 +6,7 @@ import {
   NotFoundException,
   Param,
   Post,
+  Query,
   Res,
   UploadedFile,
   UseInterceptors,
@@ -48,6 +49,22 @@ export class SalesAgentController {
       conversationId,
       sessionToken,
     );
+  }
+
+  // docs/PRD-panels-and-buyer-ux-design.md بخش ۳.۵ — حالت «فروشگاه»، گرید کامل محصولات؛
+  // بدون auth (عیناً الگوی chat/start بالا)، صفحه‌بندی‌شده، فقط فیلدهای نمایشی ایمن
+  @Get('stores/:slug/products')
+  listStoreProducts(
+    @Param('slug') slug: string,
+    @Query('q') q?: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    return this.storeService.listPublicProducts(slug, {
+      q,
+      page: Math.max(1, parseInt(page ?? '1', 10) || 1),
+      pageSize: Math.min(60, Math.max(1, parseInt(pageSize ?? '24', 10) || 24)),
+    });
   }
 
   // docs/PRD-conversation-history.md بخش ۳ — تاریخچه‌ی همه‌ی مکالمات (فعال+آرشیوشده) همین خریدار

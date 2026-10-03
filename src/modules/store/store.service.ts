@@ -174,6 +174,47 @@ export class StoreService {
     }));
   }
 
+  // docs/PRD-panels-and-buyer-ux-design.md بخش ۳.۵ — حالت «فروشگاه» خریدار؛ بدون auth (عیناً
+  // الگوی startChat در sales-agent.service.ts)، فقط فیلدهای نمایشی ایمن (نه code/telegramShortCode
+  // و بقیه‌ی فیلدهای داخلی که listProducts بالا برای پنل فروشنده برمی‌گرداند)
+  async listPublicProducts(
+    slug: string,
+    opts: { q?: string; page: number; pageSize: number },
+  ) {
+    const store = await this.prisma.store.findUnique({ where: { slug } });
+    if (!store || store.status !== 'ACTIVE')
+      throw new NotFoundException(fa.store.notFound);
+
+    const where: Prisma.ProductWhereInput = {
+      storeId: store.id,
+      ...(opts.q ? { name: { contains: opts.q, mode: 'insensitive' } } : {}),
+    };
+    const [items, total] = await Promise.all([
+      this.prisma.product.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (opts.page - 1) * opts.pageSize,
+        take: opts.pageSize,
+        select: {
+          id: true,
+          name: true,
+          basePrice: true,
+          stock: true,
+          images: true,
+          videos: true,
+          description: true,
+        },
+      }),
+      this.prisma.product.count({ where }),
+    ]);
+    return {
+      items: items.map((p) => ({ ...p, videos: parseProductVideos(p.videos) })),
+      total,
+      page: opts.page,
+      pageSize: opts.pageSize,
+    };
+  }
+
   // docs/PRD-product-strategy-and-roadmap.md بخش ۳.۱ — یک groupBy به‌جای N کوئری جدا به‌ازای
   // هر محصول (N+1)
   private async relatedKbEntryCounts(
