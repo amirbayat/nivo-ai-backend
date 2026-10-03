@@ -1,13 +1,23 @@
-import { IsBoolean, IsIn, IsInt, IsOptional, Min } from 'class-validator';
-import { IRAN_CITIES } from '../../../common/constants/iran-cities';
-import { fa } from '../../../i18n/fa';
+import {
+  ArrayUnique,
+  IsArray,
+  IsBoolean,
+  IsIn,
+  IsInt,
+  IsOptional,
+  Min,
+} from 'class-validator';
+import { IRAN_PROVINCES } from '../../../common/constants/iran-provinces';
 
-// docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۲ — city خالی/نبود = ردیف
-// پیش‌فرض «سایر شهرها» (فقط یکی به‌ازای هر فروشگاه، اعمال‌شده در سرویس نه constraint دیتابیس)
+// docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۲ (فاز ۱.۵) — provinces خالی/نبود
+// = ردیف پیش‌فرض «کل ایران» (فقط یکی به‌ازای هر فروشگاه، اعمال‌شده در سرویس نه constraint
+// دیتابیس)؛ provinces غیرخالی یعنی این ردیف فقط همان استان‌ها را پوشش می‌دهد
 export class CreateShippingRuleDto {
   @IsOptional()
-  @IsIn(IRAN_CITIES, { message: fa.validation.required })
-  city?: string;
+  @IsArray()
+  @ArrayUnique()
+  @IsIn(IRAN_PROVINCES, { each: true })
+  provinces?: string[];
 
   @IsInt()
   @Min(0)

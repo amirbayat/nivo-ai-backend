@@ -14,7 +14,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
 import { mimeTypeForExt } from '../../common/validators/chat-image.validator';
 import { AiProviderService } from '../../common/services/ai-provider.service';
-import { normalizeIranCity } from '../../common/constants/iran-cities';
+import { IRAN_PROVINCES } from '../../common/constants/iran-provinces';
 import { toEnglishDigits } from '../../common/utils/normalize-digits';
 import { StoreKbService } from '../store/store-kb.service';
 import { CardSelectorService } from '../store/card-selector.service';
@@ -51,7 +51,7 @@ export type ConversationWithStore = Prisma.SalesConversationGetPayload<{
 type AddressSnapshot = {
   recipientName: string;
   recipientPhone: string;
-  city: string;
+  province: string;
   address: string;
   postalCode: string | null;
   addressId: string | null;
@@ -2773,7 +2773,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       return this.showAddressConfirm(conversation, ctx, {
         recipientName: addr.recipientName,
         recipientPhone: addr.recipientPhone,
-        city: addr.city,
+        province: addr.province,
         address: addr.address,
         postalCode: addr.postalCode,
         fromSavedAddressId: addr.id,
@@ -2790,6 +2790,24 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         'name',
         {},
         fa.salesAgent.addressAskName,
+      );
+    }
+
+    if (action.type === 'SELECT_PROVINCE') {
+      if (
+        conversation.currentState !== 'ADDRESS_COLLECTION' ||
+        ctx.addressStep !== 'province' ||
+        !action.province ||
+        !IRAN_PROVINCES.includes(action.province)
+      ) {
+        return this.doClarify(conversation, fa.salesAgent.nothingToConfirm);
+      }
+      return this.advanceAddressStep(
+        conversation,
+        ctx,
+        'address',
+        { ...ctx.pendingAddress, province: action.province },
+        fa.salesAgent.addressAskFull,
       );
     }
 
@@ -3370,7 +3388,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
             ? {
                 recipientName: addressSnapshot.recipientName,
                 recipientPhone: addressSnapshot.recipientPhone,
-                shippingCity: addressSnapshot.city,
+                shippingProvince: addressSnapshot.province,
                 shippingAddress: addressSnapshot.address,
                 postalCode: addressSnapshot.postalCode ?? undefined,
                 addressId: addressSnapshot.addressId ?? undefined,
@@ -3485,7 +3503,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         id: a.id,
         summary: fa.salesAgent.savedAddressSummary(
           a.recipientName,
-          a.city,
+          a.province,
           a.address,
           a.lastUsedAt,
         ),
@@ -3513,6 +3531,30 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     await this.persistTransition(conversation, 'ADDRESS_COLLECTION', nextCtx);
     await this.logReply(conversation, reply, { type: 'NONE' });
     return { reply, uiBlocks: [{ type: 'NONE' }], state: 'ADDRESS_COLLECTION' };
+  }
+
+  // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۲ (فاز ۱.۵) — برخلاف
+  // advanceAddressStep (سوال متنی ساده)، این گام همیشه یک دکمه‌چین از ۳۱ استان برمی‌گرداند؛
+  // reply قابل‌تغییر است تا هم سوال اول هم یادآوری «از دکمه انتخاب کن» از همین عبور کنند
+  private async promptProvinceSelection(
+    conversation: ConversationWithStore,
+    ctx: ConversationContext,
+    pendingAddress: NonNullable<ConversationContext['pendingAddress']>,
+    reply: string = fa.salesAgent.addressAskProvince,
+  ): Promise<EngineResult> {
+    const nextCtx: ConversationContext = {
+      ...ctx,
+      addressStep: 'province',
+      pendingAddress,
+    };
+    await this.persistTransition(conversation, 'ADDRESS_COLLECTION', nextCtx);
+    const uiBlock: UiBlock = {
+      type: 'ADDRESS_PROMPT',
+      mode: 'CHOOSE_PROVINCE',
+      provinces: [...IRAN_PROVINCES],
+    };
+    await this.logReply(conversation, reply, uiBlock);
+    return { reply, uiBlocks: [uiBlock], state: 'ADDRESS_COLLECTION' };
   }
 
   // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۱ — پیام‌های آزاد مشتری حین
@@ -3546,24 +3588,20 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
             fa.salesAgent.addressPhoneInvalid,
           );
         }
-        return this.advanceAddressStep(
-          conversation,
-          ctx,
-          'city',
-          { ...pending, recipientPhone: digits },
-          fa.salesAgent.addressAskCity,
-        );
+        return this.promptProvinceSelection(conversation, ctx, {
+          ...pending,
+          recipientPhone: digits,
+        });
       }
-      case 'city':
-        if (!trimmed) {
-          return this.doClarify(conversation, fa.salesAgent.addressAskCity);
-        }
-        return this.advanceAddressStep(
+      case 'province':
+        // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۲ (فاز ۱.۵) — این گام فقط
+        // با دکمه (SELECT_PROVINCE در handleAction) جلو می‌رود، نه تایپ آزاد؛ اگر مشتری متن
+        // فرستاد، همان چوزر دوباره با یک یادآوری نشان داده می‌شود
+        return this.promptProvinceSelection(
           conversation,
           ctx,
-          'address',
-          { ...pending, city: normalizeIranCity(trimmed) },
-          fa.salesAgent.addressAskFull,
+          pending,
+          fa.salesAgent.addressProvinceUseButtons,
         );
       case 'address':
         if (!trimmed) {
@@ -3597,10 +3635,10 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     ctx: ConversationContext,
     pending: NonNullable<ConversationContext['pendingAddress']>,
   ): Promise<EngineResult> {
-    const city = pending.city ?? '';
+    const province = pending.province ?? '';
     const { cost, covered } = await this.getShippingCost(
       conversation.storeId,
-      city,
+      province,
     );
 
     const nextCtx: ConversationContext = {
@@ -3614,17 +3652,18 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       fa.salesAgent.addressFullSummary(
         pending.recipientName ?? '',
         pending.recipientPhone ?? '',
-        city,
+        province,
         pending.address ?? '',
         pending.postalCode ?? null,
         cost,
-      ) + (covered ? '' : `\n${fa.salesAgent.cityNotCoveredWarning(city)}`);
+      ) +
+      (covered ? '' : `\n${fa.salesAgent.provinceNotCoveredWarning(province)}`);
     const uiBlock: UiBlock = {
       type: 'ADDRESS_PROMPT',
       mode: 'CONFIRM',
       summary,
       shippingCostToman: cost,
-      cityCovered: covered,
+      provinceCovered: covered,
     };
     const reply = fa.salesAgent.addressConfirmQuestion;
     await this.logReply(conversation, reply, uiBlock);
@@ -3685,7 +3724,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
             customerId: conversation.customerId,
             recipientName: pending.recipientName ?? '',
             recipientPhone: pending.recipientPhone ?? '',
-            city: pending.city ?? '',
+            province: pending.province ?? '',
             address: pending.address ?? '',
             postalCode: pending.postalCode ?? undefined,
             isDefault: existingCount === 0,
@@ -3703,8 +3742,8 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     pending: NonNullable<ConversationContext['pendingAddress']>,
     addressId: string | null,
   ): Promise<EngineResult> {
-    const city = pending.city ?? '';
-    const { cost } = await this.getShippingCost(conversation.storeId, city);
+    const province = pending.province ?? '';
+    const { cost } = await this.getShippingCost(conversation.storeId, province);
     const clearedCtx: ConversationContext = {
       ...ctx,
       addressStep: undefined,
@@ -3713,7 +3752,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     return this.finalizeOrder(conversation, clearedCtx, {
       recipientName: pending.recipientName ?? '',
       recipientPhone: pending.recipientPhone ?? '',
-      city,
+      province,
       address: pending.address ?? '',
       postalCode: pending.postalCode ?? null,
       addressId,
@@ -3721,22 +3760,23 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     });
   }
 
-  // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۲ — اگر فروشنده هنوز هیچ
-  // StoreShippingRule تعریف نکرده (نه ردیف شهر خاص نه پیش‌فرض)، رایگان/بدون‌مانع فرض می‌شود؛
-  // فروشگاه‌های قدیمی‌تر که تازه requiresShipping را روشن کرده‌اند نباید ناگهان قفل شوند
+  // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۲ (فاز ۱.۵) — اگر فروشنده هنوز
+  // هیچ StoreShippingRule تعریف نکرده (نه ردیف استان خاص نه پیش‌فرض کل ایران)، رایگان/بدون‌مانع
+  // فرض می‌شود؛ فروشگاه‌های قدیمی‌تر که تازه requiresShipping را روشن کرده‌اند نباید ناگهان
+  // قفل شوند. provinces=[] روی یک ردیف یعنی «کل ایران» (ردیف پیش‌فرض)
   private async getShippingCost(
     storeId: string,
-    city: string,
+    province: string,
   ): Promise<{ cost: number; covered: boolean }> {
-    const [cityRule, defaultRule] = await Promise.all([
+    const [provinceRule, defaultRule] = await Promise.all([
       this.prisma.storeShippingRule.findFirst({
-        where: { storeId, city },
+        where: { storeId, provinces: { has: province } },
       }),
       this.prisma.storeShippingRule.findFirst({
-        where: { storeId, city: null },
+        where: { storeId, provinces: { equals: [] } },
       }),
     ]);
-    const rule = cityRule ?? defaultRule;
+    const rule = provinceRule ?? defaultRule;
     if (!rule) return { cost: 0, covered: true };
     return { cost: rule.enabled ? rule.cost : 0, covered: rule.enabled };
   }

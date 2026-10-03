@@ -31,7 +31,7 @@ export type ConversationContext = {
     | 'choose'
     | 'name'
     | 'phone'
-    | 'city'
+    | 'province'
     | 'address'
     | 'postal'
     | 'confirm'
@@ -40,7 +40,7 @@ export type ConversationContext = {
   pendingAddress?: {
     recipientName?: string;
     recipientPhone?: string;
-    city?: string;
+    province?: string;
     address?: string;
     postalCode?: string | null;
     // اگر از یک CustomerAddress ذخیره‌شده انتخاب شده (نه تازه‌نویس)، شناسه‌اش اینجا می‌ماند
@@ -85,11 +85,13 @@ export type UiBlock =
   // مرتبط با خودش را پر می‌کند
   | {
       type: 'ADDRESS_PROMPT';
-      mode: 'CHOOSE_SAVED' | 'CONFIRM' | 'ASK_SAVE';
+      mode: 'CHOOSE_SAVED' | 'CHOOSE_PROVINCE' | 'CONFIRM' | 'ASK_SAVE';
       addresses?: { id: string; summary: string }[]; // فقط CHOOSE_SAVED
+      // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۲ (فاز ۱.۵) — فقط CHOOSE_PROVINCE
+      provinces?: string[];
       summary?: string; // فقط CONFIRM
       shippingCostToman?: number; // فقط CONFIRM
-      cityCovered?: boolean; // فقط CONFIRM — false یعنی فروشنده به این شهر ارسال ندارد
+      provinceCovered?: boolean; // فقط CONFIRM — false یعنی فروشنده به این استان ارسال ندارد
     }
   | { type: 'NONE' };
 
@@ -200,6 +202,7 @@ export type SalesAction = {
     | 'CONFIRM_CART'
     | 'SELECT_ADDRESS'
     | 'NEW_ADDRESS'
+    | 'SELECT_PROVINCE'
     | 'CONFIRM_ADDRESS'
     | 'EDIT_ADDRESS'
     | 'SAVE_ADDRESS'
@@ -207,6 +210,8 @@ export type SalesAction = {
   productId?: string;
   qty?: number;
   addressId?: string;
+  // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۲ (فاز ۱.۵) — فقط برای SELECT_PROVINCE
+  province?: string;
 };
 
 // docs/PRD-sales-agent-voice.md بخش ۱ — payload صف sales-agent-voice؛ در conversation-engine

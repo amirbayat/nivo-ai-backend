@@ -2353,9 +2353,10 @@ model CustomerAddress {
   label          String? // اختیاری، خودِ خریدار: «خانه»، «محل کار»
   recipientName  String
   recipientPhone String
-  // باید از همان فهرست بسته‌ی شهرها باشد که StoreShippingRule.city برای lookup هزینه
-  // استفاده می‌کند (src/common/constants/iran-cities.ts) — یک منبع واحد، نه دو جدول جدا
-  city           String
+  // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۲ (فاز ۱.۵) — قبلاً «شهر» بود؛
+  // باید از همان فهرست بسته‌ی ۳۱ استان باشد که StoreShippingRule.provinces برای lookup هزینه
+  // استفاده می‌کند (src/common/constants/iran-provinces.ts) — یک منبع واحد، نه دو جدول جدا
+  province       String
   address        String  @db.Text
   postalCode     String?
 
@@ -2372,17 +2373,21 @@ model CustomerAddress {
 // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۲ — فروشنده در پنل یک جدول
 // می‌بیند: ردیف پیش‌فرض «سایر شهرها» (city=null) + ردیف‌های اختصاصی شهر خاص. enabled=false
 // روی یک شهر یعنی «ارسال نداریم» به آن شهر (نه فقط گران/رایگان)
+// docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۲ (فاز ۱.۵) — قبلاً city? تکی بود؛
+// یک ردیف حالا می‌تواند چند استان را هم‌زمان پوشش دهد. provinces خالی = ردیف پیش‌فرض «کل
+// ایران» (فقط یک ردیف خالی مجاز به‌ازای هر فروشگاه، چک دستی در سرویس نه constraint دیتابیس).
+// «آخرین انتخاب برنده است»: وقتی استانی به یک ردیف اضافه می‌شود، همان سرویس آن را از هر ردیف
+// دیگر همین فروشگاه حذف می‌کند — پس هیچ یونیک‌کانسترینتی روی این فیلد لازم نیست.
 model StoreShippingRule {
   id        String   @id @default(uuid())
   storeId   String
   store     Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  city      String? // null = ردیف پیش‌فرض «سایر شهرها»
+  provinces String[] @default([])
   cost      Int // تومان
   enabled   Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([storeId, city])
   @@index([storeId])
   @@map("store_shipping_rules")
 }
@@ -2603,7 +2608,8 @@ model Order {
   // می‌مانند وقتی Store.requiresShipping=false بوده (فروش حضوری/دیجیتال)
   recipientName               String?
   recipientPhone              String?
-  shippingCity                String?
+  // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۲ (فاز ۱.۵) — قبلاً shippingCity
+  shippingProvince            String?
   shippingAddress             String?            @db.Text
   postalCode                  String?
   // docs/PRD-buyer-saved-addresses.md بخش ۲ — فقط برای ارجاع/آمار («این آدرس چندبار استفاده

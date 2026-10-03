@@ -576,6 +576,9 @@ export class TelegramService {
     else if (data.startsWith('sa:'))
       action = { type: 'SELECT_ADDRESS', addressId: data.slice(3) };
     else if (data === 'na') action = { type: 'NEW_ADDRESS' };
+    // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۲ (فاز ۱.۵) — انتخاب استان دکمه‌ای
+    else if (data.startsWith('pv:'))
+      action = { type: 'SELECT_PROVINCE', province: data.slice(3) };
     else if (data === 'ca') action = { type: 'CONFIRM_ADDRESS' };
     else if (data === 'ea') action = { type: 'EDIT_ADDRESS' };
     else if (data === 'sva') action = { type: 'SAVE_ADDRESS' };
@@ -987,6 +990,19 @@ export class TelegramService {
             fa.salesAgent.addressChooseSavedPrompt,
             keyboard,
           );
+        } else if (block.mode === 'CHOOSE_PROVINCE') {
+          const provinces = block.provinces ?? [];
+          const rows: TelegramInlineKeyboard['inline_keyboard'] = [];
+          for (let i = 0; i < provinces.length; i += 3) {
+            rows.push(
+              provinces
+                .slice(i, i + 3)
+                .map((p) => ({ text: p, callback_data: `pv:${p}` })),
+            );
+          }
+          await this.sendText(chatId, fa.salesAgent.addressAskProvince, {
+            inline_keyboard: rows,
+          });
         } else if (block.mode === 'CONFIRM') {
           await this.sendText(chatId, block.summary ?? '', {
             inline_keyboard: [

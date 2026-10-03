@@ -9,6 +9,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { IRAN_PROVINCES } from '../../../common/constants/iran-provinces';
 
 // دکمه‌های UiBlock به‌جای ساختن جمله‌ی فارسی (که دوباره از parseIntent رد می‌شد)، این
 // ساختار قطعی را می‌فرستند — یا message یا action، هیچ‌وقت هیچ‌کدام
@@ -19,6 +20,8 @@ export class SalesActionDto {
     // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۱ — دکمه‌های فلوی آدرس
     'SELECT_ADDRESS',
     'NEW_ADDRESS',
+    // بخش ۲ (فاز ۱.۵) — انتخاب استان دکمه‌ای
+    'SELECT_PROVINCE',
     'CONFIRM_ADDRESS',
     'EDIT_ADDRESS',
     'SAVE_ADDRESS',
@@ -29,6 +32,7 @@ export class SalesActionDto {
     | 'CONFIRM_CART'
     | 'SELECT_ADDRESS'
     | 'NEW_ADDRESS'
+    | 'SELECT_PROVINCE'
     | 'CONFIRM_ADDRESS'
     | 'EDIT_ADDRESS'
     | 'SAVE_ADDRESS'
@@ -46,6 +50,10 @@ export class SalesActionDto {
   @IsOptional()
   @IsString()
   addressId?: string;
+
+  @IsOptional()
+  @IsIn(IRAN_PROVINCES)
+  province?: string;
 }
 
 export class SendMessageDto {

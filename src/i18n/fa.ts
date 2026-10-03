@@ -177,7 +177,8 @@ export const fa = {
       'این پیش‌نویس در وضعیتی نیست که این اکشن روی آن ممکن باشد',
     // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۲
     shippingRuleNotFound: 'این قانون ارسال یافت نشد',
-    shippingCityDuplicate: 'برای این شهر از قبل یک قانون ارسال تعریف شده',
+    shippingDefaultRuleDuplicate:
+      'یک ردیف «ارسال به کل ایران» از قبل برای این فروشگاه تعریف شده',
   },
   storeKb: {
     notFound: 'این مورد در باکس دانش یافت نشد',
@@ -275,7 +276,10 @@ export const fa = {
     addressNewOption: '🏠 آدرس جدید',
     addressAskName: 'برای ارسال سفارش، اول اسم و فامیل گیرنده رو بگو:',
     addressAskPhone: 'شماره تماس گیرنده چیه؟',
-    addressAskCity: 'کدوم شهر؟',
+    // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۲ (فاز ۱.۵) — قبلاً «کدوم شهر؟»
+    // با تایپ آزاد بود؛ حالا دکمه‌ای از ۳۱ استان (ADDRESS_PROMPT/CHOOSE_PROVINCE)
+    addressAskProvince: 'ارسال به کدوم استان؟ 👇',
+    addressProvinceUseButtons: 'لطفاً از دکمه‌های بالا استان رو انتخاب کن 🙏',
     addressPhoneInvalid:
       'این شماره تماس درست به نظر نمی‌رسه — لطفاً دوباره بفرست (مثلاً 0912xxxxxxx)',
     addressAskFull: 'آدرس کامل (خیابان، کوچه، پلاک، واحد) رو بنویس:',
@@ -283,8 +287,8 @@ export const fa = {
     addressConfirmQuestion: 'همین آدرس درسته؟',
     addressConfirmButton: '✅ بله، درسته',
     addressEditButton: '✏️ از اول وارد کنم',
-    cityNotCoveredWarning: (city: string) =>
-      `⚠️ فعلاً امکان ارسال به «${city}» نیست. می‌تونی آدرس شهر دیگه‌ای بدی یا منتظر تماس فروشنده بمونی.`,
+    provinceNotCoveredWarning: (province: string) =>
+      `⚠️ فعلاً امکان ارسال به استان «${province}» نیست. می‌تونی استان دیگه‌ای انتخاب کنی یا منتظر تماس فروشنده بمونی.`,
     addressSavePrompt: 'این آدرس رو برای دفعات بعد ذخیره کنم؟',
     addressSaveYesButton: '✅ بله، ذخیره کن',
     addressSaveNoButton: 'فقط همین‌بار',
@@ -293,20 +297,20 @@ export const fa = {
       'یه مشکلی پیش اومد، بیا از اول آدرس رو بگیریم — اسم و فامیل گیرنده؟',
     savedAddressSummary: (
       recipientName: string,
-      city: string,
+      province: string,
       address: string,
       lastUsedAt: Date,
     ) =>
-      `${recipientName} — ${city}، ${address.slice(0, 40)}${address.length > 40 ? '…' : ''} (آخرین استفاده: ${lastUsedAt.toLocaleDateString('fa-IR')})`,
+      `${recipientName} — ${province}، ${address.slice(0, 40)}${address.length > 40 ? '…' : ''} (آخرین استفاده: ${lastUsedAt.toLocaleDateString('fa-IR')})`,
     addressFullSummary: (
       recipientName: string,
       recipientPhone: string,
-      city: string,
+      province: string,
       address: string,
       postalCode: string | null,
       shippingCostToman: number,
     ) =>
-      `👤 ${recipientName}\n📞 ${recipientPhone}\n📍 ${city}، ${address}${postalCode ? `\nکد پستی: ${postalCode}` : ''}\n🚚 هزینه ارسال: ${shippingCostToman.toLocaleString('fa-IR')} تومان`,
+      `👤 ${recipientName}\n📞 ${recipientPhone}\n📍 ${province}، ${address}${postalCode ? `\nکد پستی: ${postalCode}` : ''}\n🚚 هزینه ارسال: ${shippingCostToman.toLocaleString('fa-IR')} تومان`,
   },
   telegram: {
     startNeedsLink:
