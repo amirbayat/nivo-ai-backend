@@ -24,6 +24,29 @@ export type ConversationContext = {
   // همان بخش — شمارنده‌ی پیام‌های متوالی با نشانه‌ی تردید/نارضایتی حین anchor بودن؛ با
   // ADD_TO_CART صفر می‌شود، با رسیدن به ۲ انکر برداشته می‌شود (مشتری محصول جایگزین می‌بیند)
   anchorHesitationStreak?: number;
+  // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۱ — گام فعلی فلوی
+  // ADDRESS_COLLECTION (conversation-engine.service.ts's handleAddressInput/handleAction)؛
+  // نبودش یعنی هنوز وارد این فلو نشده‌ایم
+  addressStep?:
+    | 'choose'
+    | 'name'
+    | 'phone'
+    | 'city'
+    | 'address'
+    | 'postal'
+    | 'confirm'
+    | 'saveDecision';
+  // docs/PRD-buyer-saved-addresses.md — آدرس در حال جمع‌آوری/تایید، هنوز روی Order ننشسته
+  pendingAddress?: {
+    recipientName?: string;
+    recipientPhone?: string;
+    city?: string;
+    address?: string;
+    postalCode?: string | null;
+    // اگر از یک CustomerAddress ذخیره‌شده انتخاب شده (نه تازه‌نویس)، شناسه‌اش اینجا می‌ماند
+    // تا بعد از تایید فقط lastUsedAt‌اش آپدیت شود، نه این‌که دوباره «ذخیره کنم؟» پرسیده شود
+    fromSavedAddressId?: string | null;
+  } | null;
 };
 
 export type UiBlock =
@@ -57,6 +80,17 @@ export type UiBlock =
       amount: number;
     }
   | { type: 'ORDER_STATUS'; orderId: string; status: string }
+  // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۱ + docs/PRD-buyer-saved-addresses.md —
+  // یک نوع بلاک با سه حالت (نه سه نوع جدا) تا سطح UiBlock شلوغ نشود؛ هر حالت فقط فیلدهای
+  // مرتبط با خودش را پر می‌کند
+  | {
+      type: 'ADDRESS_PROMPT';
+      mode: 'CHOOSE_SAVED' | 'CONFIRM' | 'ASK_SAVE';
+      addresses?: { id: string; summary: string }[]; // فقط CHOOSE_SAVED
+      summary?: string; // فقط CONFIRM
+      shippingCostToman?: number; // فقط CONFIRM
+      cityCovered?: boolean; // فقط CONFIRM — false یعنی فروشنده به این شهر ارسال ندارد
+    }
   | { type: 'NONE' };
 
 // docs/PRD-buyer-purchase-intent-taxonomy.md بخش ۳ — لایه‌ی «نیاز خریدار»، مکمل و جدا از
@@ -158,10 +192,21 @@ export type EngineResult = {
 // شکل مسطح، عیناً مثل SalesActionDto (نه یک union تفکیک‌شده‌ی سخت‌گیر) — چون همان instance
 // اعتبارسنجی‌شده‌ی DTO مستقیم به engine پاس می‌شود؛ productId فقط برای ADD_TO_CART لازم
 // است، engine.handleAction خودش نبودش را چک می‌کند
+// docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۱ — دکمه‌های فلوی ADDRESS_COLLECTION
+// (دقیقاً همان قرارداد بالا: شکل مسطح، نه union سخت‌گیر؛ addressId فقط برای SELECT_ADDRESS لازم است)
 export type SalesAction = {
-  type: 'ADD_TO_CART' | 'CONFIRM_CART';
+  type:
+    | 'ADD_TO_CART'
+    | 'CONFIRM_CART'
+    | 'SELECT_ADDRESS'
+    | 'NEW_ADDRESS'
+    | 'CONFIRM_ADDRESS'
+    | 'EDIT_ADDRESS'
+    | 'SAVE_ADDRESS'
+    | 'SKIP_SAVE_ADDRESS';
   productId?: string;
   qty?: number;
+  addressId?: string;
 };
 
 // docs/PRD-sales-agent-voice.md بخش ۱ — payload صف sales-agent-voice؛ در conversation-engine

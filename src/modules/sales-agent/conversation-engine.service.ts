@@ -1,13 +1,21 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
 import type { Queue } from 'bull';
-import { generateObject, generateText, tool, stepCountIs } from 'ai';
+import {
+  generateObject,
+  generateText,
+  tool,
+  stepCountIs,
+  type UserModelMessage,
+} from 'ai';
 import { z } from 'zod';
 import type { ConversationState, Order, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
 import { mimeTypeForExt } from '../../common/validators/chat-image.validator';
 import { AiProviderService } from '../../common/services/ai-provider.service';
+import { normalizeIranCity } from '../../common/constants/iran-cities';
+import { toEnglishDigits } from '../../common/utils/normalize-digits';
 import { StoreKbService } from '../store/store-kb.service';
 import { CardSelectorService } from '../store/card-selector.service';
 import { CreditService } from './credit.service';
@@ -37,6 +45,18 @@ import type {
 export type ConversationWithStore = Prisma.SalesConversationGetPayload<{
   include: { store: true };
 }>;
+
+// docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۱/۲ — snapshot آدرس+هزینه‌ی ارسال
+// که روی Order می‌نشیند (executeCreateOrder/finalizeOrder مصرفش می‌کنند)
+type AddressSnapshot = {
+  recipientName: string;
+  recipientPhone: string;
+  city: string;
+  address: string;
+  postalCode: string | null;
+  addressId: string | null;
+  shippingCostToman: number;
+};
 
 type ProductLike = {
   id: string;
@@ -222,6 +242,8 @@ export class ConversationEngineService {
       appliedDiscount: raw?.appliedDiscount ?? null,
       anchoredProductId: raw?.anchoredProductId ?? null,
       anchorHesitationStreak: raw?.anchorHesitationStreak ?? 0,
+      addressStep: raw?.addressStep,
+      pendingAddress: raw?.pendingAddress ?? null,
     };
   }
 
@@ -2205,6 +2227,17 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       return this.transitionToHandoff(conversation, 'BILLING_BLOCKED');
     }
 
+    // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۱ — دقیقاً همان الگوی
+    // awaitingReview/awaitingSatisfactionCheck بالا: پیام آزاد حین ADDRESS_COLLECTION هیچ‌وقت
+    // از parseIntent رد نمی‌شود، یک state machine قطعی روی ctx.addressStep است
+    if (conversation.currentState === 'ADDRESS_COLLECTION') {
+      return this.handleAddressInput(
+        conversation,
+        this.getContext(conversation),
+        text,
+      );
+    }
+
     // docs/PRD-sales-agent-tool-calling-architecture.md بخش ۳.۱ — شاخه‌ی کاملاً جدید و
     // افزودنی، دقیقاً مثل الگوی امن SIMPLE_AGENT قبلی: parseIntent+switch+do* زیرش دست‌نخورده
     // می‌ماند، فقط برای مکالمه‌های FULL_AGENT اصلاً اجرا نمی‌شود (هیچ مکالمه‌ی واقعی تصادفی به
@@ -2722,6 +2755,70 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       );
     }
 
+    // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۱ + docs/PRD-buyer-saved-addresses.md
+    // — دکمه‌های فلوی ADDRESS_COLLECTION؛ همه فقط وقتی مکالمه واقعاً در همین state است معنا دارند
+    if (action.type === 'SELECT_ADDRESS') {
+      if (
+        conversation.currentState !== 'ADDRESS_COLLECTION' ||
+        !action.addressId
+      ) {
+        return this.doClarify(conversation, fa.salesAgent.nothingToConfirm);
+      }
+      const addr = await this.prisma.customerAddress.findUnique({
+        where: { id: action.addressId },
+      });
+      if (!addr || addr.customerId !== conversation.customerId) {
+        return this.doClarify(conversation, fa.salesAgent.addressFlowConfused);
+      }
+      return this.showAddressConfirm(conversation, ctx, {
+        recipientName: addr.recipientName,
+        recipientPhone: addr.recipientPhone,
+        city: addr.city,
+        address: addr.address,
+        postalCode: addr.postalCode,
+        fromSavedAddressId: addr.id,
+      });
+    }
+
+    if (action.type === 'NEW_ADDRESS' || action.type === 'EDIT_ADDRESS') {
+      if (conversation.currentState !== 'ADDRESS_COLLECTION') {
+        return this.doClarify(conversation, fa.salesAgent.nothingToConfirm);
+      }
+      return this.advanceAddressStep(
+        conversation,
+        ctx,
+        'name',
+        {},
+        fa.salesAgent.addressAskName,
+      );
+    }
+
+    if (action.type === 'CONFIRM_ADDRESS') {
+      if (
+        conversation.currentState !== 'ADDRESS_COLLECTION' ||
+        ctx.addressStep !== 'confirm' ||
+        !ctx.pendingAddress
+      ) {
+        return this.doClarify(conversation, fa.salesAgent.nothingToConfirm);
+      }
+      return this.handleAddressConfirmed(conversation, ctx);
+    }
+
+    if (action.type === 'SAVE_ADDRESS' || action.type === 'SKIP_SAVE_ADDRESS') {
+      if (
+        conversation.currentState !== 'ADDRESS_COLLECTION' ||
+        ctx.addressStep !== 'saveDecision' ||
+        !ctx.pendingAddress
+      ) {
+        return this.doClarify(conversation, fa.salesAgent.nothingToConfirm);
+      }
+      return this.finalizeAfterSaveDecision(
+        conversation,
+        ctx,
+        action.type === 'SAVE_ADDRESS',
+      );
+    }
+
     // CONFIRM_CART
     await this.prisma.conversationEvent.create({
       data: {
@@ -3216,6 +3313,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
   private async executeCreateOrder(
     conversation: ConversationWithStore,
     ctx: ConversationContext,
+    addressSnapshot?: AddressSnapshot,
   ): Promise<
     | { empty: true }
     | { empty: false; order: Order; cardNumber: string; ownerName: string }
@@ -3252,7 +3350,11 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           discountCodeId = ctx.appliedDiscount.id;
         }
       }
-      const total = cartTotal - discountAmount;
+      // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۲ — هزینه‌ی ارسال همین‌جا
+      // به مجموع اضافه می‌شود (نه بعداً روی پرداخت)؛ shippingCostToman جدا هم ذخیره می‌شود
+      // فقط برای شفافیت/نمایش
+      const total =
+        cartTotal - discountAmount + (addressSnapshot?.shippingCostToman ?? 0);
       // docs/PRD-seller-multi-bank-card-rotation.md بخش ۲ — انتخاب دقیقاً همین لحظه، یک‌بار،
       // و روی خودِ سفارش پرسیست می‌شود (بازخوانی بعدی همین سفارش دوباره انتخاب نمی‌کند)
       const card = await this.cardSelector.selectCard(conversation.storeId);
@@ -3264,6 +3366,17 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           totalAmount: total,
           bankCardId: card.id,
           discountCodeId,
+          ...(addressSnapshot
+            ? {
+                recipientName: addressSnapshot.recipientName,
+                recipientPhone: addressSnapshot.recipientPhone,
+                shippingCity: addressSnapshot.city,
+                shippingAddress: addressSnapshot.address,
+                postalCode: addressSnapshot.postalCode ?? undefined,
+                addressId: addressSnapshot.addressId ?? undefined,
+                shippingCostToman: addressSnapshot.shippingCostToman,
+              }
+            : {}),
         },
       });
       cardNumber = card.cardNumber;
@@ -3285,11 +3398,33 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     return { empty: false, order, cardNumber, ownerName };
   }
 
+  // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۱ — فقط وقتی فروشگاه ارسال دارد
+  // وارد ADDRESS_COLLECTION می‌شویم؛ وگرنه (فروش حضوری/دیجیتال) مستقیم همان فلوی قدیمی
   private async doCreateOrder(
     conversation: ConversationWithStore,
     ctx: ConversationContext,
   ): Promise<EngineResult> {
-    const created = await this.executeCreateOrder(conversation, ctx);
+    if (ctx.cart.length === 0) {
+      return this.doClarify(conversation, fa.salesAgent.cartEmpty);
+    }
+    if (conversation.store.requiresShipping) {
+      return this.beginAddressCollection(conversation, ctx);
+    }
+    return this.finalizeOrder(conversation, ctx);
+  }
+
+  // قبلاً تمام بدنه‌ی doCreateOrder همین بود؛ استخراج شد تا هم از مسیر بدون‌آدرس بالا هم از
+  // انتهای فلوی ADDRESS_COLLECTION (finalizeAddressOrder) صدا زده شود
+  private async finalizeOrder(
+    conversation: ConversationWithStore,
+    ctx: ConversationContext,
+    addressSnapshot?: AddressSnapshot,
+  ): Promise<EngineResult> {
+    const created = await this.executeCreateOrder(
+      conversation,
+      ctx,
+      addressSnapshot,
+    );
     if (created.empty) {
       return this.doClarify(conversation, fa.salesAgent.cartEmpty);
     }
@@ -3300,7 +3435,11 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       ownerName: created.ownerName,
       amount: created.order.totalAmount,
     };
-    const facts = `سفارش ثبت شد. مبلغ قابل پرداخت ${created.order.totalAmount} تومان به شماره کارت ${created.cardNumber} به نام ${created.ownerName}. بعد از واریز، عکس رسید را بفرست.`;
+    const facts = `سفارش ثبت شد. مبلغ قابل پرداخت ${created.order.totalAmount} تومان${
+      addressSnapshot?.shippingCostToman
+        ? ` (شامل ${addressSnapshot.shippingCostToman.toLocaleString('fa-IR')} تومان هزینه ارسال)`
+        : ''
+    } به شماره کارت ${created.cardNumber} به نام ${created.ownerName}. بعد از واریز، عکس رسید را بفرست.`;
     const reply = await this.caption(facts, conversation);
     await this.logReply(conversation, reply, uiBlock, undefined, {
       intent: 'CHECKOUT',
@@ -3309,6 +3448,297 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       model: resolveModel(conversation.abVariant),
     });
     return { reply, uiBlocks: [uiBlock], state: 'AWAITING_PAYMENT' };
+  }
+
+  // docs/PRD-buyer-saved-addresses.md بخش ۳ — حداکثر ۳ آدرس اخیر + «آدرس جدید»؛ اگر خریدار
+  // هیچ آدرسی ندارد، مستقیم اولین سوال (اسم گیرنده) پرسیده می‌شود
+  private async beginAddressCollection(
+    conversation: ConversationWithStore,
+    ctx: ConversationContext,
+  ): Promise<EngineResult> {
+    const addresses = await this.prisma.customerAddress.findMany({
+      where: { customerId: conversation.customerId },
+      orderBy: { lastUsedAt: 'desc' },
+      take: 3,
+    });
+
+    if (addresses.length === 0) {
+      return this.advanceAddressStep(
+        conversation,
+        ctx,
+        'name',
+        {},
+        fa.salesAgent.addressAskName,
+      );
+    }
+
+    const nextCtx: ConversationContext = {
+      ...ctx,
+      addressStep: 'choose',
+      pendingAddress: null,
+    };
+    await this.persistTransition(conversation, 'ADDRESS_COLLECTION', nextCtx);
+    const uiBlock: UiBlock = {
+      type: 'ADDRESS_PROMPT',
+      mode: 'CHOOSE_SAVED',
+      addresses: addresses.map((a) => ({
+        id: a.id,
+        summary: fa.salesAgent.savedAddressSummary(
+          a.recipientName,
+          a.city,
+          a.address,
+          a.lastUsedAt,
+        ),
+      })),
+    };
+    const reply = fa.salesAgent.addressChooseSavedPrompt;
+    await this.logReply(conversation, reply, uiBlock);
+    return { reply, uiBlocks: [uiBlock], state: 'ADDRESS_COLLECTION' };
+  }
+
+  // یک گام جلو می‌رود: ctx را آپدیت/پرسیست می‌کند و سوال بعدی را بدون فراخوان AI برمی‌گرداند
+  // (دقیقاً مثل doCancel/resetCartState — پیام‌های ثابت فلوی چک‌اوت هیچ‌وقت caption تولیدی ندارند)
+  private async advanceAddressStep(
+    conversation: ConversationWithStore,
+    ctx: ConversationContext,
+    nextStep: NonNullable<ConversationContext['addressStep']>,
+    pendingAddress: NonNullable<ConversationContext['pendingAddress']>,
+    reply: string,
+  ): Promise<EngineResult> {
+    const nextCtx: ConversationContext = {
+      ...ctx,
+      addressStep: nextStep,
+      pendingAddress,
+    };
+    await this.persistTransition(conversation, 'ADDRESS_COLLECTION', nextCtx);
+    await this.logReply(conversation, reply, { type: 'NONE' });
+    return { reply, uiBlocks: [{ type: 'NONE' }], state: 'ADDRESS_COLLECTION' };
+  }
+
+  // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۱ — پیام‌های آزاد مشتری حین
+  // ADDRESS_COLLECTION هیچ‌وقت از parseIntent رد نمی‌شوند (دقیقاً مثل awaitingReview در
+  // handleMessage)؛ یک state machine ساده و قطعی روی ctx.addressStep، نه NLU
+  private async handleAddressInput(
+    conversation: ConversationWithStore,
+    ctx: ConversationContext,
+    text: string,
+  ): Promise<EngineResult> {
+    const pending = ctx.pendingAddress ?? {};
+    const trimmed = text.trim();
+
+    switch (ctx.addressStep) {
+      case 'name':
+        if (!trimmed) {
+          return this.doClarify(conversation, fa.salesAgent.addressAskName);
+        }
+        return this.advanceAddressStep(
+          conversation,
+          ctx,
+          'phone',
+          { ...pending, recipientName: trimmed },
+          fa.salesAgent.addressAskPhone,
+        );
+      case 'phone': {
+        const digits = toEnglishDigits(trimmed).replace(/[\s-]/g, '');
+        if (!/^(\+98|0)?9[0-9]{9}$/.test(digits)) {
+          return this.doClarify(
+            conversation,
+            fa.salesAgent.addressPhoneInvalid,
+          );
+        }
+        return this.advanceAddressStep(
+          conversation,
+          ctx,
+          'city',
+          { ...pending, recipientPhone: digits },
+          fa.salesAgent.addressAskCity,
+        );
+      }
+      case 'city':
+        if (!trimmed) {
+          return this.doClarify(conversation, fa.salesAgent.addressAskCity);
+        }
+        return this.advanceAddressStep(
+          conversation,
+          ctx,
+          'address',
+          { ...pending, city: normalizeIranCity(trimmed) },
+          fa.salesAgent.addressAskFull,
+        );
+      case 'address':
+        if (!trimmed) {
+          return this.doClarify(conversation, fa.salesAgent.addressAskFull);
+        }
+        return this.advanceAddressStep(
+          conversation,
+          ctx,
+          'postal',
+          { ...pending, address: trimmed },
+          fa.salesAgent.addressAskPostal,
+        );
+      case 'postal': {
+        const skip = /^(ندارم|نداره|نه|skip|-|ندارد)$/i.test(trimmed);
+        return this.showAddressConfirm(conversation, ctx, {
+          ...pending,
+          postalCode: skip ? null : trimmed,
+        });
+      }
+      default:
+        // حالت نامنتظره (مثلاً مرورگر/تلگرام دوباره یک پیام قدیمی فرستاده) — از اول شروع می‌کنیم
+        return this.beginAddressCollection(conversation, ctx);
+    }
+  }
+
+  // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۲ — همیشه یک تایید نهایی قبل از
+  // نهایی‌شدن (هم برای آدرس تازه هم آدرس ذخیره‌شده‌ی انتخاب‌شده)؛ اگر شهر پوشش ارسال ندارد،
+  // صادقانه هشدار داده می‌شود ولی فلو مسدود نمی‌شود (فروشنده می‌تواند بعداً دستی هماهنگ کند)
+  private async showAddressConfirm(
+    conversation: ConversationWithStore,
+    ctx: ConversationContext,
+    pending: NonNullable<ConversationContext['pendingAddress']>,
+  ): Promise<EngineResult> {
+    const city = pending.city ?? '';
+    const { cost, covered } = await this.getShippingCost(
+      conversation.storeId,
+      city,
+    );
+
+    const nextCtx: ConversationContext = {
+      ...ctx,
+      addressStep: 'confirm',
+      pendingAddress: pending,
+    };
+    await this.persistTransition(conversation, 'ADDRESS_COLLECTION', nextCtx);
+
+    const summary =
+      fa.salesAgent.addressFullSummary(
+        pending.recipientName ?? '',
+        pending.recipientPhone ?? '',
+        city,
+        pending.address ?? '',
+        pending.postalCode ?? null,
+        cost,
+      ) + (covered ? '' : `\n${fa.salesAgent.cityNotCoveredWarning(city)}`);
+    const uiBlock: UiBlock = {
+      type: 'ADDRESS_PROMPT',
+      mode: 'CONFIRM',
+      summary,
+      shippingCostToman: cost,
+      cityCovered: covered,
+    };
+    const reply = fa.salesAgent.addressConfirmQuestion;
+    await this.logReply(conversation, reply, uiBlock);
+    return { reply, uiBlocks: [uiBlock], state: 'ADDRESS_COLLECTION' };
+  }
+
+  // از handleAction (دکمه‌ی CONFIRM_ADDRESS) صدا زده می‌شود. آدرس ذخیره‌شده: فقط lastUsedAt
+  // آپدیت و مستقیم نهایی می‌شود. آدرس تازه: قبل از نهایی‌شدن سوال «ذخیره کنم؟» پرسیده می‌شود
+  // (بخش ۳.۳ سند)
+  private async handleAddressConfirmed(
+    conversation: ConversationWithStore,
+    ctx: ConversationContext,
+  ): Promise<EngineResult> {
+    const pending = ctx.pendingAddress as NonNullable<
+      ConversationContext['pendingAddress']
+    >;
+    if (pending.fromSavedAddressId) {
+      await this.prisma.customerAddress.update({
+        where: { id: pending.fromSavedAddressId },
+        data: { lastUsedAt: new Date() },
+      });
+      return this.finalizeAddressOrder(
+        conversation,
+        ctx,
+        pending,
+        pending.fromSavedAddressId,
+      );
+    }
+    const nextCtx: ConversationContext = {
+      ...ctx,
+      addressStep: 'saveDecision',
+    };
+    await this.persistTransition(conversation, 'ADDRESS_COLLECTION', nextCtx);
+    const uiBlock: UiBlock = { type: 'ADDRESS_PROMPT', mode: 'ASK_SAVE' };
+    const reply = fa.salesAgent.addressSavePrompt;
+    await this.logReply(conversation, reply, uiBlock);
+    return { reply, uiBlocks: [uiBlock], state: 'ADDRESS_COLLECTION' };
+  }
+
+  // docs/PRD-buyer-saved-addresses.md بخش ۳.۳ — سقف نرم ۱۰ آدرس به‌ازای هر Customer؛ اگر رد
+  // شد، سفارش همچنان ثبت می‌شود (فقط آدرس تازه ذخیره نمی‌شود) — تجربه‌ی خرید را مسدود نمی‌کند
+  private async finalizeAfterSaveDecision(
+    conversation: ConversationWithStore,
+    ctx: ConversationContext,
+    save: boolean,
+  ): Promise<EngineResult> {
+    const pending = ctx.pendingAddress as NonNullable<
+      ConversationContext['pendingAddress']
+    >;
+    let addressId: string | null = null;
+    if (save) {
+      const existingCount = await this.prisma.customerAddress.count({
+        where: { customerId: conversation.customerId },
+      });
+      if (existingCount < 10) {
+        const created = await this.prisma.customerAddress.create({
+          data: {
+            customerId: conversation.customerId,
+            recipientName: pending.recipientName ?? '',
+            recipientPhone: pending.recipientPhone ?? '',
+            city: pending.city ?? '',
+            address: pending.address ?? '',
+            postalCode: pending.postalCode ?? undefined,
+            isDefault: existingCount === 0,
+          },
+        });
+        addressId = created.id;
+      }
+    }
+    return this.finalizeAddressOrder(conversation, ctx, pending, addressId);
+  }
+
+  private async finalizeAddressOrder(
+    conversation: ConversationWithStore,
+    ctx: ConversationContext,
+    pending: NonNullable<ConversationContext['pendingAddress']>,
+    addressId: string | null,
+  ): Promise<EngineResult> {
+    const city = pending.city ?? '';
+    const { cost } = await this.getShippingCost(conversation.storeId, city);
+    const clearedCtx: ConversationContext = {
+      ...ctx,
+      addressStep: undefined,
+      pendingAddress: null,
+    };
+    return this.finalizeOrder(conversation, clearedCtx, {
+      recipientName: pending.recipientName ?? '',
+      recipientPhone: pending.recipientPhone ?? '',
+      city,
+      address: pending.address ?? '',
+      postalCode: pending.postalCode ?? null,
+      addressId,
+      shippingCostToman: cost,
+    });
+  }
+
+  // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۲ — اگر فروشنده هنوز هیچ
+  // StoreShippingRule تعریف نکرده (نه ردیف شهر خاص نه پیش‌فرض)، رایگان/بدون‌مانع فرض می‌شود؛
+  // فروشگاه‌های قدیمی‌تر که تازه requiresShipping را روشن کرده‌اند نباید ناگهان قفل شوند
+  private async getShippingCost(
+    storeId: string,
+    city: string,
+  ): Promise<{ cost: number; covered: boolean }> {
+    const [cityRule, defaultRule] = await Promise.all([
+      this.prisma.storeShippingRule.findFirst({
+        where: { storeId, city },
+      }),
+      this.prisma.storeShippingRule.findFirst({
+        where: { storeId, city: null },
+      }),
+    ]);
+    const rule = cityRule ?? defaultRule;
+    if (!rule) return { cost: 0, covered: true };
+    return { cost: rule.enabled ? rule.cost : 0, covered: rule.enabled };
   }
 
   async handleReceiptUpload(
@@ -3345,8 +3775,76 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       conversation,
     );
     await this.logReply(conversation, reply, uiBlock);
-    await this.notifySellerOfReceipt(conversation, order.id, receiptImageKey);
+
+    // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۴ گزینه A — خواندن خودکار
+    // مبلغ رسید با vision؛ یک‌بار دانلود، هم برای استخراج هم برای ارسال عکس به فروشنده
+    const buffer = await this.storage.downloadImage(receiptImageKey);
+    const verification = await this.verifyReceiptAmount(
+      buffer,
+      receiptImageKey,
+      order.totalAmount,
+    );
+    if (verification) {
+      await this.prisma.order.update({
+        where: { id: order.id },
+        data: {
+          receiptExtractedAmountToman: verification.extractedAmountToman,
+          receiptVerifiedMatch: verification.match,
+        },
+      });
+    }
+    await this.notifySellerOfReceipt(
+      conversation,
+      order.id,
+      receiptImageKey,
+      buffer,
+      verification,
+    );
     return { reply, uiBlocks: [uiBlock], state: nextState };
+  }
+
+  // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۴ گزینه A — فقط کمک به تصمیم
+  // فروشنده (تایید نهایی همچنان دست خودش است)؛ شکست استخراج (عکس بی‌کیفیت/OCR نامشخص) فلو را
+  // مسدود نمی‌کند، فقط هیچ خطی به نوتیفیکیشن اضافه نمی‌شود (سکوت امن‌تر از حدس غلط)
+  private async verifyReceiptAmount(
+    buffer: Buffer,
+    receiptImageKey: string,
+    expectedAmountToman: number,
+  ): Promise<{ extractedAmountToman: number; match: boolean } | null> {
+    try {
+      const ext = receiptImageKey.split('.').pop() ?? 'jpg';
+      const dataUrl = `data:${mimeTypeForExt(ext)};base64,${buffer.toString('base64')}`;
+      const visionMessage: UserModelMessage = {
+        role: 'user',
+        content: [
+          { type: 'image', image: dataUrl },
+          {
+            type: 'text',
+            text: 'این تصویر یک رسید انتقال وجه بانکی ایرانی (کارت‌به‌کارت/پایا/ساتنا) است. مبلغ واریزشده را به تومان استخراج کن (اگر مبلغ روی رسید به ریال نوشته شده، آن را بر ۱۰ تقسیم کن تا به تومان تبدیل شود). اگر مبلغ به‌هیچ‌وجه قابل‌تشخیص نیست، found را false بگذار و amountToman را null بگذار.',
+          },
+        ],
+      };
+      const { object } = await generateObject({
+        model: this.aiProvider.buildClient(undefined, {
+          supportsStructuredOutputs: true,
+        })(defaultModel()),
+        schema: z.object({
+          found: z.boolean(),
+          amountToman: z.number().nullable(),
+        }),
+        messages: [visionMessage],
+      });
+      if (!object.found || object.amountToman == null) return null;
+      // تلورانس کوچک (۱۰۰۰ تومان) برای خطای رند/OCR، نه برابری دقیق ریاضی
+      const match = Math.abs(object.amountToman - expectedAmountToman) <= 1000;
+      return { extractedAmountToman: object.amountToman, match };
+    } catch (err) {
+      this.logger.error(
+        `receipt vision extraction failed for key=${receiptImageKey}`,
+        err as Error,
+      );
+      return null;
+    }
   }
 
   // docs/PRD-telegram-bot-channel.md بخش ۹.۱ — عکس رسید از پشت JwtGuard+مالکیت سرو می‌شود،
@@ -3355,17 +3853,31 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     conversation: ConversationWithStore,
     orderId: string,
     receiptImageKey: string,
+    buffer: Buffer,
+    verification: { extractedAmountToman: number; match: boolean } | null,
   ): Promise<void> {
     const chatId = conversation.store.ownerTelegramChatId;
     if (!chatId) return;
     const ext = receiptImageKey.split('.').pop() ?? 'jpg';
-    const buffer = await this.storage.downloadImage(receiptImageKey);
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+    });
+    const verificationLine = verification
+      ? `\n${
+          verification.match
+            ? fa.telegram.receiptAmountMatch(verification.extractedAmountToman)
+            : fa.telegram.receiptAmountMismatch(
+                verification.extractedAmountToman,
+                order?.totalAmount ?? 0,
+              )
+        }`
+      : '';
     await this.telegramApi.sendPhotoBuffer(
       chatId,
       buffer,
       `receipt.${ext}`,
       mimeTypeForExt(ext),
-      fa.telegram.receiptNotificationCaption,
+      `${fa.telegram.receiptNotificationCaption}${verificationLine}`,
       {
         inline_keyboard: [
           [

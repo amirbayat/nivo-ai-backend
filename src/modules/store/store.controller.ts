@@ -29,6 +29,7 @@ import { StoreKbService } from './store-kb.service';
 import { StoreCreditService } from './store-credit.service';
 import { StoreBankCardService } from './store-bank-card.service';
 import { StoreDiscountCodeService } from './store-discount-code.service';
+import { StoreShippingRuleService } from './store-shipping-rule.service';
 import { StoreAdPlacementService } from './store-ad-placement.service';
 import { ProductEnrichmentService } from './product-enrichment.service';
 import { CreateStoreDto } from './dto/create-store.dto';
@@ -45,6 +46,8 @@ import { UpdateBankCardDto } from './dto/update-bank-card.dto';
 import { UpdateCardPolicyDto } from './dto/update-card-policy.dto';
 import { CreateDiscountCodeDto } from './dto/create-discount-code.dto';
 import { UpdateDiscountCodeDto } from './dto/update-discount-code.dto';
+import { CreateShippingRuleDto } from './dto/create-shipping-rule.dto';
+import { UpdateShippingRuleDto } from './dto/update-shipping-rule.dto';
 import { PurchaseAdPlacementDto } from './dto/purchase-ad-placement.dto';
 import { fa } from '../../i18n/fa';
 
@@ -58,6 +61,7 @@ export class StoreController {
     private readonly storeCreditService: StoreCreditService,
     private readonly storeBankCardService: StoreBankCardService,
     private readonly storeDiscountCodeService: StoreDiscountCodeService,
+    private readonly storeShippingRuleService: StoreShippingRuleService,
     private readonly storeAdPlacementService: StoreAdPlacementService,
     private readonly productEnrichmentService: ProductEnrichmentService,
   ) {}
@@ -526,6 +530,40 @@ export class StoreController {
     @Body() dto: UpdateDiscountCodeDto,
   ) {
     return this.storeDiscountCodeService.update(user.sub, id, codeId, dto);
+  }
+
+  // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۲ — مدیریت هزینه/پوشش ارسال
+  @Get(':id/shipping-rules')
+  listShippingRules(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    return this.storeShippingRuleService.list(user.sub, id);
+  }
+
+  @Post(':id/shipping-rules')
+  createShippingRule(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: CreateShippingRuleDto,
+  ) {
+    return this.storeShippingRuleService.create(user.sub, id, dto);
+  }
+
+  @Patch(':id/shipping-rules/:ruleId')
+  updateShippingRule(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('ruleId') ruleId: string,
+    @Body() dto: UpdateShippingRuleDto,
+  ) {
+    return this.storeShippingRuleService.update(user.sub, id, ruleId, dto);
+  }
+
+  @Delete(':id/shipping-rules/:ruleId')
+  deleteShippingRule(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('ruleId') ruleId: string,
+  ) {
+    return this.storeShippingRuleService.delete(user.sub, id, ruleId);
   }
 
   // docs/PRD-seller-advertising-placements.md بخش ۴ — وضعیت فعلی + لیست بازه‌های قیمتی ثابت

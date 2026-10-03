@@ -37,7 +37,11 @@ export class AbandonedCartReminderService {
     );
     const dueConversations = await this.prisma.salesConversation.findMany({
       where: {
-        currentState: { in: ['CART_REVIEW', 'AWAITING_PAYMENT'] },
+        // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۱ — ADDRESS_COLLECTION هم
+        // «سبد رهاشده» است: خریدار ممکن است وسط گرفتن آدرس ناپدید شود، نه فقط قبل/بعدش
+        currentState: {
+          in: ['CART_REVIEW', 'ADDRESS_COLLECTION', 'AWAITING_PAYMENT'],
+        },
         archivedAt: null,
         isMutedForHuman: false,
         abandonedCartReminderSentAt: null,
@@ -94,7 +98,11 @@ export class AbandonedCartReminderService {
     );
     const dueConversations = await this.prisma.salesConversation.findMany({
       where: {
-        currentState: { in: ['CART_REVIEW', 'AWAITING_PAYMENT'] },
+        // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۱ — ADDRESS_COLLECTION هم
+        // «سبد رهاشده» است: خریدار ممکن است وسط گرفتن آدرس ناپدید شود، نه فقط قبل/بعدش
+        currentState: {
+          in: ['CART_REVIEW', 'ADDRESS_COLLECTION', 'AWAITING_PAYMENT'],
+        },
         archivedAt: null,
         isMutedForHuman: false,
         abandonedCartReminderSentAt: { not: null, lte: threshold },

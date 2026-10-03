@@ -47,4 +47,10 @@ export class UpdateStoreDto {
   @IsOptional()
   @IsBoolean()
   persuasionTechniquesEnabled?: boolean;
+
+  // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۱ — false یعنی فروش حضوری/
+  // دیجیتال (کلاً ADDRESS_COLLECTION رد می‌شود)
+  @IsOptional()
+  @IsBoolean()
+  requiresShipping?: boolean;
 }

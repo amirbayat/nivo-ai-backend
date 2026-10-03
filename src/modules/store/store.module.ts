@@ -12,6 +12,7 @@ import { StoreKbService } from './store-kb.service';
 import { StoreCreditService } from './store-credit.service';
 import { StoreBankCardService } from './store-bank-card.service';
 import { StoreDiscountCodeService } from './store-discount-code.service';
+import { StoreShippingRuleService } from './store-shipping-rule.service';
 import { StoreAdPlacementService } from './store-ad-placement.service';
 import { CardSelectorService } from './card-selector.service';
 import { ProductEnrichmentService } from './product-enrichment.service';
@@ -42,6 +43,7 @@ import { ProductEnrichmentService } from './product-enrichment.service';
     StoreCreditService,
     StoreBankCardService,
     StoreDiscountCodeService,
+    StoreShippingRuleService,
     StoreAdPlacementService,
     CardSelectorService,
     ProductEnrichmentService,

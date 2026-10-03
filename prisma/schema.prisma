@@ -2091,6 +2091,10 @@ model Store {
   // Product.images (کلید MinIO، نه URL مستقیم) — در چت وب بالای هدر و در پیام /start تلگرام
   // نمایش داده می‌شود. برخلاف images محصول، تک‌فیلد است نه آرایه (یک فروشگاه یک لوگو دارد)
   logoImageKey                  String?
+  // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۱ — فروش حضوری/دیجیتال نیازی
+  // به آدرس ندارد؛ وقتی false باشد، ADDRESS_COLLECTION کلاً رد می‌شود (doCreateOrder همان
+  // فلوی قدیمی مستقیم به AWAITING_PAYMENT را طی می‌کند)
+  requiresShipping              Boolean           @default(true)
   createdAt                     DateTime          @default(now())
   updatedAt                     DateTime          @updatedAt
 
@@ -2107,6 +2111,9 @@ model Store {
   adPlacements      AdPlacement[]
   // فیدبک کاربر ۱۴۰۵/۰۷/۰۱ — بسته‌های اعتبار AI مخصوص همین فروشگاه (scope=STORE_AI_CREDIT)
   creditPackages    CreditPackage[]
+  // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۲ — هزینه/پوشش ارسال به تفکیک
+  // شهر؛ city=null یعنی ردیف پیش‌فرض «سایر شهرها»
+  shippingRules     StoreShippingRule[]
 
   @@index([sellerId])
   @@map("stores")
@@ -2150,34 +2157,34 @@ enum CardDisplayPolicy {
 }
 
 model Product {
-  id                String   @id @default(uuid())
-  storeId           String
-  store             Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  name              String
-  basePrice         Int // تومان
-  stock             Int      @default(0)
-  images            String[] @default([]) // فاز بعد (پنل فروشنده) پر می‌شود — در ویزارد ثبت‌نام خالی می‌ماند
+  id                          String   @id @default(uuid())
+  storeId                     String
+  store                       Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  name                        String
+  basePrice                   Int // تومان
+  stock                       Int      @default(0)
+  images                      String[] @default([]) // فاز بعد (پنل فروشنده) پر می‌شود — در ویزارد ثبت‌نام خالی می‌ماند
   // docs/PRD-product-video.md — یک ویدیوی معرفی کوتاه (نه گالری)؛ videoDurationSec موقع آپلود
   // از MediaTranscodeService.getVideoDuration گرفته می‌شود تا UI خریدار بدون لود کامل فایل
   // مدت را نشان دهد
-  videoKey          String?
-  videoDurationSec  Int?
+  videoKey                    String?
+  videoDurationSec            Int?
   // دستیار تکمیل محصول با AI (docs/PRD-seller-knowledge-base.md بخش ۱.۱) — قبلاً اصلاً وجود نداشت
-  description       String?  @db.Text
+  description                 String?  @db.Text
   // docs/PRD-telegram-bot-channel.md بخش ۹.۳ — کد کوتاه اختیاری که فروشنده روی محتوای
   // تبلیغاتی‌اش می‌گذارد؛ خریدار به‌جای اسم محصول می‌تواند کد را بگوید (searchProducts اول
   // یک exact match روی این را امتحان می‌کند). یکتا فقط در سطح فروشگاه، نه سراسری.
-  code              String?
+  code                        String?
   // docs/PRD-sales-agent-persuasion-principles.md بخش ۶ — اولین فیلد boolean روی Product؛
   // مستقل از Store.persuasionTechniquesEnabled (effective = AND هر دو) تا فروشنده بتواند
   // فقط یک محصول خاص (مثلاً حساس/قانونی) را از لحن ترغیبی مستثنا کند
-  persuasionTechniquesEnabled Boolean @default(true)
-  createdAt         DateTime @default(now())
+  persuasionTechniquesEnabled Boolean  @default(true)
+  createdAt                   DateTime @default(now())
   // docs/PRD-product-display-focus-and-variations.md §۲.۴ — کد کوتاه یکتای سراسری برای لینک
   // اختصاصی تلگرام این محصول (payload محدودیت ۶۴ کاراکتری `/start` را دارد، UUID خام جا
   // نمی‌شود)؛ lazy-generate می‌شود (اولین باری که فروشنده لینک تلگرام را می‌خواهد)، نه در
   // لحظه‌ی ساخت محصول — محصولات قدیمی‌تر هم همین‌طور پوشش داده می‌شوند
-  telegramShortCode String?  @unique
+  telegramShortCode           String?  @unique
 
   kbEntries StoreKbEntry[]
 
@@ -2325,6 +2332,9 @@ model Customer {
   // آرشیوشده داشته باشد («گفتگوی جدید» یا رسیدن به COMPLETED/REJECTED، بدون ساخت Customer تازه)
   salesConversations SalesConversation[]
   comments           ProductComment[]
+  // docs/PRD-buyer-saved-addresses.md — دفترچه‌آدرس per-Customer (یعنی per-store، طبق
+  // بخش ۱ همان سند: هنوز هویت یکپارچه‌ی خریدار بین فروشگاه‌ها وجود ندارد)
+  addresses          CustomerAddress[]
 
   @@unique([storeId, sessionToken])
   @@unique([storeId, telegramChatId])
@@ -2332,10 +2342,59 @@ model Customer {
   @@map("customers")
 }
 
+// docs/PRD-buyer-saved-addresses.md بخش ۲ — ذخیره و استفاده‌ی مجدد آدرس با یک دکمه؛ حداکثر
+// ۳ آدرس اخیر (lastUsedAt نزولی) + «آدرس جدید» در فلوی ADDRESS_COLLECTION نمایش داده می‌شود.
+// سقف نرم ۱۰ آدرس به‌ازای هر Customer در سرویس اعمال می‌شود (نه constraint دیتابیس).
+model CustomerAddress {
+  id         String   @id @default(uuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  label          String? // اختیاری، خودِ خریدار: «خانه»، «محل کار»
+  recipientName  String
+  recipientPhone String
+  // باید از همان فهرست بسته‌ی شهرها باشد که StoreShippingRule.city برای lookup هزینه
+  // استفاده می‌کند (src/common/constants/iran-cities.ts) — یک منبع واحد، نه دو جدول جدا
+  city           String
+  address        String  @db.Text
+  postalCode     String?
+
+  isDefault  Boolean  @default(false)
+  lastUsedAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  orders Order[]
+
+  @@index([customerId])
+  @@map("customer_addresses")
+}
+
+// docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۲ — فروشنده در پنل یک جدول
+// می‌بیند: ردیف پیش‌فرض «سایر شهرها» (city=null) + ردیف‌های اختصاصی شهر خاص. enabled=false
+// روی یک شهر یعنی «ارسال نداریم» به آن شهر (نه فقط گران/رایگان)
+model StoreShippingRule {
+  id        String   @id @default(uuid())
+  storeId   String
+  store     Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  city      String? // null = ردیف پیش‌فرض «سایر شهرها»
+  cost      Int // تومان
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([storeId, city])
+  @@index([storeId])
+  @@map("store_shipping_rules")
+}
+
 enum ConversationState {
   GREETING
   BROWSING
   CART_REVIEW
+  // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۱ — بین CART_REVIEW و
+  // AWAITING_PAYMENT: فقط وقتی Store.requiresShipping=true وارد می‌شود (doCreateOrder)؛
+  // آدرس/تلفن خریدار (از دفترچه‌آدرس یا تازه) قبل از نمایش شماره کارت جمع‌آوری می‌شود
+  ADDRESS_COLLECTION
   AWAITING_PAYMENT
   RECEIPT_SUBMITTED
   AWAITING_SELLER_APPROVAL
@@ -2517,30 +2576,50 @@ enum OrderStatus {
 }
 
 model Order {
-  id                         String             @id @default(uuid())
-  storeId                    String
-  store                      Store              @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  conversationId             String             @unique
-  conversation               SalesConversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  items                      Json // [{productId, name, unitPrice, qty}]
-  totalAmount                Int
-  status                     OrderStatus        @default(PENDING_PAYMENT)
-  receiptImageKey            String?
-  rejectReason               String?
+  id                          String             @id @default(uuid())
+  storeId                     String
+  store                       Store              @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  conversationId              String             @unique
+  conversation                SalesConversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  items                       Json // [{productId, name, unitPrice, qty}]
+  totalAmount                 Int
+  status                      OrderStatus        @default(PENDING_PAYMENT)
+  receiptImageKey             String?
+  rejectReason                String?
   // docs/PRD-seller-multi-bank-card-rotation.md — کدام کارت واقعاً به این خریدار نشان داده
   // شد؛ برای شمارش سقف THRESHOLD و شفافیت به فروشنده
-  bankCardId                 String?
-  bankCard                   StoreBankCard?     @relation(fields: [bankCardId], references: [id])
+  bankCardId                  String?
+  bankCard                    StoreBankCard?     @relation(fields: [bankCardId], references: [id])
   // docs/PRD-customer-comments-and-discounts.md بخش ب — کدام کد تخفیف واقعاً روی این سفارش
   // اعمال شد (totalAmount از قبل تخفیف‌خورده ذخیره می‌شود)؛ فقط شفافیت/آمار، منطق اعمال در
   // conversation-engine.service.ts's doApplyDiscount/doCreateOrder است
-  discountCodeId             String?
-  discountCode               StoreDiscountCode? @relation(fields: [discountCodeId], references: [id])
+  discountCodeId              String?
+  discountCode                StoreDiscountCode? @relation(fields: [discountCodeId], references: [id])
   // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۳ — فالوآپ رضایت چند روز بعد از تایید
   // سفارش (نه فوری مثل درخواست نظر بالا)؛ نال یعنی هنوز فرستاده نشده
-  satisfactionFollowUpSentAt DateTime?
-  createdAt                  DateTime           @default(now())
-  updatedAt                  DateTime           @updatedAt
+  satisfactionFollowUpSentAt  DateTime?
+  // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۱ — snapshot آدرس، نه فقط FK:
+  // اگر خریدار بعداً CustomerAddress را ویرایش/حذف کند، این سفارش نباید عوض شود. همه نال
+  // می‌مانند وقتی Store.requiresShipping=false بوده (فروش حضوری/دیجیتال)
+  recipientName               String?
+  recipientPhone              String?
+  shippingCity                String?
+  shippingAddress             String?            @db.Text
+  postalCode                  String?
+  // docs/PRD-buyer-saved-addresses.md بخش ۲ — فقط برای ارجاع/آمار («این آدرس چندبار استفاده
+  // شده»)، منطق محاسبه از روی فیلدهای snapshot بالاست نه از این رابطه
+  addressId                   String?
+  address                     CustomerAddress?   @relation(fields: [addressId], references: [id], onDelete: SetNull)
+  // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۲ — هزینه‌ی ارسال lookup‌شده در
+  // لحظه‌ی ثبت سفارش، از قبل داخل totalAmount جمع شده؛ این فیلد فقط برای شفافیت/نمایش جدا است
+  shippingCostToman           Int?
+  // بخش ۴ گزینه A — مبلغ استخراج‌شده توسط vision از عکس رسید؛ نال یعنی استخراج ناموفق/هنوز
+  // انجام‌نشده. receiptVerifiedMatch فقط وقتی استخراج موفق بود مقدار می‌گیرد (true/false)،
+  // در غیر این صورت نال می‌ماند (یعنی «نامشخص»، نه «مغایرت»)
+  receiptExtractedAmountToman Int?
+  receiptVerifiedMatch        Boolean?
+  createdAt                   DateTime           @default(now())
+  updatedAt                   DateTime           @updatedAt
 
   @@index([storeId])
   @@index([status, satisfactionFollowUpSentAt])

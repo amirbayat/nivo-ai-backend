@@ -572,6 +572,14 @@ export class TelegramService {
     if (data.startsWith('ac:'))
       action = { type: 'ADD_TO_CART', productId: data.slice(3) };
     else if (data === 'cc') action = { type: 'CONFIRM_CART' };
+    // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۱ — دکمه‌های فلوی آدرس
+    else if (data.startsWith('sa:'))
+      action = { type: 'SELECT_ADDRESS', addressId: data.slice(3) };
+    else if (data === 'na') action = { type: 'NEW_ADDRESS' };
+    else if (data === 'ca') action = { type: 'CONFIRM_ADDRESS' };
+    else if (data === 'ea') action = { type: 'EDIT_ADDRESS' };
+    else if (data === 'sva') action = { type: 'SAVE_ADDRESS' };
+    else if (data === 'nsa') action = { type: 'SKIP_SAVE_ADDRESS' };
     if (!action) return;
 
     if (conversation.isMutedForHuman) return;
@@ -963,6 +971,52 @@ export class TelegramService {
       case 'ORDER_STATUS':
         await this.sendText(chatId, `وضعیت سفارش: ${block.status}`);
         return;
+      // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۱ + docs/PRD-buyer-saved-addresses.md
+      case 'ADDRESS_PROMPT': {
+        if (block.mode === 'CHOOSE_SAVED') {
+          const keyboard: TelegramInlineKeyboard = {
+            inline_keyboard: [
+              ...(block.addresses ?? []).map((a) => [
+                { text: a.summary, callback_data: `sa:${a.id}` },
+              ]),
+              [{ text: fa.salesAgent.addressNewOption, callback_data: 'na' }],
+            ],
+          };
+          await this.sendText(
+            chatId,
+            fa.salesAgent.addressChooseSavedPrompt,
+            keyboard,
+          );
+        } else if (block.mode === 'CONFIRM') {
+          await this.sendText(chatId, block.summary ?? '', {
+            inline_keyboard: [
+              [
+                {
+                  text: fa.salesAgent.addressConfirmButton,
+                  callback_data: 'ca',
+                },
+                { text: fa.salesAgent.addressEditButton, callback_data: 'ea' },
+              ],
+            ],
+          });
+        } else {
+          await this.sendText(chatId, fa.salesAgent.addressSavePrompt, {
+            inline_keyboard: [
+              [
+                {
+                  text: fa.salesAgent.addressSaveYesButton,
+                  callback_data: 'sva',
+                },
+                {
+                  text: fa.salesAgent.addressSaveNoButton,
+                  callback_data: 'nsa',
+                },
+              ],
+            ],
+          });
+        }
+        return;
+      }
       case 'NONE':
         return;
     }
