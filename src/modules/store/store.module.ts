@@ -16,6 +16,7 @@ import { StoreShippingRuleService } from './store-shipping-rule.service';
 import { StoreAdPlacementService } from './store-ad-placement.service';
 import { CardSelectorService } from './card-selector.service';
 import { ProductEnrichmentService } from './product-enrichment.service';
+import { ProductEnrichmentReminderService } from './product-enrichment-reminder.service';
 
 @Module({
   // docs/PRD-seller-credit-billing.md بخش ۷ — StoreCreditService برای خرید self-serve اعتبار
@@ -48,15 +49,18 @@ import { ProductEnrichmentService } from './product-enrichment.service';
     StoreAdPlacementService,
     CardSelectorService,
     ProductEnrichmentService,
+    ProductEnrichmentReminderService,
   ],
   // CardSelectorService هم از SalesAgentModule (doCreateOrder) لازم است —
   // docs/PRD-seller-multi-bank-card-rotation.md بخش ۲
   // ProductEnrichmentService هم از AdminModule لازم است — docs/PRD-admin-product-enrichment-review.md
+  // ProductEnrichmentReminderService هم از QueueModule لازم است (cron هفتگی یادآوری)
   exports: [
     StoreService,
     StoreKbService,
     CardSelectorService,
     ProductEnrichmentService,
+    ProductEnrichmentReminderService,
   ],
 })
 export class StoreModule {}

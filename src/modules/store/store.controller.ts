@@ -49,6 +49,7 @@ import { UpdateDiscountCodeDto } from './dto/update-discount-code.dto';
 import { CreateShippingRuleDto } from './dto/create-shipping-rule.dto';
 import { UpdateShippingRuleDto } from './dto/update-shipping-rule.dto';
 import { PurchaseAdPlacementDto } from './dto/purchase-ad-placement.dto';
+import { GenerateBrandIntroDto } from './dto/generate-brand-intro.dto';
 import { fa } from '../../i18n/fa';
 
 // docs/PRD-mvp-launch-plan.md گام ۰ — ثبت‌نام فروشنده و ساخت فروشگاه
@@ -96,6 +97,22 @@ export class StoreController {
   @Get(':id/completeness')
   getCompleteness(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     return this.storeService.getCompleteness(user.sub, id);
+  }
+
+  // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۹ (پروفایل برند عمیق‌تر در
+  // آنبوردینگ) — متن خام فروشنده را به یک brandIntro کوتاه/حرفه‌ای تبدیل می‌کند؛ ذخیره‌ی واقعی
+  // با همان PATCH معمولی بالا انجام می‌شود، این مسیر فقط پیشنهاد تولید می‌کند
+  @Post(':id/brand-intro-ai')
+  generateBrandIntroAi(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: GenerateBrandIntroDto,
+  ) {
+    return this.storeKbService.generateBrandIntroFromText(
+      user.sub,
+      id,
+      dto.rawText,
+    );
   }
 
   @Post(':id/products')
@@ -458,6 +475,12 @@ export class StoreController {
       id,
       withWebSearch === 'true',
     );
+  }
+
+  // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۹ (رصد رقبا)
+  @Post(':id/competitor-analysis')
+  analyzeCompetitors(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    return this.storeKbService.analyzeCompetitors(user.sub, id);
   }
 
   // باکس دانش فروشگاه (بخش ۳)

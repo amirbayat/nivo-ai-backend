@@ -26,6 +26,9 @@ const POST_PURCHASE_FOLLOWUP_CRON = '0 10 * * *';
 // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۴ — هر نیم‌ساعت، چون آستانه‌ی خودِ فیچر
 // (۳ ساعت) به این دقت حساس‌تر از فالوآپ رضایت است
 const ABANDONED_CART_REMINDER_CRON = '*/30 * * * *';
+// docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۹ — هفته‌ای یک‌بار کافی است
+// (خودِ cooldown داخلی سرویس هم ۲۵ روزه است)؛ شنبه ساعت ۹ صبح، شروع هفته‌ی کاری ایران
+const PRODUCT_ENRICHMENT_REMINDER_CRON = '0 9 * * 6';
 
 @Injectable()
 export class QueueService implements OnApplicationBootstrap {
@@ -57,6 +60,8 @@ export class QueueService implements OnApplicationBootstrap {
     private readonly postPurchaseFollowUpQueue: Queue,
     @InjectQueue('abandoned-cart-reminder')
     private readonly abandonedCartReminderQueue: Queue,
+    @InjectQueue('product-enrichment-reminder')
+    private readonly productEnrichmentReminderQueue: Queue,
     private readonly aiProvider: AiProviderService,
   ) {}
 
@@ -265,6 +270,20 @@ export class QueueService implements OnApplicationBootstrap {
     );
     this.logger.log(
       `Abandoned cart reminder job scheduled: ${ABANDONED_CART_REMINDER_CRON}`,
+    );
+
+    const productEnrichmentReminderRepeatables =
+      await this.productEnrichmentReminderQueue.getRepeatableJobs();
+    for (const job of productEnrichmentReminderRepeatables) {
+      await this.productEnrichmentReminderQueue.removeRepeatableByKey(job.key);
+    }
+    await this.productEnrichmentReminderQueue.add(
+      'remind',
+      {},
+      { repeat: { cron: PRODUCT_ENRICHMENT_REMINDER_CRON } },
+    );
+    this.logger.log(
+      `Product enrichment reminder job scheduled: ${PRODUCT_ENRICHMENT_REMINDER_CRON}`,
     );
   }
 }

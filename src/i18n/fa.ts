@@ -159,6 +159,8 @@ export const fa = {
     // docs/PRD-seller-knowledge-base.md بخش ۹.۲ (دوم، مورد ۵)
     insufficientCreditForPhotoEnrichment:
       'اعتبار فروشگاه برای تکمیل از روی عکس کافی نیست — از بخش «اعتبار هوش مصنوعی» شارژ کن',
+    // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۹ (رصد رقبا)
+    brandIntroTextRequired: 'لطفاً چند جمله درباره‌ی برند/فروشگاهت بنویس',
     productCodeTaken:
       'این کد قبلاً برای محصول دیگری در همین فروشگاه استفاده شده',
     telegramConnectTokenInvalid: 'این توکن اتصال تلگرام نامعتبر یا منقضی شده',
@@ -384,6 +386,10 @@ export const fa = {
       `تلگرام شما به فروشگاه «${storeName}» وصل شد ✅ از این به بعد وقتی مشتری‌ای نیاز به پاسخ انسانی داشت یا رسیدی فرستاد، همین‌جا بهتون اطلاع می‌دیم.`,
     sellerConnectInvalid:
       'این لینک اتصال نامعتبر یا منقضی شده — یک لینک تازه از پنل («بیشتر» ← «اتصال تلگرام») بگیرید.',
+    // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۹ (غنی‌سازی دوره‌ای) — یادآوری
+    // هفتگی برای محصولاتی که مدت‌هاست آپدیت نشده‌اند (قیمت/موجودی رقیب ممکن است عوض شده باشد)
+    enrichmentReminder: (staleCount: number, sampleNames: string) =>
+      `📋 ${staleCount.toLocaleString('fa-IR')} محصول فروشگاه شما مدتی است آپدیت نشده (مثلاً: ${sampleNames}) — بد نیست یک نگاه بندازی و با «تکمیل خودکار همه‌ی محصولات ناقص» توی پنل دوباره enrich‌شون کنی، شاید قیمت بازار یا رقبا عوض شده باشه.`,
     handoffNotification: (customerText: string) =>
       `🔔 یک مشتری نیاز به پاسخ شما داره:\n\n«${customerText}»`,
     handoffReplyButton: '💬 پاسخ بده',

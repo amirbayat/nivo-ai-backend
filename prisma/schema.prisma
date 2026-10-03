@@ -2065,6 +2065,10 @@ model Store {
   ownerTelegramChatId           String?
   telegramConnectToken          String?           @unique
   telegramConnectTokenExpiresAt DateTime?
+  // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۹ (غنی‌سازی دوره‌ای) — آخرین بار
+  // که برای این فروشگاه یادآوری «محصولات قدیمی‌نشده» تلگرام فرستاده شد؛ cron فقط فروشگاه‌هایی
+  // که این فیلدشان خالی یا قدیمی‌تر از cooldown است را دوباره نوتیف می‌کند (جلوگیری از اسپم)
+  lastEnrichmentNudgeAt         DateTime?
   status                        StoreStatus       @default(ACTIVE)
   // docs/PRD-seller-credit-billing.md بخش ۱/۵ — اعتبار AI فروشگاه به تومان؛ بعد از تمام‌شدن
   // سهمیه‌ی رایگان روزانه، مصرف واقعی هر فراخوانی AI از همین فیلد کم می‌شود
@@ -2204,6 +2208,11 @@ model Product {
   // فقط یک محصول خاص (مثلاً حساس/قانونی) را از لحن ترغیبی مستثنا کند
   persuasionTechniquesEnabled Boolean  @default(true)
   createdAt                   DateTime @default(now())
+  // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۹ (غنی‌سازی دوره‌ای) — قبلاً
+  // Product هیچ timestamp آپدیتی نداشت، پس تشخیص «این محصول مدت‌هاست دست‌نخورده مانده»
+  // ممکن نبود. @default(now()) فقط برای NOT NULL شدن ردیف‌های قدیمی لازم است؛ Prisma خودش
+  // در هر .update() واقعی آن را به زمان جاری تنظیم می‌کند
+  updatedAt                   DateTime @default(now()) @updatedAt
   // docs/PRD-product-display-focus-and-variations.md §۲.۴ — کد کوتاه یکتای سراسری برای لینک
   // اختصاصی تلگرام این محصول (payload محدودیت ۶۴ کاراکتری `/start` را دارد، UUID خام جا
   // نمی‌شود)؛ lazy-generate می‌شود (اولین باری که فروشنده لینک تلگرام را می‌خواهد)، نه در

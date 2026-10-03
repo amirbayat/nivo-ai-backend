@@ -22,6 +22,7 @@ import { SalesAgentVoiceWebhookService } from '../modules/sales-agent/sales-agen
 import { ProductCommentModerationProcessor } from './processors/product-comment-moderation.processor';
 import { PostPurchaseFollowUpProcessor } from './processors/post-purchase-followup.processor';
 import { AbandonedCartReminderProcessor } from './processors/abandoned-cart-reminder.processor';
+import { ProductEnrichmentReminderProcessor } from './processors/product-enrichment-reminder.processor';
 import { PrismaModule } from '../prisma/prisma.module';
 import { MessageFeedbackModule } from '../modules/message-feedback/message-feedback.module';
 import { CampaignModule } from '../modules/campaign/campaign.module';
@@ -39,6 +40,7 @@ import { VeoProviderModule } from '../common/services/veo-provider.module';
 import { RunwayProviderModule } from '../common/services/runway-provider.module';
 import { TelegramModule } from '../modules/telegram/telegram.module';
 import { SalesAgentModule } from '../modules/sales-agent/sales-agent.module';
+import { StoreModule } from '../modules/store/store.module';
 
 @Module({
   imports: [
@@ -86,6 +88,9 @@ import { SalesAgentModule } from '../modules/sales-agent/sales-agent.module';
     // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۳/۵.۴
     BullModule.registerQueue({ name: 'post-purchase-followup' }),
     BullModule.registerQueue({ name: 'abandoned-cart-reminder' }),
+    // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۹ — یادآوری هفتگی محصولات
+    // قدیمی‌نشده، تولیدکننده در store.module.ts (ProductEnrichmentReminderService)
+    BullModule.registerQueue({ name: 'product-enrichment-reminder' }),
     PrismaModule,
     MessageFeedbackModule,
     CampaignModule,
@@ -105,6 +110,9 @@ import { SalesAgentModule } from '../modules/sales-agent/sales-agent.module';
     // docs/PRD-seller-credit-billing.md — CreditService برای لاگ مصرف VOICE_TTS در
     // SalesAgentVoiceProcessor پایین
     SalesAgentModule,
+    // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۹ — ProductEnrichmentReminderService
+    // برای ProductEnrichmentReminderProcessor پایین
+    StoreModule,
   ],
   // فیدبک کاربر ۱۴۰۵/۰۷/۰۱ — SalesAgentVoiceWebhookController اینجاست (نه در sales-agent
   // module) چون SalesAgentVoiceWebhookService مستقیم SalesAgentVoiceProcessor را تزریق
@@ -133,6 +141,7 @@ import { SalesAgentModule } from '../modules/sales-agent/sales-agent.module';
     ProductCommentModerationProcessor,
     PostPurchaseFollowUpProcessor,
     AbandonedCartReminderProcessor,
+    ProductEnrichmentReminderProcessor,
   ],
 })
 export class QueueModule {}

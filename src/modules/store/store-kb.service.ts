@@ -645,6 +645,124 @@ sourceNote را خالی بگذار. پاسخ را فقط به‌صورت یک �
     }
   }
 
+  // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۹ (رصد رقبا) — همان ابزار جستجوی
+  // وب موجود، اما به‌جای enrich کردن یک محصول خاص، ۲-۳ فروشگاه مشابه آنلاین را پیدا می‌کند و
+  // خلاصه‌ی نقاط قوت محتوایی‌شان را برای الهام (نه کپی) نشان می‌دهد. هزینه مثل completeProductInfo
+  // با withWebSearch از اعتبار فروشگاه کسر می‌شود؛ چیزی persist نمی‌شود (استاتلس، مثل ai-complete).
+  async analyzeCompetitors(sellerId: string, storeId: string) {
+    const store = await this.storeService.getOwned(sellerId, storeId);
+    if (store.creditBalanceToman <= 0) {
+      throw new BadRequestException(fa.store.insufficientCreditForWebSearch);
+    }
+
+    const sampleProducts = await this.prisma.product.findMany({
+      where: { storeId },
+      select: { name: true },
+      orderBy: { createdAt: 'desc' },
+      take: 5,
+    });
+
+    const model = 'openai/gpt-5.4-mini';
+    try {
+      const { object: rawObject, usage } = await generateObject({
+        model: this.aiProvider.buildClient(
+          undefined,
+          { supportsStructuredOutputs: true },
+          { tools: PRODUCT_ENRICHMENT_WEB_SEARCH_TOOLS, max_tool_calls: 5 },
+        )(model),
+        schema: z.object({
+          competitors: z
+            .array(z.object({ name: z.string(), highlight: z.string() }))
+            .max(3),
+          suggestions: z.array(z.string()).max(6),
+        }),
+        system: `تو دستیار یک فروشنده‌ی فروشگاه آنلاین ایرانی هستی. در وب جستجو کن و ۲ تا ۳
+فروشگاه آنلاین/صفحه‌ی اینستاگرام مشابه (همان دسته‌بندی) پیدا کن. برای هرکدام در competitors یک
+نام کوتاه و یک جمله درباره‌ی نقطه‌قوت محتوایی‌شان بنویس (مثلاً تاکید روی گارانتی، ارسال سریع،
+مشخصات فنی کامل، عکس باکیفیت). در suggestions ۳ تا ۶ پیشنهاد عملی و کوتاه بنویس که این فروشگاه
+می‌تواند از آن‌ها الهام بگیرد — هرگز نگو «کپی کن»، فقط ایده بده. هرگز اسم بردن از رقبا را توهین‌آمیز
+یا تبلیغاتی نکن، فقط توصیف بی‌طرفانه. اگر چیز معناداری پیدا نکردی، competitors را کوتاه‌تر/خالی
+برگردان و suggestions را بر اساس دانش عمومی این دسته‌بندی بنویس. پاسخ را فقط به‌صورت یک شیء JSON
+معتبر مطابق اسکیمای داده‌شده برگردان.`,
+        prompt: `دسته‌بندی فروشگاه: ${store.category ?? 'نامشخص'}
+معرفی فروشگاه: ${store.brandIntro ?? '(ثبت نشده)'}
+چند نمونه محصول: ${
+          sampleProducts.map((p) => p.name).join('، ') ||
+          '(هنوز محصولی ثبت نشده)'
+        }`,
+        experimental_repairText: this.repairStructuredOutput(),
+      });
+
+      const { costToman } = await this.pricing.calcCost(
+        usage.inputTokens ?? 0,
+        usage.outputTokens ?? 0,
+        model,
+      );
+      await this.prisma.creditUsageEvent.create({
+        data: {
+          storeId,
+          model,
+          kind: 'PRODUCT_ENRICHMENT',
+          costToman,
+          isFreeQuota: false,
+        },
+      });
+      await this.prisma.store.update({
+        where: { id: storeId },
+        data: { creditBalanceToman: { decrement: costToman } },
+      });
+
+      return {
+        competitors: rawObject.competitors.slice(0, 3).map((c) => ({
+          name: c.name.trim().slice(0, 80),
+          highlight: c.highlight.trim().slice(0, 300),
+        })),
+        suggestions: rawObject.suggestions
+          .map((s) => s.trim().slice(0, 200))
+          .filter(Boolean)
+          .slice(0, 6),
+      };
+    } catch (err) {
+      this.logger.error(
+        `analyzeCompetitors failed for store=${storeId}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+        err instanceof Error ? err.stack : undefined,
+      );
+      throw err;
+    }
+  }
+
+  // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۹ (پروفایل برند عمیق‌تر در
+  // آنبوردینگ) — فروشنده یک متن خام/محاوره‌ای درباره‌ی برندش می‌نویسد، AI همان لحظه (بدون
+  // جستجوی وب، رایگان مثل generateBasicSuggestions) آن را به یک معرفی کوتاه و حرفه‌ای تبدیل
+  // می‌کند. خروجی مستقیم ذخیره نمی‌شود — فرانت با همان PATCH /v2/stores/:id معمولی روی
+  // brandIntro apply می‌کند، دقیقاً مثل بقیه‌ی پیشنهادهای AI در این فایل.
+  async generateBrandIntroFromText(
+    sellerId: string,
+    storeId: string,
+    rawText: string,
+  ) {
+    await this.storeService.getOwned(sellerId, storeId);
+    const trimmed = rawText.trim().slice(0, 2000);
+    if (!trimmed) {
+      throw new BadRequestException(fa.store.brandIntroTextRequired);
+    }
+
+    const { object } = await generateObject({
+      model: this.provider('openai/gpt-5.4-mini'),
+      schema: z.object({ brandIntro: z.string() }),
+      system: `تو دستیار یک فروشنده‌ی فروشگاه آنلاین ایرانی هستی. متن خام زیر که فروشنده درباره‌ی
+برند/فروشگاهش نوشته را به یک معرفی کوتاه و حرفه‌ای (فارسی، ۱ تا ۳ جمله، لحن صمیمی ولی قابل‌اعتماد)
+تبدیل کن. فقط از همان اطلاعاتی که فروشنده داده استفاده کن، چیزی اختراع نکن. پاسخ را فقط به‌صورت
+یک شیء JSON معتبر برگردان.`,
+      prompt: trimmed,
+      experimental_repairText: this.repairStructuredOutput(),
+    });
+
+    return { suggestedBrandIntro: object.brandIntro.trim().slice(0, 300) };
+  }
+
   // docs/PRD-admin-product-enrichment-review.md بخش ۲ — نسخه‌ی ادمین‌محور completeProductInfo
   // بالا: بدون sellerId/getOwned (ادمین مالک فروشگاه نیست)، بدون چک/کسر اعتبار فروشنده (این
   // ابتکار از طرف ادمین است، نه درخواست فروشنده — هزینه‌ی عملیاتی پلتفرم است). چرخه‌ی عمر
