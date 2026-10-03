@@ -1,4 +1,5 @@
 import type { ProductVideoItem } from '../store/product-video.types';
+import type { ProductSpecItem } from '../store/product-specs.types';
 
 // docs/PRD-panels-and-buyer-ux-design.md بخش ۳.۲ — فقط زیرمجموعه‌ای که گام ۱ واقعاً می‌سازد
 // (بدون ProductVariant/CART_SUMMARY چندمتغیره؛ طبق ساده‌سازی پلن گام ۱)
@@ -96,6 +97,29 @@ export type UiBlock =
       summary?: string; // فقط CONFIRM
       shippingCostToman?: number; // فقط CONFIRM
       provinceCovered?: boolean; // فقط CONFIRM — false یعنی فروشنده به این استان ارسال ندارد
+    }
+  // docs/PRD-panels-and-buyer-ux-design.md بخش ۳.۶ (فاز ۴.۸) — سفارش مجدد با یک دکمه؛
+  // سفارش‌های همین Customer (نه فقط همین مکالمه)، تازه‌ترین اول
+  | {
+      type: 'ORDER_LIST';
+      orders: {
+        id: string;
+        createdAt: string;
+        items: CartItem[];
+        totalAmount: number;
+        status: string;
+      }[];
+    }
+  // همان بخش — مقایسه‌ی ۲-۳ محصول کنار هم؛ specs از همان فیلد Product.specs (فاز ۴.۳)
+  | {
+      type: 'COMPARE_CARD';
+      products: {
+        id: string;
+        name: string;
+        basePrice: number;
+        stock: number;
+        specs: ProductSpecItem[];
+      }[];
     }
   | { type: 'NONE' };
 
@@ -210,12 +234,17 @@ export type SalesAction = {
     | 'CONFIRM_ADDRESS'
     | 'EDIT_ADDRESS'
     | 'SAVE_ADDRESS'
-    | 'SKIP_SAVE_ADDRESS';
-  productId?: string;
+    | 'SKIP_SAVE_ADDRESS'
+    // docs/PRD-panels-and-buyer-ux-design.md بخش ۳.۶ (فاز ۴.۸)
+    | 'VIEW_ORDERS'
+    | 'TOGGLE_SAVE_PRODUCT'
+    | 'REORDER';
+  productId?: string; // ADD_TO_CART, TOGGLE_SAVE_PRODUCT
   qty?: number;
   addressId?: string;
   // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۲ (فاز ۱.۵) — فقط برای SELECT_PROVINCE
   province?: string;
+  orderId?: string; // فقط REORDER
 };
 
 // docs/PRD-sales-agent-voice.md بخش ۱ — payload صف sales-agent-voice؛ در conversation-engine

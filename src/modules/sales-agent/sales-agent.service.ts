@@ -468,6 +468,17 @@ export class SalesAgentService {
     };
   }
 
+  // docs/PRD-panels-and-buyer-ux-design.md بخش ۳.۶ (فاز ۴.۸، مورد ۳) — کدام محصولات این
+  // Customer (نه فقط همین مکالمه) «ذخیره برای بعد» کرده، برای نشان‌دادن آیکون پرشده روی کارت/گرید
+  async getSavedProductIds(conversationId: string, sessionToken: string) {
+    const conversation = await this.loadOwned(conversationId, sessionToken);
+    const saved = await this.prisma.savedProduct.findMany({
+      where: { customerId: conversation.customerId },
+      select: { productId: true },
+    });
+    return { productIds: saved.map((s) => s.productId) };
+  }
+
   // docs/PRD-sales-agent-response-strategy-ab.md بخش ۹ — سوییچ دستی خریدار (فعلاً فقط برای
   // تست زنده‌ی کاربر، نه یک قابلیت نهایی محصول) بین Track A/B روی همین مکالمه؛ بدون migration
   // چون responseStrategy از قبل روی SalesConversation هست

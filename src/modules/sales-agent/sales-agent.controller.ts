@@ -105,6 +105,18 @@ export class SalesAgentController {
     );
   }
 
+  // docs/PRD-panels-and-buyer-ux-design.md بخش ۳.۶ (فاز ۴.۸، مورد ۳) — «ذخیره برای بعد»
+  @Get('chat/:conversationId/saved-products')
+  getSavedProductIds(
+    @Param('conversationId') conversationId: string,
+    @Headers('x-session-token') sessionToken: string,
+  ) {
+    return this.salesAgentService.getSavedProductIds(
+      conversationId,
+      sessionToken,
+    );
+  }
+
   @Get('chat/:conversationId')
   getConversation(
     @Param('conversationId') conversationId: string,

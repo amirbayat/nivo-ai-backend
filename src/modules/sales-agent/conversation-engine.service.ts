@@ -25,6 +25,7 @@ import {
 import {
   parseProductSpecs,
   formatSpecsForFacts,
+  type ProductSpecItem,
 } from '../store/product-specs.types';
 import { CreditService } from './credit.service';
 import { AbuseGuardService } from './abuse-guard.service';
@@ -1335,6 +1336,9 @@ ${
 - اگر مشتری قبلاً محصولی را دیده (طبق سبد/تاریخچه/آخرین محصولات مطرح‌شده بالا) و فقط سوال عمومی
   پرسید، به‌جای جست‌وجوی دوباره روی همان محصول تمرکز کن.
 - اگر مشتری صریح عکس بیشتر خواست، از show_product_photos استفاده کن.
+- اگر مشتری صریح بین ۲-۳ محصول مشخص مردد است یا مقایسه خواسته («این بهتره یا اون؟»، «فرقشون
+  چیه؟» با حداقل دو محصول مشخص)، از compare_products استفاده کن تا جدولی کنار هم نشان داده شود
+  — به‌جای توضیح تفاوت‌ها فقط در متن آزاد.
 - همیشه اول به سوال/نیاز واقعی مشتری یک جواب کامل و مفید بده، بعد (در صورت نیاز) پیشنهاد یا دعوت
   به خرید را اضافه کن — نه برعکس.
 - (docs/PRD-sales-agent-consultative-recommendation.md) اگر پیام مشتری توصیف یک وضعیت/مشکل/هدف
@@ -1373,6 +1377,15 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       images: string[];
       videos: ProductVideoItem[];
     } | null;
+    compareResult: {
+      products: {
+        id: string;
+        name: string;
+        basePrice: number;
+        stock: number;
+        specs: ProductSpecItem[];
+      }[];
+    } | null;
     relevantProductIds: string[];
     seenProducts: Map<string, CompactProduct>;
     toolFetchedProductIds: Set<string>;
@@ -1381,6 +1394,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       orderResult,
       cartResult,
       photosResult,
+      compareResult,
       relevantProductIds,
       seenProducts,
       toolFetchedProductIds,
@@ -1408,6 +1422,9 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         images: photosResult.images,
         videos: photosResult.videos,
       };
+    }
+    if (compareResult) {
+      return { type: 'COMPARE_CARD', products: compareResult.products };
     }
     if (relevantProductIds.length > 0) {
       // باگ واقعی زنده (۱۴۰۵/۰۷/۱۹، همون مکانیزم lastShownProducts بالا) — relevantProductIds
@@ -1513,6 +1530,16 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       productName: string;
       images: string[];
       videos: ProductVideoItem[];
+    } | null = null;
+    // docs/PRD-panels-and-buyer-ux-design.md بخش ۳.۶ (فاز ۴.۸، مورد ۴) — مقایسه‌ی ۲-۳ محصول
+    let compareResult: {
+      products: {
+        id: string;
+        name: string;
+        basePrice: number;
+        stock: number;
+        specs: ProductSpecItem[];
+      }[];
     } | null = null;
 
     const initialProducts = await this.searchProducts(storeId);
@@ -1839,6 +1866,44 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       },
     });
 
+    // docs/PRD-panels-and-buyer-ux-design.md بخش ۳.۶ (فاز ۴.۸، مورد ۴) — وقتی مشتری بین ۲-۳
+    // محصول مردد است؛ فقط مشخصات واقعی (قیمت/موجودی/specs) را کنار هم برمی‌گرداند، هیچ ویژگی
+    // اختراع نمی‌کند
+    const compareProductsTool = tool({
+      description:
+        'مقایسه‌ی ۲ یا ۳ محصول کنار هم (قیمت/موجودی/مشخصات) — فقط وقتی مشتری صریح بین چند محصول مردد است یا مقایسه خواسته',
+      inputSchema: z.object({
+        productIds: z.array(z.string()).min(2).max(3),
+      }),
+      execute: async ({ productIds }: { productIds: string[] }) => {
+        const products = await this.prisma.product.findMany({
+          where: { id: { in: productIds }, storeId },
+        });
+        for (const p of products) {
+          seenProducts.set(p.id, {
+            id: p.id,
+            name: p.name,
+            basePrice: p.basePrice,
+            stock: p.stock,
+            images: p.images,
+            description: p.description,
+            videos: parseProductVideos(p.videos),
+          });
+          toolFetchedProductIds.add(p.id);
+        }
+        compareResult = {
+          products: products.map((p) => ({
+            id: p.id,
+            name: p.name,
+            basePrice: p.basePrice,
+            stock: p.stock,
+            specs: parseProductSpecs(p.specs),
+          })),
+        };
+        return compareResult;
+      },
+    });
+
     // بدون execute — دقیقاً مثل respond_to_customer در callAgentCaptionWithRelevance (Track B)،
     // حلقه‌ی چندمرحله‌ای SDK بعد از این فراخوان خودش متوقف می‌شود
     //
@@ -1924,6 +1989,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           answer_faq: answerFaqTool,
           request_human_handoff: requestHumanHandoffTool,
           show_product_photos: showProductPhotosTool,
+          compare_products: compareProductsTool,
           respond_to_customer: respondToCustomer,
         },
         // docs/PRD-sales-agent-tool-calling-architecture.md بخش ۲.۳ — سقف هزینه‌ی فروشنده:
@@ -2053,6 +2119,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       orderResult,
       cartResult,
       photosResult,
+      compareResult,
       relevantProductIds,
       seenProducts,
       toolFetchedProductIds,
@@ -2899,6 +2966,151 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         ctx,
         action.type === 'SAVE_ADDRESS',
       );
+    }
+
+    // docs/PRD-panels-and-buyer-ux-design.md بخش ۳.۶ (فاز ۴.۸، مورد ۳) — «ذخیره برای بعد»:
+    // toggle ساده، بدون تغییر state/سبد؛ از همان endpoint پیام چت دیگر مسیرهای دکمه‌ای رد می‌شود
+    if (action.type === 'TOGGLE_SAVE_PRODUCT') {
+      const product = action.productId
+        ? await this.prisma.product.findUnique({
+            where: { id: action.productId },
+          })
+        : null;
+      if (!product || product.storeId !== conversation.storeId) {
+        return this.doClarify(conversation, fa.salesAgent.productNotFound);
+      }
+      const existing = await this.prisma.savedProduct.findUnique({
+        where: {
+          customerId_productId: {
+            customerId: conversation.customerId,
+            productId: product.id,
+          },
+        },
+      });
+      await this.prisma.conversationEvent.create({
+        data: {
+          conversationId: conversation.id,
+          type: 'CUSTOMER_MESSAGE',
+          payload: {
+            text: existing
+              ? fa.salesAgent.unsaveProductActionNamed(product.name)
+              : fa.salesAgent.saveProductActionNamed(product.name),
+          },
+        },
+      });
+      if (existing) {
+        await this.prisma.savedProduct.delete({ where: { id: existing.id } });
+      } else {
+        await this.prisma.savedProduct.create({
+          data: { customerId: conversation.customerId, productId: product.id },
+        });
+      }
+      const reply = existing
+        ? fa.salesAgent.productUnsaved(product.name)
+        : fa.salesAgent.productSaved(product.name);
+      await this.logReply(conversation, reply, { type: 'NONE' });
+      return {
+        reply,
+        uiBlocks: [{ type: 'NONE' }],
+        state: conversation.currentState,
+      };
+    }
+
+    // همان بخش، مورد ۲ — سفارش‌های قبلی همین Customer (نه فقط همین مکالمه)، تازه‌ترین اول
+    if (action.type === 'VIEW_ORDERS') {
+      await this.prisma.conversationEvent.create({
+        data: {
+          conversationId: conversation.id,
+          type: 'CUSTOMER_MESSAGE',
+          payload: { text: fa.salesAgent.viewOrdersAction },
+        },
+      });
+      const orders = await this.prisma.order.findMany({
+        where: { conversation: { customerId: conversation.customerId } },
+        orderBy: { createdAt: 'desc' },
+        take: 10,
+      });
+      const uiBlock: UiBlock = {
+        type: 'ORDER_LIST',
+        orders: orders.map((o) => ({
+          id: o.id,
+          createdAt: o.createdAt.toISOString(),
+          items: o.items as CartItem[],
+          totalAmount: o.totalAmount,
+          status: o.status,
+        })),
+      };
+      const reply = orders.length
+        ? await this.caption(
+            `سفارش‌های قبلی مشتری: ${orders
+              .map((o) => `${(o.items as CartItem[]).map((i) => i.name).join('، ')} (${o.status})`)
+              .join(' | ')}`,
+            conversation,
+          )
+        : fa.salesAgent.noPreviousOrders;
+      await this.logReply(conversation, reply, uiBlock, undefined, {
+        intent: 'VIEW_ORDERS',
+        handler: 'handleAction',
+        factsOrPrompt: `${orders.length} سفارش قبلی`,
+        model: resolveModel(conversation.abVariant),
+      });
+      return { reply, uiBlocks: [uiBlock], state: conversation.currentState };
+    }
+
+    // همان بخش، مورد ۲ — «دوباره همینو سفارش بده»: آیتم‌های یک سفارش قبلی را به سبد فعلی
+    // اضافه می‌کند؛ عیناً از همان computeCartMutation که applyCartUpdate هم استفاده می‌کند
+    if (action.type === 'REORDER') {
+      const order = action.orderId
+        ? await this.prisma.order.findFirst({
+            where: {
+              id: action.orderId,
+              conversation: { customerId: conversation.customerId },
+            },
+          })
+        : null;
+      if (!order) {
+        return this.doClarify(conversation, fa.salesAgent.reorderNotFound);
+      }
+      await this.prisma.conversationEvent.create({
+        data: {
+          conversationId: conversation.id,
+          type: 'CUSTOMER_MESSAGE',
+          payload: { text: fa.salesAgent.reorderAction },
+        },
+      });
+      let cart = ctx.cart;
+      let anyAdded = false;
+      for (const item of order.items as CartItem[]) {
+        const product = await this.prisma.product.findUnique({
+          where: { id: item.productId },
+        });
+        if (!product || product.storeId !== conversation.storeId) continue;
+        const mutation = this.computeCartMutation(cart, product, item.qty, false);
+        if (mutation.ok) {
+          cart = mutation.cart;
+          anyAdded = true;
+        }
+      }
+      if (!anyAdded) {
+        return this.doClarify(conversation, fa.salesAgent.reorderOutOfStock);
+      }
+      const nextState: ConversationState = 'CART_REVIEW';
+      await this.persistTransition(conversation, nextState, { ...ctx, cart });
+      await this.resetClarifyAttempts(conversation);
+      const uiBlock: UiBlock = {
+        type: 'CART_SUMMARY',
+        items: cart,
+        total: this.cartTotal(cart),
+      };
+      const facts = `سبد فعلی: ${cart.map((i) => `${i.name} × ${i.qty}`).join('، ')} — جمع کل ${this.cartTotal(cart)} تومان`;
+      const reply = await this.caption(facts, conversation);
+      await this.logReply(conversation, reply, uiBlock, undefined, {
+        intent: 'REORDER',
+        handler: 'handleAction',
+        factsOrPrompt: facts,
+        model: resolveModel(conversation.abVariant),
+      });
+      return { reply, uiBlocks: [uiBlock], state: nextState };
     }
 
     // CONFIRM_CART

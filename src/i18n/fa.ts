@@ -241,8 +241,10 @@ export const fa = {
       'متأسفانه نتونستم پیام صوتی رو پردازش کنم 🙏 میشه لطفاً به‌صورت متن بفرستی؟',
     didNotUnderstandWithHint: (productNames: string[]) =>
       `متوجه نشدم 🙁 می‌تونی مثلاً بگی «${productNames.join('» یا «')} رو میخوام» یا از لیست بالا دکمه‌ی «افزودن به سبد» رو بزنی.`,
+    // docs/PRD-panels-and-buyer-ux-design.md بخش ۳.۶ (فاز ۴.۸، مورد ۵) — به‌جای فقط «خوش اومدی»،
+    // ۲-۳ نمونه‌ی کار واقعی که خریدار می‌تواند بخواهد (خیلی‌ها توانایی واقعی ایجنت را نمی‌دانند)
     firstGreeting: (storeName: string) =>
-      `سلام! به ${storeName} خوش اومدی 👋 برای خرید فقط اسم محصول رو بگو یا از دکمه‌های پایین لیست استفاده کن.`,
+      `سلام! به ${storeName} خوش اومدی 👋 می‌تونی عکس بیشتر بخوای، قیمت/موجودی بپرسی، یا مستقیم اسم محصول رو بگی تا برات سفارش بدم.`,
     // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۲ — خریدار برگشتی (سفارش تاییدشده‌ی
     // قبلی از همین Customer، در یک مکالمه‌ی دیگر) به‌جای پیام خوش‌آمد عمومی این را می‌بیند
     returningGreeting: (storeName: string, productName: string) =>
@@ -255,6 +257,18 @@ export const fa = {
     addToCartActionNamed: (productName: string) =>
       `${productName} رو به سبد اضافه کن`,
     confirmCartAction: 'تایید و پرداخت',
+    // docs/PRD-panels-and-buyer-ux-design.md بخش ۳.۶ (فاز ۴.۸)
+    saveProductActionNamed: (productName: string) =>
+      `${productName} رو برای بعد ذخیره کن`,
+    unsaveProductActionNamed: (productName: string) =>
+      `${productName} رو از ذخیره‌شده‌ها حذف کن`,
+    productSaved: (productName: string) => `${productName} ذخیره شد ✅`,
+    productUnsaved: (productName: string) => `${productName} از ذخیره‌شده‌ها حذف شد`,
+    viewOrdersAction: 'سفارش‌های قبلیم رو نشون بده',
+    noPreviousOrders: 'هنوز هیچ سفارشی ثبت نکردی',
+    reorderAction: 'دوباره همینو سفارش بده',
+    reorderNotFound: 'این سفارش رو پیدا نکردم',
+    reorderOutOfStock: 'متاسفانه هیچ‌کدوم از آیتم‌های این سفارش دیگه موجود نیستن',
     noProductsFound: 'محصولی با این مشخصات پیدا نکردم',
     // docs/PRD-sales-agent-response-strategy-ab.md بخش ۱ (Track A، ردیف askClarifyingQuestion)
     // — fallback وقتی هر دو تلاش AI برای ساخت سوال روشن‌کننده شکست بخورد

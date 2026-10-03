@@ -2232,6 +2232,9 @@ model Product {
   // توضیحات (§۶) هم قابل‌اشاره در پاسخ ایجنت به خریدار بعدی هستند
   comments ProductComment[]
 
+  // docs/PRD-panels-and-buyer-ux-design.md بخش ۳.۶ (فاز ۴.۸) — «ذخیره برای بعد»
+  savedByCustomers SavedProduct[]
+
   // docs/PRD-product-display-focus-and-variations.md §۳ — جایگاه‌های تبلیغاتی محصول‌محور
   // (GREETING_FEATURED_PRODUCT) این محصول
   adPlacements AdPlacement[]
@@ -2368,11 +2371,28 @@ model Customer {
   // docs/PRD-buyer-saved-addresses.md — دفترچه‌آدرس per-Customer (یعنی per-store، طبق
   // بخش ۱ همان سند: هنوز هویت یکپارچه‌ی خریدار بین فروشگاه‌ها وجود ندارد)
   addresses          CustomerAddress[]
+  // docs/PRD-panels-and-buyer-ux-design.md بخش ۳.۶ (فاز ۴.۸) — «ذخیره برای بعد»
+  savedProducts      SavedProduct[]
 
   @@unique([storeId, sessionToken])
   @@unique([storeId, telegramChatId])
   @@index([storeId])
   @@map("customers")
+}
+
+// docs/PRD-panels-and-buyer-ux-design.md بخش ۳.۶ (فاز ۴.۸) — «ذخیره برای بعد»: نشان‌کردن یک
+// محصول بدون خرید فوری؛ جدول کوچک customerId+productId، بدون فیلد اضافه
+model SavedProduct {
+  id         String   @id @default(uuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+
+  @@unique([customerId, productId])
+  @@index([customerId])
+  @@map("saved_products")
 }
 
 // docs/PRD-buyer-saved-addresses.md بخش ۲ — ذخیره و استفاده‌ی مجدد آدرس با یک دکمه؛ حداکثر
