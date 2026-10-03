@@ -50,6 +50,7 @@ import { CreateShippingRuleDto } from './dto/create-shipping-rule.dto';
 import { UpdateShippingRuleDto } from './dto/update-shipping-rule.dto';
 import { PurchaseAdPlacementDto } from './dto/purchase-ad-placement.dto';
 import { GenerateBrandIntroDto } from './dto/generate-brand-intro.dto';
+import { GenerateProductDescriptionDto } from './dto/generate-product-description.dto';
 import { fa } from '../../i18n/fa';
 
 // docs/PRD-mvp-launch-plan.md گام ۰ — ثبت‌نام فروشنده و ساخت فروشگاه
@@ -439,6 +440,23 @@ export class StoreController {
       id,
       productId,
       withWebSearch === 'true',
+    );
+  }
+
+  // فیدبک کاربر ۱۴۰۵/۰۷/۱۱ — دستیار «نوشتن توضیحات با کمک AI» از روی یادداشت خام فروشنده؛
+  // ذخیره‌ی واقعی با همان PATCH/POST معمولی محصول انجام می‌شود، این مسیر فقط پیشنهاد می‌دهد
+  @Post(':id/products/:productId/describe-from-notes')
+  generateProductDescriptionFromNotes(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('productId') productId: string,
+    @Body() dto: GenerateProductDescriptionDto,
+  ) {
+    return this.storeKbService.generateProductDescriptionFromNotes(
+      user.sub,
+      id,
+      productId,
+      dto.rawText,
     );
   }
 

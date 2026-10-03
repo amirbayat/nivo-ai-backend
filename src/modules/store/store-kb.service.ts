@@ -763,6 +763,43 @@ sourceNote را خالی بگذار. پاسخ را فقط به‌صورت یک �
     return { suggestedBrandIntro: object.brandIntro.trim().slice(0, 300) };
   }
 
+  // فیدبک کاربر ۱۴۰۵/۰۷/۱۱ — فروشنده هرچی از یک محصول می‌داند خام/تیکه‌تیکه می‌نویسد، AI همان
+  // لحظه (بدون جستجوی وب/بدون کسر اعتبار، عیناً الگوی generateBrandIntroFromText بالا) آن را
+  // به یک توضیح محصول تمیز به‌صورت Markdown تبدیل می‌کند. خروجی مستقیم ذخیره نمی‌شود — فرانت
+  // با همان PATCH/POST معمولی محصول روی description اعمال می‌کند.
+  async generateProductDescriptionFromNotes(
+    sellerId: string,
+    storeId: string,
+    productId: string,
+    rawText: string,
+  ) {
+    await this.storeService.getOwned(sellerId, storeId);
+    const product = await this.prisma.product.findUnique({
+      where: { id: productId },
+    });
+    if (!product || product.storeId !== storeId) {
+      throw new NotFoundException(fa.store.productNotFound);
+    }
+    const trimmed = rawText.trim().slice(0, 4000);
+    if (!trimmed) {
+      throw new BadRequestException(fa.store.productNotesRequired);
+    }
+
+    const { object } = await generateObject({
+      model: this.provider('openai/gpt-5.4-mini'),
+      schema: z.object({ description: z.string() }),
+      system: `تو دستیار یک فروشنده‌ی فروشگاه آنلاین ایرانی هستی. یادداشت خام زیر که فروشنده
+درباره‌ی محصول «${product.name}» نوشته (ممکن است تیکه‌تیکه و نامرتب باشد) را به یک توضیح محصول
+تمیز و خوش‌خوان به‌صورت Markdown فارسی تبدیل کن — پاراگراف کوتاه و در صورت نیاز لیست نقطه‌ای
+برای مزایا/مشخصات، بدون heading. فقط از همان اطلاعاتی که فروشنده داده استفاده کن، چیزی اختراع
+نکن. لحن فروش‌محور ولی صادقانه باشد. پاسخ را فقط به‌صورت یک شیء JSON معتبر برگردان.`,
+      prompt: trimmed,
+      experimental_repairText: this.repairStructuredOutput(),
+    });
+
+    return { suggestedDescription: object.description.trim().slice(0, 5000) };
+  }
+
   // docs/PRD-admin-product-enrichment-review.md بخش ۲ — نسخه‌ی ادمین‌محور completeProductInfo
   // بالا: بدون sellerId/getOwned (ادمین مالک فروشگاه نیست)، بدون چک/کسر اعتبار فروشنده (این
   // ابتکار از طرف ادمین است، نه درخواست فروشنده — هزینه‌ی عملیاتی پلتفرم است). چرخه‌ی عمر

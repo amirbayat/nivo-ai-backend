@@ -1,4 +1,5 @@
 import {
+  IsArray,
   IsBoolean,
   IsInt,
   IsOptional,
@@ -7,6 +8,7 @@ import {
   MaxLength,
 } from 'class-validator';
 import { fa } from '../../../i18n/fa';
+import type { ProductSpecItem } from '../product-specs.types';
 
 // گام ۰ سند PRD-mvp-launch-plan.md — قدم ۳ ویزارد ثبت‌نام فروشنده (فقط محصول تکی، بدون واریانت/عکس)
 export class CreateProductDto {
@@ -42,4 +44,10 @@ export class CreateProductDto {
   @IsOptional()
   @IsBoolean()
   persuasionTechniquesEnabled?: boolean;
+
+  // فرم SellerProductEditPage.tsx برای ساخت و ویرایش محصول از همون dto مشترک استفاده می‌کند
+  // و specs را همیشه می‌فرستد (حتی null وقتی خالی است) — باید مثل UpdateProductDto whitelist شود
+  @IsOptional()
+  @IsArray()
+  specs?: ProductSpecItem[] | null;
 }

@@ -127,7 +127,13 @@ export class StoreService {
   ) {
     await this.getOwned(sellerId, storeId);
     if (dto.code) await this.assertProductCodeAvailable(storeId, dto.code);
-    return this.prisma.product.create({ data: { ...dto, storeId } });
+    // عیناً الگوی updateProduct پایین‌تر — specs یک فیلد Prisma.Json است، null خام قابل‌پاس
+    // به create نیست (باید Prisma.DbNull باشد)
+    const { specs: rawSpecs, ...rest } = dto;
+    const specs = clampProductSpecs(rawSpecs ?? undefined) ?? Prisma.DbNull;
+    return this.prisma.product.create({
+      data: { ...rest, specs, storeId },
+    });
   }
 
   // docs/PRD-telegram-bot-channel.md بخش ۹.۳ — کد کوتاه یکتا فقط در سطح فروشگاه
@@ -638,8 +644,10 @@ export class StoreService {
       }
 
       try {
+        // ستون‌های اکسل هیچ‌وقت specs نمی‌سازند (headerMap فقط name/basePrice/stock/description
+        // را می‌شناسد)؛ specs:undefined فقط برای رضایت تایپ Prisma.Json است (مثل نبودِ کلید)
         await this.prisma.product.create({
-          data: { ...instance, storeId },
+          data: { ...instance, specs: undefined, storeId },
         });
         created++;
       } catch {

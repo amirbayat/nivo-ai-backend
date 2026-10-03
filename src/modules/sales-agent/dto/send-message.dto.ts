@@ -26,6 +26,12 @@ export class SalesActionDto {
     'EDIT_ADDRESS',
     'SAVE_ADDRESS',
     'SKIP_SAVE_ADDRESS',
+    // docs/PRD-panels-and-buyer-ux-design.md بخش ۳.۶ (فاز ۴.۸) — همون سه نوع جدید
+    // sales-agent.types.ts::SalesAction، اینجا هم باید whitelist شوند وگرنه ValidationPipe
+    // رد می‌کند (باگ: دکمه‌ی «سفارش‌های من» با ۴۰۰ شکست می‌خورد)
+    'VIEW_ORDERS',
+    'TOGGLE_SAVE_PRODUCT',
+    'REORDER',
   ])
   type:
     | 'ADD_TO_CART'
@@ -36,7 +42,10 @@ export class SalesActionDto {
     | 'CONFIRM_ADDRESS'
     | 'EDIT_ADDRESS'
     | 'SAVE_ADDRESS'
-    | 'SKIP_SAVE_ADDRESS';
+    | 'SKIP_SAVE_ADDRESS'
+    | 'VIEW_ORDERS'
+    | 'TOGGLE_SAVE_PRODUCT'
+    | 'REORDER';
 
   @IsOptional()
   @IsString()
@@ -54,6 +63,10 @@ export class SalesActionDto {
   @IsOptional()
   @IsIn(IRAN_PROVINCES)
   province?: string;
+
+  @IsOptional()
+  @IsString()
+  orderId?: string;
 }
 
 export class SendMessageDto {
