@@ -321,6 +321,52 @@ export class StoreController {
     res.send(buffer);
   }
 
+  // docs/PRD-seller-growth-tools-and-marketplace-trust.md بخش ۱.۱
+  @Get(':id/dashboard')
+  getDashboard(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    return this.storeService.getDashboard(user.sub, id);
+  }
+
+  // بخش ۱.۲ — سه خروجی CSV (سفارش‌ها/محصولات/تراکنش‌های اعتبار)
+  @Get(':id/export/orders.csv')
+  async exportOrdersCsv(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Res() res: Response,
+  ) {
+    const csv = await this.storeService.exportOrdersCsv(user.sub, id);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="orders.csv"');
+    res.send('﻿' + csv);
+  }
+
+  @Get(':id/export/products.csv')
+  async exportProductsCsv(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Res() res: Response,
+  ) {
+    const csv = await this.storeService.exportProductsCsv(user.sub, id);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="products.csv"');
+    res.send('﻿' + csv);
+  }
+
+  @Get(':id/export/credit-usage.csv')
+  async exportCreditUsageCsv(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Res() res: Response,
+  ) {
+    const csv = await this.storeService.exportCreditUsageCsv(user.sub, id);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      'attachment; filename="credit-usage.csv"',
+    );
+    res.send('﻿' + csv);
+  }
+
   @Get(':id/conversations')
   listNeededAttention(
     @CurrentUser() user: JwtPayload,

@@ -566,6 +566,19 @@ model CreditConfig {
   @@map("credit_config")
 }
 
+// docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۶ — singleton مخصوص مارکت‌پلیس
+// sales-agent (نه قاطی با CreditConfig بالا که مال ویجت نیوو/nivoai.ir است). جایگزین دو
+// ثابت هاردکدشده‌ی قبلی (FREE_DAILY_QUOTA در credit.service.ts و store-credit.service.ts)
+model SalesAgentGlobalConfig {
+  id                String   @id @default("singleton")
+  freeDailyQuota    Int      @default(10)
+  trialDurationDays Int      @default(14)
+  trialCreditToman  Int      @default(300000)
+  updatedAt         DateTime @updatedAt
+
+  @@map("sales_agent_global_config")
+}
+
 // ضریب مارک‌آپ پله‌ای بر اساس نوع تولید (متن/عکس/ویدیو) و بازه‌ی هزینه‌ی واقعی (تومان) —
 // جایگزین Plan.payAsYouGoMarkup ثابت قبلی. هر نوع می‌تواند چند پله داشته باشد؛ maxToman=null
 // یعنی آخرین پله (بدون سقف). از پنل ادمین کاملاً CRUD می‌شود — docs/PRD-tiered-pricing-and-studio-features.md
@@ -2063,6 +2076,12 @@ model Store {
   // (conversation-engine.service.ts's logReply/reserveFreeVoiceConversationSlot)
   freeVoiceConversationsUsed    Int               @default(0)
   freeVoiceQuotaResetAt         DateTime?
+  // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۶ — از اولین چتِ اولین خریدار
+  // همین فروشگاه فقط یک‌بار گرنت می‌شود (CreditService.grantTrialIfFirstChat)؛ trialEndsAt
+  // snapshot لحظه‌ی گرنت است (تغییر بعدی تنظیمات ادمین روی فروشگاه‌های در-حال-اجرا اثر ندارد)
+  trialStartedAt                DateTime?
+  trialEndsAt                   DateTime?
+  trialCreditRemainingToman     Int               @default(0)
   // docs/PRD-seller-multi-bank-card-rotation.md — سیاست انتخاب کارت وقتی چند StoreBankCard
   // فعال دارد؛ lastCardIndex فقط برای EQUAL (round-robin واقعی، نه رندوم)
   cardDisplayPolicy             CardDisplayPolicy @default(EQUAL)
@@ -2629,6 +2648,9 @@ model Order {
 
   @@index([storeId])
   @@index([status, satisfactionFollowUpSentAt])
+  // docs/PRD-seller-growth-tools-and-marketplace-trust.md بخش ۱.۱ — کوئری تجمیعی داشبورد
+  // فروش (بازه‌ی تاریخ به‌ازای فروشگاه)؛ دو ایندکس بالا برای این کوئری خاص بهینه نیستند
+  @@index([storeId, createdAt])
   @@map("orders")
 }
 
@@ -2680,6 +2702,10 @@ model StoreDiscountCode {
   redemptionCount Int          @default(0)
   expiresAt       DateTime?
   isActive        Boolean      @default(true)
+  // docs/PRD-seller-growth-tools-and-marketplace-trust.md بخش ۵ مورد ۵ — تخفیف پلکانی بر
+  // اساس تعداد («۳ عدد بخر، ۱۰٪ تخفیف»)؛ نال = بدون حداقل تعداد (رفتار فعلی). شرط روی مجموع
+  // تعداد کل اقلام سبد است، نه تعداد یک محصول خاص
+  minQuantity     Int?
   createdAt       DateTime     @default(now())
 
   orders Order[]

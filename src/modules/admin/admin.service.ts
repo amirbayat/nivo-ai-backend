@@ -24,11 +24,16 @@ import {
   TOKENIZER_FAMILIES,
 } from './dto/create-model.dto';
 import { UpdateModelDto } from './dto/update-model.dto';
+import { UpdateSalesAgentGlobalConfigDto } from './dto/update-sales-agent-global-config.dto';
 import {
   computeConversationStats,
   getStuckConversationIds,
   type StatsGroupBy,
 } from '../sales-agent/conversation-stats.util';
+import {
+  getSalesAgentGlobalConfig,
+  invalidateSalesAgentGlobalConfigCache,
+} from '../sales-agent/sales-agent-global-config.util';
 
 const MODEL_IMPORT_COLUMNS = [
   'name',
@@ -1718,5 +1723,22 @@ export class AdminService {
         0,
       ),
     };
+  }
+
+  // ── تنظیمات مارکت‌پلیس sales-agent (SalesAgentGlobalConfig singleton) ───────────────────
+  // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۶.۵ — سهمیه‌ی رایگان روزانه +
+  // دوره‌ی آزمایشی؛ جدا از CreditConfig (ویجت نیوو/nivoai.ir)
+  getSalesAgentGlobalConfigAdmin() {
+    return getSalesAgentGlobalConfig(this.prisma);
+  }
+
+  async updateSalesAgentGlobalConfig(dto: UpdateSalesAgentGlobalConfigDto) {
+    const config = await this.prisma.salesAgentGlobalConfig.upsert({
+      where: { id: 'singleton' },
+      create: { id: 'singleton', ...dto },
+      update: dto,
+    });
+    invalidateSalesAgentGlobalConfigCache();
+    return config;
   }
 }

@@ -335,6 +335,9 @@ export class TelegramService {
       });
       conversationId = created.id;
     } else {
+      // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۶.۳ — معادل تلگرامی startChat
+      // وب: اولین Customer این فروشگاه، پس اگر اولین چت است همین‌جا دوره‌ی آزمایشی گرنت می‌شود
+      await this.creditService.grantTrialIfFirstChat(store.id);
       // docs/PRD-seller-credit-billing.md — یک‌بار همین‌جا تعیین می‌شود، معادل startChat وب
       const billingMode = await this.creditService.decideBillingMode(store.id);
       const customer = await this.prisma.customer.create({

@@ -54,6 +54,9 @@ export class SalesAgentService {
     if (!store || store.status !== 'ACTIVE')
       throw new NotFoundException(fa.store.notFound);
 
+    // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۶.۳ — اگر این اولین چتِ اولین
+    // خریدار همین فروشگاه است، قبل از decideBillingMode دوره‌ی آزمایشی گرنت می‌شود
+    await this.creditService.grantTrialIfFirstChat(store.id);
     // docs/PRD-seller-credit-billing.md — یک‌بار همین‌جا تعیین می‌شود، تا آخر عمر مکالمه ثابت می‌ماند
     const billingMode = await this.creditService.decideBillingMode(store.id);
 

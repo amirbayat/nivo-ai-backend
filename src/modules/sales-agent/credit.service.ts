@@ -2,10 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { BillingMode, CreditUsageKind } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PricingService } from '../usage/pricing.service';
-
-// docs/PRD-seller-credit-billing.md بخش ۱ — ۱۰ خریدار *جدید* رایگان در روز به‌ازای هر فروشگاه
-// (نه ۱۰ پیام؛ واحد شمارش Customer تازه‌ساز همان روز است)
-const FREE_DAILY_QUOTA = 10;
+import { getSalesAgentGlobalConfig } from './sales-agent-global-config.util';
 
 @Injectable()
 export class CreditService {
@@ -16,10 +13,35 @@ export class CreditService {
 
   // تک سورس عدد سهمیه‌ی رایگان روزانه — فیدبک کاربر ۱۴۰۵/۰۷/۱۲: سقف رایگان روزانه‌ی وویس هم
   // باید دقیقاً همین عدد را بخواند، نه یک ثابت جدا (conversation-engine.service.ts's
-  // reserveFreeVoiceConversationSlot). وقتی فاز ۳ این عدد را از SalesAgentGlobalConfig
-  // بخواند (بخش ۶.۴ سند)، این متد async می‌شود و همه‌ی مصرف‌کننده‌ها خودکار همگام می‌مانند.
-  getFreeDailyQuota(): number {
-    return FREE_DAILY_QUOTA;
+  // reserveFreeVoiceConversationSlot). بخش ۶.۴ سند — از SalesAgentGlobalConfig خوانده می‌شود
+  // (کش‌شده ۶۰ ثانیه)، نه یک ثابت هاردکد.
+  async getFreeDailyQuota(): Promise<number> {
+    const config = await getSalesAgentGlobalConfig(this.prisma);
+    return config.freeDailyQuota;
+  }
+
+  // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۶.۳ — فقط یک‌بار، لحظه‌ی اولین
+  // چتِ اولین خریدار هر فروشگاه (یعنی اولین‌بار که یک Customer برای این storeId ساخته می‌شود)؛
+  // trialStartedAt null بودن همان شرط «اولین‌بار» است، نیازی به کوئری شمارش جدا نیست
+  async grantTrialIfFirstChat(storeId: string): Promise<void> {
+    const store = await this.prisma.store.findUnique({
+      where: { id: storeId },
+      select: { trialStartedAt: true },
+    });
+    if (!store || store.trialStartedAt) return;
+    const config = await getSalesAgentGlobalConfig(this.prisma);
+    const now = new Date();
+    const trialEndsAt = new Date(
+      now.getTime() + config.trialDurationDays * 24 * 60 * 60 * 1000,
+    );
+    await this.prisma.store.update({
+      where: { id: storeId },
+      data: {
+        trialStartedAt: now,
+        trialEndsAt,
+        trialCreditRemainingToman: config.trialCreditToman,
+      },
+    });
   }
 
   // فقط یک‌بار، لحظه‌ی ساخت مکالمه (startChat وب / handleStart تلگرام) صدا زده می‌شود —
@@ -28,16 +50,30 @@ export class CreditService {
   async decideBillingMode(storeId: string): Promise<BillingMode> {
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
-    const newCustomersToday = await this.prisma.customer.count({
-      where: { storeId, createdAt: { gte: todayStart } },
-    });
-    if (newCustomersToday < FREE_DAILY_QUOTA) return 'FREE';
+    const [freeDailyQuota, newCustomersToday] = await Promise.all([
+      this.getFreeDailyQuota(),
+      this.prisma.customer.count({
+        where: { storeId, createdAt: { gte: todayStart } },
+      }),
+    ]);
+    if (newCustomersToday < freeDailyQuota) return 'FREE';
 
+    // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۶.۴ — PAID یعنی بودجه‌ی
+    // آزمایشی هنوز فعال است (trialEndsAt نگذشته و مانده‌اش مثبت است) یا اعتبار واقعی دارد
     const store = await this.prisma.store.findUnique({
       where: { id: storeId },
-      select: { creditBalanceToman: true },
+      select: {
+        creditBalanceToman: true,
+        trialEndsAt: true,
+        trialCreditRemainingToman: true,
+      },
     });
-    return (store?.creditBalanceToman ?? 0) > 0 ? 'PAID' : 'BLOCKED';
+    if (!store) return 'BLOCKED';
+    const trialActive =
+      !!store.trialEndsAt &&
+      store.trialEndsAt > new Date() &&
+      store.trialCreditRemainingToman > 0;
+    return trialActive || store.creditBalanceToman > 0 ? 'PAID' : 'BLOCKED';
   }
 
   // مصرف متن (parseIntent/caption/tryAnswerFromProductDescriptions) — هزینه از
@@ -125,11 +161,23 @@ export class CreditService {
       },
     });
     // decrement ساده، نه شرطی — طبق تصمیم معماری، چون هزینه‌ی واقعی فقط بعد از فراخوان
-    // معلوم می‌شود؛ ممکن است balance منفی شود، که همین باعث BLOCKED شدن مکالمه‌ی بعدی است
+    // معلوم می‌شود؛ ممکن است منفی شود، که همین باعث BLOCKED شدن مکالمه‌ی بعدی است
     if (!params.isFreeQuota) {
+      // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۶.۴ — اول از بودجه‌ی
+      // آزمایشی کم شود (اگر هنوز فعال و مثبت است)، وگرنه از اعتبار واقعی فروشگاه
+      const store = await this.prisma.store.findUnique({
+        where: { id: params.storeId },
+        select: { trialEndsAt: true, trialCreditRemainingToman: true },
+      });
+      const trialActive =
+        !!store?.trialEndsAt &&
+        store.trialEndsAt > new Date() &&
+        store.trialCreditRemainingToman > 0;
       await this.prisma.store.update({
         where: { id: params.storeId },
-        data: { creditBalanceToman: { decrement: params.costToman } },
+        data: trialActive
+          ? { trialCreditRemainingToman: { decrement: params.costToman } }
+          : { creditBalanceToman: { decrement: params.costToman } },
       });
     }
   }

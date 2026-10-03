@@ -179,6 +179,45 @@ export const fa = {
     shippingRuleNotFound: 'این قانون ارسال یافت نشد',
     shippingDefaultRuleDuplicate:
       'یک ردیف «ارسال به کل ایران» از قبل برای این فروشگاه تعریف شده',
+    // docs/PRD-seller-growth-tools-and-marketplace-trust.md بخش ۱.۲ — سه خروجی CSV فروشنده
+    csvOrdersHeader: [
+      'تاریخ',
+      'محصولات',
+      'مبلغ (تومان)',
+      'وضعیت',
+      'استان',
+      'آدرس',
+      'گیرنده',
+      'تلفن گیرنده',
+    ],
+    csvOrderStatusLabels: {
+      PENDING_PAYMENT: 'در انتظار پرداخت',
+      RECEIPT_SUBMITTED: 'رسید ارسال‌شده',
+      APPROVED: 'تاییدشده',
+      REJECTED: 'ردشده',
+    } as Record<string, string>,
+    csvProductsHeader: [
+      'نام محصول',
+      'قیمت (تومان)',
+      'موجودی',
+      'تعداد فروش‌رفته',
+    ],
+    csvCreditUsageHeader: [
+      'تاریخ',
+      'نوع مصرف',
+      'مبلغ (تومان)',
+      'از سهمیه‌ی رایگان',
+    ],
+    csvCreditUsageKindLabels: {
+      TEXT_REPLY: 'پاسخ متنی',
+      VOICE_TTS: 'پاسخ صوتی',
+      ASR: 'تشخیص گفتار',
+      TOPUP: 'شارژ اعتبار',
+      PRODUCT_ENRICHMENT: 'تکمیل محصول با AI',
+      AD_PLACEMENT: 'خرید جایگاه تبلیغاتی',
+    } as Record<string, string>,
+    csvCreditUsageFreeYes: 'بله',
+    csvCreditUsageFreeNo: 'خیر',
   },
   storeKb: {
     notFound: 'این مورد در باکس دانش یافت نشد',
@@ -247,6 +286,9 @@ export const fa = {
     // docs/PRD-customer-comments-and-discounts.md بخش ۹
     discountCodeMissing: 'کد تخفیف رو متوجه نشدم، می‌تونی دوباره بگی؟',
     discountCodeInvalid: 'این کد تخفیف معتبر نیست یا منقضی/تمام‌شده',
+    // docs/PRD-seller-growth-tools-and-marketplace-trust.md بخش ۵ مورد ۵
+    discountCodeMinQuantityNotMet: (minQuantity: number) =>
+      `این کد تخفیف فقط برای خرید حداقل ${minQuantity} عدد معتبره`,
     discountAppliedHint: 'اگه کد تخفیف داری، بگو تا برات اعمال کنم.',
     // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۳ — فالوآپ رضایت، چند روز بعد از تایید
     // سفارش (نه فوری مثل reviewFollowUpPrompt بالا)؛ پیام ثابت، بدون فراخوان AI

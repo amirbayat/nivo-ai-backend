@@ -21,6 +21,7 @@ import { TicketsService } from '../tickets/tickets.service';
 import { UpdateTicketStatusDto } from '../tickets/dto/update-ticket-status.dto';
 import { CreateModelDto } from './dto/create-model.dto';
 import { UpdateModelDto } from './dto/update-model.dto';
+import { UpdateSalesAgentGlobalConfigDto } from './dto/update-sales-agent-global-config.dto';
 import {
   CurrentUser,
   JwtPayload,
@@ -296,6 +297,17 @@ export class AdminController {
   @Get('sales-agent/ad-placement-instrumentation')
   getAdPlacementInstrumentation(@Query('storeId') storeId?: string) {
     return this.adminService.getAdPlacementInstrumentation({ storeId });
+  }
+
+  // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۶.۵
+  @Get('sales-agent/global-config')
+  getSalesAgentGlobalConfig() {
+    return this.adminService.getSalesAgentGlobalConfigAdmin();
+  }
+
+  @Patch('sales-agent/global-config')
+  updateSalesAgentGlobalConfig(@Body() dto: UpdateSalesAgentGlobalConfigDto) {
+    return this.adminService.updateSalesAgentGlobalConfig(dto);
   }
 
   // docs/PRD-admin-product-enrichment-review.md — لیست کراس-فروشگاه محصولات کم‌اطلاعات

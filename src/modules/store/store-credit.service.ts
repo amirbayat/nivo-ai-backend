@@ -5,11 +5,7 @@ import { PaymentsService } from '../payments/payments.service';
 import { CreditsService } from '../credits/credits.service';
 import { StoreService } from './store.service';
 import { fa } from '../../i18n/fa';
-
-// باید دقیقاً با FREE_DAILY_QUOTA در ../sales-agent/credit.service.ts هماهنگ بماند — اینجا
-// فقط برای نمایش وضعیت به فروشنده تکرار شده (import مستقیم CreditService ممکن نیست چون
-// SalesAgentModule خودش StoreModule را import می‌کند، وارد کردن برعکسش چرخه می‌سازد)
-const FREE_DAILY_QUOTA = 10;
+import { getSalesAgentGlobalConfig } from '../sales-agent/sales-agent-global-config.util';
 
 // docs/PRD-seller-credit-billing.md بخش ۷ — خرید self-serve اعتبار AI فروشگاه از همان درگاه
 // پرداخت واقعی موجود (Zarinpal/Vandar/Zibal)، با reuse کامل CreditPackage/PaymentsService
@@ -26,13 +22,26 @@ export class StoreCreditService {
     const store = await this.storeService.getOwned(sellerId, storeId);
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
-    const freeQuotaUsedToday = await this.prisma.customer.count({
-      where: { storeId, createdAt: { gte: todayStart } },
-    });
+    const [config, freeQuotaUsedToday] = await Promise.all([
+      getSalesAgentGlobalConfig(this.prisma),
+      this.prisma.customer.count({
+        where: { storeId, createdAt: { gte: todayStart } },
+      }),
+    ]);
+    // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۶ — فقط وقتی واقعاً فعال است
+    // (snapshot لحظه‌ی گرنت نگذشته و مانده‌اش مثبت است) به فروشنده نمایش داده شود
+    const trialActive =
+      !!store.trialEndsAt &&
+      store.trialEndsAt > new Date() &&
+      store.trialCreditRemainingToman > 0;
     return {
       balanceToman: store.creditBalanceToman,
       freeQuotaUsedToday,
-      freeQuotaLimit: FREE_DAILY_QUOTA,
+      freeQuotaLimit: config.freeDailyQuota,
+      trialCreditRemainingToman: trialActive
+        ? store.trialCreditRemainingToman
+        : 0,
+      trialEndsAt: trialActive ? store.trialEndsAt : null,
     };
   }
 

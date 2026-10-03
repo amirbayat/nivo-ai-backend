@@ -61,6 +61,12 @@ function cellToNumber(value: unknown): number | undefined {
   return Number.isNaN(n) ? undefined : n;
 }
 
+// همون الگوی usage-analytics.service.ts's csvEscape — خروجی گزارش فروشنده (بخش ۱.۲)
+function csvEscape(v: unknown): string {
+  const s = String(v ?? '');
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
 @Injectable()
 export class StoreService {
   constructor(
@@ -709,6 +715,201 @@ export class StoreService {
     const ext = order.receiptImageKey.split('.').pop() ?? '';
     const buffer = await this.storage.downloadImage(order.receiptImageKey);
     return { buffer, mimeType: mimeTypeForExt(ext) };
+  }
+
+  // docs/PRD-seller-growth-tools-and-marketplace-trust.md بخش ۱.۱ — تجمیع مستقیم روی Order،
+  // بدون مدل/جدول rollup جدا (حجم فعلی سفارش‌ها کم است)؛ ایندکس [storeId, createdAt] تازه
+  // روی Order همین کوئری را پوشش می‌دهد
+  async getDashboard(sellerId: string, storeId: string) {
+    await this.getOwned(sellerId, storeId);
+
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const weekStart = new Date(todayStart);
+    weekStart.setDate(weekStart.getDate() - 6);
+    const monthStart = new Date(todayStart);
+    monthStart.setDate(monthStart.getDate() - 29);
+
+    const [approvedOrders, orderCountsByStatus] = await Promise.all([
+      this.prisma.order.findMany({
+        where: { storeId, status: 'APPROVED' },
+        select: {
+          totalAmount: true,
+          createdAt: true,
+          items: true,
+          conversation: { select: { customerId: true } },
+        },
+      }),
+      this.prisma.order.groupBy({
+        by: ['status'],
+        where: { storeId },
+        _count: { _all: true },
+      }),
+    ]);
+
+    const sumSince = (since: Date) =>
+      approvedOrders
+        .filter((o) => o.createdAt >= since)
+        .reduce((sum, o) => sum + o.totalAmount, 0);
+
+    const dailyRevenueTrend: { date: string; totalToman: number }[] = [];
+    for (let i = 29; i >= 0; i--) {
+      const day = new Date(todayStart);
+      day.setDate(day.getDate() - i);
+      const nextDay = new Date(day);
+      nextDay.setDate(nextDay.getDate() + 1);
+      const totalToman = approvedOrders
+        .filter((o) => o.createdAt >= day && o.createdAt < nextDay)
+        .reduce((sum, o) => sum + o.totalAmount, 0);
+      dailyRevenueTrend.push({
+        date: day.toISOString().slice(0, 10),
+        totalToman,
+      });
+    }
+
+    const productTotals = new Map<string, { name: string; qty: number }>();
+    for (const order of approvedOrders) {
+      const items = order.items as {
+        productId: string;
+        name: string;
+        qty: number;
+      }[];
+      for (const item of items) {
+        const existing = productTotals.get(item.productId);
+        if (existing) existing.qty += item.qty;
+        else
+          productTotals.set(item.productId, { name: item.name, qty: item.qty });
+      }
+    }
+    const topProducts = [...productTotals.entries()]
+      .map(([productId, v]) => ({ productId, name: v.name, qty: v.qty }))
+      .sort((a, b) => b.qty - a.qty)
+      .slice(0, 5);
+
+    const uniqueCustomerCount = new Set(
+      approvedOrders.map((o) => o.conversation.customerId),
+    ).size;
+    const totalRevenueAllTimeToman = approvedOrders.reduce(
+      (sum, o) => sum + o.totalAmount,
+      0,
+    );
+    const averageOrderValueToman =
+      approvedOrders.length === 0
+        ? 0
+        : Math.round(totalRevenueAllTimeToman / approvedOrders.length);
+
+    const countByStatus: Record<OrderStatus, number> = {
+      PENDING_PAYMENT: 0,
+      RECEIPT_SUBMITTED: 0,
+      APPROVED: 0,
+      REJECTED: 0,
+    };
+    for (const row of orderCountsByStatus) {
+      countByStatus[row.status] = row._count._all;
+    }
+
+    return {
+      revenueTodayToman: sumSince(todayStart),
+      revenueWeekToman: sumSince(weekStart),
+      revenueMonthToman: sumSince(monthStart),
+      orderCountsByStatus: countByStatus,
+      dailyRevenueTrend,
+      topProducts,
+      uniqueCustomerCount,
+      averageOrderValueToman,
+    };
+  }
+
+  // docs/PRD-seller-growth-tools-and-marketplace-trust.md بخش ۱.۲ — CSV ساده با هدر فارسی،
+  // به‌جای xlsx واقعی (سریع‌تر، بدون نیاز به کتابخانه‌ی اضافه برای نوشتن)
+  async exportOrdersCsv(sellerId: string, storeId: string): Promise<string> {
+    await this.getOwned(sellerId, storeId);
+    const orders = await this.prisma.order.findMany({
+      where: { storeId },
+      orderBy: { createdAt: 'desc' },
+    });
+    const lines = [fa.store.csvOrdersHeader.map(csvEscape).join(',')];
+    for (const order of orders) {
+      const items = order.items as { name: string; qty: number }[];
+      const productNames = items.map((i) => `${i.name} × ${i.qty}`).join(' + ');
+      lines.push(
+        [
+          order.createdAt.toLocaleDateString('fa-IR'),
+          productNames,
+          order.totalAmount.toLocaleString('fa-IR'),
+          fa.store.csvOrderStatusLabels[order.status] ?? order.status,
+          order.shippingProvince ?? '',
+          order.shippingAddress ?? '',
+          order.recipientName ?? '',
+          order.recipientPhone ?? '',
+        ]
+          .map(csvEscape)
+          .join(','),
+      );
+    }
+    return lines.join('\n');
+  }
+
+  async exportProductsCsv(sellerId: string, storeId: string): Promise<string> {
+    await this.getOwned(sellerId, storeId);
+    const [products, approvedOrders] = await Promise.all([
+      this.prisma.product.findMany({ where: { storeId } }),
+      this.prisma.order.findMany({
+        where: { storeId, status: 'APPROVED' },
+        select: { items: true },
+      }),
+    ]);
+    const soldQtyByProduct = new Map<string, number>();
+    for (const order of approvedOrders) {
+      const items = order.items as { productId: string; qty: number }[];
+      for (const item of items) {
+        soldQtyByProduct.set(
+          item.productId,
+          (soldQtyByProduct.get(item.productId) ?? 0) + item.qty,
+        );
+      }
+    }
+    const lines = [fa.store.csvProductsHeader.map(csvEscape).join(',')];
+    for (const product of products) {
+      lines.push(
+        [
+          product.name,
+          product.basePrice.toLocaleString('fa-IR'),
+          product.stock,
+          soldQtyByProduct.get(product.id) ?? 0,
+        ]
+          .map(csvEscape)
+          .join(','),
+      );
+    }
+    return lines.join('\n');
+  }
+
+  async exportCreditUsageCsv(
+    sellerId: string,
+    storeId: string,
+  ): Promise<string> {
+    await this.getOwned(sellerId, storeId);
+    const events = await this.prisma.creditUsageEvent.findMany({
+      where: { storeId },
+      orderBy: { createdAt: 'desc' },
+    });
+    const lines = [fa.store.csvCreditUsageHeader.map(csvEscape).join(',')];
+    for (const event of events) {
+      lines.push(
+        [
+          event.createdAt.toLocaleDateString('fa-IR'),
+          fa.store.csvCreditUsageKindLabels[event.kind] ?? event.kind,
+          event.costToman.toLocaleString('fa-IR'),
+          event.isFreeQuota
+            ? fa.store.csvCreditUsageFreeYes
+            : fa.store.csvCreditUsageFreeNo,
+        ]
+          .map(csvEscape)
+          .join(','),
+      );
+    }
+    return lines.join('\n');
   }
 
   async listNeededAttention(sellerId: string, storeId: string) {

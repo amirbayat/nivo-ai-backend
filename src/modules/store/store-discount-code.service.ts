@@ -44,6 +44,7 @@ export class StoreDiscountCodeService {
         value: dto.value,
         maxRedemptions: dto.maxRedemptions,
         expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : undefined,
+        minQuantity: dto.minQuantity,
       },
     });
   }

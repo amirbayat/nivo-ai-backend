@@ -21,8 +21,9 @@ import { ProductEnrichmentService } from './product-enrichment.service';
   // docs/PRD-seller-credit-billing.md بخش ۷ — StoreCreditService برای خرید self-serve اعتبار
   // UsageModule (PricingService) — docs/PRD-seller-knowledge-base.md بخش ۲.۳، هزینه‌ی واقعی
   // تکمیل محصول با جستجوی وب. عمداً import مستقیم از sales-agent/credit.service.ts نشد —
-  // SalesAgentModule خودش StoreModule را import می‌کند، برعکسش چرخه می‌سازد (همان دلیلی که
-  // store-credit.service.ts هم FREE_DAILY_QUOTA را به‌جای import تکرار کرده)
+  // SalesAgentModule خودش StoreModule را import می‌کند، برعکسش چرخه می‌سازد (به همین دلیل
+  // store-credit.service.ts عدد سهمیه‌ی رایگان را مستقیم از sales-agent-global-config.util.ts
+  // می‌خواند، نه از CreditService)
   // docs/PRD-telegram-bot-channel.md بخش ۹.۱ — پوش پیام فروشنده به مشتری‌ای که کانالش تلگرام است
   imports: [
     PaymentsModule,

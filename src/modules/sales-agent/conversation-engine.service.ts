@@ -255,8 +255,41 @@ export class ConversationEngineService {
     return `\nنظر خریدارهای قبلی: ${approved.map((c) => `«${c.text}»`).join('، ')}`;
   }
 
+  // docs/PRD-seller-growth-tools-and-marketplace-trust.md بخش ۵ مورد ۲ — «خریداران این را هم
+  // خریدند»: شمارش هم‌رخدادی ساده روی Order.items سفارش‌های تاییدشده (نه ML). همون الگوی
+  // $queryRaw's containment JSONB که برای countApprovedOrdersForProduct استفاده شده
+  private async crossSellFactsSuffix(
+    storeId: string,
+    productId: string,
+  ): Promise<string> {
+    const rows = await this.prisma.$queryRaw<{ name: string; count: bigint }[]>`
+      SELECT item->>'name' AS name, COUNT(DISTINCT orders.id)::bigint AS count
+      FROM orders, jsonb_array_elements(items) AS item
+      WHERE orders."storeId" = ${storeId}
+        AND orders.status = 'APPROVED'
+        AND (item->>'productId') != ${productId}
+        AND orders.id IN (
+          SELECT id FROM orders
+          WHERE "storeId" = ${storeId}
+            AND status = 'APPROVED'
+            AND items @> ${JSON.stringify([{ productId }])}::jsonb
+        )
+      GROUP BY item->>'productId', item->>'name'
+      ORDER BY count DESC
+      LIMIT 3
+    `;
+    if (rows.length === 0) return '';
+    return `\nخریدارانی که این محصول را خریدند این‌ها را هم خریدند: ${rows.map((r) => r.name).join('، ')}`;
+  }
+
   private cartTotal(cart: CartItem[]): number {
     return cart.reduce((sum, item) => sum + item.unitPrice * item.qty, 0);
+  }
+
+  // docs/PRD-seller-growth-tools-and-marketplace-trust.md بخش ۵ مورد ۵ — مجموع تعداد کل
+  // اقلام سبد (نه تعداد یک محصول خاص)، برای شرط minQuantity کد تخفیف پلکانی
+  private cartQuantity(cart: CartItem[]): number {
+    return cart.reduce((sum, item) => sum + item.qty, 0);
   }
 
   // docs/PRD-sales-agent-persuasion-principles.md بخش ۳.۲ — تعداد سفارش واقعاً تاییدشده
@@ -1675,6 +1708,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         const preview = await this.previewDiscount(
           storeId,
           this.cartTotal(ctx.cart),
+          this.cartQuantity(ctx.cart),
           code,
         );
         if (!preview.valid) {
@@ -1682,7 +1716,9 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
             error:
               preview.reason === 'MISSING'
                 ? 'کد تخفیف نامشخص است'
-                : 'این کد تخفیف معتبر نیست یا منقضی/تمام‌شده',
+                : preview.reason === 'MIN_QUANTITY_NOT_MET'
+                  ? `این کد تخفیف فقط برای خرید حداقل ${preview.minQuantity} عدد معتبره`
+                  : 'این کد تخفیف معتبر نیست یا منقضی/تمام‌شده',
           };
         }
         // بخش ۱.۳/۱.۴ docs/PRD-full-agent-engineering-review.md — همان ترتیب امن update_cart
@@ -2619,6 +2655,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
   private async previewDiscount(
     storeId: string,
     cartTotal: number,
+    cartQuantity: number,
     rawCode: string | null | undefined,
   ): Promise<
     | {
@@ -2628,7 +2665,11 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         amountToman: number;
         newTotal: number;
       }
-    | { valid: false; reason: 'MISSING' | 'INVALID' }
+    | {
+        valid: false;
+        reason: 'MISSING' | 'INVALID' | 'MIN_QUANTITY_NOT_MET';
+        minQuantity?: number;
+      }
   > {
     if (!rawCode) return { valid: false, reason: 'MISSING' };
     const normalized = rawCode.trim().toUpperCase();
@@ -2645,6 +2686,13 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       (discount.maxRedemptions == null ||
         discount.redemptionCount < discount.maxRedemptions);
     if (!valid) return { valid: false, reason: 'INVALID' };
+    if (discount.minQuantity && cartQuantity < discount.minQuantity) {
+      return {
+        valid: false,
+        reason: 'MIN_QUANTITY_NOT_MET',
+        minQuantity: discount.minQuantity,
+      };
+    }
 
     const amountToman =
       discount.kind === 'PERCENT'
@@ -2669,6 +2717,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     const preview = await this.previewDiscount(
       conversation.storeId,
       this.cartTotal(ctx.cart),
+      this.cartQuantity(ctx.cart),
       rawCode,
     );
     if (!preview.valid) {
@@ -2676,7 +2725,9 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         conversation,
         preview.reason === 'MISSING'
           ? fa.salesAgent.discountCodeMissing
-          : fa.salesAgent.discountCodeInvalid,
+          : preview.reason === 'MIN_QUANTITY_NOT_MET'
+            ? fa.salesAgent.discountCodeMinQuantityNotMet(preview.minQuantity!)
+            : fa.salesAgent.discountCodeInvalid,
       );
     }
 
@@ -2958,7 +3009,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     // عمداً بدون عدد موجودی در واقعیت‌هایی که به مدل داده می‌شود — caption() فقط از همین
     // واقعیت‌ها جمله می‌سازد، پس هر عددی اینجا باشد عیناً به مشتری گفته می‌شود. فروشنده
     // نمی‌خواهد تعداد واقعی موجودی افشا شود؛ فقط وضعیت موجود/ناموجود کافی است.
-    const facts = `مشتری از لینک مستقیم این محصول وارد شده: ${product.name} (${product.basePrice} تومان)${product.stock === 0 ? ' — فعلاً ناموجود' : ''}${product.description ? `\nتوضیحات محصول: ${truncateDescriptionForFacts(product.description)}` : ''}${await this.commentsFactsSuffix(product.id)}`;
+    const facts = `مشتری از لینک مستقیم این محصول وارد شده: ${product.name} (${product.basePrice} تومان)${product.stock === 0 ? ' — فعلاً ناموجود' : ''}${product.description ? `\nتوضیحات محصول: ${truncateDescriptionForFacts(product.description)}` : ''}${await this.commentsFactsSuffix(product.id)}${await this.crossSellFactsSuffix(conversation.storeId, product.id)}`;
     // skipGreeting=true چون finalReply پایین همیشه (بدون قید isFirstReply) یک buildGreeting
     // جلوی همین reply می‌چسباند — بدون این پرچم، caption() خودش هم یک «سلام!» جدا می‌ساخت
     const reply = await this.caption(facts, conversation, undefined, true);
@@ -4602,7 +4653,7 @@ answered=false بده (به‌جای حدس‌زدن).`,
       },
     });
 
-    const quota = this.creditService.getFreeDailyQuota();
+    const quota = await this.creditService.getFreeDailyQuota();
     const result = await this.prisma.store.updateMany({
       where: { id: storeId, freeVoiceConversationsUsed: { lt: quota } },
       data: { freeVoiceConversationsUsed: { increment: 1 } },

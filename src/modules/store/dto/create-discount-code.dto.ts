@@ -33,4 +33,11 @@ export class CreateDiscountCodeDto {
   @IsOptional()
   @IsDateString()
   expiresAt?: string;
+
+  // docs/PRD-seller-growth-tools-and-marketplace-trust.md بخش ۵ مورد ۵ — تخفیف پلکانی
+  // («۳ عدد بخر، ۱۰٪ تخفیف»)؛ خالی = بدون حداقل تعداد
+  @IsOptional()
+  @IsInt()
+  @Min(2)
+  minQuantity?: number;
 }
