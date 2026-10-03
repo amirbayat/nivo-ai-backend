@@ -31,8 +31,12 @@ const MIN_STORE_KB_ENTRIES = 3;
 const TELEGRAM_CONNECT_TOKEN_TTL_MS = 15 * 60 * 1000;
 
 // هدرهای پذیرفته‌شده‌ی آپلود اکسل محصول (گام ۳) — هم فارسی (چیزی که فروشنده واقعاً می‌نویسد)
-// هم انگلیسی را می‌پذیرد
-const PRODUCT_IMPORT_COLUMNS: Record<string, 'name' | 'basePrice' | 'stock'> = {
+// هم انگلیسی را می‌پذیرد. ستون «توضیح» اختیاری است (بخش ۹.۲ PRD-seller-knowledge-base.md،
+// مورد ۷) — additive، اگر فروشنده این ستون را نداشته باشد مثل قبل نادیده گرفته می‌شود
+const PRODUCT_IMPORT_COLUMNS: Record<
+  string,
+  'name' | 'basePrice' | 'stock' | 'description'
+> = {
   نام: 'name',
   name: 'name',
   قیمت: 'basePrice',
@@ -40,6 +44,9 @@ const PRODUCT_IMPORT_COLUMNS: Record<string, 'name' | 'basePrice' | 'stock'> = {
   price: 'basePrice',
   موجودی: 'stock',
   stock: 'stock',
+  توضیح: 'description',
+  توضیحات: 'description',
+  description: 'description',
 };
 
 function cellToString(value: unknown): string | undefined {
@@ -519,7 +526,10 @@ export class StoreService {
     });
     if (rows.length === 0) throw new BadRequestException(fa.store.excelEmpty);
 
-    const headerMap = new Map<string, 'name' | 'basePrice' | 'stock'>();
+    const headerMap = new Map<
+      string,
+      'name' | 'basePrice' | 'stock' | 'description'
+    >();
     for (const key of Object.keys(rows[0])) {
       const normalized =
         PRODUCT_IMPORT_COLUMNS[key.trim()] ??
@@ -540,7 +550,9 @@ export class StoreService {
       const data: Record<string, unknown> = {};
       for (const [key, target] of headerMap) {
         data[target] =
-          target === 'name' ? cellToString(raw[key]) : cellToNumber(raw[key]);
+          target === 'name' || target === 'description'
+            ? cellToString(raw[key])
+            : cellToNumber(raw[key]);
       }
 
       const instance = plainToInstance(CreateProductDto, data);
