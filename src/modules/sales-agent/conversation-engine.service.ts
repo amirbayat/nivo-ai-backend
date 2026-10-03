@@ -18,6 +18,10 @@ import { IRAN_PROVINCES } from '../../common/constants/iran-provinces';
 import { toEnglishDigits } from '../../common/utils/normalize-digits';
 import { StoreKbService } from '../store/store-kb.service';
 import { CardSelectorService } from '../store/card-selector.service';
+import {
+  parseProductVideos,
+  type ProductVideoItem,
+} from '../store/product-video.types';
 import { CreditService } from './credit.service';
 import { AbuseGuardService } from './abuse-guard.service';
 import { TelegramApiClientService } from '../telegram/telegram-api-client.service';
@@ -65,9 +69,8 @@ type ProductLike = {
   stock: number;
   images: string[];
   description?: string | null;
-  // docs/PRD-product-video.md
-  videoKey?: string | null;
-  videoDurationSec?: number | null;
+  // docs/PRD-product-video.md بخش ۴ — ستون Json خام (Prisma.JsonValue)، با parseProductVideos می‌خوانیم
+  videos?: unknown;
 };
 
 // آستانه‌ی handoff: بعد از این تعداد پیام پیاپی نامفهوم/بی‌نتیجه، مکالمه به انسان سپرده
@@ -172,9 +175,8 @@ type CompactProduct = {
   stock: number;
   images: string[];
   description?: string | null;
-  // docs/PRD-product-video.md
-  videoKey?: string | null;
-  videoDurationSec?: number | null;
+  // docs/PRD-product-video.md بخش ۴
+  videos: ProductVideoItem[];
 };
 
 // docs/PRD-sales-agent-persuasion-principles.md بخش ۳.۲/۳.۳/۳.۴ — ثابت در کد (نه تنظیم پنل)،
@@ -1361,6 +1363,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       productId: string;
       productName: string;
       images: string[];
+      videos: ProductVideoItem[];
     } | null;
     relevantProductIds: string[];
     seenProducts: Map<string, CompactProduct>;
@@ -1395,6 +1398,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         productId: photosResult.productId,
         productName: photosResult.productName,
         images: photosResult.images,
+        videos: photosResult.videos,
       };
     }
     if (relevantProductIds.length > 0) {
@@ -1422,8 +1426,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
             basePrice: p.basePrice,
             stock: p.stock,
             images: p.images,
-            videoKey: p.videoKey,
-            videoDurationSec: p.videoDurationSec,
+            videos: p.videos,
           })),
         };
       }
@@ -1501,6 +1504,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       productId: string;
       productName: string;
       images: string[];
+      videos: ProductVideoItem[];
     } | null = null;
 
     const initialProducts = await this.searchProducts(storeId);
@@ -1514,8 +1518,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           stock: p.stock,
           images: p.images,
           description: p.description,
-          videoKey: p.videoKey,
-          videoDurationSec: p.videoDurationSec,
+          videos: parseProductVideos(p.videos),
         },
       ]),
     );
@@ -1569,8 +1572,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
             stock: p.stock,
             images: p.images,
             description: p.description,
-            videoKey: p.videoKey,
-            videoDurationSec: p.videoDurationSec,
+            videos: parseProductVideos(p.videos),
           });
           toolFetchedProductIds.add(p.id);
         }
@@ -1604,8 +1606,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           stock: product.stock,
           images: product.images,
           description: product.description,
-          videoKey: product.videoKey,
-          videoDurationSec: product.videoDurationSec,
+          videos: parseProductVideos(product.videos),
         });
         toolFetchedProductIds.add(product.id);
         const persuasionNote = await this.buildPersuasionNote(
@@ -1822,6 +1823,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           productId: product.id,
           productName: product.name,
           images: product.images,
+          videos: parseProductVideos(product.videos),
         };
         return { images: product.images };
       },
@@ -2448,6 +2450,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       productId: product.id,
       productName: product.name,
       images: product.images,
+      videos: parseProductVideos(product.videos),
     };
     const reply = fa.salesAgent.photosCaption(product.name);
     await this.logReply(conversation, reply, uiBlock, undefined, {
@@ -2990,8 +2993,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           basePrice: product.basePrice,
           stock: product.stock,
           images: product.images,
-          videoKey: product.videoKey,
-          videoDurationSec: product.videoDurationSec,
+          videos: parseProductVideos(product.videos),
         },
       ],
     };
@@ -3211,8 +3213,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         basePrice: p.basePrice,
         stock: p.stock,
         images: p.images,
-        videoKey: p.videoKey,
-        videoDurationSec: p.videoDurationSec,
+        videos: parseProductVideos(p.videos),
       })),
     };
     const nextState: ConversationState = 'BROWSING';

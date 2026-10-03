@@ -921,41 +921,68 @@ export class TelegramService {
               [{ text: '🛒 افزودن به سبد', callback_data: `ac:${p.id}` }],
             ],
           };
-          // fallback به متن اگر sendPhoto شکست بخورد (مثلاً عکس در دسترس نباشد) — قبلاً
-          // اینجا هیچ fallback نبود، پس یک sendPhoto ناموفق کل کارت محصول (عکس + دکمه‌ی
-          // افزودن به سبد) را بی‌صدا حذف می‌کرد، چون callApi روی پاسخ ناموفق throw نمی‌کند
-          const photoResult = p.images[0]
-            ? ((await this.sendPhoto(
-                chatId,
-                this.productImageUrl(p.id, p.images[0]),
-                caption,
-                keyboard,
-              )) as { ok?: boolean } | null)
-            : null;
-          if (!p.images[0] || !photoResult?.ok) {
+          // docs/PRD-product-video.md بخش ۴ — ویدیو(ها) قبل از عکس‌ها (تصمیم ترتیب‌نمایش)،
+          // سقف ۱۰ آیتم (معادل سقف بومی sendMediaGroup تلگرام)
+          const mediaItems: { type: 'photo' | 'video'; media: string }[] = [
+            ...p.videos.map((v) => ({
+              type: 'video' as const,
+              media: this.productVideoUrl(p.id, v.key),
+            })),
+            ...p.images.map((key) => ({
+              type: 'photo' as const,
+              media: this.productImageUrl(p.id, key),
+            })),
+          ].slice(0, 10);
+
+          if (mediaItems.length >= 2) {
+            // تلگرام sendMediaGroup هیچ reply_markup قبول نمی‌کند، پس کپشن+دکمه جدا می‌رود
+            await this.sendMediaGroup(chatId, mediaItems);
             await this.sendText(chatId, caption, keyboard);
-          }
-          // docs/PRD-product-video.md — جدا از عکس/کپشن، یک پیام ویدیوی مجزا (تلگرام یک
-          // پیام sendPhoto را با ویدیو ترکیب نمی‌کند)
-          if (p.videoKey) {
-            await this.sendVideo(
+          } else if (mediaItems[0]?.type === 'photo') {
+            // fallback به متن اگر sendPhoto شکست بخورد (مثلاً عکس در دسترس نباشد) — قبلاً
+            // اینجا هیچ fallback نبود، پس یک sendPhoto ناموفق کل کارت محصول (عکس + دکمه‌ی
+            // افزودن به سبد) را بی‌صدا حذف می‌کرد، چون callApi روی پاسخ ناموفق throw نمی‌کند
+            const photoResult = (await this.sendPhoto(
               chatId,
-              this.productVideoUrl(p.id, p.videoKey),
-            );
+              mediaItems[0].media,
+              caption,
+              keyboard,
+            )) as { ok?: boolean } | null;
+            if (!photoResult?.ok) {
+              await this.sendText(chatId, caption, keyboard);
+            }
+          } else if (mediaItems[0]?.type === 'video') {
+            // تلگرام sendVideo کپشن/دکمه قبول نمی‌کند، پس جدا فرستاده می‌شود
+            await this.sendVideo(chatId, mediaItems[0].media);
+            await this.sendText(chatId, caption, keyboard);
+          } else {
+            await this.sendText(chatId, caption, keyboard);
           }
         }
         return;
       // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۳ — برخلاف PRODUCT_CARD که فقط
-      // images[0] می‌فرستد، همه‌ی عکس‌ها (تا سقف ۴ تا، که اسپم نشود) را جدا می‌فرستد
-      case 'PRODUCT_PHOTOS':
-        for (const key of block.images.slice(0, 4)) {
-          await this.sendPhoto(
-            chatId,
-            this.productImageUrl(block.productId, key),
-            block.productName,
-          );
+      // images[0] می‌فرستد، همه‌ی عکس‌ها/ویدیوها را carousel-طور می‌فرستد (وقتی مشتری صریح
+      // عکس بیشتر خواسته). docs/PRD-product-video.md بخش ۴ — ویدیو(ها) اول، بعد عکس‌ها
+      case 'PRODUCT_PHOTOS': {
+        const photosMedia: { type: 'photo' | 'video'; media: string }[] = [
+          ...block.videos.map((v) => ({
+            type: 'video' as const,
+            media: this.productVideoUrl(block.productId, v.key),
+          })),
+          ...block.images.map((key) => ({
+            type: 'photo' as const,
+            media: this.productImageUrl(block.productId, key),
+          })),
+        ].slice(0, 10);
+        if (photosMedia.length >= 2) {
+          await this.sendMediaGroup(chatId, photosMedia);
+        } else if (photosMedia[0]?.type === 'video') {
+          await this.sendVideo(chatId, photosMedia[0].media);
+        } else if (photosMedia[0]) {
+          await this.sendPhoto(chatId, photosMedia[0].media, block.productName);
         }
         return;
+      }
       case 'CART_SUMMARY': {
         const lines = block.items.map(
           (i) =>
@@ -1146,6 +1173,16 @@ export class TelegramService {
   // این هم روزی همون خطای «failed to get HTTP URL content» را گرفت، همون الگوی بافر را بگیرد
   private sendVideo(chatId: string, videoUrl: string) {
     return this.callApi('sendVideo', { chat_id: chatId, video: videoUrl });
+  }
+
+  // docs/PRD-product-video.md بخش ۴ — carousel بومی تلگرام برای چندویدیو/چندعکس یک محصول؛
+  // برخلاف sendPhoto/sendVideo، تلگرام روی sendMediaGroup هیچ reply_markup (دکمه) قبول
+  // نمی‌کند، پس دکمه‌ی «افزودن به سبد» باید در یک sendText جدا بعد از این فرستاده شود
+  private sendMediaGroup(
+    chatId: string,
+    items: { type: 'photo' | 'video'; media: string }[],
+  ) {
+    return this.callApi('sendMediaGroup', { chat_id: chatId, media: items });
   }
 
   private answerCallbackQuery(callbackQueryId: string) {

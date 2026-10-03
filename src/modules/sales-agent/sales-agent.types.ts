@@ -1,3 +1,5 @@
+import type { ProductVideoItem } from '../store/product-video.types';
+
 // docs/PRD-panels-and-buyer-ux-design.md بخش ۳.۲ — فقط زیرمجموعه‌ای که گام ۱ واقعاً می‌سازد
 // (بدون ProductVariant/CART_SUMMARY چندمتغیره؛ طبق ساده‌سازی پلن گام ۱)
 export type CartItem = {
@@ -58,19 +60,21 @@ export type UiBlock =
         basePrice: number;
         stock: number;
         images: string[];
-        // docs/PRD-product-video.md
-        videoKey?: string | null;
-        videoDurationSec?: number | null;
+        // docs/PRD-product-video.md بخش ۴ — چندویدیویی، فرانت با MediaCarousel ویدیو(ها)
+        // را قبل از عکس‌ها نشان می‌دهد
+        videos: ProductVideoItem[];
       }[];
     }
   // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۳ — برخلاف PRODUCT_CARD که فقط
   // images[0] را می‌فرستد، این بلاک همه‌ی عکس‌های محصول را حمل می‌کند، برای وقتی مشتری
-  // صریحاً عکس بیشتر خواسته (BuyerNeedTag.REQUEST_MORE_PHOTOS)
+  // صریحاً عکس بیشتر خواسته (BuyerNeedTag.REQUEST_MORE_PHOTOS). docs/PRD-product-video.md
+  // بخش ۴ — videos هم اضافه شد تا MediaCarousel اینجا هم ویدیو(ها)+عکس‌ها را یکجا نشان دهد
   | {
       type: 'PRODUCT_PHOTOS';
       productId: string;
       productName: string;
       images: string[];
+      videos: ProductVideoItem[];
     }
   | { type: 'CART_SUMMARY'; items: CartItem[]; total: number }
   | {

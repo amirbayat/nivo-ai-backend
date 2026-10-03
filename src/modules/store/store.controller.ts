@@ -179,8 +179,8 @@ export class StoreController {
     return this.storeService.removeStoreLogo(user.sub, id);
   }
 
-  // docs/PRD-product-video.md — یک ویدیوی معرفی کوتاه برای محصول؛ سقف interceptor کمی
-  // بالاتر از سقف واقعی سرویس (۵۰MB) تا پیام خطای دوستانه‌ی خودِ سرویس دیده شود، نه رد خام multer
+  // docs/PRD-product-video.md بخش ۴ — چندویدیویی (سقف ۴ تا)؛ سقف interceptor کمی بالاتر از
+  // سقف واقعی سرویس (۵۰MB) تا پیام خطای دوستانه‌ی خودِ سرویس دیده شود، نه رد خام multer
   @Post(':id/products/:productId/video')
   @UseInterceptors(
     FileInterceptor('file', { limits: { fileSize: 55 * 1024 * 1024 } }),
@@ -195,13 +195,14 @@ export class StoreController {
     return this.storeService.uploadProductVideo(user.sub, id, productId, file);
   }
 
-  @Delete(':id/products/:productId/video')
+  @Delete(':id/products/:productId/video/:key')
   removeProductVideo(
     @CurrentUser() user: JwtPayload,
     @Param('id') id: string,
     @Param('productId') productId: string,
+    @Param('key') key: string,
   ) {
-    return this.storeService.removeProductVideo(user.sub, id, productId);
+    return this.storeService.removeProductVideo(user.sub, id, productId, key);
   }
 
   // docs/PRD-product-display-focus-and-variations.md §۲.۴ — کد کوتاه لینک تلگرامی این

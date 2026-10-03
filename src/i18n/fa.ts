@@ -143,6 +143,7 @@ export const fa = {
     imageOnly: 'فقط فایل تصویر پذیرفته می‌شود',
     logoNotFound: 'عکس پروفایل فروشگاه یافت نشد',
     // docs/PRD-product-video.md
+    tooManyVideos: 'هر محصول حداکثر ۴ ویدیو می‌تواند داشته باشد',
     videoOnly: 'فقط فایل ویدیو (mp4 یا mov) پذیرفته می‌شود',
     videoTooLarge: 'حجم ویدیو نباید بیشتر از ۵۰ مگابایت باشد',
     videoTooLong: 'مدت ویدیو نباید بیشتر از ۹۰ ثانیه باشد',

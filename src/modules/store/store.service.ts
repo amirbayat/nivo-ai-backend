@@ -23,6 +23,10 @@ import { computeConversationStats } from '../sales-agent/conversation-stats.util
 import { TelegramApiClientService } from '../telegram/telegram-api-client.service';
 import { computeProductCompleteness } from './product-completeness.util';
 import { generateShortCode } from '../../common/utils/generate-code';
+import {
+  parseProductVideos,
+  type ProductVideoItem,
+} from './product-video.types';
 
 // docs/PRD-product-strategy-and-roadmap.md بخش ۳.۱ — چک‌لیست سطح فروشگاه
 const MIN_STORE_KB_ENTRIES = 3;
@@ -370,9 +374,10 @@ export class StoreService {
     return { buffer, mimeType: mimeTypeForExt(ext) };
   }
 
-  // docs/PRD-product-video.md — یک ویدیوی معرفی کوتاه برای محصول (تک‌فیلد، نه گالری)؛
-  // عیناً همون سقف فرمت/magic-bytes که video-edit.service.ts/caption-studio.service.ts
-  // استفاده می‌کنند (فقط mp4/mov ورودی قبول می‌شود، همیشه به mp4 نرمال‌سازی می‌شود)
+  // docs/PRD-product-video.md بخش ۴ — چندویدیویی (سقف ۴ تا، مثل images)؛ عیناً همون سقف
+  // فرمت/magic-bytes که video-edit.service.ts/caption-studio.service.ts استفاده می‌کنند
+  // (فقط mp4/mov ورودی قبول می‌شود، همیشه به mp4 نرمال‌سازی می‌شود)
+  private static readonly MAX_PRODUCT_VIDEOS = 4;
   private static readonly MAX_PRODUCT_VIDEO_BYTES = 50 * 1024 * 1024;
   private static readonly MAX_PRODUCT_VIDEO_DURATION_SEC = 90;
   private static readonly PRODUCT_VIDEO_MIME_EXT: Record<string, string> = {
@@ -395,6 +400,10 @@ export class StoreService {
     file: Express.Multer.File,
   ) {
     const product = await this.getOwnedProduct(sellerId, storeId, productId);
+    const existingVideos = parseProductVideos(product.videos);
+    if (existingVideos.length >= StoreService.MAX_PRODUCT_VIDEOS) {
+      throw new BadRequestException(fa.store.tooManyVideos);
+    }
     if (file.size > StoreService.MAX_PRODUCT_VIDEO_BYTES) {
       throw new BadRequestException(fa.store.videoTooLarge);
     }
@@ -425,12 +434,13 @@ export class StoreService {
     }
 
     const key = await this.storage.uploadImage(storeBuffer, storeExt);
-    if (product.videoKey) {
-      await this.storage.deleteObject(product.videoKey).catch(() => undefined);
-    }
+    const videos: ProductVideoItem[] = [
+      ...existingVideos,
+      { key, durationSec: Math.round(durationSec) },
+    ];
     return this.prisma.product.update({
       where: { id: productId },
-      data: { videoKey: key, videoDurationSec: Math.round(durationSec) },
+      data: { videos },
     });
   }
 
@@ -438,26 +448,31 @@ export class StoreService {
     sellerId: string,
     storeId: string,
     productId: string,
+    key: string,
   ) {
     const product = await this.getOwnedProduct(sellerId, storeId, productId);
-    if (product.videoKey) {
-      await this.storage.deleteObject(product.videoKey).catch(() => undefined);
-    }
+    const videos = parseProductVideos(product.videos).filter(
+      (v) => v.key !== key,
+    );
+    await this.storage.deleteObject(key).catch(() => undefined);
     return this.prisma.product.update({
       where: { id: productId },
-      data: { videoKey: null, videoDurationSec: null },
+      data: { videos },
     });
   }
 
   // بدون چک مالکیت (سلر) — محتوای عمومی ویترین، باید برای مرورگر خریدار ناشناس هم قابل‌پخش
-  // باشد؛ فقط چک می‌کند کلید واقعاً videoKey همین محصول است تا کلید دلخواه سرو نشود. برخلاف
-  // getProductImage (کل بافر)، اینجا فقط وجود/مالکیت را تایید می‌کند — پخش واقعی با Range
-  // request توسط خودِ کنترلر (sales-agent.controller.ts) با storage.getObjectStream انجام می‌شود
+  // باشد؛ فقط چک می‌کند کلید واقعاً داخل videos همین محصول است تا کلید دلخواه سرو نشود.
+  // برخلاف getProductImage (کل بافر)، اینجا فقط وجود/مالکیت را تایید می‌کند — پخش واقعی با
+  // Range request توسط خودِ کنترلر (sales-agent.controller.ts) با storage.getObjectStream انجام می‌شود
   async assertProductVideoKey(productId: string, key: string): Promise<void> {
     const product = await this.prisma.product.findUnique({
       where: { id: productId },
     });
-    if (!product || product.videoKey !== key) {
+    if (
+      !product ||
+      !parseProductVideos(product.videos).some((v) => v.key === key)
+    ) {
       throw new NotFoundException(fa.store.videoNotFound);
     }
   }
