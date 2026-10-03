@@ -2685,6 +2685,9 @@ model Order {
   // docs/PRD-seller-growth-tools-and-marketplace-trust.md بخش ۱.۱ — کوئری تجمیعی داشبورد
   // فروش (بازه‌ی تاریخ به‌ازای فروشگاه)؛ دو ایندکس بالا برای این کوئری خاص بهینه نیستند
   @@index([storeId, createdAt])
+  // docs/PRD-marketplace-explore-cross-store.md بخش ۷ (فاز ۵ MVP) — «سفارش‌های من،
+  // همه‌ی فروشگاه‌ها»: جست‌وجوی سفارش بر اساس شماره‌تلفن در کل جدول (نه فقط یک storeId)
+  @@index([recipientPhone])
   @@map("orders")
 }
 

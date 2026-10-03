@@ -51,6 +51,7 @@ import { StoreModule } from './modules/store/store.module';
 import { SalesAgentModule } from './modules/sales-agent/sales-agent.module';
 import { TelegramModule } from './modules/telegram/telegram.module';
 import { CommentsModule } from './modules/comments/comments.module';
+import { MarketplaceModule } from './modules/marketplace/marketplace.module';
 
 @Module({
   imports: [
@@ -103,6 +104,7 @@ import { CommentsModule } from './modules/comments/comments.module';
     SalesAgentModule,
     CommentsModule,
     TelegramModule,
+    MarketplaceModule,
   ],
   providers: [{ provide: APP_FILTER, useClass: AllExceptionsFilter }],
 })

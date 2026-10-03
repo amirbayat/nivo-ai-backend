@@ -667,4 +667,10 @@ export const fa = {
     jobFailedPushBody: 'پردازش ویدیوی شما ناموفق بود — اعتبار شما کسر نشد',
     promptReviewFailed: 'بررسی پرامپت الان جواب نداد، دوباره امتحان کن',
   },
+  // docs/PRD-marketplace-explore-cross-store.md بخش ۷ (فاز ۵ MVP) — «سفارش‌های من،
+  // همه‌ی فروشگاه‌ها»؛ پیام‌های OTP خودِ fa.auth عمداً دوباره استفاده می‌شوند (همون معنا)
+  marketplace: {
+    invalidSession: 'نشست شما منقضی شده — دوباره شماره‌ات رو تأیید کن',
+    noOrdersFound: 'هنوز سفارشی با این شماره ثبت نشده',
+  },
 } as const;
