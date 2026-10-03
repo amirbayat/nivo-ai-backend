@@ -1,3 +1,6 @@
+// باید قبل از همه‌ی import های دیگر لود شود.
+import './instrument';
+
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import type { NestExpressApplication } from '@nestjs/platform-express';

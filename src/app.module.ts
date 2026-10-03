@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
+import { SentryModule } from '@sentry/nestjs/setup';
 import { ConfigModule } from '@nestjs/config';
 import { validate } from './config/env.validation';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter';
@@ -55,6 +56,7 @@ import { MarketplaceModule } from './modules/marketplace/marketplace.module';
 
 @Module({
   imports: [
+    SentryModule.forRoot(),
     ConfigModule.forRoot({ isGlobal: true, validate }),
     PrismaModule,
     RedisModule,

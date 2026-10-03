@@ -1,12 +1,13 @@
 import {
-  ArgumentsHost,
   Catch,
   ExceptionFilter,
   HttpException,
   HttpStatus,
   Logger,
 } from '@nestjs/common';
+import type { ArgumentsHost } from '@nestjs/common';
 import { Request, Response } from 'express';
+import { SentryExceptionCaptured } from '@sentry/nestjs';
 import { LiveStatsService } from '../../modules/live-stats/live-stats.service';
 
 @Catch()
@@ -17,6 +18,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
   // تزریق کار کند — docs/PRD-admin-notifications-and-mobile.md بخش ۴/۸ (SYSTEM_ERROR_SPIKE)
   constructor(private readonly liveStats: LiveStatsService) {}
 
+  @SentryExceptionCaptured()
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();

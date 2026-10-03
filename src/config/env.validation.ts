@@ -71,6 +71,11 @@ class EnvironmentVariables {
   // بدون آن فقط پوش غیرفعال می‌ماند، بقیه‌ی سیستم (لیست/polling) بدون آن هم کار می‌کند
   @IsOptional() @IsString() FIREBASE_SERVICE_ACCOUNT?: string;
 
+  // گزارش خطا به Sentry (instrument.ts) — عمداً اختیاری: بدون این var، Sentry.init
+  // اصلاً صدا زده نمی‌شود و بقیه‌ی اپ بدون تغییر کار می‌کند (مثلاً روی dev/local).
+  @IsOptional() @IsString() SENTRY_DSN?: string;
+  @IsOptional() @IsString() SENTRY_ENVIRONMENT?: string;
+
   @IsInt() @Min(1) PORT: number = 3001;
 }
 
