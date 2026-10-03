@@ -502,7 +502,11 @@ export class ConversationEngineService {
         outputTokens,
       );
       return result;
-    } catch {
+    } catch (err) {
+      this.logger.error(
+        `parseIntent failed (model=${primaryModel}, conversation=${conversation.id})`,
+        err as Error,
+      );
       await this.logAiCall(
         conversation,
         'PARSE_INTENT',
@@ -532,7 +536,11 @@ export class ConversationEngineService {
           outputTokens,
         );
         return result;
-      } catch {
+      } catch (fallbackErr) {
+        this.logger.error(
+          `parseIntent fallback failed (model=${defaultModel()}, conversation=${conversation.id})`,
+          fallbackErr as Error,
+        );
         await this.logAiCall(
           conversation,
           'PARSE_INTENT',
@@ -645,7 +653,11 @@ export class ConversationEngineService {
         outputTokens,
       );
       return text;
-    } catch {
+    } catch (err) {
+      this.logger.error(
+        `caption failed (model=${primaryModel}, conversation=${conversation.id})`,
+        err as Error,
+      );
       await this.logAiCall(
         conversation,
         'CAPTION',
@@ -676,7 +688,11 @@ export class ConversationEngineService {
           outputTokens,
         );
         return text;
-      } catch {
+      } catch (fallbackErr) {
+        this.logger.error(
+          `caption fallback failed (model=${defaultModel()}, conversation=${conversation.id})`,
+          fallbackErr as Error,
+        );
         await this.logAiCall(
           conversation,
           'CAPTION',
@@ -796,7 +812,11 @@ export class ConversationEngineService {
             ? relevantProductIds
             : candidateProductIds,
       };
-    } catch {
+    } catch (err) {
+      this.logger.error(
+        `captionWithRelevance failed (model=${primaryModel}, conversation=${conversation.id})`,
+        err as Error,
+      );
       await this.logAiCall(
         conversation,
         'CAPTION',
@@ -837,7 +857,11 @@ export class ConversationEngineService {
               ? relevantProductIds
               : candidateProductIds,
         };
-      } catch {
+      } catch (fallbackErr) {
+        this.logger.error(
+          `captionWithRelevance fallback failed (model=${defaultModel()}, conversation=${conversation.id})`,
+          fallbackErr as Error,
+        );
         await this.logAiCall(
           conversation,
           'CAPTION',
@@ -912,7 +936,11 @@ export class ConversationEngineService {
         outputTokens,
       );
       return text;
-    } catch {
+    } catch (err) {
+      this.logger.error(
+        `askClarifyingQuestion failed (model=${primaryModel}, conversation=${conversation.id})`,
+        err as Error,
+      );
       await this.logAiCall(
         conversation,
         'CAPTION',
@@ -945,7 +973,11 @@ export class ConversationEngineService {
           outputTokens,
         );
         return text;
-      } catch {
+      } catch (fallbackErr) {
+        this.logger.error(
+          `askClarifyingQuestion fallback failed (model=${defaultModel()}, conversation=${conversation.id})`,
+          fallbackErr as Error,
+        );
         await this.logAiCall(
           conversation,
           'CAPTION',
@@ -1225,7 +1257,11 @@ relevantProductIds را خالی بگذار.${
         outputTokens,
       );
       return { text, relevantProductIds };
-    } catch {
+    } catch (err) {
+      this.logger.error(
+        `agentCaptionWithRelevance failed (model=${primaryModel}, conversation=${conversation.id})`,
+        err as Error,
+      );
       await this.logAiCall(
         conversation,
         'AGENT_CAPTION',
@@ -1260,7 +1296,11 @@ relevantProductIds را خالی بگذار.${
           outputTokens,
         );
         return { text, relevantProductIds };
-      } catch {
+      } catch (fallbackErr) {
+        this.logger.error(
+          `agentCaptionWithRelevance fallback failed (model=${defaultModel()}, conversation=${conversation.id})`,
+          fallbackErr as Error,
+        );
         await this.logAiCall(
           conversation,
           'AGENT_CAPTION',
@@ -2216,7 +2256,11 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         outputTokens,
       );
       return engineResult;
-    } catch {
+    } catch (err) {
+      this.logger.error(
+        `runFullAgentTurn failed (model=${primaryModel}, conversation=${conversation.id})`,
+        err as Error,
+      );
       await this.logAiCall(
         conversation,
         'AGENT_CAPTION',
@@ -2248,7 +2292,11 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           outputTokens,
         );
         return engineResult;
-      } catch {
+      } catch (fallbackErr) {
+        this.logger.error(
+          `runFullAgentTurn fallback failed (model=${defaultModel()}, conversation=${conversation.id})`,
+          fallbackErr as Error,
+        );
         await this.logAiCall(
           conversation,
           'AGENT_CAPTION',
@@ -2636,7 +2684,11 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         outputTokens,
       );
       return verdict;
-    } catch {
+    } catch (err) {
+      this.logger.error(
+        `classifySatisfactionReply failed (model=${primaryModel}, conversation=${conversation.id})`,
+        err as Error,
+      );
       await this.logAiCall(
         conversation,
         'SATISFACTION_CLASSIFY',
@@ -2661,7 +2713,11 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           outputTokens,
         );
         return verdict;
-      } catch {
+      } catch (fallbackErr) {
+        this.logger.error(
+          `classifySatisfactionReply fallback failed (model=${defaultModel()}, conversation=${conversation.id})`,
+          fallbackErr as Error,
+        );
         await this.logAiCall(
           conversation,
           'SATISFACTION_CLASSIFY',
@@ -4421,7 +4477,11 @@ answered=false بده (به‌جای حدس‌زدن).`,
         usage.outputTokens ?? 0,
       );
       return object.answered ? object.reply.trim() : null;
-    } catch {
+    } catch (err) {
+      this.logger.error(
+        `tryAnswerFromProductDescriptions failed (conversation=${conversation.id})`,
+        err as Error,
+      );
       return null;
     }
   }
@@ -4464,7 +4524,11 @@ answered=false بده (به‌جای حدس‌زدن).`,
         usage.outputTokens ?? 0,
       );
       return object.answered ? object.reply.trim() : null;
-    } catch {
+    } catch (err) {
+      this.logger.error(
+        `tryAnswerFromStoreProfile failed (conversation=${conversation.id})`,
+        err as Error,
+      );
       return null;
     }
   }
