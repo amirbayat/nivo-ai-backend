@@ -125,6 +125,11 @@ export class StoreController {
     return this.storeService.createProduct(user.sub, id, dto);
   }
 
+  // فیدبک کاربر ۱۴۰۵/۰۷/۱۲ — این دقیقاً هم‌شکل است با یک مسیر عمومی احتمالی زیر همین پیشوند
+  // (v2/stores/:x/products)؛ قبلاً SalesAgentController دقیقاً همین شکل را برای buyer-facing
+  // شاپ داشت و چون زودتر رجیستر می‌شد همیشه این مسیر را shadow می‌کرد (۴۰۴ دائمی، حتی با JWT
+  // معتبر). آن مسیر به stores/:slug/public-products تغییر نام داد — هر مسیر عمومی جدید زیر
+  // v2/stores/... را «products» اسم نگذار، اسمی که اینجا هم ممکن است تکرار شود انتخاب نکن.
   @Get(':id/products')
   listProducts(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     return this.storeService.listProducts(user.sub, id);

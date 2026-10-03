@@ -53,7 +53,15 @@ export class SalesAgentController {
 
   // docs/PRD-panels-and-buyer-ux-design.md بخش ۳.۵ — حالت «فروشگاه»، گرید کامل محصولات؛
   // بدون auth (عیناً الگوی chat/start بالا)، صفحه‌بندی‌شده، فقط فیلدهای نمایشی ایمن
-  @Get('stores/:slug/products')
+  // فیدبک کاربر ۱۴۰۵/۰۷/۱۲ — این مسیر عمداً «public-products» است نه «products»: قبلاً دقیقاً
+  // همین شکل (stores/:slug/products) با StoreController::@Get(':id/products') (مسیر پنل
+  // فروشنده، احراز‌هویت‌شده) collision داشت. Nest/Express مسیرها را به ترتیب رجیستر امتحان
+  // می‌کنند و اولین match برنده است — چون این کنترلر زودتر رجیستر می‌شد، هر درخواست GET به
+  // .../stores/:id/products (حتی با JWT معتبر فروشنده) همیشه همین هندلر عمومی را می‌گرفت و
+  // چون id واقعی یک slug نیست، «فروشگاه یافت نشد» برمی‌گرداند — باگ: لیست محصولات پنل فروشنده
+  // همیشه ۴۰۴ می‌داد. اسم این مسیر را عوض کردیم تا دیگر هیچ‌وقت با چیزی زیر StoreController
+  // تصادفی هم‌شکل نشود (به‌جای تکیه به ترتیب رجیستر ماژول‌ها که شکننده است).
+  @Get('stores/:slug/public-products')
   listStoreProducts(
     @Param('slug') slug: string,
     @Query('q') q?: string,
