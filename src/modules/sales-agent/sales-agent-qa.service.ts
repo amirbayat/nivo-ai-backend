@@ -9,6 +9,7 @@ import { toneForCategory } from './tone-by-category';
 import { GOLDEN_QUESTIONS } from './qa-golden-questions';
 import { INTENT_GOLDEN_CASES } from './intent-golden-cases';
 import { IMPLICIT_NEED_GOLDEN_CASES } from './intent-implicit-need-golden-cases';
+import { formatShippingRulesSummary } from './shipping-rules-summary.util';
 import {
   buildIntentClassificationPrompt,
   intentClassificationSchema,
@@ -104,8 +105,14 @@ export class SalesAgentQaService {
       select: { name: true, basePrice: true, stock: true, description: true },
     });
 
+    const shippingRulesSummary = await formatShippingRulesSummary(
+      this.prisma,
+      storeId,
+    );
     const storeProfileFacts = [
       store.shippingInfo && `ارسال/هزینه‌ی ارسال: ${store.shippingInfo}`,
+      shippingRulesSummary &&
+        `هزینه‌ی ارسال به‌تفکیک استان:\n${shippingRulesSummary}`,
       store.returnPolicy && `شرایط مرجوعی/گارانتی: ${store.returnPolicy}`,
       store.brandIntro && `معرفی فروشگاه: ${store.brandIntro}`,
     ]

@@ -31,6 +31,7 @@ import { CreditService } from './credit.service';
 import { AbuseGuardService } from './abuse-guard.service';
 import { TelegramApiClientService } from '../telegram/telegram-api-client.service';
 import { CommentsService } from '../comments/comments.service';
+import { formatShippingRulesSummary } from './shipping-rules-summary.util';
 import { fa } from '../../i18n/fa';
 import { defaultModel, resolveModel } from './model-variants';
 import { toneForCategory } from './tone-by-category';
@@ -1369,7 +1370,7 @@ relevantProductIds را خالی بگذار.${
   // این یک نوبت کامل مکالمه (سبد/سفارش/تخفیف/FAQ/ارجاع انسانی) را با یک زنجیره‌ی
   // generateText چندمرحله‌ای تصمیم می‌گیرد — جایگزین کامل parseIntent+switch+do* برای
   // مکالمه‌هایی که responseStrategy=FULL_AGENT دارند.
-  private buildFullAgentSystemPrompt(
+  private async buildFullAgentSystemPrompt(
     conversation: ConversationWithStore,
     ctx: ConversationContext,
     catalogFacts: string,
@@ -1377,13 +1378,19 @@ relevantProductIds را خالی بگذار.${
     nudgeActive: boolean,
     persuasionEnabled: boolean,
     urgentDiscount: { code: string; expiresAt: Date } | null,
-  ): string {
+  ): Promise<string> {
     const tone = toneForCategory(conversation.store.category);
     const store = conversation.store;
+    const shippingRulesSummary = await formatShippingRulesSummary(
+      this.prisma,
+      conversation.storeId,
+    );
     const storeProfile = [
       store.category && `حوزه‌ی فعالیت: ${store.category}`,
       store.brandIntro && `معرفی فروشگاه: ${store.brandIntro}`,
       store.shippingInfo && `ارسال: ${store.shippingInfo}`,
+      shippingRulesSummary &&
+        `هزینه‌ی ارسال به‌تفکیک استان:\n${shippingRulesSummary}`,
       store.returnPolicy && `شرایط مرجوعی/گارانتی: ${store.returnPolicy}`,
     ]
       .filter(Boolean)
@@ -2055,7 +2062,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     // برای FULL_AGENT فقط دوباره‌ی customerMessage بود (برچسب «نمایش کامل prompt/facts» در ادمین
     // گمراه‌کننده بود)؛ حالا متن واقعی پرامپت سیستم همین‌جا یک‌بار ساخته و هم به generateText هم
     // به logReply پاس داده می‌شود
-    const systemPrompt = this.buildFullAgentSystemPrompt(
+    const systemPrompt = await this.buildFullAgentSystemPrompt(
       conversation,
       ctx,
       catalogFacts,
@@ -3043,11 +3050,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       if (!ctx.pendingVariantSelection || !action.value) {
         return this.doClarify(conversation, fa.salesAgent.nothingToConfirm);
       }
-      return this.resolveVariantSelectionValue(
-        conversation,
-        ctx,
-        action.value,
-      );
+      return this.resolveVariantSelectionValue(conversation, ctx, action.value);
     }
 
     // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۱ + docs/PRD-buyer-saved-addresses.md
@@ -3207,7 +3210,10 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       const reply = orders.length
         ? await this.caption(
             `سفارش‌های قبلی مشتری: ${orders
-              .map((o) => `${(o.items as CartItem[]).map((i) => i.name).join('، ')} (${o.status})`)
+              .map(
+                (o) =>
+                  `${(o.items as CartItem[]).map((i) => i.name).join('، ')} (${o.status})`,
+              )
               .join(' | ')}`,
             conversation,
           )
@@ -3465,7 +3471,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
 
     // همون دلیل showProduct بالا — بدون عدد موجودی در واقعیت‌ها. hasVariantOptions هم همان‌جا
     // توضیح داده شد: فقط یک اشاره‌ی کوتاه که این محصول گزینه دارد، بدون جزئیات
-    const facts = `این محصولات فروشگاه است: ${products.map((p) => `${p.name} (${p.basePrice} تومان)${p.stock === 0 ? ' — فعلاً ناموجود' : ''}${hasVariantOptions(p) ? ` — دارای گزینه‌های مختلف (${p.optionTypes!.map((o) => o.name).join('/')})` : ''}${p.description ? ` — توضیحات: ${truncateDescriptionForFacts(p.description)}` : ''}${formatSpecsForFacts(parseProductSpecs(p.specs))}`).join('، ')}`;
+    const facts = `این محصولات فروشگاه است: ${products.map((p) => `${p.name} (${p.basePrice} تومان)${p.stock === 0 ? ' — فعلاً ناموجود' : ''}${hasVariantOptions(p) ? ` — دارای گزینه‌های مختلف (${p.optionTypes.map((o) => o.name).join('/')})` : ''}${p.description ? ` — توضیحات: ${truncateDescriptionForFacts(p.description)}` : ''}${formatSpecsForFacts(parseProductSpecs(p.specs))}`).join('، ')}`;
 
     // docs/PRD-sales-agent-response-strategy-ab.md بخش ۱، جدول Track A — جدول تصمیمی که
     // docs/PRD-sales-agent-implicit-need-detection.md فاز ۱ محاسبه می‌کرد ولی تا امروز هیچ‌جا
@@ -3872,7 +3878,10 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       productId: product.id,
       productName: product.name,
       optionName: optionType.name,
-      values: optionType.values.map((v) => ({ label: v.value, value: v.value })),
+      values: optionType.values.map((v) => ({
+        label: v.value,
+        value: v.value,
+      })),
       selectedSoFar: selectedValues,
       mode: 'DIMENSION',
     };
@@ -3915,7 +3924,11 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       ...ctx,
       pendingVariantSelection,
     });
-    const uiBlock = this.buildVariantDimensionPrompt(product, firstOptionType, {});
+    const uiBlock = this.buildVariantDimensionPrompt(
+      product,
+      firstOptionType,
+      {},
+    );
     const reply = fa.salesAgent.variantAskOption(firstOptionType.name);
     await this.logReply(conversation, reply, uiBlock);
     return { reply, uiBlocks: [uiBlock], state: conversation.currentState };
@@ -3944,8 +3957,11 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     }
 
     if (pending.mode === 'ALTERNATIVES') {
-      const alternatives = product.variants!.filter((v) => v.stock > 0);
-      const uiBlock = this.buildVariantAlternativesPrompt(product, alternatives);
+      const alternatives = product.variants.filter((v) => v.stock > 0);
+      const uiBlock = this.buildVariantAlternativesPrompt(
+        product,
+        alternatives,
+      );
       const reply = fa.salesAgent.variantOutOfStockAlternatives;
       await this.logReply(conversation, reply, uiBlock);
       return { reply, uiBlocks: [uiBlock], state: conversation.currentState };
@@ -3957,12 +3973,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     );
     if (!optionType) {
       // حالت نامنتظره (selectedValues از قبل کامل بود) — مستقیم نهایی‌سازی را امتحان می‌کنیم
-      return this.finalizeVariantSelection(
-        conversation,
-        ctx,
-        product,
-        pending,
-      );
+      return this.finalizeVariantSelection(conversation, ctx, product, pending);
     }
 
     const trimmed = text.trim().toLowerCase();
@@ -4013,22 +4024,33 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     }
 
     if (pending.mode === 'ALTERNATIVES') {
-      const variant = product.variants!.find(
+      const variant = product.variants.find(
         (v) => v.id === rawValue && v.stock > 0,
       );
       if (!variant) {
         // همین الان یکی دیگر خریده بود (race) یا دکمه‌ی قدیمی — لیست موجود را تازه نشان می‌دهیم
-        const alternatives = product.variants!.filter((v) => v.stock > 0);
+        const alternatives = product.variants.filter((v) => v.stock > 0);
         if (alternatives.length === 0) {
-          await this.persistTransition(conversation, conversation.currentState, {
-            ...ctx,
-            pendingVariantSelection: null,
-          });
+          await this.persistTransition(
+            conversation,
+            conversation.currentState,
+            {
+              ...ctx,
+              pendingVariantSelection: null,
+            },
+          );
           const reply = fa.salesAgent.variantNoAlternatives;
           await this.logReply(conversation, reply, { type: 'NONE' });
-          return { reply, uiBlocks: [{ type: 'NONE' }], state: conversation.currentState };
+          return {
+            reply,
+            uiBlocks: [{ type: 'NONE' }],
+            state: conversation.currentState,
+          };
         }
-        const uiBlock = this.buildVariantAlternativesPrompt(product, alternatives);
+        const uiBlock = this.buildVariantAlternativesPrompt(
+          product,
+          alternatives,
+        );
         const reply = fa.salesAgent.variantOutOfStockAlternatives;
         await this.logReply(conversation, reply, uiBlock);
         return { reply, uiBlocks: [uiBlock], state: conversation.currentState };
@@ -4037,7 +4059,12 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         conversation,
         ctx,
         product,
-        { id: variant.id, optionValues: this.optionValuesOf(variant), priceOverride: variant.priceOverride, stock: variant.stock },
+        {
+          id: variant.id,
+          optionValues: this.optionValuesOf(variant),
+          priceOverride: variant.priceOverride,
+          stock: variant.stock,
+        },
         pending.qty,
         false,
         'ADD_TO_CART',
@@ -4157,7 +4184,11 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       });
       const reply = fa.salesAgent.variantNoAlternatives;
       await this.logReply(conversation, reply, { type: 'NONE' });
-      return { reply, uiBlocks: [{ type: 'NONE' }], state: conversation.currentState };
+      return {
+        reply,
+        uiBlocks: [{ type: 'NONE' }],
+        state: conversation.currentState,
+      };
     }
     const alternativesPending: PendingVariantSelection = {
       productId: product.id,
@@ -5034,10 +5065,17 @@ answered=false بده (به‌جای حدس‌زدن).`,
     question: string,
   ): Promise<string | null> {
     const { shippingInfo, returnPolicy, brandIntro } = conversation.store;
-    if (!shippingInfo && !returnPolicy && !brandIntro) return null;
+    const shippingRulesSummary = await formatShippingRulesSummary(
+      this.prisma,
+      conversation.storeId,
+    );
+    if (!shippingInfo && !shippingRulesSummary && !returnPolicy && !brandIntro)
+      return null;
 
     const facts = [
       shippingInfo && `ارسال/هزینه‌ی ارسال: ${shippingInfo}`,
+      shippingRulesSummary &&
+        `هزینه‌ی ارسال به‌تفکیک استان:\n${shippingRulesSummary}`,
       returnPolicy && `شرایط مرجوعی/گارانتی: ${returnPolicy}`,
       brandIntro && `معرفی فروشگاه: ${brandIntro}`,
     ]
