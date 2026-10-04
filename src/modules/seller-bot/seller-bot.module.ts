@@ -3,14 +3,15 @@ import { AuthModule } from '../auth/auth.module';
 import { StoreModule } from '../store/store.module';
 import { SellerBotController } from './seller-bot.controller';
 import { SellerBotService } from './seller-bot.service';
-import { SellerBotApiClientService } from './seller-bot-api-client.service';
+import { SellerBotApiClientModule } from './seller-bot-api-client.module';
 
 // docs/PRD-seller-telegram-management-bot.md — AuthService برای OTP (همان مسیر پیامکی پنل
 // وب)، StoreService/StoreCreditService برای اکشن‌های مدیریتی؛ نه AuthModule نه StoreModule
-// این ماژول را import می‌کنند، پس چرخه‌ای ساخته نمی‌شود
+// این ماژول را import می‌کنند، پس چرخه‌ای ساخته نمی‌شود. SellerBotApiClientModule جدا است
+// چون SalesAgentModule هم مستقیم همان provider را لازم دارد (پوش نوتیفیکیشن handoff/رسید)
 @Module({
-  imports: [AuthModule, StoreModule],
+  imports: [AuthModule, StoreModule, SellerBotApiClientModule],
   controllers: [SellerBotController],
-  providers: [SellerBotService, SellerBotApiClientService],
+  providers: [SellerBotService],
 })
 export class SellerBotModule {}

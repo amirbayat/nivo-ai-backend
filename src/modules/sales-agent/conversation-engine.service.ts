@@ -29,7 +29,7 @@ import {
 } from '../store/product-specs.types';
 import { CreditService } from './credit.service';
 import { AbuseGuardService } from './abuse-guard.service';
-import { TelegramApiClientService } from '../telegram/telegram-api-client.service';
+import { SellerBotApiClientService } from '../seller-bot/seller-bot-api-client.service';
 import { CommentsService } from '../comments/comments.service';
 import { formatShippingRulesSummary } from './shipping-rules-summary.util';
 import { fa } from '../../i18n/fa';
@@ -286,7 +286,7 @@ export class ConversationEngineService {
     private readonly creditService: CreditService,
     private readonly abuseGuard: AbuseGuardService,
     private readonly storage: StorageService,
-    private readonly telegramApi: TelegramApiClientService,
+    private readonly sellerBotApi: SellerBotApiClientService,
     private readonly comments: CommentsService,
     @InjectQueue('sales-agent-voice')
     private readonly voiceQueue: Queue<SalesAgentVoiceJobData>,
@@ -4776,8 +4776,11 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     }
   }
 
-  // docs/PRD-telegram-bot-channel.md بخش ۹.۱ — عکس رسید از پشت JwtGuard+مالکیت سرو می‌شود،
-  // پس سرور تلگرام نمی‌تواند خودش آن را fetch کند؛ بایت‌های واقعی multipart آپلود می‌شوند
+  // docs/PRD-seller-telegram-management-bot.md — اعلان رسید حالا روی بات دوم (مدیریت پنل)
+  // می‌رود، نه بات مشترک مشتری‌محور (ownerTelegramChatId)؛ دکمه‌های تایید/رد همان sbap:/sbrj:
+  // هستند که seller-bot.service.ts از قبل برای /orders هم استفاده می‌کند. عکس رسید از پشت
+  // JwtGuard+مالکیت سرو می‌شود، پس سرور تلگرام نمی‌تواند خودش آن را fetch کند؛ بایت‌های واقعی
+  // multipart آپلود می‌شوند
   private async notifySellerOfReceipt(
     conversation: ConversationWithStore,
     orderId: string,
@@ -4785,7 +4788,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     buffer: Buffer,
     verification: { extractedAmountToman: number; match: boolean } | null,
   ): Promise<void> {
-    const chatId = conversation.store.ownerTelegramChatId;
+    const chatId = conversation.store.sellerBotChatId;
     if (!chatId) return;
     const ext = receiptImageKey.split('.').pop() ?? 'jpg';
     const order = await this.prisma.order.findUnique({
@@ -4812,7 +4815,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
             .join('، '),
         )
       : '';
-    await this.telegramApi.sendPhotoBuffer(
+    await this.sellerBotApi.sendPhotoBuffer(
       chatId,
       buffer,
       `receipt.${ext}`,
@@ -4823,11 +4826,11 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           [
             {
               text: fa.telegram.receiptApproveButton,
-              callback_data: `sap:${orderId}`,
+              callback_data: `sbap:${orderId}`,
             },
             {
               text: fa.telegram.receiptRejectButton,
-              callback_data: `srj:${orderId}`,
+              callback_data: `sbrj:${orderId}`,
             },
           ],
         ],
@@ -5211,13 +5214,13 @@ answered=false بده (به‌جای حدس‌زدن).`,
       : now >= start || now <= end;
   }
 
-  // docs/PRD-telegram-bot-channel.md بخش ۹.۱ — اگر فروشنده تلگرامش را وصل کرده باشد، سؤال
-  // مشتری + دکمه‌ی «پاسخ بده» مستقیم پوش می‌شود؛ اگر نه، بی‌صدا رد می‌شود (فروشنده فقط از
-  // پنل «نیاز به توجه» می‌بیند، مثل قبل)
+  // docs/PRD-seller-telegram-management-bot.md — اگر فروشنده بات مدیریت پنل را وصل کرده
+  // باشد (sellerBotChatId، نه ownerTelegramChatId قدیمی)، سؤال مشتری + دکمه‌ی «پاسخ بده»
+  // مستقیم پوش می‌شود؛ اگر نه، بی‌صدا رد می‌شود (فروشنده فقط از پنل «نیاز به توجه» می‌بیند)
   private async notifySellerOfHandoff(
     conversation: ConversationWithStore,
   ): Promise<void> {
-    const chatId = conversation.store.ownerTelegramChatId;
+    const chatId = conversation.store.sellerBotChatId;
     if (!chatId) return;
     const lastCustomerMessage = await this.prisma.conversationEvent.findFirst({
       where: { conversationId: conversation.id, type: 'CUSTOMER_MESSAGE' },
@@ -5226,7 +5229,7 @@ answered=false بده (به‌جای حدس‌زدن).`,
     const customerText =
       (lastCustomerMessage?.payload as { text?: string } | undefined)?.text ??
       '—';
-    await this.telegramApi.sendText(
+    await this.sellerBotApi.sendText(
       chatId,
       fa.telegram.handoffNotification(customerText),
       {
@@ -5234,7 +5237,7 @@ answered=false بده (به‌جای حدس‌زدن).`,
           [
             {
               text: fa.telegram.handoffReplyButton,
-              callback_data: `sr:${conversation.id}`,
+              callback_data: `sbrp:${conversation.id}`,
             },
           ],
         ],

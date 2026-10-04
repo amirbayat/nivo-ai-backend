@@ -5,6 +5,7 @@ import { MediaTranscodeModule } from '../../common/services/media-transcode.modu
 import { AsrModule } from '../../common/services/asr.module';
 import { UsageModule } from '../usage/usage.module';
 import { TelegramApiClientModule } from '../telegram/telegram-api-client.module';
+import { SellerBotApiClientModule } from '../seller-bot/seller-bot-api-client.module';
 import { CommentsModule } from '../comments/comments.module';
 import { SmsModule } from '../../sms/sms.module';
 import { SalesAgentController } from './sales-agent.controller';
@@ -26,8 +27,11 @@ import { SalesAgentQaController } from './sales-agent-qa.controller';
     UsageModule,
     // docs/PRD-sales-agent-voice.md — مصرف‌کننده/پردازشگر واقعی در queue.module.ts
     BullModule.registerQueue({ name: 'sales-agent-voice' }),
-    // docs/PRD-telegram-bot-channel.md بخش ۹.۱ — پوش اعلان handoff/رسید به تلگرام فروشنده
+    // docs/PRD-telegram-bot-channel.md بخش ۹.۱ — پوش پیام فروشنده به مشتری‌ای که کانالش تلگرام است
     TelegramApiClientModule,
+    // docs/PRD-seller-telegram-management-bot.md — پوش اعلان handoff/رسید حالا روی بات دوم
+    // (مدیریت پنل فروشنده) می‌رود، نه بات مشترک مشتری‌محور بالا
+    SellerBotApiClientModule,
     // docs/PRD-customer-comments-and-discounts.md — ثبت نظر بعد از تکمیل سفارش + نمایش
     // نظرات تاییدشده در doFaq/showProduct
     CommentsModule,

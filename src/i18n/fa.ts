@@ -530,9 +530,9 @@ export const fa = {
     otpSent: 'یک کد ۶ رقمی به شماره‌ت پیامک شد — همین‌جا بفرستش.',
     otpInvalid: 'کد اشتباهه یا منقضی شده — دوباره امتحان کن یا /start رو بزن.',
     linked: (storeName: string) =>
-      `وصل شدی ✅ فروشگاه «${storeName}». برای دیدن دستورات /help رو بزن.`,
+      `وصل شدی ✅ فروشگاه «${storeName}». از دکمه‌های پایین صفحه استفاده کن.`,
     alreadyLinked: (storeName: string) =>
-      `قبلاً به فروشگاه «${storeName}» وصل شدی. /help رو بزن برای دیدن دستورات.`,
+      `قبلاً به فروشگاه «${storeName}» وصل شدی. از دکمه‌های پایین صفحه استفاده کن.`,
     notLinked:
       'برای استفاده از این دستور، اول باید وارد بشی — /start رو بزن و شماره‌ت رو تایید کن.',
     logoutSuccess:
@@ -544,8 +544,29 @@ export const fa = {
       '/stock <اسم یا کد محصول> — دیدن/تغییر موجودی',
       '/credit — موجودی اعتبار فروشگاه',
       '/logout — خروج',
+      '',
+      'یا از دکمه‌های پایین صفحه استفاده کن.',
     ].join('\n'),
-    unknownCommand: 'متوجه نشدم — /help رو بزن برای دیدن دستورات.',
+    unknownCommand:
+      'متوجه نشدم — از دکمه‌های پایین صفحه استفاده کن یا /help رو بزن.',
+    // docs/PRD-seller-telegram-management-bot.md — کیبرد دائمی (reply keyboard) جایگزین
+    // تایپ‌کردن دستورات؛ بعد از لینک‌شدن و بعد از هر اکشن تمام‌شده دوباره فرستاده می‌شود تا
+    // همیشه پایین صفحه باشد (force_reply/inline keyboard آن را پاک نمی‌کند، ولی برای اطمینان
+    // صریح دوباره می‌فرستیم)
+    menuOrdersButton: '📦 سفارش‌ها',
+    menuAttentionButton: '💬 گفتگوهای نیازمند توجه',
+    menuStockButton: '📋 موجودی محصولات',
+    menuCreditButton: '💳 اعتبار فروشگاه',
+    menuLogoutButton: '🚪 خروج از حساب',
+    stockSearchPrompt: '🔎 جست‌وجوی موجودی\n\nنام یا کد محصول رو بفرست.',
+    attentionEmpty: 'الان گفتگوی بازی که نیاز به توجه داشته باشه نداری ✅',
+    attentionHeader: '💬 گفتگوهای نیازمند توجه:',
+    attentionLine: (customerLabel: string, updatedAt: Date) =>
+      `${customerLabel} — ${updatedAt.toLocaleDateString('fa-IR')}`,
+    attentionReplyButton: '✍️ پاسخ بده',
+    attentionReplyPrompt: (conversationId: string) =>
+      `پیامت برای این مشتری رو بنویس.\nکد مکالمه: ${conversationId}`,
+    attentionReplySent: 'پیامت برای مشتری ارسال شد ✅',
     ordersEmpty: 'هنوز سفارشی ثبت نشده.',
     ordersHeader: '📦 سفارش‌های اخیر:',
     orderLine: (

@@ -17,14 +17,35 @@ import type {
 
 // docs/PRD-seller-telegram-management-bot.md — فاز ۱: بات جدا برای مدیریت پنل فروشنده، با
 // احراز هویت واقعی (اشتراک‌گذاری شماره‌ی تلگرام + همان OTP پیامکی پنل وب). عمداً مستقل از
-// TelegramService/telegram.service.ts (بات مشتری‌محور) — هیچ خطی از آن فایل عوض نشده؛ اعلان
-// handoff/رسید و پاسخ‌دهی فروشنده همچنان روی همان بات قبلی می‌ماند (فاز بعد، طبق بخش ۱ سند،
-// تصمیم مهاجرت کامل گرفته می‌شود).
+// TelegramService/telegram.service.ts (بات مشتری‌محور) — هیچ خطی از آن فایل عوض نشده. فاز ۲
+// (بخش ۸ سند): اعلان handoff/رسید حالا هم این‌جا پوش می‌شود (از conversation-engine.service.ts،
+// نه دیگر بات قدیم)؛ ایمپورت گروهی محصول با سند/صوت هنوز فقط روی بات قدیم مانده.
 const OTP_PENDING_TTL_MS = 3 * 60 * 1000;
 const STOCK_UPDATE_REF_REGEX = /کد محصول: ([0-9a-fA-F-]{36})/;
 const REJECT_REASON_REF_REGEX = /کد سفارش رد: ([0-9a-fA-F-]{36})/;
+const CONVERSATION_REPLY_REF_REGEX = /کد مکالمه: ([0-9a-fA-F-]{36})/;
 const STOCK_SEARCH_MAX_RESULTS = 5;
 const ORDERS_LIST_MAX = 5;
+const ATTENTION_LIST_MAX = 5;
+
+// docs/PRD-seller-telegram-management-bot.md — فیدبک کاربر: همه‌ی بخش‌ها باید دکمه‌ی
+// جای‌کیبرد (reply keyboard) داشته باشند، نه فقط دستور متنی. این کیبرد دائمی است (نه
+// one_time) — یک‌بار فرستاده می‌شود و تا force_reply/inline keyboard بعدی زیر صفحه می‌ماند؛
+// بعد از هر اکشن تمام‌شده دوباره با پیام پایانی فرستاده می‌شود تا همیشه در دسترس باشد
+const MAIN_MENU_KEYBOARD = {
+  keyboard: [
+    [
+      { text: fa.sellerBot.menuOrdersButton },
+      { text: fa.sellerBot.menuAttentionButton },
+    ],
+    [
+      { text: fa.sellerBot.menuStockButton },
+      { text: fa.sellerBot.menuCreditButton },
+    ],
+    [{ text: fa.sellerBot.menuLogoutButton }],
+  ],
+  resize_keyboard: true,
+};
 
 interface PendingOtp {
   phone: string;
@@ -78,6 +99,21 @@ export class SellerBotService {
           await this.handleStockUpdateMessage(message, stockProductId);
           return;
         }
+        const conversationId = this.extractRef(
+          message,
+          CONVERSATION_REPLY_REF_REGEX,
+        );
+        if (conversationId) {
+          await this.handleAttentionReplyMessage(message, conversationId);
+          return;
+        }
+        if (message.reply_to_message?.text === fa.sellerBot.stockSearchPrompt) {
+          await this.handleStockSearch(
+            String(message.chat.id),
+            message.text.trim(),
+          );
+          return;
+        }
         await this.handleText(message);
         return;
       }
@@ -100,6 +136,12 @@ export class SellerBotService {
     return this.prisma.store.findUnique({ where: { sellerBotChatId: chatId } });
   }
 
+  // بعد از هر اکشن تمام‌شده صدا زده می‌شود تا کیبرد منو همیشه پایین صفحه باشد — force_reply/
+  // inline keyboard پیام‌های بعدی این را پاک نمی‌کنند، ولی صریح دوباره فرستادنش قابل‌اطمینان‌تر است
+  private async sendMenu(chatId: string, text: string): Promise<void> {
+    await this.api.sendText(chatId, text, MAIN_MENU_KEYBOARD);
+  }
+
   private async handleText(message: TelegramMessage): Promise<void> {
     const chatId = String(message.chat.id);
     const text = message.text!.trim();
@@ -108,23 +150,31 @@ export class SellerBotService {
       await this.handleStart(chatId);
       return;
     }
-    if (text === '/logout') {
+    if (text === '/logout' || text === fa.sellerBot.menuLogoutButton) {
       await this.handleLogout(chatId);
       return;
     }
     if (text === '/help') {
-      await this.api.sendText(chatId, fa.sellerBot.help);
+      await this.sendMenu(chatId, fa.sellerBot.help);
       return;
     }
-    if (text === '/orders') {
+    if (text === '/orders' || text === fa.sellerBot.menuOrdersButton) {
       await this.handleOrders(chatId);
+      return;
+    }
+    if (text === fa.sellerBot.menuAttentionButton) {
+      await this.handleAttentionList(chatId);
+      return;
+    }
+    if (text === fa.sellerBot.menuStockButton) {
+      await this.handleStockPrompt(chatId);
       return;
     }
     if (text === '/stock' || text.startsWith('/stock ')) {
       await this.handleStockSearch(chatId, text.slice('/stock'.length).trim());
       return;
     }
-    if (text === '/credit') {
+    if (text === '/credit' || text === fa.sellerBot.menuCreditButton) {
       await this.handleCredit(chatId);
       return;
     }
@@ -135,13 +185,13 @@ export class SellerBotService {
       return;
     }
 
-    await this.api.sendText(chatId, fa.sellerBot.unknownCommand);
+    await this.sendMenu(chatId, fa.sellerBot.unknownCommand);
   }
 
   private async handleStart(chatId: string): Promise<void> {
     const store = await this.getLinkedStore(chatId);
     if (store) {
-      await this.api.sendText(chatId, fa.sellerBot.alreadyLinked(store.name));
+      await this.sendMenu(chatId, fa.sellerBot.alreadyLinked(store.name));
       return;
     }
     await this.api.sendText(chatId, fa.sellerBot.shareContactPrompt, {
@@ -194,7 +244,7 @@ export class SellerBotService {
       where: { id: pending.storeId },
       data: { sellerBotChatId: chatId, sellerBotLinkedAt: new Date() },
     });
-    await this.api.removeReplyKeyboard(chatId, fa.sellerBot.linked(store.name));
+    await this.sendMenu(chatId, fa.sellerBot.linked(store.name));
   }
 
   private async handleLogout(chatId: string): Promise<void> {
@@ -207,7 +257,7 @@ export class SellerBotService {
       where: { id: store.id },
       data: { sellerBotChatId: null, sellerBotLinkedAt: null },
     });
-    await this.api.sendText(chatId, fa.sellerBot.logoutSuccess);
+    await this.api.removeReplyKeyboard(chatId, fa.sellerBot.logoutSuccess);
   }
 
   private async requireLinkedStore(chatId: string): Promise<Store | null> {
@@ -227,7 +277,7 @@ export class SellerBotService {
       await this.storeService.listOrders(store.sellerId, store.id)
     ).slice(0, ORDERS_LIST_MAX);
     if (orders.length === 0) {
-      await this.api.sendText(chatId, fa.sellerBot.ordersEmpty);
+      await this.sendMenu(chatId, fa.sellerBot.ordersEmpty);
       return;
     }
 
@@ -241,7 +291,7 @@ export class SellerBotService {
         o.createdAt,
       );
     });
-    await this.api.sendText(
+    await this.sendMenu(
       chatId,
       `${fa.sellerBot.ordersHeader}\n\n${lines.join('\n')}`,
     );
@@ -284,6 +334,10 @@ export class SellerBotService {
       await this.handleStockSelect(chatId, data.slice('sbst:'.length));
       return;
     }
+    if (data.startsWith('sbrp:')) {
+      await this.handleAttentionReplyButton(chatId, data.slice('sbrp:'.length));
+      return;
+    }
   }
 
   private async handleOrderDecision(
@@ -301,7 +355,7 @@ export class SellerBotService {
 
     if (approve) {
       await this.storeService.approveOrder(store.sellerId, store.id, orderId);
-      await this.api.sendText(chatId, fa.sellerBot.orderApproved);
+      await this.sendMenu(chatId, fa.sellerBot.orderApproved);
     } else {
       await this.api.sendForceReply(
         chatId,
@@ -333,7 +387,7 @@ export class SellerBotService {
       orderId,
       reason,
     );
-    await this.api.sendText(chatId, fa.sellerBot.orderRejected);
+    await this.sendMenu(chatId, fa.sellerBot.orderRejected);
   }
 
   private async handleStockSearch(
@@ -343,7 +397,7 @@ export class SellerBotService {
     const store = await this.requireLinkedStore(chatId);
     if (!store) return;
     if (!query) {
-      await this.api.sendText(chatId, fa.sellerBot.stockUsage);
+      await this.sendMenu(chatId, fa.sellerBot.stockUsage);
       return;
     }
 
@@ -361,7 +415,7 @@ export class SellerBotService {
       .slice(0, STOCK_SEARCH_MAX_RESULTS);
 
     if (matches.length === 0) {
-      await this.api.sendText(chatId, fa.sellerBot.stockSearchEmpty);
+      await this.sendMenu(chatId, fa.sellerBot.stockSearchEmpty);
       return;
     }
 
@@ -407,17 +461,20 @@ export class SellerBotService {
     const text = message.text?.trim() ?? '';
     const stock = Number(text);
     if (!/^\d+$/.test(text) || !Number.isInteger(stock)) {
-      await this.api.sendText(chatId, fa.sellerBot.stockInvalidNumber);
+      await this.sendMenu(chatId, fa.sellerBot.stockInvalidNumber);
       return;
     }
 
     await this.storeService.updateProduct(store.sellerId, store.id, productId, {
       stock,
     });
-    await this.api.sendText(
-      chatId,
-      fa.sellerBot.stockUpdated(product.name, stock),
-    );
+    await this.sendMenu(chatId, fa.sellerBot.stockUpdated(product.name, stock));
+  }
+
+  private async handleStockPrompt(chatId: string): Promise<void> {
+    const store = await this.requireLinkedStore(chatId);
+    if (!store) return;
+    await this.api.sendForceReply(chatId, fa.sellerBot.stockSearchPrompt);
   }
 
   private async handleCredit(chatId: string): Promise<void> {
@@ -427,9 +484,89 @@ export class SellerBotService {
       store.sellerId,
       store.id,
     );
-    await this.api.sendText(
+    await this.sendMenu(
       chatId,
       fa.sellerBot.creditBalance(status.balanceToman),
     );
+  }
+
+  // docs/PRD-seller-telegram-management-bot.md — فاز ۲: «گفتگوهای نیازمند توجه» (همان
+  // StoreService.listNeededAttention که پنل وب هم استفاده می‌کند)، با دکمه‌ی پاسخ روی هرکدام
+  private async handleAttentionList(chatId: string): Promise<void> {
+    const store = await this.requireLinkedStore(chatId);
+    if (!store) return;
+
+    const conversations = (
+      await this.storeService.listNeededAttention(store.sellerId, store.id)
+    ).slice(0, ATTENTION_LIST_MAX);
+    if (conversations.length === 0) {
+      await this.sendMenu(chatId, fa.sellerBot.attentionEmpty);
+      return;
+    }
+
+    const lines = conversations.map((c) =>
+      fa.sellerBot.attentionLine(c.customerLabel, c.updatedAt),
+    );
+    await this.sendMenu(
+      chatId,
+      `${fa.sellerBot.attentionHeader}\n\n${lines.join('\n')}`,
+    );
+
+    for (const conversation of conversations) {
+      await this.api.sendText(
+        chatId,
+        fa.sellerBot.attentionLine(
+          conversation.customerLabel,
+          conversation.updatedAt,
+        ),
+        {
+          inline_keyboard: [
+            [
+              {
+                text: fa.sellerBot.attentionReplyButton,
+                callback_data: `sbrp:${conversation.id}`,
+              },
+            ],
+          ],
+        },
+      );
+    }
+  }
+
+  private async handleAttentionReplyButton(
+    chatId: string,
+    conversationId: string,
+  ): Promise<void> {
+    const store = await this.getLinkedStore(chatId);
+    if (!store) return;
+    await this.api.sendForceReply(
+      chatId,
+      fa.sellerBot.attentionReplyPrompt(conversationId),
+    );
+  }
+
+  private async handleAttentionReplyMessage(
+    message: TelegramMessage,
+    conversationId: string,
+  ): Promise<void> {
+    const chatId = String(message.chat.id);
+    const store = await this.getLinkedStore(chatId);
+    if (!store) return;
+    const text = message.text?.trim();
+    if (!text) return;
+    try {
+      await this.storeService.sendSellerMessage(
+        store.sellerId,
+        store.id,
+        conversationId,
+        text,
+      );
+      await this.sendMenu(chatId, fa.sellerBot.attentionReplySent);
+    } catch (err) {
+      this.logger.error(
+        `handleAttentionReplyMessage failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      await this.sendMenu(chatId, fa.sellerBot.genericError);
+    }
   }
 }
