@@ -801,6 +801,76 @@ sourceNote را خالی بگذار. پاسخ را فقط به‌صورت یک �
     return { suggestedDescription: object.description.trim().slice(0, 5000) };
   }
 
+  // docs/PRD-product-display-focus-and-variations.md §۴.۱.۱ (فاز ۲) — فروشنده به‌جای تایپ
+  // تک‌تک «سایز» و بعد M/L/XL، یک توضیح متنی آزاد می‌نویسد (مثل کپشن اینستاگرام) و AI آن را به
+  // گزینه/مقدار ساخت‌یافته تبدیل می‌کند، عیناً الگوی generateProductDescriptionFromNotes بالا
+  // (بدون جستجوی وب، بدون کسر اعتبار). خروجی مستقیم ذخیره نمی‌شود — فرانت همان جدول ترکیب‌های
+  // فاز ۱ (ProductVariantsEditor) را با این مقادیر به‌صورت چیپ‌های قابل‌ویرایش پیش‌پر می‌کند؛
+  // auto-save ممنوع (تصمیم غیرقابل‌مذاکره‌ی §۴.۱.۱).
+  async generateProductOptionsFromText(
+    sellerId: string,
+    storeId: string,
+    productId: string,
+    rawText: string,
+  ): Promise<{
+    optionTypes: { name: string; values: string[] }[];
+    assumptions: string[];
+  }> {
+    await this.storeService.getOwned(sellerId, storeId);
+    const product = await this.prisma.product.findUnique({
+      where: { id: productId },
+    });
+    if (!product || product.storeId !== storeId) {
+      throw new NotFoundException(fa.store.productNotFound);
+    }
+    const trimmed = rawText.trim().slice(0, 2000);
+    if (!trimmed) {
+      throw new BadRequestException(fa.store.variantOptionsTextRequired);
+    }
+
+    const { object } = await generateObject({
+      model: this.provider('openai/gpt-5.4-mini'),
+      schema: z.object({
+        optionTypes: z
+          .array(
+            z.object({
+              name: z.string(),
+              values: z.array(z.string()),
+            }),
+          )
+          .max(2),
+        assumptions: z.array(z.string()),
+      }),
+      system: `تو دستیار یک فروشنده‌ی فروشگاه آنلاین ایرانی هستی. از توضیح متنی آزاد زیر درباره‌ی
+محصول «${product.name}» (ممکن است شبیه کپشن اینستاگرام یا تیکه‌تیکه باشد)، گزینه‌های محصول (مثل
+سایز، رنگ) و مقادیر هر گزینه را استخراج کن. حداکثر ۲ نوع گزینه (مثلاً «سایز» و «رنگ») برگردان؛
+مقادیر هر گزینه را به ترتیب طبیعی (مثلاً سایزها از کوچک به بزرگ) بچین. اگر برای چیزی مجبور به فرض
+شدی (مثلاً فاصله‌ی سایزها، یا تعبیر یک کلمه‌ی مبهم)، آن فرض را به‌صورت یک جمله‌ی کوتاه فارسی در
+assumptions بنویس. فقط از همان اطلاعاتی که فروشنده داده استفاده کن، گزینه/مقداری که اصلاً اشاره
+نشده اختراع نکن. اگر هیچ گزینه‌ای در متن پیدا نشد، optionTypes را آرایه‌ی خالی برگردان. پاسخ را
+فقط به‌صورت یک شیء JSON معتبر برگردان.`,
+      prompt: trimmed,
+      experimental_repairText: this.repairStructuredOutput(),
+    });
+
+    return {
+      optionTypes: object.optionTypes
+        .filter((o) => o.name.trim() && o.values.length > 0)
+        .map((o) => ({
+          name: o.name.trim().slice(0, 40),
+          values: o.values
+            .map((v) => v.trim().slice(0, 40))
+            .filter(Boolean)
+            .slice(0, 30),
+        }))
+        .slice(0, 2),
+      assumptions: object.assumptions
+        .map((a) => a.trim().slice(0, 200))
+        .filter(Boolean)
+        .slice(0, 5),
+    };
+  }
+
   // docs/PRD-admin-product-enrichment-review.md بخش ۲ — نسخه‌ی ادمین‌محور completeProductInfo
   // بالا: بدون sellerId/getOwned (ادمین مالک فروشگاه نیست)، بدون چک/کسر اعتبار فروشنده (این
   // ابتکار از طرف ادمین است، نه درخواست فروشنده — هزینه‌ی عملیاتی پلتفرم است). چرخه‌ی عمر

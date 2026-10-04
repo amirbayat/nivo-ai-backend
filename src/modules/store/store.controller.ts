@@ -53,6 +53,7 @@ import { UpdateShippingRuleDto } from './dto/update-shipping-rule.dto';
 import { PurchaseAdPlacementDto } from './dto/purchase-ad-placement.dto';
 import { GenerateBrandIntroDto } from './dto/generate-brand-intro.dto';
 import { GenerateProductDescriptionDto } from './dto/generate-product-description.dto';
+import { GenerateProductOptionsDto } from './dto/generate-product-options.dto';
 import { fa } from '../../i18n/fa';
 
 // docs/PRD-mvp-launch-plan.md گام ۰ — ثبت‌نام فروشنده و ساخت فروشگاه
@@ -479,6 +480,24 @@ export class StoreController {
     @Body() dto: GenerateProductDescriptionDto,
   ) {
     return this.storeKbService.generateProductDescriptionFromNotes(
+      user.sub,
+      id,
+      productId,
+      dto.rawText,
+    );
+  }
+
+  // docs/PRD-product-display-focus-and-variations.md §۴.۱.۱ (فاز ۲) — ساخت گزینه/مقدار واریانت
+  // از توضیح متنی آزاد؛ عیناً الگوی describe-from-notes بالا، ذخیره‌ی واقعی با همان
+  // PUT .../variants (ProductVariantsEditor) انجام می‌شود، این مسیر فقط پیشنهاد می‌دهد
+  @Post(':id/products/:productId/options-from-text')
+  generateProductOptionsFromText(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('productId') productId: string,
+    @Body() dto: GenerateProductOptionsDto,
+  ) {
+    return this.storeKbService.generateProductOptionsFromText(
       user.sub,
       id,
       productId,

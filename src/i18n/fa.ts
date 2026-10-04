@@ -170,6 +170,9 @@ export const fa = {
     variantCombinationInvalid:
       'یکی از ترکیب‌ها با گزینه‌های تعریف‌شده جور نیست',
     variantCombinationDuplicate: 'یک ترکیب تکراری در لیست وجود دارد',
+    // docs/PRD-product-display-focus-and-variations.md §۴.۱.۱ (فاز ۲)
+    variantOptionsTextRequired:
+      'لطفاً گزینه‌ها رو توضیح بده (مثلاً سایز و رنگ‌بندی)',
     telegramConnectTokenInvalid: 'این توکن اتصال تلگرام نامعتبر یا منقضی شده',
     // docs/PRD-customer-comments-and-discounts.md بخش ۷/۸
     discountCodeNotFound: 'این کد تخفیف یافت نشد',
