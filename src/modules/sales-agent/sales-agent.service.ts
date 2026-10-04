@@ -15,7 +15,10 @@ import {
   VOICE_MESSAGE_ASR_CHAIN,
 } from '../../common/services/asr.service';
 import { AiProviderService } from '../../common/services/ai-provider.service';
-import { ConversationEngineService } from './conversation-engine.service';
+import {
+  ConversationEngineService,
+  PRODUCT_VARIANT_INCLUDE,
+} from './conversation-engine.service';
 import { CreditService } from './credit.service';
 import {
   pickVariant,
@@ -173,6 +176,7 @@ export class SalesAgentService {
     }
     const product = await this.prisma.product.findUnique({
       where: { id: productId },
+      include: PRODUCT_VARIANT_INCLUDE,
     });
     if (product && product.storeId === storeId) {
       const shown = await this.engine.showProduct(conversation!, product);

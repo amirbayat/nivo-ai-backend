@@ -45,6 +45,7 @@ import type {
   ConversationContext,
   EngineResult,
   ParsedIntent,
+  PendingVariantSelection,
   PersuasionTechnique,
   SalesAction,
   SalesAgentVoiceJobData,
@@ -78,7 +79,55 @@ type ProductLike = {
   videos?: unknown;
   // docs/PRD-seller-knowledge-base.md بخش ۹.۲ (سوم) — ستون Json خام، با parseProductSpecs می‌خوانیم
   specs?: unknown;
+  // docs/PRD-product-display-focus-and-variations.md §۴ — فقط وقتی کوئری با VARIANT_INCLUDE
+  // گرفته شده پر است؛ نبودن/خالی‌بودن یعنی محصول ساده (بدون گزینه) است
+  optionTypes?: ProductOptionTypeWithValues[];
+  variants?: ProductVariantRow[];
 };
+
+// docs/PRD-product-display-focus-and-variations.md §۴ — شکل include مشترک همه‌جایی که محصول
+// برای نمایش/افزودن‌به‌سبد خوانده می‌شود (searchProducts، doUpdateCart، handleAction، showProduct
+// caller ها)؛ یک‌جا تعریف شده تا هیچ مسیری فراموش نشود که optionTypes/variants را بخواهد
+export const PRODUCT_VARIANT_INCLUDE = {
+  optionTypes: {
+    orderBy: { position: 'asc' as const },
+    include: { values: { orderBy: { position: 'asc' as const } } },
+  },
+  variants: true,
+};
+
+type ProductOptionTypeWithValues = {
+  id: string;
+  name: string;
+  position: number;
+  values: { id: string; value: string; position: number }[];
+};
+
+type ProductVariantRow = {
+  id: string;
+  optionValues: unknown;
+  priceOverride: number | null;
+  stock: number;
+};
+
+// محصول با گزینه فعال است یعنی حداقل یک ProductOptionType دارد — خودِ وجود واریانت‌ها هم
+// همین را نشان می‌دهد، ولی optionTypes منبع واقعی تصمیم است (ممکن است فروشنده گزینه ساخته
+// ولی هنوز هیچ ردیف موجودی‌دار نساخته باشد)
+function hasVariantOptions(product: ProductLike): boolean {
+  return (product.optionTypes?.length ?? 0) > 0;
+}
+
+// مجموع موجودی همه‌ی ترکیب‌ها — برای PRODUCT_CARD/COMPARE_CARD وقتی محصول واریانت دارد،
+// چون Product.stock خودش برای محصول واریانت‌دار دیگر معنی ندارد (تصمیم §۴)
+function aggregateVariantStock(product: ProductLike): number {
+  return (product.variants ?? []).reduce((sum, v) => sum + v.stock, 0);
+}
+
+function displayStock(product: ProductLike): number {
+  return hasVariantOptions(product)
+    ? aggregateVariantStock(product)
+    : product.stock;
+}
 
 // آستانه‌ی handoff: بعد از این تعداد پیام پیاپی نامفهوم/بی‌نتیجه، مکالمه به انسان سپرده
 // می‌شود (طبق جدول دیسپچ پلن گام ۱) — تایمر ندارد، فقط شمارنده.
@@ -253,6 +302,7 @@ export class ConversationEngineService {
       anchorHesitationStreak: raw?.anchorHesitationStreak ?? 0,
       addressStep: raw?.addressStep,
       pendingAddress: raw?.pendingAddress ?? null,
+      pendingVariantSelection: raw?.pendingVariantSelection ?? null,
     };
   }
 
@@ -995,6 +1045,7 @@ export class ConversationEngineService {
     if (query) {
       const exact = await this.prisma.product.findFirst({
         where: { storeId, code: { equals: query, mode: 'insensitive' } },
+        include: PRODUCT_VARIANT_INCLUDE,
       });
       if (exact) return [exact];
     }
@@ -1005,6 +1056,7 @@ export class ConversationEngineService {
       },
       orderBy: { createdAt: 'desc' },
       take: 5,
+      include: PRODUCT_VARIANT_INCLUDE,
     });
   }
 
@@ -1727,9 +1779,13 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         if (!product || product.storeId !== storeId) {
           return { error: 'محصولی با این شناسه در این فروشگاه پیدا نشد' };
         }
+        // docs/PRD-product-display-focus-and-variations.md §۴.۴ — مسیر FULL_AGENT فعلاً فعال
+        // نیست (pickResponseStrategy همیشه RULE_BASED برمی‌گرداند)؛ فاز ۱ واریانت را به این
+        // ابزار گسترش نمی‌دهد، اگر/وقتی فعال شد باید جداگانه اضافه شود
         const mutation = this.computeCartMutation(
           ctx.cart,
           product,
+          null,
           qty ?? 1,
           !!remove,
         );
@@ -2401,6 +2457,19 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       );
     }
 
+    // docs/PRD-product-display-focus-and-variations.md §۴.۲ — عیناً همان الگوی ADDRESS_COLLECTION
+    // بالا: پیام آزاد حین انتخاب واریانت هیچ‌وقت از parseIntent رد نمی‌شود، چون «آبی» یا
+    // «سایز M» برای مدل intent عمومی چیزی برای classify کردن ندارد — یک تطبیق متنی ساده روی
+    // مقادیر همان بُعدِ در انتظار کافی‌ست (resolveVariantSelectionValue)
+    const pendingVariantCtx = this.getContext(conversation);
+    if (pendingVariantCtx.pendingVariantSelection) {
+      return this.handleVariantSelectionInput(
+        conversation,
+        pendingVariantCtx,
+        text,
+      );
+    }
+
     // docs/PRD-sales-agent-tool-calling-architecture.md بخش ۳.۱ — شاخه‌ی کاملاً جدید و
     // افزودنی، دقیقاً مثل الگوی امن SIMPLE_AGENT قبلی: parseIntent+switch+do* زیرش دست‌نخورده
     // می‌ماند، فقط برای مکالمه‌های FULL_AGENT اصلاً اجرا نمی‌شود (هیچ مکالمه‌ی واقعی تصادفی به
@@ -2512,6 +2581,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     ) {
       const anchoredProduct = await this.prisma.product.findUnique({
         where: { id: ctx.anchoredProductId },
+        include: PRODUCT_VARIANT_INCLUDE,
       });
       if (anchoredProduct && anchoredProduct.storeId === conversation.storeId) {
         return this.showProduct(
@@ -2913,6 +2983,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       const product = action.productId
         ? await this.prisma.product.findUnique({
             where: { id: action.productId },
+            include: PRODUCT_VARIANT_INCLUDE,
           })
         : null;
       if (!product || product.storeId !== conversation.storeId) {
@@ -2932,13 +3003,37 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           payload: { text: fa.salesAgent.addToCartActionNamed(product.name) },
         },
       });
+      // docs/PRD-product-display-focus-and-variations.md §۴.۲ — محصول با گزینه مستقیم به سبد
+      // اضافه نمی‌شود، اول باید سایز/رنگ مشخص شود
+      if (hasVariantOptions(product)) {
+        return this.startVariantSelection(
+          conversation,
+          ctx,
+          product,
+          action.qty ?? 1,
+        );
+      }
       return this.applyCartUpdate(
         conversation,
         ctx,
         product,
+        null,
         action.qty ?? 1,
         false,
         'ADD_TO_CART',
+      );
+    }
+
+    // docs/PRD-product-display-focus-and-variations.md §۴.۲ — جواب چیپ VARIANT_PROMPT (مسیر
+    // دکمه، معادل دکمه‌ای مسیر متنی handleVariantSelectionInput)
+    if (action.type === 'SELECT_VARIANT_VALUE') {
+      if (!ctx.pendingVariantSelection || !action.value) {
+        return this.doClarify(conversation, fa.salesAgent.nothingToConfirm);
+      }
+      return this.resolveVariantSelectionValue(
+        conversation,
+        ctx,
+        action.value,
       );
     }
 
@@ -3141,7 +3236,16 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           where: { id: item.productId },
         });
         if (!product || product.storeId !== conversation.storeId) continue;
-        const mutation = this.computeCartMutation(cart, product, item.qty, false);
+        // docs/PRD-product-display-focus-and-variations.md §۴.۴ — فاز ۱ عمداً دوباره‌سفارش را
+        // به سطح واریانت گسترش نمی‌دهد؛ اگر محصول گزینه دارد، همان نسخه‌ی ساده (بدون واریانت
+        // خاص) دوباره اضافه می‌شود — مشتری در صورت نیاز از نو گزینه را انتخاب می‌کند
+        const mutation = this.computeCartMutation(
+          cart,
+          product,
+          null,
+          item.qty,
+          false,
+        );
         if (mutation.ok) {
           cart = mutation.cart;
           anyAdded = true;
@@ -3158,7 +3262,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         items: cart,
         total: this.cartTotal(cart),
       };
-      const facts = `سبد فعلی: ${cart.map((i) => `${i.name} × ${i.qty}`).join('، ')} — جمع کل ${this.cartTotal(cart)} تومان`;
+      const facts = `سبد فعلی: ${cart.map((i) => `${i.name}${i.variantLabel ? ` (${i.variantLabel})` : ''} × ${i.qty}`).join('، ')} — جمع کل ${this.cartTotal(cart)} تومان`;
       const reply = await this.caption(facts, conversation);
       await this.logReply(conversation, reply, uiBlock, undefined, {
         intent: 'REORDER',
@@ -3269,7 +3373,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           id: product.id,
           name: product.name,
           basePrice: product.basePrice,
-          stock: product.stock,
+          stock: displayStock(product),
           images: product.images,
           videos: parseProductVideos(product.videos),
         },
@@ -3289,7 +3393,9 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     // عمداً بدون عدد موجودی در واقعیت‌هایی که به مدل داده می‌شود — caption() فقط از همین
     // واقعیت‌ها جمله می‌سازد، پس هر عددی اینجا باشد عیناً به مشتری گفته می‌شود. فروشنده
     // نمی‌خواهد تعداد واقعی موجودی افشا شود؛ فقط وضعیت موجود/ناموجود کافی است.
-    const facts = `مشتری از لینک مستقیم این محصول وارد شده: ${product.name} (${product.basePrice} تومان)${product.stock === 0 ? ' — فعلاً ناموجود' : ''}${product.description ? `\nتوضیحات محصول: ${truncateDescriptionForFacts(product.description)}` : ''}${formatSpecsForFacts(parseProductSpecs(product.specs))}${await this.commentsFactsSuffix(product.id)}${await this.crossSellFactsSuffix(conversation.storeId, product.id)}`;
+    // docs/PRD-product-display-focus-and-variations.md §۴.۲ — اگر محصول گزینه (سایز/رنگ) دارد،
+    // caption از قبل مشتری را آگاه می‌کند که بعد از «افزودن به سبد» باید گزینه انتخاب کند
+    const facts = `مشتری از لینک مستقیم این محصول وارد شده: ${product.name} (${product.basePrice} تومان)${product.stock === 0 ? ' — فعلاً ناموجود' : ''}${hasVariantOptions(product) ? ` — این محصول گزینه‌های مختلف (${product.optionTypes!.map((o) => o.name).join('/')}) دارد` : ''}${product.description ? `\nتوضیحات محصول: ${truncateDescriptionForFacts(product.description)}` : ''}${formatSpecsForFacts(parseProductSpecs(product.specs))}${await this.commentsFactsSuffix(product.id)}${await this.crossSellFactsSuffix(conversation.storeId, product.id)}`;
     // skipGreeting=true چون finalReply پایین همیشه (بدون قید isFirstReply) یک buildGreeting
     // جلوی همین reply می‌چسباند — بدون این پرچم، caption() خودش هم یک «سلام!» جدا می‌ساخت
     const reply = await this.caption(facts, conversation, undefined, true);
@@ -3344,8 +3450,9 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
 
     const isFirstReply = conversation.currentState === 'GREETING';
 
-    // همون دلیل showProduct بالا — بدون عدد موجودی در واقعیت‌ها
-    const facts = `این محصولات فروشگاه است: ${products.map((p) => `${p.name} (${p.basePrice} تومان)${p.stock === 0 ? ' — فعلاً ناموجود' : ''}${p.description ? ` — توضیحات: ${truncateDescriptionForFacts(p.description)}` : ''}${formatSpecsForFacts(parseProductSpecs(p.specs))}`).join('، ')}`;
+    // همون دلیل showProduct بالا — بدون عدد موجودی در واقعیت‌ها. hasVariantOptions هم همان‌جا
+    // توضیح داده شد: فقط یک اشاره‌ی کوتاه که این محصول گزینه دارد، بدون جزئیات
+    const facts = `این محصولات فروشگاه است: ${products.map((p) => `${p.name} (${p.basePrice} تومان)${p.stock === 0 ? ' — فعلاً ناموجود' : ''}${hasVariantOptions(p) ? ` — دارای گزینه‌های مختلف (${p.optionTypes!.map((o) => o.name).join('/')})` : ''}${p.description ? ` — توضیحات: ${truncateDescriptionForFacts(p.description)}` : ''}${formatSpecsForFacts(parseProductSpecs(p.specs))}`).join('، ')}`;
 
     // docs/PRD-sales-agent-response-strategy-ab.md بخش ۱، جدول Track A — جدول تصمیمی که
     // docs/PRD-sales-agent-implicit-need-detection.md فاز ۱ محاسبه می‌کرد ولی تا امروز هیچ‌جا
@@ -3489,7 +3596,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         id: p.id,
         name: p.name,
         basePrice: p.basePrice,
-        stock: p.stock,
+        stock: displayStock(p),
         images: p.images,
         videos: parseProductVideos(p.videos),
       })),
@@ -3542,7 +3649,10 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
 
     const ref = this.resolveProductRef(ctx, parsed);
     const product = ref
-      ? await this.prisma.product.findUnique({ where: { id: ref.id } })
+      ? await this.prisma.product.findUnique({
+          where: { id: ref.id },
+          include: PRODUCT_VARIANT_INCLUDE,
+        })
       : parsed.productQuery
         ? (
             await this.searchProducts(conversation.storeId, parsed.productQuery)
@@ -3553,10 +3663,27 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       return this.doClarify(conversation, fa.salesAgent.productNotFound);
     }
 
+    // docs/PRD-product-display-focus-and-variations.md §۴.۲ — فاز ۱: پیام آزاد اول («فلان رو
+    // می‌خوام») هر نیت واریانتی را که همان پیام حمل کرده باشد نادیده می‌گیرد و همیشه با چیپ
+    // صریح می‌پرسد؛ ساده‌تر و بی‌خطاتر از استخراج NLU مقدار از همان جمله
+    if (
+      parsed.intent === 'ADD_TO_CART' &&
+      hasVariantOptions(product) &&
+      !ctx.pendingVariantSelection
+    ) {
+      return this.startVariantSelection(
+        conversation,
+        ctx,
+        product,
+        parsed.quantity ?? 1,
+      );
+    }
+
     return this.applyCartUpdate(
       conversation,
       ctx,
       product,
+      null,
       parsed.quantity ?? 1,
       parsed.intent === 'REMOVE_FROM_CART',
       parsed.intent,
@@ -3564,55 +3691,98 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
   }
 
   // محاسبه‌ی خالص (بدون DB) تغییر سبد — docs/PRD-sales-agent-tool-calling-architecture.md
-  // بخش ۳.۳ (ابزار update_cart) هم عیناً همین تابع را صدا می‌زند، نه این‌که منطق را تکرار کند
+  // بخش ۳.۳ (ابزار update_cart) هم عیناً همین تابع را صدا می‌زند، نه این‌که منطق را تکرار کند.
+  // docs/PRD-product-display-focus-and-variations.md §۴ — variant=null یعنی محصول ساده یا
+  // (فاز ۱، reorder/tool-calling) واریانت عمداً نادیده گرفته شده
   private computeCartMutation(
     cart: CartItem[],
     product: { id: string; name: string; basePrice: number; stock: number },
+    variant: {
+      id: string;
+      optionValues: Record<string, string>;
+      priceOverride: number | null;
+      stock: number;
+    } | null,
     qty: number,
     remove: boolean,
   ): { ok: true; cart: CartItem[] } | { ok: false } {
     let next = [...cart];
-    const existingIdx = next.findIndex((i) => i.productId === product.id);
 
+    // حذف همیشه در سطح محصول است، نه واریانت خاص — فاز ۱ وارد تفکیک «کدام واریانت حذف شود»
+    // نمی‌شود؛ مشتری در صورت اشتباه دوباره واریانت درست را اضافه می‌کند
     if (remove) {
       next = next.filter((i) => i.productId !== product.id);
+      return { ok: true, cart: next };
+    }
+
+    const availableStock = variant ? variant.stock : product.stock;
+    if (availableStock < qty) return { ok: false };
+    const unitPrice = variant?.priceOverride ?? product.basePrice;
+    const existingIdx = next.findIndex(
+      (i) =>
+        i.productId === product.id &&
+        (i.variantId ?? null) === (variant?.id ?? null),
+    );
+    if (existingIdx >= 0) {
+      next[existingIdx] = {
+        ...next[existingIdx],
+        qty: next[existingIdx].qty + qty,
+      };
     } else {
-      if (product.stock < qty) return { ok: false };
-      if (existingIdx >= 0) {
-        next[existingIdx] = {
-          ...next[existingIdx],
-          qty: next[existingIdx].qty + qty,
-        };
-      } else {
-        next.push({
-          productId: product.id,
-          name: product.name,
-          unitPrice: product.basePrice,
-          qty,
-        });
-      }
+      next.push({
+        productId: product.id,
+        name: product.name,
+        unitPrice,
+        qty,
+        ...(variant
+          ? {
+              variantId: variant.id,
+              variantLabel: Object.entries(variant.optionValues)
+                .map(([k, v]) => `${k}: ${v}`)
+                .join('، '),
+            }
+          : {}),
+      });
     }
     return { ok: true, cart: next };
   }
 
   // منطق مشترک تغییر سبد — هم از مسیر NLU (doUpdateCart، productQuery/productIndex حدسی)
-  // هم از مسیر قطعی دکمه‌ها (handleAction، productId مستقیم) صدا زده می‌شود
+  // هم از مسیر قطعی دکمه‌ها (handleAction، productId مستقیم) و هم پایان مسیر واریانت
+  // (finalizeVariantSelection) صدا زده می‌شود
   private async applyCartUpdate(
     conversation: ConversationWithStore,
     ctx: ConversationContext,
     product: { id: string; name: string; basePrice: number; stock: number },
+    variant: {
+      id: string;
+      optionValues: Record<string, string>;
+      priceOverride: number | null;
+      stock: number;
+    } | null,
     qty: number,
     remove: boolean,
     intent: string,
   ): Promise<EngineResult> {
-    const mutation = this.computeCartMutation(ctx.cart, product, qty, remove);
+    const mutation = this.computeCartMutation(
+      ctx.cart,
+      product,
+      variant,
+      qty,
+      remove,
+    );
     if (!mutation.ok) {
       return this.doClarify(conversation, fa.salesAgent.insufficientStock);
     }
     const cart = mutation.cart;
 
     const nextState: ConversationState = 'CART_REVIEW';
-    await this.persistTransition(conversation, nextState, { ...ctx, cart });
+    // pendingVariantSelection همیشه اینجا پاک می‌شود — چه از مسیر واریانت رسیده باشیم چه نه
+    await this.persistTransition(conversation, nextState, {
+      ...ctx,
+      cart,
+      pendingVariantSelection: null,
+    });
     await this.resetClarifyAttempts(conversation);
 
     const uiBlock: UiBlock = {
@@ -3621,7 +3791,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       total: this.cartTotal(cart),
     };
     const facts = cart.length
-      ? `سبد فعلی: ${cart.map((i) => `${i.name} × ${i.qty}`).join('، ')} — جمع کل ${this.cartTotal(cart)} تومان\n${fa.salesAgent.discountAppliedHint}`
+      ? `سبد فعلی: ${cart.map((i) => `${i.name}${i.variantLabel ? ` (${i.variantLabel})` : ''} × ${i.qty}`).join('، ')} — جمع کل ${this.cartTotal(cart)} تومان\n${fa.salesAgent.discountAppliedHint}`
       : fa.salesAgent.cartEmpty;
     const reply = await this.caption(facts, conversation);
     await this.logReply(conversation, reply, uiBlock, undefined, {
@@ -3643,7 +3813,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       total: this.cartTotal(ctx.cart),
     };
     const facts = ctx.cart.length
-      ? `سبد فعلی: ${ctx.cart.map((i) => `${i.name} × ${i.qty}`).join('، ')} — جمع کل ${this.cartTotal(ctx.cart)} تومان`
+      ? `سبد فعلی: ${ctx.cart.map((i) => `${i.name}${i.variantLabel ? ` (${i.variantLabel})` : ''} × ${i.qty}`).join('، ')} — جمع کل ${this.cartTotal(ctx.cart)} تومان`
       : fa.salesAgent.cartEmpty;
     const reply = await this.caption(facts, conversation);
     await this.logReply(conversation, reply, uiBlock, undefined, {
@@ -3652,6 +3822,343 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       factsOrPrompt: facts,
       model: resolveModel(conversation.abVariant),
     });
+    return { reply, uiBlocks: [uiBlock], state: conversation.currentState };
+  }
+
+  // docs/PRD-product-display-focus-and-variations.md §۴.۲ — عیناً سبک advanceAddressStep/
+  // promptProvinceSelection: متن ثابت (نه caption تولیدی)، چون این یک سوال قالبی‌ست نه نیازمند
+  // درک AI. چیپ‌ها خودِ مقادیر را نشان می‌دهند، متن فقط یک خط کوتاه است.
+  private optionValuesOf(variant: {
+    optionValues: unknown;
+  }): Record<string, string> {
+    return (variant.optionValues ?? {}) as Record<string, string>;
+  }
+
+  private variantLabelOf(variant: { optionValues: unknown }): string {
+    return Object.entries(this.optionValuesOf(variant))
+      .map(([k, v]) => `${k}: ${v}`)
+      .join('، ');
+  }
+
+  private firstUnresolvedOptionType(
+    product: ProductLike,
+    selectedValues: Record<string, string>,
+  ): ProductOptionTypeWithValues | null {
+    return (
+      product.optionTypes?.find((o) => !(o.name in selectedValues)) ?? null
+    );
+  }
+
+  private buildVariantDimensionPrompt(
+    product: ProductLike,
+    optionType: ProductOptionTypeWithValues,
+    selectedValues: Record<string, string>,
+  ): UiBlock {
+    return {
+      type: 'VARIANT_PROMPT',
+      productId: product.id,
+      productName: product.name,
+      optionName: optionType.name,
+      values: optionType.values.map((v) => ({ label: v.value, value: v.value })),
+      selectedSoFar: selectedValues,
+      mode: 'DIMENSION',
+    };
+  }
+
+  private buildVariantAlternativesPrompt(
+    product: ProductLike,
+    alternatives: ProductVariantRow[],
+  ): UiBlock {
+    return {
+      type: 'VARIANT_PROMPT',
+      productId: product.id,
+      productName: product.name,
+      optionName: null,
+      values: alternatives.map((v) => ({
+        label: this.variantLabelOf(v),
+        value: v.id,
+      })),
+      selectedSoFar: {},
+      mode: 'ALTERNATIVES',
+    };
+  }
+
+  // از handleAction (ADD_TO_CART روی محصول دارای گزینه) و doUpdateCart (مسیر NLU) صدا زده
+  // می‌شود — همیشه از بُعد اول (position=0) شروع می‌کند
+  private async startVariantSelection(
+    conversation: ConversationWithStore,
+    ctx: ConversationContext,
+    product: ProductLike,
+    qty: number,
+  ): Promise<EngineResult> {
+    const firstOptionType = product.optionTypes![0];
+    const pendingVariantSelection: PendingVariantSelection = {
+      productId: product.id,
+      qty,
+      selectedValues: {},
+      mode: 'DIMENSION',
+    };
+    await this.persistTransition(conversation, conversation.currentState, {
+      ...ctx,
+      pendingVariantSelection,
+    });
+    const uiBlock = this.buildVariantDimensionPrompt(product, firstOptionType, {});
+    const reply = fa.salesAgent.variantAskOption(firstOptionType.name);
+    await this.logReply(conversation, reply, uiBlock);
+    return { reply, uiBlocks: [uiBlock], state: conversation.currentState };
+  }
+
+  // docs/PRD-product-display-focus-and-variations.md §۴.۲ — پیام آزاد حین انتخاب واریانت؛
+  // فقط mode=DIMENSION را با تطبیق متنی ساده (نه AI) جواب می‌دهد — mode=ALTERNATIVES (ترکیب
+  // تمام‌شده) عیناً مثل addressStep='province' فقط با دکمه جلو می‌رود، چون مقدار آن یک
+  // شناسه‌ی داخلی (variantId) است، نه چیزی که مشتری واقعاً تایپ کند
+  private async handleVariantSelectionInput(
+    conversation: ConversationWithStore,
+    ctx: ConversationContext,
+    text: string,
+  ): Promise<EngineResult> {
+    const pending = ctx.pendingVariantSelection!;
+    const product = await this.prisma.product.findUnique({
+      where: { id: pending.productId },
+      include: PRODUCT_VARIANT_INCLUDE,
+    });
+    if (!product) {
+      await this.persistTransition(conversation, conversation.currentState, {
+        ...ctx,
+        pendingVariantSelection: null,
+      });
+      return this.doClarify(conversation, fa.salesAgent.productNotFound);
+    }
+
+    if (pending.mode === 'ALTERNATIVES') {
+      const alternatives = product.variants!.filter((v) => v.stock > 0);
+      const uiBlock = this.buildVariantAlternativesPrompt(product, alternatives);
+      const reply = fa.salesAgent.variantOutOfStockAlternatives;
+      await this.logReply(conversation, reply, uiBlock);
+      return { reply, uiBlocks: [uiBlock], state: conversation.currentState };
+    }
+
+    const optionType = this.firstUnresolvedOptionType(
+      product,
+      pending.selectedValues,
+    );
+    if (!optionType) {
+      // حالت نامنتظره (selectedValues از قبل کامل بود) — مستقیم نهایی‌سازی را امتحان می‌کنیم
+      return this.finalizeVariantSelection(
+        conversation,
+        ctx,
+        product,
+        pending,
+      );
+    }
+
+    const trimmed = text.trim().toLowerCase();
+    const matched = optionType.values.find(
+      (v) =>
+        v.value.trim().toLowerCase() === trimmed ||
+        trimmed.includes(v.value.trim().toLowerCase()),
+    );
+    if (!matched) {
+      const uiBlock = this.buildVariantDimensionPrompt(
+        product,
+        optionType,
+        pending.selectedValues,
+      );
+      const reply = fa.salesAgent.variantValueNotRecognized(optionType.name);
+      await this.logReply(conversation, reply, uiBlock);
+      return { reply, uiBlocks: [uiBlock], state: conversation.currentState };
+    }
+
+    return this.continueVariantSelection(
+      conversation,
+      ctx,
+      product,
+      pending,
+      optionType,
+      matched.value,
+    );
+  }
+
+  // جواب چیپ VARIANT_PROMPT از مسیر دکمه (handleAction) — دقیقاً همان مسیر که
+  // handleVariantSelectionInput بعد از تطبیق متنی به آن می‌رسد
+  private async resolveVariantSelectionValue(
+    conversation: ConversationWithStore,
+    ctx: ConversationContext,
+    rawValue: string,
+  ): Promise<EngineResult> {
+    const pending = ctx.pendingVariantSelection!;
+    const product = await this.prisma.product.findUnique({
+      where: { id: pending.productId },
+      include: PRODUCT_VARIANT_INCLUDE,
+    });
+    if (!product) {
+      await this.persistTransition(conversation, conversation.currentState, {
+        ...ctx,
+        pendingVariantSelection: null,
+      });
+      return this.doClarify(conversation, fa.salesAgent.productNotFound);
+    }
+
+    if (pending.mode === 'ALTERNATIVES') {
+      const variant = product.variants!.find(
+        (v) => v.id === rawValue && v.stock > 0,
+      );
+      if (!variant) {
+        // همین الان یکی دیگر خریده بود (race) یا دکمه‌ی قدیمی — لیست موجود را تازه نشان می‌دهیم
+        const alternatives = product.variants!.filter((v) => v.stock > 0);
+        if (alternatives.length === 0) {
+          await this.persistTransition(conversation, conversation.currentState, {
+            ...ctx,
+            pendingVariantSelection: null,
+          });
+          const reply = fa.salesAgent.variantNoAlternatives;
+          await this.logReply(conversation, reply, { type: 'NONE' });
+          return { reply, uiBlocks: [{ type: 'NONE' }], state: conversation.currentState };
+        }
+        const uiBlock = this.buildVariantAlternativesPrompt(product, alternatives);
+        const reply = fa.salesAgent.variantOutOfStockAlternatives;
+        await this.logReply(conversation, reply, uiBlock);
+        return { reply, uiBlocks: [uiBlock], state: conversation.currentState };
+      }
+      return this.applyCartUpdate(
+        conversation,
+        ctx,
+        product,
+        { id: variant.id, optionValues: this.optionValuesOf(variant), priceOverride: variant.priceOverride, stock: variant.stock },
+        pending.qty,
+        false,
+        'ADD_TO_CART',
+      );
+    }
+
+    const optionType = this.firstUnresolvedOptionType(
+      product,
+      pending.selectedValues,
+    );
+    if (!optionType) {
+      return this.finalizeVariantSelection(conversation, ctx, product, pending);
+    }
+    const matched = optionType.values.find((v) => v.value === rawValue);
+    if (!matched) {
+      const uiBlock = this.buildVariantDimensionPrompt(
+        product,
+        optionType,
+        pending.selectedValues,
+      );
+      const reply = fa.salesAgent.variantValueNotRecognized(optionType.name);
+      await this.logReply(conversation, reply, uiBlock);
+      return { reply, uiBlocks: [uiBlock], state: conversation.currentState };
+    }
+    return this.continueVariantSelection(
+      conversation,
+      ctx,
+      product,
+      pending,
+      optionType,
+      matched.value,
+    );
+  }
+
+  // مشترک بین دو مسیر بالا — یک مقدار برای بُعد فعلی تایید شد؛ یا بُعد بعدی را می‌پرسد یا
+  // (همه‌ی ابعاد تمام شدند) سعی می‌کند ترکیب را نهایی کند
+  private async continueVariantSelection(
+    conversation: ConversationWithStore,
+    ctx: ConversationContext,
+    product: ProductLike,
+    pending: PendingVariantSelection,
+    optionType: ProductOptionTypeWithValues,
+    value: string,
+  ): Promise<EngineResult> {
+    const nextSelectedValues = {
+      ...pending.selectedValues,
+      [optionType.name]: value,
+    };
+    const remainingOptionType = this.firstUnresolvedOptionType(
+      product,
+      nextSelectedValues,
+    );
+    if (remainingOptionType) {
+      const nextPending: PendingVariantSelection = {
+        ...pending,
+        selectedValues: nextSelectedValues,
+      };
+      await this.persistTransition(conversation, conversation.currentState, {
+        ...ctx,
+        pendingVariantSelection: nextPending,
+      });
+      const uiBlock = this.buildVariantDimensionPrompt(
+        product,
+        remainingOptionType,
+        nextSelectedValues,
+      );
+      const reply = fa.salesAgent.variantAskOption(remainingOptionType.name);
+      await this.logReply(conversation, reply, uiBlock);
+      return { reply, uiBlocks: [uiBlock], state: conversation.currentState };
+    }
+    return this.finalizeVariantSelection(conversation, ctx, product, {
+      ...pending,
+      selectedValues: nextSelectedValues,
+    });
+  }
+
+  // docs/PRD-product-display-focus-and-variations.md §۴.۳ — همه‌ی ابعاد مشخص شدند؛ یا ترکیب
+  // دقیقاً موجود پیدا می‌شود و مستقیم به سبد اضافه می‌شود، یا (موجودی لحظه‌ای تمام‌شده) لیست
+  // ترکیب‌های واقعاً موجود نشان داده می‌شود — هرگز حدس یا موجودی فرضی
+  private async finalizeVariantSelection(
+    conversation: ConversationWithStore,
+    ctx: ConversationContext,
+    product: ProductLike,
+    pending: PendingVariantSelection,
+  ): Promise<EngineResult> {
+    const match = product.variants!.find((v) => {
+      const values = this.optionValuesOf(v);
+      const keys = Object.keys(pending.selectedValues);
+      return (
+        keys.length === Object.keys(values).length &&
+        keys.every((k) => values[k] === pending.selectedValues[k])
+      );
+    });
+
+    if (match && match.stock > 0) {
+      return this.applyCartUpdate(
+        conversation,
+        ctx,
+        product,
+        {
+          id: match.id,
+          optionValues: this.optionValuesOf(match),
+          priceOverride: match.priceOverride,
+          stock: match.stock,
+        },
+        pending.qty,
+        false,
+        'ADD_TO_CART',
+      );
+    }
+
+    const alternatives = product.variants!.filter((v) => v.stock > 0);
+    if (alternatives.length === 0) {
+      await this.persistTransition(conversation, conversation.currentState, {
+        ...ctx,
+        pendingVariantSelection: null,
+      });
+      const reply = fa.salesAgent.variantNoAlternatives;
+      await this.logReply(conversation, reply, { type: 'NONE' });
+      return { reply, uiBlocks: [{ type: 'NONE' }], state: conversation.currentState };
+    }
+    const alternativesPending: PendingVariantSelection = {
+      productId: product.id,
+      qty: pending.qty,
+      selectedValues: {},
+      mode: 'ALTERNATIVES',
+    };
+    await this.persistTransition(conversation, conversation.currentState, {
+      ...ctx,
+      pendingVariantSelection: alternativesPending,
+    });
+    const uiBlock = this.buildVariantAlternativesPrompt(product, alternatives);
+    const reply = fa.salesAgent.variantOutOfStockAlternatives;
+    await this.logReply(conversation, reply, uiBlock);
     return { reply, uiBlocks: [uiBlock], state: conversation.currentState };
   }
 

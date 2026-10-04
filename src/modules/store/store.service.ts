@@ -18,6 +18,7 @@ import { mimeTypeForExt } from '../../common/validators/chat-image.validator';
 import { CreateStoreDto } from './dto/create-store.dto';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
+import { ReplaceProductVariantsDto } from './dto/replace-product-variants.dto';
 import { UpdateStoreDto } from './dto/update-store.dto';
 import { fa } from '../../i18n/fa';
 import { computeConversationStats } from '../sales-agent/conversation-stats.util';
@@ -169,12 +170,27 @@ export class StoreService {
     const products = await this.prisma.product.findMany({
       where: { storeId },
       orderBy: { createdAt: 'desc' },
+      include: {
+        // docs/PRD-product-display-focus-and-variations.md §۴.۱ — پنل فروشنده جدول ترکیب‌ها
+        // را از همین لیست پر می‌کند (نه یک GET جدا)، عیناً مثل completeness پایین
+        optionTypes: {
+          orderBy: { position: 'asc' },
+          include: { values: { orderBy: { position: 'asc' } } },
+        },
+        variants: true,
+      },
     });
     const kbCountByProduct = await this.relatedKbEntryCounts(storeId);
     return products.map((product) => ({
       ...product,
       completeness: computeProductCompleteness(
-        product,
+        {
+          ...product,
+          hasVariants: product.optionTypes.length > 0,
+          hasZeroStockVariants:
+            product.optionTypes.length > 0 &&
+            product.variants.every((v) => v.stock === 0),
+        },
         kbCountByProduct.get(product.id) ?? 0,
       ),
     }));
@@ -241,12 +257,26 @@ export class StoreService {
     const store = await this.getOwned(sellerId, storeId);
     const products = await this.prisma.product.findMany({
       where: { storeId },
-      select: { id: true, images: true, description: true },
+      select: {
+        id: true,
+        images: true,
+        description: true,
+        optionTypes: { select: { id: true } },
+        variants: { select: { stock: true } },
+      },
     });
     const kbCountByProduct = await this.relatedKbEntryCounts(storeId);
     const scores = products.map(
       (p) =>
-        computeProductCompleteness(p, kbCountByProduct.get(p.id) ?? 0).percent,
+        computeProductCompleteness(
+          {
+            ...p,
+            hasVariants: p.optionTypes.length > 0,
+            hasZeroStockVariants:
+              p.optionTypes.length > 0 && p.variants.every((v) => v.stock === 0),
+          },
+          kbCountByProduct.get(p.id) ?? 0,
+        ).percent,
     );
     const overallScorePercent =
       scores.length === 0
@@ -295,6 +325,86 @@ export class StoreService {
     return this.prisma.product.update({
       where: { id: productId },
       data: { ...rest, ...(specs !== undefined ? { specs } : {}) },
+    });
+  }
+
+  // docs/PRD-product-display-focus-and-variations.md §۴.۱ — همیشه جایگزین کامل (نه patch
+  // تدریجی)، چون جدول ترکیب‌ها در پنل یک‌جا ذخیره می‌شود؛ هیچ محصولی هنگام ساخت اولیه این
+  // را نمی‌سازد، فقط وقتی فروشنده صریح سوئیچ «چند حالت داره؟» را روشن کند
+  async replaceProductVariants(
+    sellerId: string,
+    storeId: string,
+    productId: string,
+    dto: ReplaceProductVariantsDto,
+  ) {
+    await this.getOwnedProduct(sellerId, storeId, productId);
+
+    const optionTypeNames = dto.optionTypes.map((o) => o.name);
+    if (new Set(optionTypeNames).size !== optionTypeNames.length) {
+      throw new BadRequestException(fa.store.variantOptionNamesDuplicate);
+    }
+    const valuesByName = new Map(
+      dto.optionTypes.map((o) => [o.name, new Set(o.values)]),
+    );
+    const combosSeen = new Set<string>();
+    for (const variant of dto.variants) {
+      const keys = Object.keys(variant.optionValues);
+      const valid =
+        keys.length === optionTypeNames.length &&
+        keys.every(
+          (k) =>
+            valuesByName.has(k) &&
+            valuesByName.get(k)!.has(variant.optionValues[k]),
+        );
+      if (!valid) {
+        throw new BadRequestException(fa.store.variantCombinationInvalid);
+      }
+      const comboKey = JSON.stringify(
+        [...keys].sort().map((k) => [k, variant.optionValues[k]]),
+      );
+      if (combosSeen.has(comboKey)) {
+        throw new BadRequestException(fa.store.variantCombinationDuplicate);
+      }
+      combosSeen.add(comboKey);
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.productVariant.deleteMany({ where: { productId } }),
+      this.prisma.productOptionType.deleteMany({ where: { productId } }),
+      ...dto.optionTypes.map((o, i) =>
+        this.prisma.productOptionType.create({
+          data: {
+            productId,
+            name: o.name,
+            position: i,
+            values: {
+              create: o.values.map((v, j) => ({ value: v, position: j })),
+            },
+          },
+        }),
+      ),
+      ...dto.variants.map((v) =>
+        this.prisma.productVariant.create({
+          data: {
+            productId,
+            optionValues: v.optionValues,
+            stock: v.stock,
+            priceOverride: v.priceOverride ?? null,
+            sku: v.sku ?? null,
+          },
+        }),
+      ),
+    ]);
+
+    return this.prisma.product.findUnique({
+      where: { id: productId },
+      include: {
+        optionTypes: {
+          orderBy: { position: 'asc' },
+          include: { values: { orderBy: { position: 'asc' } } },
+        },
+        variants: true,
+      },
     });
   }
 

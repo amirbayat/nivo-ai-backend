@@ -32,6 +32,8 @@ export class SalesActionDto {
     'VIEW_ORDERS',
     'TOGGLE_SAVE_PRODUCT',
     'REORDER',
+    // docs/PRD-product-display-focus-and-variations.md §۴.۲ — جواب چیپ VARIANT_PROMPT
+    'SELECT_VARIANT_VALUE',
   ])
   type:
     | 'ADD_TO_CART'
@@ -45,7 +47,8 @@ export class SalesActionDto {
     | 'SKIP_SAVE_ADDRESS'
     | 'VIEW_ORDERS'
     | 'TOGGLE_SAVE_PRODUCT'
-    | 'REORDER';
+    | 'REORDER'
+    | 'SELECT_VARIANT_VALUE';
 
   @IsOptional()
   @IsString()
@@ -67,6 +70,14 @@ export class SalesActionDto {
   @IsOptional()
   @IsString()
   orderId?: string;
+
+  // فقط SELECT_VARIANT_VALUE — در mode=DIMENSION یک مقدار گزینه («M»)، در mode=ALTERNATIVES
+  // یک شناسه‌ی ProductVariant (UUID)؛ همون @IsString ساده کافی است چون engine خودش هر دو
+  // حالت را با دیتای واقعی محصول اعتبارسنجی می‌کند، نه فرمت رشته
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  value?: string;
 }
 
 export class SendMessageDto {

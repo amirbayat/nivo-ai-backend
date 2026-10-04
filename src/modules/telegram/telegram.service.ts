@@ -599,6 +599,11 @@ export class TelegramService {
     else if (data === 'ea') action = { type: 'EDIT_ADDRESS' };
     else if (data === 'sva') action = { type: 'SAVE_ADDRESS' };
     else if (data === 'nsa') action = { type: 'SKIP_SAVE_ADDRESS' };
+    // docs/PRD-product-display-focus-and-variations.md §۴.۲ — چیپ انتخاب واریانت؛ value یک
+    // مقدار گزینه («M») یا (mode=ALTERNATIVES) یک UUID ترکیب موجود است، هر دو کوتاه و بی‌خطر
+    // برای callback_data (عیناً همون فرض pv: برای اسم استان)
+    else if (data.startsWith('vv:'))
+      action = { type: 'SELECT_VARIANT_VALUE', value: data.slice(3) };
     if (!action) return;
 
     if (conversation.isMutedForHuman) return;
@@ -1130,6 +1135,24 @@ export class TelegramService {
             ],
           });
         }
+        return;
+      }
+      // docs/PRD-product-display-focus-and-variations.md §۴.۲ — عیناً سبک CHOOSE_PROVINCE بالا:
+      // چیپ‌چین ۳تایی؛ callback_data همیشه مقدار/UUID کوتاه است (هیچ‌وقت لیبل فارسی ترکیب)
+      case 'VARIANT_PROMPT': {
+        const rows: TelegramInlineKeyboard['inline_keyboard'] = [];
+        for (let i = 0; i < block.values.length; i += 3) {
+          rows.push(
+            block.values
+              .slice(i, i + 3)
+              .map((v) => ({ text: v.label, callback_data: `vv:${v.value}` })),
+          );
+        }
+        const text =
+          block.mode === 'ALTERNATIVES'
+            ? fa.salesAgent.variantOutOfStockAlternatives
+            : fa.salesAgent.variantAskOption(block.optionName ?? '');
+        await this.sendText(chatId, text, { inline_keyboard: rows });
         return;
       }
       case 'NONE':

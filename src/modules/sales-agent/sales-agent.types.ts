@@ -1,13 +1,29 @@
 import type { ProductVideoItem } from '../store/product-video.types';
 import type { ProductSpecItem } from '../store/product-specs.types';
 
-// docs/PRD-panels-and-buyer-ux-design.md بخش ۳.۲ — فقط زیرمجموعه‌ای که گام ۱ واقعاً می‌سازد
-// (بدون ProductVariant/CART_SUMMARY چندمتغیره؛ طبق ساده‌سازی پلن گام ۱)
+// docs/PRD-panels-and-buyer-ux-design.md بخش ۳.۲ — گام ۱. docs/PRD-product-display-focus-and-variations.md
+// §۴ (فاز ۱) — variantId/variantLabel اختیاری‌اند: محصول بدون واریانت (اکثریت) این دو را
+// نمی‌سازد؛ variantLabel همین‌جا (نه با join موقع نمایش سبد/سفارش قدیمی) ذخیره می‌شود چون
+// Order.items یک عکس فوری (snapshot) است، نه رفرنس زنده به ProductVariant
 export type CartItem = {
   productId: string;
   name: string;
   unitPrice: number;
   qty: number;
+  variantId?: string;
+  variantLabel?: string;
+};
+
+// همان سند §۴.۲ — در حین انتخاب واریانت، بین دو/چند دکمه‌ای که پشت‌سرهم پرسیده می‌شوند
+// (مثلاً اول «سایز» بعد «رنگ») این وضعیت را نگه می‌دارد. مرحله‌ی فعلی از روی طول
+// selectedValues نسبت‌به ProductOptionType های محصول محاسبه می‌شود، نه یک فیلد جدا.
+// mode=ALTERNATIVES یعنی همه‌ی ابعاد انتخاب شدند ولی آن ترکیب دقیق موجودی نداشت — چیپ‌ها
+// دیگر مقدار یک بعد نیستند، مستقیم شناسه‌ی یک ProductVariant موجود هستند (resolveVariantSelectionValue)
+export type PendingVariantSelection = {
+  productId: string;
+  qty: number;
+  selectedValues: Record<string, string>;
+  mode: 'DIMENSION' | 'ALTERNATIVES';
 };
 
 export type ConversationContext = {
@@ -50,6 +66,10 @@ export type ConversationContext = {
     // تا بعد از تایید فقط lastUsedAt‌اش آپدیت شود، نه این‌که دوباره «ذخیره کنم؟» پرسیده شود
     fromSavedAddressId?: string | null;
   } | null;
+  // docs/PRD-product-display-focus-and-variations.md §۴.۲ — وقتی ست است، handleMessage پیام
+  // آزاد را به‌جای parseIntent مستقیم به handleVariantSelectionInput می‌دهد (عیناً الگوی
+  // addressStep بالا)؛ با افزودن موفق به سبد یا لغو، null می‌شود
+  pendingVariantSelection?: PendingVariantSelection | null;
 };
 
 export type UiBlock =
@@ -120,6 +140,19 @@ export type UiBlock =
         stock: number;
         specs: ProductSpecItem[];
       }[];
+    }
+  // docs/PRD-product-display-focus-and-variations.md §۴.۲ — چیپ‌های انتخاب سریع واریانت؛
+  // mode=DIMENSION یعنی values مقادیر یک ProductOptionType هستند (مثلاً سایزها)، mode=ALTERNATIVES
+  // یعنی ترکیب انتخابی تمام شده و values معادل‌های موجود هستند — هر دو با همان SalesAction
+  // (SELECT_VARIANT_VALUE) جواب داده می‌شوند، فرق را فقط سرور از روی ctx می‌داند
+  | {
+      type: 'VARIANT_PROMPT';
+      productId: string;
+      productName: string;
+      optionName: string | null; // فقط mode=DIMENSION
+      values: { label: string; value: string }[];
+      selectedSoFar: Record<string, string>;
+      mode: 'DIMENSION' | 'ALTERNATIVES';
     }
   | { type: 'NONE' };
 
@@ -238,13 +271,19 @@ export type SalesAction = {
     // docs/PRD-panels-and-buyer-ux-design.md بخش ۳.۶ (فاز ۴.۸)
     | 'VIEW_ORDERS'
     | 'TOGGLE_SAVE_PRODUCT'
-    | 'REORDER';
+    | 'REORDER'
+    // docs/PRD-product-display-focus-and-variations.md §۴.۲ — جواب چیپ VARIANT_PROMPT؛ فقط
+    // وقتی ctx.pendingVariantSelection واقعاً موجود است معنا دارد (handleAction چک می‌کند)
+    | 'SELECT_VARIANT_VALUE';
   productId?: string; // ADD_TO_CART, TOGGLE_SAVE_PRODUCT
   qty?: number;
   addressId?: string;
   // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۲ (فاز ۱.۵) — فقط برای SELECT_PROVINCE
   province?: string;
   orderId?: string; // فقط REORDER
+  // فقط SELECT_VARIANT_VALUE — در mode=DIMENSION یک ProductOptionValue.value، در mode=ALTERNATIVES
+  // یک ProductVariant.id
+  value?: string;
 };
 
 // docs/PRD-sales-agent-voice.md بخش ۱ — payload صف sales-agent-voice؛ در conversation-engine

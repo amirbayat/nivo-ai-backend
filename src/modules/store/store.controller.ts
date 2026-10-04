@@ -7,6 +7,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
   Res,
   UploadedFile,
@@ -36,6 +37,7 @@ import { CreateStoreDto } from './dto/create-store.dto';
 import { UpdateStoreDto } from './dto/update-store.dto';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
+import { ReplaceProductVariantsDto } from './dto/replace-product-variants.dto';
 import { ImportProductFromUrlDto } from './dto/import-product-from-url.dto';
 import { AddProductImagesFromUrlDto } from './dto/add-product-images-from-url.dto';
 import { CreateKbEntryDto } from './dto/create-kb-entry.dto';
@@ -143,6 +145,23 @@ export class StoreController {
     @Body() dto: UpdateProductDto,
   ) {
     return this.storeService.updateProduct(user.sub, id, productId, dto);
+  }
+
+  // docs/PRD-product-display-focus-and-variations.md §۴.۱ — همیشه جایگزین کامل جدول ترکیب‌ها،
+  // نه patch تدریجی (دلیل کامل در store.service.ts::replaceProductVariants)
+  @Put(':id/products/:productId/variants')
+  replaceProductVariants(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('productId') productId: string,
+    @Body() dto: ReplaceProductVariantsDto,
+  ) {
+    return this.storeService.replaceProductVariants(
+      user.sub,
+      id,
+      productId,
+      dto,
+    );
   }
 
   @Delete(':id/products/:productId')

@@ -165,6 +165,11 @@ export const fa = {
     productNotesRequired: 'لطفاً چیزی که درباره‌ی این محصول می‌دونی بنویس',
     productCodeTaken:
       'این کد قبلاً برای محصول دیگری در همین فروشگاه استفاده شده',
+    // docs/PRD-product-display-focus-and-variations.md §۴.۱
+    variantOptionNamesDuplicate: 'اسم گزینه‌ها باید با هم فرق داشته باشند',
+    variantCombinationInvalid:
+      'یکی از ترکیب‌ها با گزینه‌های تعریف‌شده جور نیست',
+    variantCombinationDuplicate: 'یک ترکیب تکراری در لیست وجود دارد',
     telegramConnectTokenInvalid: 'این توکن اتصال تلگرام نامعتبر یا منقضی شده',
     // docs/PRD-customer-comments-and-discounts.md بخش ۷/۸
     discountCodeNotFound: 'این کد تخفیف یافت نشد',
@@ -279,6 +284,14 @@ export const fa = {
     productNotFound: 'این محصول رو پیدا نکردم، می‌تونی دوباره اسمش رو بگی؟',
     insufficientStock: 'موجودی این محصول کافی نیست',
     cartEmpty: 'سبد خرید خالی است',
+    // docs/PRD-product-display-focus-and-variations.md §۴.۲ — عیناً سبک addressAskProvince:
+    // متن کوتاه + لیست مقادیر از خودِ چیپ‌ها (VARIANT_PROMPT) خوانده می‌شود، نه این‌جا تکرار
+    variantAskOption: (optionName: string) => `${optionName} رو انتخاب کن 👇`,
+    variantValueNotRecognized: (optionName: string) =>
+      `متوجه نشدم 🙁 لطفاً یکی از گزینه‌های «${optionName}» رو از دکمه‌های بالا انتخاب کن`,
+    variantOutOfStockAlternatives:
+      'این ترکیب فعلاً تموم شده — این‌ها موجودن 👇',
+    variantNoAlternatives: 'متاسفانه الان هیچ ترکیبی از این محصول موجود نیست',
     cartCleared: 'سبد خرید خالی شد',
     noPendingOrder: 'سفارشی در انتظار پرداخت پیدا نکردم',
     // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۳ — جواب ثابت وقتی مشتری صریح عکس

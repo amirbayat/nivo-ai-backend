@@ -2243,10 +2243,56 @@ model Product {
   // ادمین‌محور این محصول (رد‌شده‌ها هم نگه داشته می‌شوند، نه فقط فعال‌ها)
   enrichmentDrafts ProductEnrichmentDraft[]
 
+  // docs/PRD-product-display-focus-and-variations.md §۴ — سیستم عمومی واریانت (سایز/رنگ/...)؛
+  // محصول بدون این دو رابطه (اکثریت امروز) دست‌نخورده می‌ماند، basePrice/stock همان معنی قبلی را دارند
+  optionTypes ProductOptionType[]
+  variants    ProductVariant[]
+
   @@unique([storeId, code])
   @@index([storeId])
   @@index([canonicalProductId])
   @@map("products")
+}
+
+// docs/PRD-product-display-focus-and-variations.md §۴ — یک بُعد انتخاب محصول («سایز»، «رنگ»،
+// «نحوه‌ی برگزاری»)؛ فاز ۱ حداکثر ۲ بعد به‌ازای محصول را پشتیبانی می‌کند (تصمیم §۴.۱)
+model ProductOptionType {
+  id        String               @id @default(uuid())
+  productId String
+  product   Product              @relation(fields: [productId], references: [id], onDelete: Cascade)
+  name      String
+  position  Int                  @default(0)
+  values    ProductOptionValue[]
+
+  @@index([productId])
+  @@map("product_option_types")
+}
+
+model ProductOptionValue {
+  id           String            @id @default(uuid())
+  optionTypeId String
+  optionType   ProductOptionType @relation(fields: [optionTypeId], references: [id], onDelete: Cascade)
+  value        String
+  position     Int               @default(0)
+
+  @@index([optionTypeId])
+  @@map("product_option_values")
+}
+
+// ترکیب گزینه‌ها به‌صورت JSON ساده («سایز»:«M»، «رنگ»:«قرمز») — نه یک جدول join جدا، چون
+// تعداد ابعاد عملاً کم است (۱-۲ تا) و join برای این حجم overkill است (تصمیم §۴ همین سند)
+model ProductVariant {
+  id            String   @id @default(uuid())
+  productId     String
+  product       Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  optionValues  Json
+  priceOverride Int? // null = از basePrice محصول استفاده می‌شود
+  stock         Int      @default(0)
+  sku           String?
+
+  @@unique([productId, optionValues])
+  @@index([productId])
+  @@map("product_variants")
 }
 
 // docs/PRD-seller-knowledge-base.md بخش ۲.۴ — لایه‌ی مشترک بین مستأجرها؛ هرگز قیمت/موجودی/

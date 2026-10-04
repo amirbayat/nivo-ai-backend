@@ -4,6 +4,10 @@
 export interface ProductCompletenessInput {
   images: string[];
   description: string | null;
+  // docs/PRD-product-display-focus-and-variations.md §۴.۱ مورد ۴ — فقط محصولات دارای گزینه
+  // این چک را می‌گیرند (پایین)، تا درصد بقیه‌ی محصولات (اکثریت، بدون واریانت) عوض نشود
+  hasVariants?: boolean;
+  hasZeroStockVariants?: boolean;
 }
 
 export interface ProductCompleteness {
@@ -24,6 +28,16 @@ export function computeProductCompleteness(
       done: relatedKbEntryCount >= MIN_RELATED_KB_ENTRIES,
       label: `حداقل ${MIN_RELATED_KB_ENTRIES} سؤال مرتبط در باکس دانش`,
     },
+    // فروشنده گزینه (سایز/رنگ) ساخته ولی فراموش کرده موجودی هیچ ترکیبی را پر کند — محصول
+    // «تکمیل» نشان داده می‌شد ولی هیچ‌کس نمی‌توانست بخرد (docs همین سند، بخش ۶)
+    ...(product.hasVariants
+      ? [
+          {
+            done: !product.hasZeroStockVariants,
+            label: 'موجودی حداقل یک ترکیب از گزینه‌ها',
+          },
+        ]
+      : []),
   ];
   const doneCount = checks.filter((c) => c.done).length;
   return {
