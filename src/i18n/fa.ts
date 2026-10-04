@@ -338,6 +338,9 @@ export const fa = {
     // docs/PRD-seller-growth-tools-and-marketplace-trust.md بخش ۵ مورد ۵
     discountCodeMinQuantityNotMet: (minQuantity: number) =>
       `این کد تخفیف فقط برای خرید حداقل ${minQuantity} عدد معتبره`,
+    // docs/PRD-customer-comments-and-discounts.md بخش ۱۳ — کد محدود به یک محصول خاص
+    discountCodeProductNotInCart:
+      'این کد تخفیف فقط برای یک محصول خاصه که الان توی سبدت نیست',
     discountAppliedHint: 'اگه کد تخفیف داری، بگو تا برات اعمال کنم.',
     // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۳ — فالوآپ رضایت، چند روز بعد از تایید
     // سفارش (نه فوری مثل reviewFollowUpPrompt بالا)؛ پیام ثابت، بدون فراخوان AI

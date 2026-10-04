@@ -1839,12 +1839,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         'یک کد تخفیف را روی سبد فعلی اعتبارسنجی و اعمال می‌کند (پیش‌نمایش، نه ثبت نهایی)',
       inputSchema: z.object({ code: z.string() }),
       execute: async ({ code }: { code: string }) => {
-        const preview = await this.previewDiscount(
-          storeId,
-          this.cartTotal(ctx.cart),
-          this.cartQuantity(ctx.cart),
-          code,
-        );
+        const preview = await this.previewDiscount(storeId, ctx.cart, code);
         if (!preview.valid) {
           return {
             error:
@@ -1852,7 +1847,9 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
                 ? 'کد تخفیف نامشخص است'
                 : preview.reason === 'MIN_QUANTITY_NOT_MET'
                   ? `این کد تخفیف فقط برای خرید حداقل ${preview.minQuantity} عدد معتبره`
-                  : 'این کد تخفیف معتبر نیست یا منقضی/تمام‌شده',
+                  : preview.reason === 'PRODUCT_NOT_IN_CART'
+                    ? fa.salesAgent.discountCodeProductNotInCart
+                    : 'این کد تخفیف معتبر نیست یا منقضی/تمام‌شده',
           };
         }
         // بخش ۱.۳/۱.۴ docs/PRD-full-agent-engineering-review.md — همان ترتیب امن update_cart
@@ -2860,8 +2857,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
   // بخش ۳.۳ (ابزار apply_discount) هم عیناً همین تابع را صدا می‌زند
   private async previewDiscount(
     storeId: string,
-    cartTotal: number,
-    cartQuantity: number,
+    cart: CartItem[],
     rawCode: string | null | undefined,
   ): Promise<
     | {
@@ -2873,7 +2869,11 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       }
     | {
         valid: false;
-        reason: 'MISSING' | 'INVALID' | 'MIN_QUANTITY_NOT_MET';
+        reason:
+          | 'MISSING'
+          | 'INVALID'
+          | 'MIN_QUANTITY_NOT_MET'
+          | 'PRODUCT_NOT_IN_CART';
         minQuantity?: number;
       }
   > {
@@ -2892,7 +2892,19 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       (discount.maxRedemptions == null ||
         discount.redemptionCount < discount.maxRedemptions);
     if (!valid) return { valid: false, reason: 'INVALID' };
-    if (discount.minQuantity && cartQuantity < discount.minQuantity) {
+
+    // docs/PRD-customer-comments-and-discounts.md بخش ۱۳ — وقتی کد محدود به یک محصول خاص است،
+    // مبلغ/حداقل تعداد فقط روی ردیف همان محصول در سبد حساب می‌شود، نه کل سبد
+    const scopedItems = discount.productId
+      ? cart.filter((item) => item.productId === discount.productId)
+      : cart;
+    if (discount.productId && scopedItems.length === 0) {
+      return { valid: false, reason: 'PRODUCT_NOT_IN_CART' };
+    }
+    const scopedTotal = this.cartTotal(scopedItems);
+    const scopedQuantity = this.cartQuantity(scopedItems);
+
+    if (discount.minQuantity && scopedQuantity < discount.minQuantity) {
       return {
         valid: false,
         reason: 'MIN_QUANTITY_NOT_MET',
@@ -2902,14 +2914,14 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
 
     const amountToman =
       discount.kind === 'PERCENT'
-        ? Math.floor((cartTotal * discount.value) / 100)
-        : Math.min(discount.value, cartTotal);
+        ? Math.floor((scopedTotal * discount.value) / 100)
+        : Math.min(discount.value, scopedTotal);
     return {
       valid: true,
       id: discount.id,
       code: normalized,
       amountToman,
-      newTotal: cartTotal - amountToman,
+      newTotal: this.cartTotal(cart) - amountToman,
     };
   }
 
@@ -2922,8 +2934,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
   ): Promise<EngineResult> {
     const preview = await this.previewDiscount(
       conversation.storeId,
-      this.cartTotal(ctx.cart),
-      this.cartQuantity(ctx.cart),
+      ctx.cart,
       rawCode,
     );
     if (!preview.valid) {
@@ -2933,7 +2944,9 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           ? fa.salesAgent.discountCodeMissing
           : preview.reason === 'MIN_QUANTITY_NOT_MET'
             ? fa.salesAgent.discountCodeMinQuantityNotMet(preview.minQuantity!)
-            : fa.salesAgent.discountCodeInvalid,
+            : preview.reason === 'PRODUCT_NOT_IN_CART'
+              ? fa.salesAgent.discountCodeProductNotInCart
+              : fa.salesAgent.discountCodeInvalid,
       );
     }
 

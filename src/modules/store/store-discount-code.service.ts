@@ -23,11 +23,15 @@ export class StoreDiscountCodeService {
     return this.prisma.storeDiscountCode.findMany({
       where: { storeId },
       orderBy: { createdAt: 'desc' },
+      include: { product: { select: { id: true, name: true } } },
     });
   }
 
   async create(sellerId: string, storeId: string, dto: CreateDiscountCodeDto) {
     await this.storeService.getOwned(sellerId, storeId);
+    if (dto.productId) {
+      await this.storeService.getOwnedProduct(sellerId, storeId, dto.productId);
+    }
     const code = dto.code.trim().toUpperCase();
     if (dto.kind === 'PERCENT' && dto.value > 100) {
       throw new BadRequestException(fa.store.discountPercentTooHigh);
@@ -45,7 +49,9 @@ export class StoreDiscountCodeService {
         maxRedemptions: dto.maxRedemptions,
         expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : undefined,
         minQuantity: dto.minQuantity,
+        productId: dto.productId,
       },
+      include: { product: { select: { id: true, name: true } } },
     });
   }
 

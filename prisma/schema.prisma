@@ -2258,6 +2258,9 @@ model Product {
   optionTypes ProductOptionType[]
   variants    ProductVariant[]
 
+  // docs/PRD-customer-comments-and-discounts.md بخش ۱۳ — کدهای تخفیف محدود به این محصول
+  discountCodes StoreDiscountCode[]
+
   @@unique([storeId, code])
   @@index([storeId])
   @@index([canonicalProductId])
@@ -2800,6 +2803,11 @@ model StoreDiscountCode {
   // تعداد کل اقلام سبد است، نه تعداد یک محصول خاص
   minQuantity     Int?
   createdAt       DateTime     @default(now())
+  // docs/PRD-customer-comments-and-discounts.md بخش ۱۳ — محدود کردن کد به یک محصول خاص
+  // (اختیاری)؛ نال = کد عمومی فروشگاهی (رفتار قبلی). وقتی ست شود، previewDiscount/doApplyDiscount
+  // تخفیف را فقط روی ردیف همان محصول در سبد حساب می‌کنند، نه کل سبد؛ حذف محصول کد را هم حذف می‌کند
+  productId       String?
+  product         Product?     @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   orders Order[]
 

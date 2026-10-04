@@ -4,6 +4,7 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  IsUUID,
   Matches,
   Min,
 } from 'class-validator';
@@ -40,4 +41,10 @@ export class CreateDiscountCodeDto {
   @IsInt()
   @Min(2)
   minQuantity?: number;
+
+  // docs/PRD-customer-comments-and-discounts.md بخش ۱۳ — محدود کردن کد به یک محصول خاص؛
+  // خالی = کد عمومی فروشگاهی (رفتار قبلی)
+  @IsOptional()
+  @IsUUID()
+  productId?: string;
 }
