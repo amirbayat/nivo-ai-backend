@@ -9,6 +9,7 @@ import * as crypto from 'crypto';
 import type { BillingMode } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
+import { mimeTypeForExt } from '../../common/validators/chat-image.validator';
 import { MediaTranscodeService } from '../../common/services/media-transcode.service';
 import {
   AsrService,
@@ -270,6 +271,40 @@ export class SalesAgentService {
     return this.attachVoicePending(conversationId, result);
   }
 
+  // خریدار - فقط وقتی مکالمه muted است (صحبت مستقیم با فروشنده، مثل HANDOFF_HUMAN/REJECTED)
+  // می‌تواند عکس بفرستد؛ موتور مکالمه‌ی رباتی اصلاً برای عکسِ غیر-رسید طراحی نشده، پس دقیقاً
+  // همان مسیر CUSTOMER_MESSAGE متنیِ muted در sendMessage بالا را تکرار می‌کنیم، فقط با imageKey
+  // به‌جای text — فروشنده در تب «نیاز به توجه» می‌بیندش
+  async submitImageMessage(
+    conversationId: string,
+    sessionToken: string,
+    file: Express.Multer.File | undefined,
+  ) {
+    if (!file) throw new BadRequestException(fa.errors.validation);
+    if (!file.mimetype.startsWith('image/'))
+      throw new BadRequestException(fa.errors.validation);
+
+    const conversation = await this.loadOwned(conversationId, sessionToken);
+    if (!conversation.isMutedForHuman) {
+      throw new BadRequestException(fa.errors.validation);
+    }
+
+    const ext = file.mimetype.split('/')[1]?.replace('jpeg', 'jpg') ?? 'jpg';
+    const imageKey = await this.storage.uploadImage(
+      file.buffer,
+      ext,
+      conversation.id,
+    );
+    await this.prisma.conversationEvent.create({
+      data: {
+        conversationId: conversation.id,
+        type: 'CUSTOMER_MESSAGE',
+        payload: { imageKey },
+      },
+    });
+    return { reply: '', uiBlocks: [], state: conversation.currentState };
+  }
+
   // docs/PRD-sales-agent-voice.md بخش ۱.۲ — بعد از هر پاسخ، اگر همان پاسخ (تازه لاگ‌شده)
   // voicePending دارد، شناسه‌ی همان AGENT_REPLY event را به کلاینت می‌دهیم تا کوتاه (وب) پول
   // کند؛ تلگرام نیازی به این ندارد چون sales-agent-voice.processor.ts مستقیم برایش push می‌کند
@@ -406,6 +441,26 @@ export class SalesAgentService {
       });
     }
     return this.storage.downloadImage(key);
+  }
+
+  // سرو عکس‌هایی که خریدار در حالت «صحبت با فروشنده» فرستاده — همان الگوی getVoiceAudio
+  // بالا (عمومی + کلید غیرقابل‌حدس، عضویت با چک این‌که کلید واقعاً روی یک CUSTOMER_MESSAGE
+  // همین مکالمه نشسته)، چون هم چت وب و هم پنل فروشنده بدون JWT/session-token آن را fetch می‌کنند
+  async getChatImage(
+    conversationId: string,
+    key: string,
+  ): Promise<{ buffer: Buffer; mimeType: string }> {
+    const events = await this.prisma.conversationEvent.findMany({
+      where: { conversationId, type: 'CUSTOMER_MESSAGE' },
+      select: { payload: true },
+    });
+    const found = events.some(
+      (e) => (e.payload as { imageKey?: string })?.imageKey === key,
+    );
+    if (!found) throw new NotFoundException(fa.salesAgent.conversationNotFound);
+    const buffer = await this.storage.downloadImage(key);
+    const ext = key.split('.').pop() ?? '';
+    return { buffer, mimeType: mimeTypeForExt(ext) };
   }
 
   // docs/PRD-sales-agent-voice.md بخش ۶.۵ — سیگنال واقعی روی وب: onPlay خودِ تگ audio، یک‌بار

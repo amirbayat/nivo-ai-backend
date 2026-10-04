@@ -113,6 +113,40 @@ export class SalesAgentController {
     );
   }
 
+  // عکسی که خریدار در حالت «صحبت با فروشنده» (isMutedForHuman) می‌فرستد — جدا از رسید
+  @Post('chat/:conversationId/image')
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: 5 * 1024 * 1024 } }),
+  )
+  submitImageMessage(
+    @Param('conversationId') conversationId: string,
+    @Headers('x-session-token') sessionToken: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    return this.salesAgentService.submitImageMessage(
+      conversationId,
+      sessionToken,
+      file,
+    );
+  }
+
+  // سرو همان عکس — عمومی/کلید غیرقابل‌حدس، عیناً الگوی chat/:conversationId/voice/:key پایین
+  @SkipThrottle()
+  @Get('chat/:conversationId/image/:key')
+  async getChatImage(
+    @Param('conversationId') conversationId: string,
+    @Param('key') key: string,
+    @Res() res: Response,
+  ) {
+    const { buffer, mimeType } = await this.salesAgentService.getChatImage(
+      conversationId,
+      key,
+    );
+    res.setHeader('Content-Type', mimeType);
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    res.send(buffer);
+  }
+
   // docs/PRD-panels-and-buyer-ux-design.md بخش ۳.۶ (فاز ۴.۸، مورد ۳) — «ذخیره برای بعد»
   @Get('chat/:conversationId/saved-products')
   getSavedProductIds(
