@@ -26,6 +26,7 @@ import {
 } from '../sales-agent/model-variants';
 import { buildAsrVocabHint } from '../sales-agent/asr-vocab-hint';
 import { buildHistoryEntry } from '../sales-agent/conversation-history.util';
+import { reattachReceiptIfOrderOpen } from '../sales-agent/receipt-reattach.util';
 import type {
   EngineResult,
   SalesAction,
@@ -746,7 +747,40 @@ export class TelegramService {
   private async handlePhoto(message: TelegramMessage): Promise<void> {
     const chatId = String(message.chat.id);
     const conversation = await this.resolveActiveConversation(chatId);
-    if (!conversation || conversation.isMutedForHuman) return;
+    if (!conversation) return;
+
+    // فیدبک کاربر — قبلاً این شرط هر عکسی را وقتی مکالمه muted بود (بعد از رد سفارش/
+    // HANDOFF_HUMAN، یعنی «حالت همکار») بی‌صدا دور می‌ریخت: نه دانلود می‌شد، نه
+    // ConversationEvent‌ای ساخته می‌شد — پس در تب «نیاز به توجه»ی پنل فروشنده هم هرگز دیده
+    // نمی‌شد. دقیقاً همان مسیر submitImageMessage کانال وب (sales-agent.service.ts) اینجا هم
+    // باید اجرا شود تا هر دو کانال یکسان رفتار کنند.
+    if (conversation.isMutedForHuman) {
+      const mutedPhotos = message.photo ?? [];
+      const mutedLargest = mutedPhotos[mutedPhotos.length - 1];
+      if (!mutedLargest) return;
+      const mutedBuffer = await this.downloadFile(mutedLargest.file_id);
+      const imageKey = await this.storage.uploadImage(
+        mutedBuffer,
+        'jpg',
+        conversation.id,
+      );
+      const reattachedToOrder = await reattachReceiptIfOrderOpen(
+        this.prisma,
+        conversation.id,
+        imageKey,
+      );
+      await this.prisma.conversationEvent.create({
+        data: {
+          conversationId: conversation.id,
+          type: 'CUSTOMER_MESSAGE',
+          payload: {
+            imageKey,
+            ...(reattachedToOrder ? { reattachedToOrder } : {}),
+          },
+        },
+      });
+      return;
+    }
 
     // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۱ بند ۱ — قبلاً هر عکسی (حتی وقتی
     // مشتری فقط عکس یک محصول/اسکرین‌شات می‌فرستد، نه رسید) بدون قید و شرط به

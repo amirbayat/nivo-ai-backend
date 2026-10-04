@@ -32,6 +32,7 @@ import {
   pickResponseStrategy,
 } from './model-variants';
 import { buildAsrVocabHint } from './asr-vocab-hint';
+import { reattachReceiptIfOrderOpen } from './receipt-reattach.util';
 import {
   buildHistoryEntry,
   type ConversationHistoryEntry,
@@ -302,7 +303,8 @@ export class SalesAgentService {
       ext,
       conversation.id,
     );
-    const reattachedToOrder = await this.reattachReceiptIfOrderOpen(
+    const reattachedToOrder = await reattachReceiptIfOrderOpen(
+      this.prisma,
       conversation.id,
       imageKey,
     );
@@ -317,34 +319,6 @@ export class SalesAgentService {
       },
     });
     return { reply: '', uiBlocks: [], state: conversation.currentState };
-  }
-
-  // docs/PRD-seller-panel-order-chat-linking.md بخش ۲.۲ — فروشنده بعد از رد سفارش دیگر عکس
-  // تازه‌ی خریدار (مثلاً رسید اصلاح‌شده) را روی خودِ سفارش نمی‌بیند، چون submitImageMessage
-  // فقط در چت لاگ می‌کند. اگر سفارشی برای این مکالمه باز باشد (هنوز APPROVED نشده)، عکس تازه
-  // جای رسید را می‌گیرد؛ اگر رد شده بود، دوباره RECEIPT_SUBMITTED می‌شود تا زیر فیلتر «در
-  // انتظار» دوباره دیده شود — دقیقاً مثل یک رسید تازه. برمی‌گرداند که آیا attach شد، تا پیام
-  // چت با یک نشانه‌ی «این رسید جدیده» ذخیره شود (fa.seller.panel.attention.newReceiptNotice)
-  private async reattachReceiptIfOrderOpen(
-    conversationId: string,
-    imageKey: string,
-  ): Promise<boolean> {
-    const order = await this.prisma.order.findUnique({
-      where: { conversationId },
-      select: { id: true, status: true },
-    });
-    if (!order || order.status === 'APPROVED') return false;
-
-    await this.prisma.order.update({
-      where: { id: order.id },
-      data: {
-        receiptImageKey: imageKey,
-        ...(order.status === 'REJECTED'
-          ? { status: 'RECEIPT_SUBMITTED', rejectReason: null }
-          : {}),
-      },
-    });
-    return true;
   }
 
   // docs/PRD-buyer-phone-otp-registration.md — برخلاف marketplace.service.ts's sendOtp/verifyOtp
