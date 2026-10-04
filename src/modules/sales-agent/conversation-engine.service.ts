@@ -4749,12 +4749,23 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
               )
         }`
       : '';
+    // فیدبک کاربر — فروشنده قبل از تایید/رد سفارش آدرس و مشخصات گیرنده رو نمی‌دید؛ این فیلدها
+    // فقط وقتی Store.requiresShipping بوده روی سفارش ست می‌شوند (doCreateOrder)
+    const recipientLine = order?.recipientName
+      ? fa.telegram.receiptRecipientInfo(
+          order.recipientName,
+          order.recipientPhone ?? '',
+          [order.shippingProvince, order.shippingAddress, order.postalCode]
+            .filter(Boolean)
+            .join('، '),
+        )
+      : '';
     await this.telegramApi.sendPhotoBuffer(
       chatId,
       buffer,
       `receipt.${ext}`,
       mimeTypeForExt(ext),
-      `${fa.telegram.receiptNotificationCaption}${verificationLine}`,
+      `${fa.telegram.receiptNotificationCaption}${recipientLine}${verificationLine}`,
       {
         inline_keyboard: [
           [

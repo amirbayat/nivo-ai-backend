@@ -791,6 +791,10 @@ export class StoreService {
 
   async approveOrder(sellerId: string, storeId: string, orderId: string) {
     const order = await this.getOwnedOrder(sellerId, storeId, orderId);
+    // فیدبک کاربر — فروشنده باید بتواند بعد از رد اشتباهی یک سفارش، دوباره تاییدش کند
+    // (REJECTED -> APPROVED مجاز است)؛ اما اگر از قبل APPROVED بوده، بی‌صدا نادیده می‌گیریم
+    // تا totalConfirmedToman دوباره increment نشود و requestReviewFollowUp دوبار پیام نفرستد
+    if (order.status === 'APPROVED') return order;
     // docs/PRD-conversation-history.md — تأیید سفارش یعنی مکالمه واقعاً تمام شده: هم
     // currentState (COMPLETED، تا امروز هیچ‌جا ست نمی‌شد) هم archivedAt پر می‌شود تا هم
     // TERMINAL_STATES فرانت درست کار کند هم مکالمه از «فعال» بودن خارج شود
@@ -877,6 +881,9 @@ export class StoreService {
     reason?: string,
   ) {
     const order = await this.getOwnedOrder(sellerId, storeId, orderId);
+    // فیدبک کاربر — جلوگیری از تکرار پیام رد به خریدار اگر همین سفارش از قبل رد شده بود
+    // (مثلاً دوبار زدن دکمه‌ی رد قدیمی روی تلگرام)
+    if (order.status === 'REJECTED') return order;
     const [, updated] = await this.prisma.$transaction([
       this.prisma.salesConversation.update({
         where: { id: order.conversationId },
@@ -887,7 +894,40 @@ export class StoreService {
         data: { status: 'REJECTED', rejectReason: reason },
       }),
     ]);
+    await this.notifyBuyerOfRejection(order, reason);
     return updated;
+  }
+
+  // فیدبک کاربر — خریدار بعد از رد سفارش توسط فروشنده هیچ اطلاعی توی چت نمی‌گرفت؛ عیناً
+  // الگوی requestReviewFollowUp بالا (ConversationEvent + پوش تلگرام اگر کانال خریدار تلگرام است)
+  private async notifyBuyerOfRejection(
+    order: { conversationId: string },
+    reason?: string,
+  ): Promise<void> {
+    const conversation = await this.prisma.salesConversation.findUnique({
+      where: { id: order.conversationId },
+      include: { customer: true },
+    });
+    if (!conversation) return;
+
+    const text = fa.salesAgent.orderRejectedMessage(reason);
+    await this.prisma.conversationEvent.create({
+      data: {
+        conversationId: conversation.id,
+        type: 'AGENT_REPLY',
+        payload: { text },
+      },
+    });
+
+    if (
+      conversation.customer.channel === 'TELEGRAM' &&
+      conversation.customer.telegramChatId
+    ) {
+      await this.telegramApi.sendText(
+        conversation.customer.telegramChatId,
+        text,
+      );
+    }
   }
 
   // الگوی conversations.service.ts getImage — کلید در storage هیچ‌وقت مستقیم به فرانت داده

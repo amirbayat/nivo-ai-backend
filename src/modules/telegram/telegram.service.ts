@@ -214,6 +214,17 @@ export class TelegramService {
         return;
       }
       if (message.text) {
+        // فیدبک کاربر — عیناً الگوی force_reply پایین برای جواب فروشنده، برای گرفتن دلیل رد
+        // سفارش؛ باید قبل از handleText چک شود
+        const sellerRejectReasonOrderId =
+          this.extractSellerRejectReasonRef(message);
+        if (sellerRejectReasonOrderId) {
+          await this.handleSellerRejectReasonMessage(
+            message,
+            sellerRejectReasonOrderId,
+          );
+          return;
+        }
         // docs/PRD-telegram-bot-channel.md بخش ۹.۱ — جواب فروشنده به پیام force_reply (نه
         // مشتری‌ای که در حال خریده)؛ باید قبل از handleText (که مکالمه‌ی مشتری را می‌جوید) چک شود
         const sellerReplyConversationId = this.extractSellerReplyRef(message);
@@ -849,6 +860,20 @@ export class TelegramService {
     return match ? match[1] : null;
   }
 
+  // فیدبک کاربر — عیناً الگوی SELLER_REPLY_REF_REGEX بالا، برای گرفتن دلیل رد سفارش؛ متن
+  // prompt جدا است (کد سفارش رد: ...) تا با force_reply جواب‌به‌مشتری اشتباه گرفته نشود
+  private static readonly SELLER_REJECT_REASON_REF_REGEX =
+    /کد سفارش رد: ([0-9a-fA-F-]{36})/;
+
+  private extractSellerRejectReasonRef(message: TelegramMessage): string | null {
+    const promptText = message.reply_to_message?.text;
+    if (!promptText) return null;
+    const match = promptText.match(
+      TelegramService.SELLER_REJECT_REASON_REF_REGEX,
+    );
+    return match ? match[1] : null;
+  }
+
   private async handleSellerReplyButton(
     chatId: string,
     conversationId: string,
@@ -904,9 +929,39 @@ export class TelegramService {
       await this.storeService.approveOrder(store.sellerId, store.id, orderId);
       await this.sendText(chatId, fa.telegram.orderApprovedFromTelegram);
     } else {
-      await this.storeService.rejectOrder(store.sellerId, store.id, orderId);
-      await this.sendText(chatId, fa.telegram.orderRejectedFromTelegram);
+      // فیدبک کاربر — رد سفارش دیگر فوری انجام نمی‌شود؛ اول دلیل رد با force_reply گرفته
+      // می‌شود (handleSellerRejectReasonMessage پایین)، چون خریدار باید دلیل رو توی چت ببیند
+      await this.sendForceReply(
+        chatId,
+        fa.telegram.sellerRejectReasonPrompt(orderId),
+      );
     }
+  }
+
+  private async handleSellerRejectReasonMessage(
+    message: TelegramMessage,
+    orderId: string,
+  ): Promise<void> {
+    const chatId = String(message.chat.id);
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: { conversation: { include: { store: true } } },
+    });
+    if (!order || order.conversation.store.ownerTelegramChatId !== chatId)
+      return;
+    const store = order.conversation.store;
+    const text = message.text?.trim();
+    const reason =
+      !text || text === fa.telegram.sellerRejectReasonSkipKeyword
+        ? undefined
+        : text;
+    await this.storeService.rejectOrder(
+      store.sellerId,
+      store.id,
+      orderId,
+      reason,
+    );
+    await this.sendText(chatId, fa.telegram.orderRejectedFromTelegram);
   }
 
   // docs/PRD-bulk-product-import-from-document.md — عیناً معادل تلگرامیِ BulkProductImportSheet

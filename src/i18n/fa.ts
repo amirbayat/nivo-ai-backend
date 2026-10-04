@@ -326,6 +326,12 @@ export const fa = {
     reviewFollowUpPrompt:
       'سفارشت تایید شد ✅ امیدواریم راضی باشی 🙏 اگه دوست داری نظرت رو درباره‌ی خرید یا محصول همین‌جا برام بنویس، به بقیه هم کمک می‌کنه.',
     reviewThanks: 'ممنون بابت نظرت! بعد از بررسی نمایش داده می‌شه 🙏',
+    // فیدبک کاربر — خریدار بعد از رد سفارش توسط فروشنده هیچ اطلاعی توی چت نمی‌گرفت؛ این پیام
+    // دقیقاً مثل reviewFollowUpPrompt بالا، از rejectOrder در store.service.ts صدا زده می‌شود
+    orderRejectedMessage: (reason?: string | null) =>
+      reason
+        ? `متأسفانه فروشنده این سفارش رو رد کرد 😔\nدلیل: ${reason}\nاگه سوالی داری همین‌جا بپرس.`
+        : 'متأسفانه فروشنده این سفارش رو رد کرد 😔 اگه سوالی داری همین‌جا بپرس.',
     // docs/PRD-customer-comments-and-discounts.md بخش ۹
     discountCodeMissing: 'کد تخفیف رو متوجه نشدم، می‌تونی دوباره بگی؟',
     discountCodeInvalid: 'این کد تخفیف معتبر نیست یا منقضی/تمام‌شده',
@@ -431,6 +437,10 @@ export const fa = {
       `🔔 یک مشتری نیاز به پاسخ شما داره:\n\n«${customerText}»`,
     handoffReplyButton: '💬 پاسخ بده',
     receiptNotificationCaption: '🧾 رسید جدید برای بررسی رسید.',
+    // فیدبک کاربر — فروشنده قبل از تایید/رد، آدرس و مشخصات گیرنده رو نمی‌دید؛ فقط وقتی
+    // Store.requiresShipping بوده و این فیلدها روی سفارش ست شده‌اند نمایش داده می‌شود
+    receiptRecipientInfo: (name: string, phone: string, address: string) =>
+      `\n\n📦 گیرنده: ${name} (${phone})\nآدرس: ${address}`,
     // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۴ گزینه A — خط اضافه‌شده به
     // caption بالا، بر اساس خواندن خودکار مبلغ رسید با vision؛ receiptVerifiedMatch===null
     // یعنی استخراج ناموفق بود، هیچ خطی اضافه نمی‌شود (سکوت امن‌تر از حدس غلط)
@@ -442,6 +452,11 @@ export const fa = {
     receiptRejectButton: '❌ رد',
     orderApprovedFromTelegram: 'سفارش تایید شد ✅',
     orderRejectedFromTelegram: 'سفارش رد شد ❌',
+    // فیدبک کاربر — قبلاً رد سفارش از تلگرام بدون گرفتن دلیل انجام می‌شد؛ حالا مثل
+    // sellerReplyPrompt پایین، از force_reply با کد سفارش داخل متن استفاده می‌کند
+    sellerRejectReasonPrompt: (orderId: string) =>
+      `چرا این سفارش رو رد می‌کنی؟ دلیل برای خریدار فرستاده می‌شه.\nاگه دلیلی نداری فقط «-» بفرست.\n(کد سفارش رد: ${orderId})`,
+    sellerRejectReasonSkipKeyword: '-',
     sellerReplyPrompt: (conversationId: string) =>
       `✍️ جواب مشتری رو تایپ کنید و بفرستید:\n(کد گفتگو: ${conversationId})`,
     sellerReplySent: 'پیام شما برای مشتری ارسال شد ✅',
