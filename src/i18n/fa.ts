@@ -161,6 +161,8 @@ export const fa = {
       'اعتبار فروشگاه برای تکمیل از روی عکس کافی نیست — از بخش «اعتبار هوش مصنوعی» شارژ کن',
     // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۹ (رصد رقبا)
     brandIntroTextRequired: 'لطفاً چند جمله درباره‌ی برند/فروشگاهت بنویس',
+    // docs/PRD-ai-assisted-business-setup.md — تشخیص نوع کسب‌وکار/دسته‌بندی از روی توضیح آزاد
+    businessSetupTextRequired: 'لطفاً چند جمله درباره‌ی کسب‌وکارت بنویس یا بیوی اینستاگرامت رو پیست کن',
     // فیدبک کاربر ۱۴۰۵/۰۷/۱۱ — دستیار «نوشتن توضیحات با کمک AI» از روی یادداشت خام فروشنده
     productNotesRequired: 'لطفاً چیزی که درباره‌ی این محصول می‌دونی بنویس',
     productCodeTaken:

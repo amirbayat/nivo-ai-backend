@@ -1,4 +1,5 @@
-import { IsOptional, IsString, Matches, MaxLength } from 'class-validator';
+import { IsEnum, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
+import { StoreBusinessType } from '@prisma/client';
 import { fa } from '../../../i18n/fa';
 
 // گام ۰ سند PRD-mvp-launch-plan.md — قدم ۱و۲ ویزارد ثبت‌نام فروشنده
@@ -11,6 +12,12 @@ export class CreateStoreDto {
   @IsString()
   @MaxLength(60, { message: fa.validation.stringTooLong })
   category?: string;
+
+  // docs/PRD-ai-assisted-business-setup.md / PRD-business-types-and-appointment-booking.md
+  // بخش ۴ — پیش‌فرض Prisma خودش PRODUCT_SALES را می‌گذارد اگر فرستاده نشود
+  @IsOptional()
+  @IsEnum(StoreBusinessType)
+  businessType?: StoreBusinessType;
 
   // انگلیسی، انتخاب خود فروشنده — بخش nivo.ai/chat/<slug> (بخش ۱.۱ سند)
   @IsString({ message: fa.validation.required })

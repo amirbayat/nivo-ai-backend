@@ -24,6 +24,7 @@ import { StoreService } from './store.service';
 import { CommentsService } from '../comments/comments.service';
 import { defaultModel } from '../sales-agent/model-variants';
 import { clampProductSpecs } from './product-specs.types';
+import { BUSINESS_CATEGORIES } from './business-categories';
 
 // docs/PRD-seller-knowledge-base.md بخش ۲.۳ — دقیقاً همان shape که chat.service.ts's
 // OPENROUTER_WEB_SEARCH_TOOLS استفاده می‌کند (کپی محلی، نه import — آن فایل چیزی export نمی‌کند
@@ -831,6 +832,70 @@ sourceNote را خالی بگذار. پاسخ را فقط به‌صورت یک �
     });
 
     return { suggestedBrandIntro: object.brandIntro.trim().slice(0, 300) };
+  }
+
+  // docs/PRD-ai-assisted-business-setup.md — قدم ۱ ویزارد ثبت‌نام (قبل از ساخت فروشگاه، بدون
+  // storeId/getOwned). فروشنده کسب‌وکارش را با زبان خودش توصیف می‌کند یا بیوی اینستاگرامش را
+  // پیست می‌کند؛ AI آن را به businessType/category(+یادداشت قیمت‌گذاری در صورت نیاز) نگاشت
+  // می‌کند. خروجی هرگز auto-save نیست — فرانت فقط در صورت confidence=HIGH کارت تأیید نشان
+  // می‌دهد، وگرنه مستقیم به چیپ‌های دستی (پیش‌پرشده با همین حدس) برمی‌گردد.
+  //
+  // category حتماً .enum() روی BUSINESS_CATEGORIES است، نه string آزاد — تا AI هیچ‌وقت
+  // دسته‌ای خارج از چیپ‌های واقعی ویزارد پیشنهاد ندهد. pricingNote/confidence .nullable()
+  // هستند نه .optional() — طبق تجربه‌ی store-kb.service.ts/extractProductCandidatesFromText:
+  // با supportsStructuredOutputs=true، OpenAI در strict mode فیلد optional را رد می‌کند.
+  async classifyBusinessSetup(rawText: string) {
+    const trimmed = rawText.trim().slice(0, 2000);
+    if (!trimmed) {
+      throw new BadRequestException(fa.store.businessSetupTextRequired);
+    }
+
+    const { object } = await generateObject({
+      model: this.provider('openai/gpt-5.4-mini'),
+      schema: z.object({
+        businessType: z.enum(['PRODUCT_SALES', 'APPOINTMENT_BOOKING']),
+        confidence: z.enum(['HIGH', 'MEDIUM', 'LOW']),
+        category: z.enum(BUSINESS_CATEGORIES),
+        businessTypeReason: z.string(),
+        categoryReason: z.string(),
+        pricingNote: z.string().nullable(),
+      }),
+      system: `تو دستیار ثبت‌نام یک فروشگاه‌ساز آنلاین ایرانی هستی. فروشنده یک توضیح آزاد درباره‌ی
+کسب‌وکارش نوشته (یا بیوی اینستاگرامش را پیست کرده). از روی همین متن سه چیز را تشخیص بده:
+
+۱. businessType: "PRODUCT_SALES" اگر فروشنده کالای فیزیکی با تحویل می‌فروشد، "APPOINTMENT_BOOKING"
+اگر صاحب «وقت»/نوبت است (پزشک، مشاور، سالن زیبایی، معلم خصوصی، مربی) نه کالا.
+۲. category: دقیقاً یکی از این مقادیر (نه چیز دیگری، حتی اگر نزدیک‌تر به نظر برسد): ${BUSINESS_CATEGORIES.join('، ')}
+۳. در صورتی که فروشنده اشاره کرد قیمت ثابت نیست و بر اساس وزن/نرخ روز/فرمول محاسبه می‌شود
+(مثل طلا/نقره آب‌شده)، در pricingNote یک جمله‌ی کوتاه و کاربردی به فروشنده بگو که فعلاً این را
+در توضیح محصول بنویسد (قیمت‌گذاری خودکار وزن‌محور هنوز اضافه نشده)؛ در غیر این صورت pricingNote
+را null بگذار.
+
+نمونه‌ها:
+- «طلافروشی‌ام، آب‌شده و دست‌دوم کار می‌کنم، قیمت رو بر اساس وزن و اجرت حساب می‌کنم» →
+  businessType=PRODUCT_SALES, category=جواهرات و اکسسوری, pricingNote پر شود.
+- «روان‌شناسم، مشاوره‌ی تلفنی و حضوری میدم» → businessType=APPOINTMENT_BOOKING, category=مشاوره,
+  pricingNote=null.
+- «سالن زیبایی‌مون، من و دو تا همکارم رنگ و کوتاهی کار می‌کنیم» →
+  businessType=APPOINTMENT_BOOKING, category=سالن زیبایی و آرایشگاه.
+- «پوشاک زنانه می‌فروشم، سایز ۳۶ تا ۴۲» → businessType=PRODUCT_SALES, category=پوشاک.
+
+confidence را محافظه‌کارانه بزن: اگر متن خیلی کوتاه/مبهم بود و نمی‌شود مطمئن حدس زد، LOW یا
+MEDIUM بگذار، نه HIGH. businessTypeReason/categoryReason باید خیلی کوتاه باشند (یک جمله‌ی
+ساده‌ی فارسی که توضیح بدهد از کدام کلمه/جمله‌ی فروشنده این حدس زده شد). چیزی اختراع نکن، فقط از
+همان متن استفاده کن. پاسخ را فقط به‌صورت یک شیء JSON معتبر برگردان.`,
+      prompt: trimmed,
+      experimental_repairText: this.repairStructuredOutput(),
+    });
+
+    return {
+      businessType: object.businessType,
+      confidence: object.confidence,
+      category: object.category,
+      businessTypeReason: object.businessTypeReason.trim().slice(0, 200),
+      categoryReason: object.categoryReason.trim().slice(0, 200),
+      pricingNote: object.pricingNote?.trim().slice(0, 300) || null,
+    };
   }
 
   // فیدبک کاربر ۱۴۰۵/۰۷/۱۱ — فروشنده هرچی از یک محصول می‌داند خام/تیکه‌تیکه می‌نویسد، AI همان

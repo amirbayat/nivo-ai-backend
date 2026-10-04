@@ -2051,6 +2051,11 @@ model Store {
   slug                          String            @unique // بخش nivo.ai/chat/<slug> — انگلیسی، توسط خود فروشنده انتخاب می‌شود (بخش ۱.۱ سند)
   name                          String // نام فارسی فروشگاه، فقط نمایشی
   category                      String?
+  // docs/PRD-business-types-and-appointment-booking.md بخش ۴ — بعد جدا از category: شکل
+  // بنیادی تراکنش (کالا در برابر وقت)، نه برچسب نمایشی. فقط PRODUCT_SALES رفتار واقعی دارد؛
+  // APPOINTMENT_BOOKING فعلاً فقط ذخیره می‌شود تا تقاضای واقعی سنجیده شود — ماشین‌حالت/پنل/
+  // مدل داده‌ی نوبت‌دهی هنوز ساخته نشده (فاز جدا، تأیید نشده).
+  businessType                  StoreBusinessType @default(PRODUCT_SALES)
   bankCardNumber                String
   bankOwnerName                 String
   // فیدبک اول پایلوت — فروشنده می‌خواست بتواند لینک صفحه/کانالش را هم بدهد (نه ویرایش
@@ -2145,6 +2150,11 @@ model Store {
 enum StoreStatus {
   ACTIVE
   SUSPENDED
+}
+
+enum StoreBusinessType {
+  PRODUCT_SALES
+  APPOINTMENT_BOOKING
 }
 
 // docs/PRD-seller-multi-bank-card-rotation.md — فروشنده‌ی خرد با یک کارت خیلی زود به سقف

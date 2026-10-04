@@ -54,6 +54,7 @@ import { CreateShippingRuleDto } from './dto/create-shipping-rule.dto';
 import { UpdateShippingRuleDto } from './dto/update-shipping-rule.dto';
 import { PurchaseAdPlacementDto } from './dto/purchase-ad-placement.dto';
 import { GenerateBrandIntroDto } from './dto/generate-brand-intro.dto';
+import { ClassifyBusinessSetupDto } from './dto/classify-business-setup.dto';
 import { GenerateProductDescriptionDto } from './dto/generate-product-description.dto';
 import { GenerateProductOptionsDto } from './dto/generate-product-options.dto';
 import { fa } from '../../i18n/fa';
@@ -81,6 +82,13 @@ export class StoreController {
   @Get('slug-available')
   async slugAvailable(@Query('slug') slug: string) {
     return { available: await this.storeService.isSlugAvailable(slug) };
+  }
+
+  // docs/PRD-ai-assisted-business-setup.md — قدم ۱ ویزارد، قبل از ساخت فروشگاه (بدون :id)؛
+  // باید قبل از مسیرهای :id تعریف شود تا با آن‌ها اشتباه گرفته نشود (مثل slug-available بالا)
+  @Post('classify-business-setup')
+  classifyBusinessSetup(@Body() dto: ClassifyBusinessSetupDto) {
+    return this.storeKbService.classifyBusinessSetup(dto.rawText);
   }
 
   @Post()
