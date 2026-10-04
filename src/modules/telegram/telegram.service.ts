@@ -28,6 +28,7 @@ import type {
   UiBlock,
 } from '../sales-agent/sales-agent.types';
 import { fa } from '../../i18n/fa';
+import { mimeTypeForExt } from '../../common/validators/chat-image.validator';
 import type {
   TelegramCallbackQuery,
   TelegramInlineKeyboard,
@@ -40,6 +41,13 @@ import type {
 // فروشگاه، حداکثر همین تعداد می‌توانند ⭐ باشند؛ حل «۳۰ نفر هم‌زمان بخرن» را به «همه نوبتی دیده
 // می‌شوند» تبدیل می‌کند، نه «هرکی اول خرید همیشه برنده است»
 const SPONSORED_SLOT_CAP = 2;
+
+interface LoadedMediaItem {
+  type: 'photo' | 'video';
+  buffer: Buffer;
+  mimeType: string;
+  filename: string;
+}
 
 // docs/PRD-telegram-bot-channel.md بخش ۴ — آداپتور کانال تلگرام؛ هسته‌ی ایجنت
 // (ConversationEngineService) هیچ تغییری نمی‌بیند، این سرویس فقط پیام‌های تلگرام را به همان
@@ -368,11 +376,16 @@ export class TelegramService {
     // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۴ — عکس پروفایل فروشگاه، فقط همین یک‌بار
     // در شروع مکالمه (مثل منوی پایین، بالا)؛ اگر فروشگاه عکس ندارد اصلاً فراخوانی نمی‌شود
     if (store.logoImageKey) {
-      await this.sendPhoto(
-        chatId,
-        this.storeLogoUrl(store.id, store.logoImageKey),
-        store.name,
-      );
+      const logo = await this.loadImageMedia(store.logoImageKey);
+      if (logo) {
+        await this.sendPhotoBuffer(
+          chatId,
+          logo.buffer,
+          store.logoImageKey,
+          logo.mimeType,
+          store.name,
+        );
+      }
     }
     const result = product
       ? await this.engine.showProduct(conversation, product)
@@ -879,25 +892,60 @@ export class TelegramService {
     });
   }
 
-  private productImageUrl(productId: string, key: string): string {
-    const apiUrl = this.config.get<string>('API_URL');
-    // main.ts: app.setGlobalPrefix('api/v1') روی همه‌ی روت‌ها اعمال می‌شود، ولی API_URL
-    // (طبق .env.example) فقط origin خالی است (بدون /api/v1) — بدون این پیشوند، تلگرام موقع
-    // sendPhoto با 404 مواجه می‌شود و کل uiBlock (عکس + دکمه‌ی افزودن به سبد) بی‌صدا حذف
-    // می‌شود، چون callApi روی پاسخ ناموفق throw نمی‌کند، فقط لاگ می‌کند
-    return `${apiUrl}/api/v1/v2/products/${productId}/images/${key}`;
+  // فیدبک کاربر ۱۴۰۵/۰۷/۱۴ — قبلاً اینجا فقط یک URL (محصول/لوگو/ویدیو) ساخته می‌شد و به
+  // sendPhoto/sendVideo/sendMediaGroup داده می‌شد تا خودِ تلگرام آن را fetch کند؛ دقیقاً همون
+  // مشکل sendAudio بالا (بخش «ایران تلگرام را فیلتر می‌کند») برای عکس/ویدیوی محصول هم رخ
+  // می‌داد — سرور تلگرام قادر به دانلود از بک‌اند میزبانی‌شده در ایران نبود، و چون callApi روی
+  // پاسخ ناموفق throw نمی‌کند، این بی‌صدا هیچ عکس/ویدیویی نمی‌فرستاد. راه‌حل: همون الگوی
+  // sendVoiceReadyBuffer — خودمان بایت فایل را از استوریج می‌گیریم و مستقیم آپلود می‌کنیم.
+  private async loadImageMedia(
+    key: string,
+  ): Promise<{ buffer: Buffer; mimeType: string } | null> {
+    try {
+      const buffer = await this.storage.downloadImage(key);
+      return { buffer, mimeType: mimeTypeForExt(key.split('.').pop() ?? '') };
+    } catch (err) {
+      this.logger.error(
+        `telegram: failed to load image ${key} from storage: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      return null;
+    }
   }
 
-  // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۴ — عیناً همون الگوی productImageUrl بالا
-  private storeLogoUrl(storeId: string, key: string): string {
-    const apiUrl = this.config.get<string>('API_URL');
-    return `${apiUrl}/api/v1/v2/stores/${storeId}/logo/${key}`;
+  // ویدیوی محصول همیشه mp4 است (normalizeVideoForProviders در store.service.ts)
+  private async loadVideoMedia(
+    key: string,
+  ): Promise<{ buffer: Buffer; mimeType: string } | null> {
+    try {
+      const buffer = await this.storage.downloadImage(key);
+      return { buffer, mimeType: 'video/mp4' };
+    } catch (err) {
+      this.logger.error(
+        `telegram: failed to load video ${key} from storage: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      return null;
+    }
   }
 
-  // docs/PRD-product-video.md — عیناً همون الگوی productImageUrl بالا
-  private productVideoUrl(productId: string, key: string): string {
-    const apiUrl = this.config.get<string>('API_URL');
-    return `${apiUrl}/api/v1/v2/products/${productId}/video/${key}`;
+  // یک عکس/ویدیوی تک از استوریج نخواندنی (مثلاً فایل پاک‌شده‌ی قدیمی) نباید کل کارت محصول را
+  // بترکاند — همین‌جا حذف می‌شود، نه این‌که کل پیام fail شود
+  private async loadMediaItems(
+    keys: { type: 'photo' | 'video'; key: string }[],
+  ): Promise<LoadedMediaItem[]> {
+    const loaded = await Promise.all(
+      keys.map(async ({ type, key }) => {
+        const media =
+          type === 'video'
+            ? await this.loadVideoMedia(key)
+            : await this.loadImageMedia(key);
+        return media ? { type, filename: key, ...media } : null;
+      }),
+    );
+    return loaded.filter((m): m is LoadedMediaItem => !!m);
   }
 
   private async sendEngineResult(
@@ -923,28 +971,34 @@ export class TelegramService {
           };
           // docs/PRD-product-video.md بخش ۴ — ویدیو(ها) قبل از عکس‌ها (تصمیم ترتیب‌نمایش)،
           // سقف ۱۰ آیتم (معادل سقف بومی sendMediaGroup تلگرام)
-          const mediaItems: { type: 'photo' | 'video'; media: string }[] = [
-            ...p.videos.map((v) => ({
-              type: 'video' as const,
-              media: this.productVideoUrl(p.id, v.key),
-            })),
-            ...p.images.map((key) => ({
-              type: 'photo' as const,
-              media: this.productImageUrl(p.id, key),
-            })),
+          const mediaKeys: { type: 'photo' | 'video'; key: string }[] = [
+            ...p.videos.map((v) => ({ type: 'video' as const, key: v.key })),
+            ...p.images.map((key) => ({ type: 'photo' as const, key })),
           ].slice(0, 10);
+          const mediaItems = await this.loadMediaItems(mediaKeys);
 
           if (mediaItems.length >= 2) {
             // تلگرام sendMediaGroup هیچ reply_markup قبول نمی‌کند، پس کپشن+دکمه جدا می‌رود
-            await this.sendMediaGroup(chatId, mediaItems);
+            const groupResult = (await this.sendMediaGroupBuffer(
+              chatId,
+              mediaItems,
+            )) as { ok?: boolean } | null;
+            if (!groupResult?.ok) {
+              this.logger.error(
+                `telegram sendMediaGroup failed for product=${p.id}`,
+              );
+            }
             await this.sendText(chatId, caption, keyboard);
           } else if (mediaItems[0]?.type === 'photo') {
             // fallback به متن اگر sendPhoto شکست بخورد (مثلاً عکس در دسترس نباشد) — قبلاً
             // اینجا هیچ fallback نبود، پس یک sendPhoto ناموفق کل کارت محصول (عکس + دکمه‌ی
             // افزودن به سبد) را بی‌صدا حذف می‌کرد، چون callApi روی پاسخ ناموفق throw نمی‌کند
-            const photoResult = (await this.sendPhoto(
+            const photo = mediaItems[0];
+            const photoResult = (await this.sendPhotoBuffer(
               chatId,
-              mediaItems[0].media,
+              photo.buffer,
+              photo.filename,
+              photo.mimeType,
               caption,
               keyboard,
             )) as { ok?: boolean } | null;
@@ -953,7 +1007,17 @@ export class TelegramService {
             }
           } else if (mediaItems[0]?.type === 'video') {
             // تلگرام sendVideo کپشن/دکمه قبول نمی‌کند، پس جدا فرستاده می‌شود
-            await this.sendVideo(chatId, mediaItems[0].media);
+            const video = mediaItems[0];
+            const videoResult = (await this.sendVideoBuffer(
+              chatId,
+              video.buffer,
+              video.filename,
+            )) as { ok?: boolean } | null;
+            if (!videoResult?.ok) {
+              this.logger.error(
+                `telegram sendVideo failed for product=${p.id}`,
+              );
+            }
             await this.sendText(chatId, caption, keyboard);
           } else {
             await this.sendText(chatId, caption, keyboard);
@@ -964,22 +1028,27 @@ export class TelegramService {
       // images[0] می‌فرستد، همه‌ی عکس‌ها/ویدیوها را carousel-طور می‌فرستد (وقتی مشتری صریح
       // عکس بیشتر خواسته). docs/PRD-product-video.md بخش ۴ — ویدیو(ها) اول، بعد عکس‌ها
       case 'PRODUCT_PHOTOS': {
-        const photosMedia: { type: 'photo' | 'video'; media: string }[] = [
-          ...block.videos.map((v) => ({
-            type: 'video' as const,
-            media: this.productVideoUrl(block.productId, v.key),
-          })),
-          ...block.images.map((key) => ({
-            type: 'photo' as const,
-            media: this.productImageUrl(block.productId, key),
-          })),
+        const photoKeys: { type: 'photo' | 'video'; key: string }[] = [
+          ...block.videos.map((v) => ({ type: 'video' as const, key: v.key })),
+          ...block.images.map((key) => ({ type: 'photo' as const, key })),
         ].slice(0, 10);
+        const photosMedia = await this.loadMediaItems(photoKeys);
         if (photosMedia.length >= 2) {
-          await this.sendMediaGroup(chatId, photosMedia);
+          await this.sendMediaGroupBuffer(chatId, photosMedia);
         } else if (photosMedia[0]?.type === 'video') {
-          await this.sendVideo(chatId, photosMedia[0].media);
+          await this.sendVideoBuffer(
+            chatId,
+            photosMedia[0].buffer,
+            photosMedia[0].filename,
+          );
         } else if (photosMedia[0]) {
-          await this.sendPhoto(chatId, photosMedia[0].media, block.productName);
+          await this.sendPhotoBuffer(
+            chatId,
+            photosMedia[0].buffer,
+            photosMedia[0].filename,
+            photosMedia[0].mimeType,
+            block.productName,
+          );
         }
         return;
       }
@@ -1154,35 +1223,62 @@ export class TelegramService {
     });
   }
 
-  private sendPhoto(
+  // عیناً الگوی sendVoiceReadyBuffer — بایت عکس مستقیم آپلود می‌شود، نه URL (توضیح بالا)
+  private sendPhotoBuffer(
     chatId: string,
-    photoUrl: string,
+    buffer: Buffer,
+    filename: string,
+    mimeType: string,
     caption: string,
     keyboard?: TelegramInlineKeyboard,
   ) {
-    return this.callApi('sendPhoto', {
-      chat_id: chatId,
-      photo: photoUrl,
-      caption,
-      ...(keyboard ? { reply_markup: keyboard } : {}),
-    });
+    const form = new FormData();
+    form.append('chat_id', chatId);
+    form.append('caption', caption);
+    if (keyboard) form.append('reply_markup', JSON.stringify(keyboard));
+    form.append(
+      'photo',
+      new Blob([new Uint8Array(buffer)], { type: mimeType }),
+      filename,
+    );
+    return this.callApi('sendPhoto', form);
   }
 
   // docs/PRD-product-video.md — ویدیوی معرفی محصول؛ همیشه mp4 است (normalizeVideoForProviders
-  // در store.service.ts). برخلاف sendVoiceReadyBuffer بالا، همچنان با URL کار می‌کند — اگر
-  // این هم روزی همون خطای «failed to get HTTP URL content» را گرفت، همون الگوی بافر را بگیرد
-  private sendVideo(chatId: string, videoUrl: string) {
-    return this.callApi('sendVideo', { chat_id: chatId, video: videoUrl });
+  // در store.service.ts)
+  private sendVideoBuffer(chatId: string, buffer: Buffer, filename: string) {
+    const form = new FormData();
+    form.append('chat_id', chatId);
+    form.append(
+      'video',
+      new Blob([new Uint8Array(buffer)], { type: 'video/mp4' }),
+      filename,
+    );
+    return this.callApi('sendVideo', form);
   }
 
   // docs/PRD-product-video.md بخش ۴ — carousel بومی تلگرام برای چندویدیو/چندعکس یک محصول؛
   // برخلاف sendPhoto/sendVideo، تلگرام روی sendMediaGroup هیچ reply_markup (دکمه) قبول
-  // نمی‌کند، پس دکمه‌ی «افزودن به سبد» باید در یک sendText جدا بعد از این فرستاده شود
-  private sendMediaGroup(
-    chatId: string,
-    items: { type: 'photo' | 'video'; media: string }[],
-  ) {
-    return this.callApi('sendMediaGroup', { chat_id: chatId, media: items });
+  // نمی‌کند، پس دکمه‌ی «افزودن به سبد» باید در یک sendText جدا بعد از این فرستاده شود.
+  // برخلاف sendPhoto/sendVideo تکی، تلگرام برای فایل‌های آپلودی در sendMediaGroup هر آیتم را
+  // با media:'attach://<name>' در آرایه‌ی JSON ارجاع می‌دهد و فایل واقعی را جدا، با همون
+  // نام فیلد، به فرم multipart می‌چسباند
+  private sendMediaGroupBuffer(chatId: string, items: LoadedMediaItem[]) {
+    const form = new FormData();
+    form.append('chat_id', chatId);
+    const media = items.map((item, i) => ({
+      type: item.type,
+      media: `attach://file${i}`,
+    }));
+    form.append('media', JSON.stringify(media));
+    items.forEach((item, i) => {
+      form.append(
+        `file${i}`,
+        new Blob([new Uint8Array(item.buffer)], { type: item.mimeType }),
+        item.filename,
+      );
+    });
+    return this.callApi('sendMediaGroup', form);
   }
 
   private answerCallbackQuery(callbackQueryId: string) {
