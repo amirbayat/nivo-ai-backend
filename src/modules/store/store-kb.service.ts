@@ -1046,6 +1046,7 @@ ${resourceText.slice(0, MAX_EXTRACTED_CHARS)}`,
         suggestedDescription: z.string(),
         suggestedSpecs: z
           .array(z.object({ label: z.string(), value: z.string() }))
+          .nullable()
           .optional(),
         priceHint: z.number().int().positive().nullable().optional(),
       }),
@@ -1066,7 +1067,7 @@ ${resourceText.slice(0, MAX_EXTRACTED_CHARS)}`,
       suggestedDescription: object.suggestedDescription
         .trim()
         .slice(0, MAX_SUGGESTED_DESCRIPTION_CHARS),
-      suggestedSpecs: clampProductSpecs(object.suggestedSpecs),
+      suggestedSpecs: clampProductSpecs(object.suggestedSpecs ?? undefined),
       priceHint: object.priceHint ?? undefined,
       imageUrls: page.imageUrls,
     };
