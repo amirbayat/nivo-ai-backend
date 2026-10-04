@@ -1,13 +1,18 @@
 import {
   BadRequestException,
   ForbiddenException,
+  HttpException,
   Injectable,
   Logger,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import * as crypto from 'crypto';
 import type { BillingMode } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { RedisService } from '../../redis/redis.service';
+import { SmsService } from '../../sms/sms.service';
+import { normalizePhone } from '../../common/utils/normalize-phone';
 import { StorageService } from '../../storage/storage.service';
 import { mimeTypeForExt } from '../../common/validators/chat-image.validator';
 import { MediaTranscodeService } from '../../common/services/media-transcode.service';
@@ -47,6 +52,8 @@ export class SalesAgentService {
     private readonly asr: AsrService,
     private readonly aiProvider: AiProviderService,
     private readonly creditService: CreditService,
+    private readonly redis: RedisService,
+    private readonly sms: SmsService,
   ) {}
 
   // productId اختیاری — لینک اختصاصی یک محصول (فروشنده در استوری گذاشته)؛ اگر معتبر و
@@ -295,14 +302,131 @@ export class SalesAgentService {
       ext,
       conversation.id,
     );
+    const reattachedToOrder = await this.reattachReceiptIfOrderOpen(
+      conversation.id,
+      imageKey,
+    );
     await this.prisma.conversationEvent.create({
       data: {
         conversationId: conversation.id,
         type: 'CUSTOMER_MESSAGE',
-        payload: { imageKey },
+        payload: {
+          imageKey,
+          ...(reattachedToOrder ? { reattachedToOrder } : {}),
+        },
       },
     });
     return { reply: '', uiBlocks: [], state: conversation.currentState };
+  }
+
+  // docs/PRD-seller-panel-order-chat-linking.md بخش ۲.۲ — فروشنده بعد از رد سفارش دیگر عکس
+  // تازه‌ی خریدار (مثلاً رسید اصلاح‌شده) را روی خودِ سفارش نمی‌بیند، چون submitImageMessage
+  // فقط در چت لاگ می‌کند. اگر سفارشی برای این مکالمه باز باشد (هنوز APPROVED نشده)، عکس تازه
+  // جای رسید را می‌گیرد؛ اگر رد شده بود، دوباره RECEIPT_SUBMITTED می‌شود تا زیر فیلتر «در
+  // انتظار» دوباره دیده شود — دقیقاً مثل یک رسید تازه. برمی‌گرداند که آیا attach شد، تا پیام
+  // چت با یک نشانه‌ی «این رسید جدیده» ذخیره شود (fa.seller.panel.attention.newReceiptNotice)
+  private async reattachReceiptIfOrderOpen(
+    conversationId: string,
+    imageKey: string,
+  ): Promise<boolean> {
+    const order = await this.prisma.order.findUnique({
+      where: { conversationId },
+      select: { id: true, status: true },
+    });
+    if (!order || order.status === 'APPROVED') return false;
+
+    await this.prisma.order.update({
+      where: { id: order.id },
+      data: {
+        receiptImageKey: imageKey,
+        ...(order.status === 'REJECTED'
+          ? { status: 'RECEIPT_SUBMITTED', rejectReason: null }
+          : {}),
+      },
+    });
+    return true;
+  }
+
+  // docs/PRD-buyer-phone-otp-registration.md — برخلاف marketplace.service.ts's sendOtp/verifyOtp
+  // (که یک JWT جدید برای دسترسی چندفروشگاهی صادر می‌کند)، این‌جا فقط باید مالکیت شماره برای
+  // همین مکالمه‌ی در حال اجرا (که مالکیتش با sessionToken قبلاً اثبات شده) تایید شود — بدون
+  // توکن جدید. الگوی Redis TTL/rate-limit عیناً از marketplace.service.ts کپی شده، فقط با
+  // پیشوند کلید جدا تا اسپم یک فروشگاه محدود به خودش بماند
+  private otpKey(storeId: string, phone: string) {
+    return `shopBuyerOtp:${storeId}:${phone}`;
+  }
+  private otpRateKey(storeId: string, phone: string) {
+    return `shopBuyerOtp:rate:${storeId}:${phone}`;
+  }
+  private otpAttemptKey(storeId: string, phone: string) {
+    return `shopBuyerOtp:attempt:${storeId}:${phone}`;
+  }
+
+  async sendBuyerOtp(
+    conversationId: string,
+    sessionToken: string,
+    rawPhone: string,
+  ): Promise<{ message: string }> {
+    const conversation = await this.loadOwned(conversationId, sessionToken);
+    const phone = normalizePhone(rawPhone);
+
+    const rateKey = this.otpRateKey(conversation.storeId, phone);
+    const sends = await this.redis.incr(rateKey);
+    if (sends === 1) await this.redis.expire(rateKey, 600);
+    if (sends > 3) {
+      throw new HttpException(fa.auth.otpTooManyRequests(10), 429);
+    }
+
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    await this.redis.set(
+      this.otpKey(conversation.storeId, phone),
+      code,
+      'EX',
+      120,
+    );
+    await this.sms.sendOtp(phone, code);
+
+    return { message: fa.auth.otpSent };
+  }
+
+  async verifyBuyerOtp(
+    conversationId: string,
+    sessionToken: string,
+    rawPhone: string,
+    code: string,
+    fullName?: string,
+  ): Promise<{ message: string }> {
+    const conversation = await this.loadOwned(conversationId, sessionToken);
+    const phone = normalizePhone(rawPhone);
+
+    const attemptKey = this.otpAttemptKey(conversation.storeId, phone);
+    const attempts = await this.redis.incr(attemptKey);
+    if (attempts === 1) await this.redis.expire(attemptKey, 1800);
+    if (attempts > 5) {
+      throw new HttpException(fa.auth.otpTooManyAttempts(30), 429);
+    }
+
+    const otpRedisKey = this.otpKey(conversation.storeId, phone);
+    const stored = await this.redis.get(otpRedisKey);
+    if (!stored) throw new UnauthorizedException(fa.auth.otpExpired);
+    if (stored !== code) throw new UnauthorizedException(fa.auth.otpInvalid);
+
+    await this.redis.del(
+      otpRedisKey,
+      this.otpRateKey(conversation.storeId, phone),
+      attemptKey,
+    );
+
+    await this.prisma.customer.update({
+      where: { id: conversation.customerId },
+      data: {
+        phone,
+        phoneVerifiedAt: new Date(),
+        ...(fullName ? { fullName } : {}),
+      },
+    });
+
+    return { message: fa.salesAgent.registerSuccess };
   }
 
   // docs/PRD-sales-agent-voice.md بخش ۱.۲ — بعد از هر پاسخ، اگر همان پاسخ (تازه لاگ‌شده)

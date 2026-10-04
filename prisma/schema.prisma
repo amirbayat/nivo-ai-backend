@@ -2414,6 +2414,9 @@ model Customer {
   telegramChatId  String? // فقط TELEGRAM
   phone           String?
   fullName        String?
+  // docs/PRD-buyer-phone-otp-registration.md بخش ۲ — نال یعنی phone هنوز با OTP تایید نشده
+  // (یا اصلاً ثبت‌نام نکرده)؛ جدا از Order.recipientPhone که آزادانه تایپ می‌شود و تایید نمی‌شود
+  phoneVerifiedAt DateTime?
   // docs/PRD-buyer-abuse-rate-limit.md — قفل موقت وقتی مشتری از سقف پیام در پنجره‌ی ۵ دقیقه‌ای
   // رد شود؛ تا این زمان، هیچ فراخوان AI برایش انجام نمی‌شود (سکوت کامل بعد از یک پیام اول)
   lockedUntil     DateTime?

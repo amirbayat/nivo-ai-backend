@@ -1146,13 +1146,16 @@ export class StoreService {
     const conversations = await this.prisma.salesConversation.findMany({
       where: { storeId, isMutedForHuman: true },
       orderBy: { updatedAt: 'desc' },
-      include: { customer: true },
+      include: { customer: true, order: true },
     });
     return conversations.map((c) => ({
       id: c.id,
       customerLabel: c.customer.phone ?? c.customer.fullName ?? 'مشتری ناشناس',
       currentState: c.currentState,
       updatedAt: c.updatedAt,
+      // docs/PRD-seller-panel-order-chat-linking.md بخش ۲.۱ — سفارش مربوط به این مکالمه،
+      // اگر وجود داشته باشد (رابطه‌ی ۱:۱ از قبل در schema هست)
+      orderId: c.order?.id ?? null,
     }));
   }
 
@@ -1164,7 +1167,7 @@ export class StoreService {
     await this.getOwned(sellerId, storeId);
     const conversation = await this.prisma.salesConversation.findUnique({
       where: { id: conversationId },
-      include: { customer: true },
+      include: { customer: true, order: true },
     });
     if (!conversation || conversation.storeId !== storeId)
       throw new NotFoundException(fa.salesAgent.conversationNotFound);
@@ -1194,6 +1197,8 @@ export class StoreService {
         conversation.customer.phone ??
         conversation.customer.fullName ??
         'مشتری ناشناس',
+      // docs/PRD-seller-panel-order-chat-linking.md بخش ۲.۱
+      orderId: conversation.order?.id ?? null,
       events,
     };
   }

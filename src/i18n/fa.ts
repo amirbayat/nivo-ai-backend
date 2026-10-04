@@ -248,6 +248,8 @@ export const fa = {
     invalidSession: 'نشست معتبر نیست',
     conversationNotFound: 'مکالمه یافت نشد',
     orderNotFound: 'سفارش یافت نشد',
+    // docs/PRD-buyer-phone-otp-registration.md
+    registerSuccess: 'ثبت‌نام با موفقیت انجام شد ✅',
     nothingToConfirm: 'چیزی برای تایید نیست — اول یک محصول به سبد اضافه کن',
     didNotUnderstand: 'متوجه نشدم، می‌تونی دوباره بگی چی می‌خوای؟',
     // فیدبک کاربر: پیام صوتی وب قبلاً در خطای ASR/ترنسکود یک 500 خام می‌گرفت؛ حالا مثل تلگرام

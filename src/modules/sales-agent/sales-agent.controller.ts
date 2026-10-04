@@ -17,6 +17,7 @@ import type { Response } from 'express';
 import { SalesAgentService } from './sales-agent.service';
 import { SendMessageDto } from './dto/send-message.dto';
 import { SetResponseStrategyDto } from './dto/set-response-strategy.dto';
+import { SendBuyerOtpDto, VerifyBuyerOtpDto } from './dto/register-buyer.dto';
 import { StoreService } from '../store/store.service';
 import { StorageService } from '../../storage/storage.service';
 import { fa } from '../../i18n/fa';
@@ -127,6 +128,35 @@ export class SalesAgentController {
       conversationId,
       sessionToken,
       file,
+    );
+  }
+
+  // docs/PRD-buyer-phone-otp-registration.md — ثبت‌نام اختیاری خریدار با شماره+OTP
+  @Post('chat/:conversationId/register/send-otp')
+  sendBuyerOtp(
+    @Param('conversationId') conversationId: string,
+    @Headers('x-session-token') sessionToken: string,
+    @Body() dto: SendBuyerOtpDto,
+  ) {
+    return this.salesAgentService.sendBuyerOtp(
+      conversationId,
+      sessionToken,
+      dto.phone,
+    );
+  }
+
+  @Post('chat/:conversationId/register/verify-otp')
+  verifyBuyerOtp(
+    @Param('conversationId') conversationId: string,
+    @Headers('x-session-token') sessionToken: string,
+    @Body() dto: VerifyBuyerOtpDto,
+  ) {
+    return this.salesAgentService.verifyBuyerOtp(
+      conversationId,
+      sessionToken,
+      dto.phone,
+      dto.code,
+      dto.fullName,
     );
   }
 

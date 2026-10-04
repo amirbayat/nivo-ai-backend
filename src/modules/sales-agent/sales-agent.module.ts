@@ -6,6 +6,7 @@ import { AsrModule } from '../../common/services/asr.module';
 import { UsageModule } from '../usage/usage.module';
 import { TelegramApiClientModule } from '../telegram/telegram-api-client.module';
 import { CommentsModule } from '../comments/comments.module';
+import { SmsModule } from '../../sms/sms.module';
 import { SalesAgentController } from './sales-agent.controller';
 import { SalesAgentService } from './sales-agent.service';
 import { ConversationEngineService } from './conversation-engine.service';
@@ -30,6 +31,8 @@ import { SalesAgentQaController } from './sales-agent-qa.controller';
     // docs/PRD-customer-comments-and-discounts.md — ثبت نظر بعد از تکمیل سفارش + نمایش
     // نظرات تاییدشده در doFaq/showProduct
     CommentsModule,
+    // docs/PRD-buyer-phone-otp-registration.md — ارسال کد OTP
+    SmsModule,
   ],
   controllers: [SalesAgentController, SalesAgentQaController],
   providers: [
