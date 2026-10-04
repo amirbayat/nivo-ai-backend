@@ -33,6 +33,8 @@ import {
 } from './model-variants';
 import { buildAsrVocabHint } from './asr-vocab-hint';
 import { reattachReceiptIfOrderOpen } from './receipt-reattach.util';
+import { CommentsService } from '../comments/comments.service';
+import type { SubmitCommentDto } from './dto/submit-comment.dto';
 import {
   buildHistoryEntry,
   type ConversationHistoryEntry,
@@ -55,6 +57,7 @@ export class SalesAgentService {
     private readonly creditService: CreditService,
     private readonly redis: RedisService,
     private readonly sms: SmsService,
+    private readonly comments: CommentsService,
   ) {}
 
   // productId اختیاری — لینک اختصاصی یک محصول (فروشنده در استوری گذاشته)؛ اگر معتبر و
@@ -319,6 +322,77 @@ export class SalesAgentService {
       },
     });
     return { reply: '', uiBlocks: [], state: conversation.currentState };
+  }
+
+  // docs/PRD-buyer-orders-page-and-direct-order.md بخش ۲.۲ — صفحه‌ی مستقل «سفارش‌های من»،
+  // بدون AI/engine؛ عیناً همون query که VIEW_ORDERS داخل conversation-engine.service.ts استفاده
+  // می‌کند (مقایسه‌شده تا کانال چت و صفحه‌ی مستقل داده‌ی یکسان نشان بدهند)، فقط به یک GET معمولی
+  // منتقل شده. distinctProductId هم عیناً منطق requestReviewFollowUp (store.service.ts) است —
+  // برای پیش‌پرکردن productId فرم «ثبت نظر» وقتی سفارش دقیقاً یک محصول داشت
+  async listMyOrders(conversationId: string, sessionToken: string) {
+    const conversation = await this.loadOwned(conversationId, sessionToken);
+    const orders = await this.prisma.order.findMany({
+      where: { conversation: { customerId: conversation.customerId } },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    });
+    return orders.map((o) => {
+      const items = o.items as {
+        productId: string;
+        name: string;
+        unitPrice: number;
+        qty: number;
+      }[];
+      const distinctProductIds = [...new Set(items.map((i) => i.productId))];
+      return {
+        id: o.id,
+        createdAt: o.createdAt.toISOString(),
+        items,
+        totalAmount: o.totalAmount,
+        status: o.status,
+        distinctProductId:
+          distinctProductIds.length === 1 ? distinctProductIds[0] : null,
+      };
+    });
+  }
+
+  // docs/PRD-buyer-orders-page-and-direct-order.md بخش ۲.۳ — ثبت نظر مستقیم، مستقل از پیام
+  // پیگیریِ چت (awaitingReview/doSubmitComment که دست‌نخورده می‌ماند). فقط خریدارهایی که واقعاً
+  // سفارش تاییدشده دارند (و اگر productId داده شده، آن محصول دقیقاً در یکی از آن سفارش‌ها بوده)
+  // مجاز به ثبت نظرند — جلوگیری از نظر جعلی کسی که اصلاً خرید نکرده
+  async submitDirectComment(
+    conversationId: string,
+    sessionToken: string,
+    dto: SubmitCommentDto,
+  ) {
+    const conversation = await this.loadOwned(conversationId, sessionToken);
+
+    const approvedOrders = await this.prisma.order.findMany({
+      where: {
+        status: 'APPROVED',
+        conversation: { customerId: conversation.customerId },
+      },
+      select: { items: true },
+    });
+    const hasPurchased = dto.productId
+      ? approvedOrders.some((o) =>
+          (o.items as { productId: string }[]).some(
+            (i) => i.productId === dto.productId,
+          ),
+        )
+      : approvedOrders.length > 0;
+    if (!hasPurchased) {
+      throw new ForbiddenException(fa.salesAgent.commentRequiresPurchase);
+    }
+
+    await this.comments.submitComment({
+      storeId: conversation.storeId,
+      customerId: conversation.customerId,
+      productId: dto.productId ?? null,
+      text: dto.text,
+      rating: dto.rating,
+    });
+    return { ok: true };
   }
 
   // docs/PRD-buyer-phone-otp-registration.md — برخلاف marketplace.service.ts's sendOtp/verifyOtp

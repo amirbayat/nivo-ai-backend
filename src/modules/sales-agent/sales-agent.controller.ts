@@ -18,6 +18,7 @@ import { SalesAgentService } from './sales-agent.service';
 import { SendMessageDto } from './dto/send-message.dto';
 import { SetResponseStrategyDto } from './dto/set-response-strategy.dto';
 import { SendBuyerOtpDto, VerifyBuyerOtpDto } from './dto/register-buyer.dto';
+import { SubmitCommentDto } from './dto/submit-comment.dto';
 import { StoreService } from '../store/store.service';
 import { StorageService } from '../../storage/storage.service';
 import { fa } from '../../i18n/fa';
@@ -128,6 +129,30 @@ export class SalesAgentController {
       conversationId,
       sessionToken,
       file,
+    );
+  }
+
+  // docs/PRD-buyer-orders-page-and-direct-order.md بخش ۲.۲ — صفحه‌ی مستقل «سفارش‌های من»،
+  // خارج از AI/engine
+  @Get('chat/:conversationId/orders')
+  listMyOrders(
+    @Param('conversationId') conversationId: string,
+    @Headers('x-session-token') sessionToken: string,
+  ) {
+    return this.salesAgentService.listMyOrders(conversationId, sessionToken);
+  }
+
+  // docs/PRD-buyer-orders-page-and-direct-order.md بخش ۲.۳ — ثبت نظر مستقیم از روی محصول/سفارش
+  @Post('chat/:conversationId/comments')
+  submitComment(
+    @Param('conversationId') conversationId: string,
+    @Headers('x-session-token') sessionToken: string,
+    @Body() dto: SubmitCommentDto,
+  ) {
+    return this.salesAgentService.submitDirectComment(
+      conversationId,
+      sessionToken,
+      dto,
     );
   }
 

@@ -23,6 +23,7 @@ export class CommentsService {
     customerId: string;
     productId: string | null;
     text: string;
+    rating?: number;
   }): Promise<void> {
     const comment = await this.prisma.productComment.create({
       data: {
@@ -30,6 +31,7 @@ export class CommentsService {
         customerId: input.customerId,
         productId: input.productId,
         text: input.text,
+        rating: input.rating,
       },
     });
     await this.moderationQueue.add('moderate', { commentId: comment.id });

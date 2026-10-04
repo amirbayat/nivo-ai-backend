@@ -162,7 +162,8 @@ export const fa = {
     // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۹ (رصد رقبا)
     brandIntroTextRequired: 'لطفاً چند جمله درباره‌ی برند/فروشگاهت بنویس',
     // docs/PRD-ai-assisted-business-setup.md — تشخیص نوع کسب‌وکار/دسته‌بندی از روی توضیح آزاد
-    businessSetupTextRequired: 'لطفاً چند جمله درباره‌ی کسب‌وکارت بنویس یا بیوی اینستاگرامت رو پیست کن',
+    businessSetupTextRequired:
+      'لطفاً چند جمله درباره‌ی کسب‌وکارت بنویس یا بیوی اینستاگرامت رو پیست کن',
     // فیدبک کاربر ۱۴۰۵/۰۷/۱۱ — دستیار «نوشتن توضیحات با کمک AI» از روی یادداشت خام فروشنده
     productNotesRequired: 'لطفاً چیزی که درباره‌ی این محصول می‌دونی بنویس',
     productCodeTaken:
@@ -176,7 +177,8 @@ export const fa = {
     variantOptionsTextRequired:
       'لطفاً گزینه‌ها رو توضیح بده (مثلاً سایز و رنگ‌بندی)',
     // docs/PRD-bulk-product-import-from-document.md — افزودن/آپدیت دسته‌جمعی محصول از فایل/متن/صوت
-    bulkImportTextRequired: 'لطفاً توضیحات محصولات رو بنویس یا فایل/صوت رو آپلود کن',
+    bulkImportTextRequired:
+      'لطفاً توضیحات محصولات رو بنویس یا فایل/صوت رو آپلود کن',
     telegramConnectTokenInvalid: 'این توکن اتصال تلگرام نامعتبر یا منقضی شده',
     // docs/PRD-customer-comments-and-discounts.md بخش ۷/۸
     discountCodeNotFound: 'این کد تخفیف یافت نشد',
@@ -241,7 +243,8 @@ export const fa = {
   },
   storeKb: {
     notFound: 'این مورد در باکس دانش یافت نشد',
-    invalidFile: 'فرمت فایل پذیرفته نیست — فقط PDF، Word، Excel، صوت یا متن ساده',
+    invalidFile:
+      'فرمت فایل پذیرفته نیست — فقط PDF، Word، Excel، صوت یا متن ساده',
     textRequired: 'لطفاً متن رو بنویس یا فایل/صوت رو آپلود کن',
   },
   salesAgent: {
@@ -280,12 +283,14 @@ export const fa = {
     unsaveProductActionNamed: (productName: string) =>
       `${productName} رو از ذخیره‌شده‌ها حذف کن`,
     productSaved: (productName: string) => `${productName} ذخیره شد ✅`,
-    productUnsaved: (productName: string) => `${productName} از ذخیره‌شده‌ها حذف شد`,
+    productUnsaved: (productName: string) =>
+      `${productName} از ذخیره‌شده‌ها حذف شد`,
     viewOrdersAction: 'سفارش‌های قبلیم رو نشون بده',
     noPreviousOrders: 'هنوز هیچ سفارشی ثبت نکردی',
     reorderAction: 'دوباره همینو سفارش بده',
     reorderNotFound: 'این سفارش رو پیدا نکردم',
-    reorderOutOfStock: 'متاسفانه هیچ‌کدوم از آیتم‌های این سفارش دیگه موجود نیستن',
+    reorderOutOfStock:
+      'متاسفانه هیچ‌کدوم از آیتم‌های این سفارش دیگه موجود نیستن',
     noProductsFound: 'محصولی با این مشخصات پیدا نکردم',
     // docs/PRD-sales-agent-response-strategy-ab.md بخش ۱ (Track A، ردیف askClarifyingQuestion)
     // — fallback وقتی هر دو تلاش AI برای ساخت سوال روشن‌کننده شکست بخورد
@@ -328,6 +333,10 @@ export const fa = {
     reviewFollowUpPrompt:
       'سفارشت تایید شد ✅ امیدواریم راضی باشی 🙏 اگه دوست داری نظرت رو درباره‌ی خرید یا محصول همین‌جا برام بنویس، به بقیه هم کمک می‌کنه.',
     reviewThanks: 'ممنون بابت نظرت! بعد از بررسی نمایش داده می‌شه 🙏',
+    // docs/PRD-buyer-orders-page-and-direct-order.md بخش ۲.۳ — ثبت نظر مستقیم (بدون صبر برای
+    // پیام پیگیری چت)؛ فقط خریدارهایی که واقعاً سفارش تاییدشده دارند مجازند
+    commentRequiresPurchase:
+      'فقط خریدارهایی که این محصول رو خریدن می‌تونن نظر بدن',
     // فیدبک کاربر — خریدار بعد از رد سفارش توسط فروشنده هیچ اطلاعی توی چت نمی‌گرفت؛ این پیام
     // دقیقاً مثل reviewFollowUpPrompt بالا، از rejectOrder در store.service.ts صدا زده می‌شود
     orderRejectedMessage: (reason?: string | null) =>
