@@ -38,6 +38,7 @@ import { UpdateStoreDto } from './dto/update-store.dto';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { ReplaceProductVariantsDto } from './dto/replace-product-variants.dto';
+import { ExtractProductsFromTextDto } from './dto/extract-products-from-text.dto';
 import { ImportProductFromUrlDto } from './dto/import-product-from-url.dto';
 import { AddProductImagesFromUrlDto } from './dto/add-product-images-from-url.dto';
 import { CreateKbEntryDto } from './dto/create-kb-entry.dto';
@@ -315,6 +316,37 @@ export class StoreController {
       throw new BadRequestException(fa.store.excelOnly);
     }
     return this.storeService.importProducts(user.sub, id, file.buffer);
+  }
+
+  // docs/PRD-bulk-product-import-from-document.md — آپلود PDF/Word که چند محصول را با هم
+  // توصیف می‌کند → استخراج لیست محصولات (ذخیره نمی‌شود — فروشنده هرکدام را در شیت مرور
+  // تأیید/ویرایش می‌کند و همان useCreateProduct/useUpdateProduct معمولی اعمال می‌کند)
+  @Post(':id/products/extract-from-file')
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: 5 * 1024 * 1024 } }),
+  )
+  extractProductsFromFile(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException(fa.store.noFileUploaded);
+    return this.storeKbService.extractProductsFromFile(user.sub, id, file);
+  }
+
+  // همان استخراج بالا، برای متن پیست‌شده یا رونویسی صوت (فرانت اول با همان /transcribe
+  // موجود صوت را متن می‌کند، بعد همین اندپوینت را صدا می‌زند)
+  @Post(':id/products/extract-from-text')
+  extractProductsFromText(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: ExtractProductsFromTextDto,
+  ) {
+    return this.storeKbService.extractProductsFromText(
+      user.sub,
+      id,
+      dto.rawText,
+    );
   }
 
   @Get(':id/orders')

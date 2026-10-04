@@ -173,6 +173,8 @@ export const fa = {
     // docs/PRD-product-display-focus-and-variations.md §۴.۱.۱ (فاز ۲)
     variantOptionsTextRequired:
       'لطفاً گزینه‌ها رو توضیح بده (مثلاً سایز و رنگ‌بندی)',
+    // docs/PRD-bulk-product-import-from-document.md — افزودن/آپدیت دسته‌جمعی محصول از فایل/متن/صوت
+    bulkImportTextRequired: 'لطفاً توضیحات محصولات رو بنویس یا فایل/صوت رو آپلود کن',
     telegramConnectTokenInvalid: 'این توکن اتصال تلگرام نامعتبر یا منقضی شده',
     // docs/PRD-customer-comments-and-discounts.md بخش ۷/۸
     discountCodeNotFound: 'این کد تخفیف یافت نشد',

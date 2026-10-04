@@ -871,6 +871,132 @@ assumptions بنویس. فقط از همان اطلاعاتی که فروشند�
     };
   }
 
+  // docs/PRD-bulk-product-import-from-document.md — فروشنده یک متن بلند/فایل (PDF/Word) یا
+  // رونویسی صوت را می‌دهد که چند محصول را با هم توصیف می‌کند؛ از آن یک آرایه‌ی محصول استخراج
+  // می‌شود و هرکدام با محصولات موجود فروشگاه (با کد، بعد اسم) تطبیق داده می‌شود تا فروشنده در
+  // شیت مرور بداند کدام «ایجاد» و کدام «آپدیتِ» کدام محصول است. تطبیق قطعی/دترمینیستیک است
+  // (نه حدس AI) تا رفتار قابل‌پیش‌بینی بماند. خروجی مستقیم ذخیره نمی‌شود — فرانت با همان
+  // useCreateProduct/useUpdateProduct معمولی، فقط بعد از تأیید تک‌تک ردیف‌ها توسط فروشنده،
+  // اعمال می‌کند (عیناً اصل غیرقابل‌مذاکره‌ی «AI فقط پیش‌پر می‌کند»، مثل generateProductOptionsFromText بالا).
+  private async extractProductCandidatesFromText(
+    storeId: string,
+    text: string,
+  ): Promise<{
+    items: {
+      action: 'create' | 'update';
+      matchedProductId?: string;
+      matchedProductName?: string;
+      name: string;
+      description?: string;
+      basePrice?: number;
+      stock?: number;
+      code?: string;
+    }[];
+    assumptions: string[];
+  }> {
+    const { object } = await generateObject({
+      model: this.provider('openai/gpt-5.4-mini'),
+      schema: z.object({
+        items: z
+          .array(
+            z.object({
+              name: z.string(),
+              code: z.string().optional(),
+              description: z.string().optional(),
+              basePrice: z.number().optional(),
+              stock: z.number().optional(),
+            }),
+          )
+          .max(50),
+        assumptions: z.array(z.string()),
+      }),
+      system: `تو دستیار یک فروشنده‌ی فروشگاه آنلاین ایرانی هستی. متن زیر (که ممکن است کپشن
+اینستاگرام، کاتالوگ، یا رونویسی صوت فروشنده باشد) توضیح چند محصول مختلف را با هم دارد. برای هر
+محصولی که در متن پیدا می‌کنی یک مورد جدا در items برگردان: name (اسم محصول)، description (توضیح
+کوتاه، اگر چیزی گفته شده)، basePrice (قیمت به تومان، فقط اگر صریح گفته شده — حدس نزن)، stock
+(موجودی، فقط اگر صریح گفته شده)، code (کد/SKU محصول، فقط اگر صریح در متن آمده). هرگز قیمت یا
+موجودی را از روی حدس یا میانگین بازار اختراع نکن — اگر گفته نشده، آن فیلد را کلاً نیاور. اگر برای
+چیزی مجبور به فرض شدی (مثلاً تفسیر یک کلمه‌ی مبهم)، آن فرض را به‌صورت یک جمله‌ی کوتاه فارسی در
+assumptions بنویس. اگر متن هیچ محصول قابل‌تشخیصی نداشت، items را آرایه‌ی خالی برگردان. پاسخ را
+فقط به‌صورت یک شیء JSON معتبر برگردان.`,
+      prompt: text,
+      experimental_repairText: this.repairStructuredOutput(),
+    });
+
+    const existing = await this.prisma.product.findMany({
+      where: { storeId },
+      select: { id: true, name: true, code: true },
+    });
+    const normalize = (s: string) => s.trim().toLowerCase();
+    const byCode = new Map(
+      existing.filter((p) => p.code).map((p) => [normalize(p.code!), p]),
+    );
+    const byName = new Map(existing.map((p) => [normalize(p.name), p]));
+
+    const items = object.items
+      .filter((i) => i.name.trim())
+      .slice(0, 50)
+      .map((i) => {
+        const code = i.code?.trim().slice(0, 40) || undefined;
+        const matched =
+          (code && byCode.get(normalize(code))) ||
+          byName.get(normalize(i.name.trim()));
+        return {
+          action: (matched ? 'update' : 'create') as 'create' | 'update',
+          matchedProductId: matched?.id,
+          matchedProductName: matched?.name,
+          name: i.name.trim().slice(0, 200),
+          description: i.description?.trim().slice(0, 5000) || undefined,
+          basePrice:
+            typeof i.basePrice === 'number' && i.basePrice >= 0
+              ? Math.round(i.basePrice)
+              : undefined,
+          stock:
+            typeof i.stock === 'number' && i.stock >= 0
+              ? Math.round(i.stock)
+              : undefined,
+          code,
+        };
+      });
+
+    return {
+      items,
+      assumptions: object.assumptions
+        .map((a) => a.trim().slice(0, 200))
+        .filter(Boolean)
+        .slice(0, 5),
+    };
+  }
+
+  async extractProductsFromText(
+    sellerId: string,
+    storeId: string,
+    rawText: string,
+  ) {
+    await this.storeService.getOwned(sellerId, storeId);
+    const trimmed = rawText.trim().slice(0, 8000);
+    if (!trimmed) {
+      throw new BadRequestException(fa.store.bulkImportTextRequired);
+    }
+    return this.extractProductCandidatesFromText(storeId, trimmed);
+  }
+
+  async extractProductsFromFile(
+    sellerId: string,
+    storeId: string,
+    file: { buffer: Buffer; originalname: string },
+  ) {
+    await this.storeService.getOwned(sellerId, storeId);
+
+    const parsed = parseUploadedKbFile(file.buffer, file.originalname);
+    if (!parsed) throw new NotFoundException(fa.storeKb.invalidFile);
+
+    const extracted = await extractChatFileText(parsed, MAX_EXTRACTED_CHARS);
+    if (!extracted.text.trim()) return { items: [], assumptions: [] };
+
+    return this.extractProductCandidatesFromText(storeId, extracted.text);
+  }
+
   // docs/PRD-admin-product-enrichment-review.md بخش ۲ — نسخه‌ی ادمین‌محور completeProductInfo
   // بالا: بدون sellerId/getOwned (ادمین مالک فروشگاه نیست)، بدون چک/کسر اعتبار فروشنده (این
   // ابتکار از طرف ادمین است، نه درخواست فروشنده — هزینه‌ی عملیاتی پلتفرم است). چرخه‌ی عمر
