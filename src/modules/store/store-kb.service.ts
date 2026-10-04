@@ -953,15 +953,22 @@ assumptions بنویس. فقط از همان اطلاعاتی که فروشند�
   ): Promise<ExtractProductsResult> {
     const { object } = await generateObject({
       model: this.provider('openai/gpt-5.4-mini'),
+      // code/description/basePrice/stock عمداً .nullable() هستند نه .optional() — طبق
+      // تجربه‌ی nivo-cal.service.ts (fiberG/sugarG)، با OpenAI structured outputs در strict
+      // mode، فیلد optional در schema باعث خطای واقعی پروداکشن می‌شود: «'required' is required
+      // to... Missing 'code'» (چون strict mode همه‌ی propertyها را در required می‌خواهد، نه فقط
+      // فیلدهای اجباری) — این دقیقاً همان ارور بود که با بات تلگرام/آپلود فایل گرفته شد
+      // (۱۴۰۵/۰۷/۱۳). optional chaining پایین‌تر (i.code?.trim()) با null هم درست کار می‌کند،
+      // پس نیازی به تغییر بقیه‌ی کد نیست.
       schema: z.object({
         items: z
           .array(
             z.object({
               name: z.string(),
-              code: z.string().optional(),
-              description: z.string().optional(),
-              basePrice: z.number().optional(),
-              stock: z.number().optional(),
+              code: z.string().nullable(),
+              description: z.string().nullable(),
+              basePrice: z.number().nullable(),
+              stock: z.number().nullable(),
             }),
           )
           .max(50),
