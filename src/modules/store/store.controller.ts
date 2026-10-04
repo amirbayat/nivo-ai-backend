@@ -39,6 +39,7 @@ import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { ReplaceProductVariantsDto } from './dto/replace-product-variants.dto';
 import { ExtractProductsFromTextDto } from './dto/extract-products-from-text.dto';
+import { ExtractKbFromTextDto } from './dto/extract-kb-from-text.dto';
 import { ImportProductFromUrlDto } from './dto/import-product-from-url.dto';
 import { AddProductImagesFromUrlDto } from './dto/add-product-images-from-url.dto';
 import { CreateKbEntryDto } from './dto/create-kb-entry.dto';
@@ -616,10 +617,12 @@ export class StoreController {
     return this.storeKbService.remove(user.sub, id, entryId);
   }
 
-  // آپلود فایل → استخراج کاندیدها (ذخیره نمی‌شود — فروشنده باید هرکدام را تأیید کند، بخش ۳.۳)
+  // آپلود فایل → استخراج کاندیدها (ذخیره نمی‌شود — فروشنده باید هرکدام را تأیید کند، بخش ۳.۳).
+  // فیدبک کاربر ۱۴۰۵/۰۷/۱۲ — سقف از ۵ به ۱۵ مگابایت بالا رفت چون این اندپوینت حالا فایل صوتی
+  // هم می‌پذیرد (برای همون حجم محتوا صوت همیشه از PDF/Word بزرگ‌تره)
   @Post(':id/knowledge/extract-file')
   @UseInterceptors(
-    FileInterceptor('file', { limits: { fileSize: 5 * 1024 * 1024 } }),
+    FileInterceptor('file', { limits: { fileSize: 15 * 1024 * 1024 } }),
   )
   extractKbFile(
     @CurrentUser() user: JwtPayload,
@@ -628,6 +631,21 @@ export class StoreController {
   ) {
     if (!file) throw new BadRequestException(fa.store.noFileUploaded);
     return this.storeKbService.extractCandidatesFromFile(user.sub, id, file);
+  }
+
+  // همان استخراج بالا برای متن مستقیم پیست‌شده (بدون فایل) — فروشنده مجبور نیست چیزی را
+  // اول فایل کند؛ همراه با بالا، فرانت یک ورودی واحد (فایل هر فرمتی یا متن) نشان می‌دهد
+  @Post(':id/knowledge/extract-text')
+  extractKbText(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: ExtractKbFromTextDto,
+  ) {
+    return this.storeKbService.extractCandidatesFromText(
+      user.sub,
+      id,
+      dto.rawText,
+    );
   }
 
   // docs/PRD-sales-agent-admin-analytics.md بخش ۴ — مقایسه‌ی نرخ تبدیل وب/تلگرام همین فروشگاه

@@ -16,11 +16,21 @@ export interface TelegramVoice {
   mime_type?: string;
 }
 
+// docs/PRD-bulk-product-import-from-document.md — فایل PDF/Word که فروشنده از چت شخصی‌اش
+// می‌فرستد تا چند محصول را با هم اضافه/آپدیت کند
+export interface TelegramDocument {
+  file_id: string;
+  file_name?: string;
+  mime_type?: string;
+  file_size?: number;
+}
+
 export interface TelegramMessage {
   chat: TelegramChat;
   text?: string;
   photo?: TelegramPhotoSize[];
   voice?: TelegramVoice;
+  document?: TelegramDocument;
   // docs/PRD-telegram-bot-channel.md بخش ۹.۱ — force_reply: وقتی فروشنده به پیام
   // force_reply بات جواب می‌دهد، تلگرام این فیلد را با همان پیام اصلی پر می‌کند؛ conversationId
   // از متن همان پیام اصلی (که ما ساختیم) استخراج می‌شود، نیازی به session state جدا نیست

@@ -16,6 +16,10 @@ import {
 import { CreditService } from '../sales-agent/credit.service';
 import { StoreService } from '../store/store.service';
 import {
+  StoreKbService,
+  type ExtractProductsResult,
+} from '../store/store-kb.service';
+import {
   pickVariant,
   pickVoiceVariant,
   pickResponseStrategy,
@@ -36,11 +40,25 @@ import type {
   TelegramMessage,
   TelegramUpdate,
 } from './telegram.types';
+import { randomUUID } from 'crypto';
 
 // docs/PRD-product-strategy-and-roadmap.md بخش ۶ آیتم #۲۱ — از ۵ نتیجه‌ی نمایش‌داده‌شده‌ی سرچ
 // فروشگاه، حداکثر همین تعداد می‌توانند ⭐ باشند؛ حل «۳۰ نفر هم‌زمان بخرن» را به «همه نوبتی دیده
 // می‌شوند» تبدیل می‌کند، نه «هرکی اول خرید همیشه برنده است»
 const SPONSORED_SLOT_CAP = 2;
+
+// docs/PRD-bulk-product-import-from-document.md — نتیجه‌ی استخراج تا تایید فروشنده (دکمه‌ی
+// inline) در حافظه نگه داشته می‌شود؛ نیازی به جدول دیتابیس نیست چون کل چرخه عمرش چند دقیقه است
+const BULK_IMPORT_TTL_MS = 15 * 60 * 1000;
+const BULK_IMPORT_MAX_FILE_BYTES = 15 * 1024 * 1024;
+
+interface PendingBulkImport {
+  chatId: string;
+  storeId: string;
+  sellerId: string;
+  items: ExtractProductsResult['items'];
+  createdAt: number;
+}
 
 interface LoadedMediaItem {
   type: 'photo' | 'video';
@@ -65,6 +83,8 @@ export class TelegramService {
   // هدر X-Relay-Secret اضافه می‌شود، نیازی به proxy/dispatcher سطح شبکه نیست.
   private readonly apiBaseUrl: string;
   private readonly relaySecret?: string;
+  // docs/PRD-bulk-product-import-from-document.md
+  private readonly pendingBulkImports = new Map<string, PendingBulkImport>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -76,6 +96,7 @@ export class TelegramService {
     private readonly aiProvider: AiProviderService,
     private readonly creditService: CreditService,
     private readonly storeService: StoreService,
+    private readonly storeKbService: StoreKbService,
   ) {
     this.botToken = this.config.get<string>('TELEGRAM_BOT_TOKEN');
     this.webhookSecret = this.config.get<string>('TELEGRAM_WEBHOOK_SECRET');
@@ -177,7 +198,18 @@ export class TelegramService {
         await this.handlePhoto(message);
         return;
       }
+      // docs/PRD-bulk-product-import-from-document.md — سند PDF/Word فقط از چت شخصی‌ی
+      // فروشنده‌ی متصل معنی دارد (ownerTelegramChatId)؛ هیچ مسیر دیگری امروز سند را مصرف
+      // نمی‌کند، پس برای چت‌های غیرمالک بی‌صدا نادیده گرفته می‌شود (رفتار قبلی هم همین بود)
+      if (message.document) {
+        await this.handleSellerBulkImportDocument(message);
+        return;
+      }
       if (message.voice) {
+        // چت شخصی فروشنده: پیام صوتی یعنی «این صوت رو برای افزودن/آپدیت محصول بخون»، نه
+        // پیام مشتری — باید قبل از handleVoice (مسیر خریدار) چک شود
+        const handledAsSeller = await this.trySellerBulkImportVoice(message);
+        if (handledAsSeller) return;
         await this.handleVoice(message);
         return;
       }
@@ -580,6 +612,11 @@ export class TelegramService {
       await this.handleSellerOrderDecision(chatId, data);
       return;
     }
+    // docs/PRD-bulk-product-import-from-document.md — تایید نهایی اعمال محصولات استخراج‌شده
+    if (data.startsWith('bpi:')) {
+      await this.handleBulkImportConfirm(chatId, data.slice(4));
+      return;
+    }
 
     const conversation = await this.resolveActiveConversation(chatId);
     if (!conversation) return;
@@ -870,6 +907,220 @@ export class TelegramService {
       await this.storeService.rejectOrder(store.sellerId, store.id, orderId);
       await this.sendText(chatId, fa.telegram.orderRejectedFromTelegram);
     }
+  }
+
+  // docs/PRD-bulk-product-import-from-document.md — عیناً معادل تلگرامیِ BulkProductImportSheet
+  // پنل وب: فروشنده یک PDF/Word به چت شخصی‌اش (owner chat) می‌فرستد → استخراج محصولات →
+  // خلاصه با دکمه‌ی تایید ارسال می‌شود → فقط با زدن دکمه چیزی واقعاً ساخته/آپدیت می‌شود.
+  // ساده‌سازی عمدی نسبت به پنل وب: اگر یک chat به چند فروشگاه وصل بود (نادر)، این مسیر
+  // پشتیبانی نمی‌شود — فروشنده به پنل وب ارجاع داده می‌شود، چون نمی‌شود بدون پرسیدن حدس زد
+  // فایل برای کدام فروشگاه است.
+  private async handleSellerBulkImportDocument(
+    message: TelegramMessage,
+  ): Promise<void> {
+    const chatId = String(message.chat.id);
+    const doc = message.document!;
+    const stores = await this.prisma.store.findMany({
+      where: { ownerTelegramChatId: chatId },
+    });
+    if (stores.length === 0) return; // چت مالک هیچ فروشگاهی نیست — بی‌صدا نادیده (رفتار قبلی)
+    if (stores.length > 1) {
+      await this.sendText(chatId, fa.telegram.bulkImportMultiStoreUnsupported);
+      return;
+    }
+    if (!doc.file_name) {
+      await this.sendText(chatId, fa.telegram.bulkImportError);
+      return;
+    }
+    if ((doc.file_size ?? 0) > BULK_IMPORT_MAX_FILE_BYTES) {
+      await this.sendText(chatId, fa.telegram.bulkImportFileTooLarge);
+      return;
+    }
+
+    const store = stores[0];
+    await this.sendText(chatId, fa.telegram.bulkImportProcessing);
+    try {
+      const buffer = await this.downloadFile(doc.file_id);
+      const result = await this.storeKbService.extractProductsFromFile(
+        store.sellerId,
+        store.id,
+        { buffer, originalname: doc.file_name },
+      );
+      await this.presentBulkImportResult(chatId, store, result);
+    } catch (err) {
+      this.logger.error(
+        `handleSellerBulkImportDocument failed: ${err instanceof Error ? err.message : String(err)}`,
+        err instanceof Error ? err.stack : undefined,
+      );
+      await this.sendText(chatId, fa.telegram.bulkImportError);
+    }
+  }
+
+  // همان بالا، برای پیام صوتی روی چت شخصی فروشنده؛ false برمی‌گرداند اگر این چت مالک هیچ
+  // فروشگاهی نبود تا caller به مسیر معمول خریدار (handleVoice) برگردد
+  private async trySellerBulkImportVoice(
+    message: TelegramMessage,
+  ): Promise<boolean> {
+    const chatId = String(message.chat.id);
+    const stores = await this.prisma.store.findMany({
+      where: { ownerTelegramChatId: chatId },
+    });
+    if (stores.length === 0) return false;
+    if (stores.length > 1) {
+      await this.sendText(chatId, fa.telegram.bulkImportMultiStoreUnsupported);
+      return true;
+    }
+
+    const store = stores[0];
+    await this.sendText(chatId, fa.telegram.bulkImportTranscribing);
+    try {
+      const oggBuffer = await this.downloadFile(message.voice!.file_id);
+      const mp3Buffer = await this.mediaTranscode.extractAudio(
+        oggBuffer,
+        'ogg',
+      );
+      const transcript = await this.asr.transcribeWithFallback(
+        mp3Buffer,
+        this.aiProvider.sharedApiKey,
+        'fa',
+        undefined,
+        VOICE_MESSAGE_ASR_CHAIN,
+        false,
+      );
+      const result = await this.storeKbService.extractProductsFromText(
+        store.sellerId,
+        store.id,
+        transcript.text,
+      );
+      await this.presentBulkImportResult(chatId, store, result);
+    } catch (err) {
+      this.logger.error(
+        `trySellerBulkImportVoice failed: ${err instanceof Error ? err.message : String(err)}`,
+        err instanceof Error ? err.stack : undefined,
+      );
+      await this.sendText(chatId, fa.telegram.bulkImportError);
+    }
+    return true;
+  }
+
+  // ردیف‌های ایجاد بدون basePrice همین‌جا کنار گذاشته می‌شوند (نه موقع اعمال) — چون تلگرام
+  // برخلاف پنل وب امکان ویرایش فیلد به فیلد ندارد؛ هرگز قیمتی حدس زده نمی‌شود، فقط آن مورد
+  // از این دسته رد می‌شود و صریحاً در پیام اعلام می‌شود
+  private async presentBulkImportResult(
+    chatId: string,
+    store: Store,
+    result: ExtractProductsResult,
+  ): Promise<void> {
+    if (result.items.length === 0) {
+      await this.sendText(chatId, fa.telegram.bulkImportEmpty);
+      return;
+    }
+    const applicable = result.items.filter(
+      (i) => i.action === 'update' || typeof i.basePrice === 'number',
+    );
+    const skipped = result.items.length - applicable.length;
+    if (applicable.length === 0) {
+      await this.sendText(chatId, fa.telegram.bulkImportAllMissingPrice);
+      return;
+    }
+
+    const token = randomUUID().replace(/-/g, '');
+    this.pendingBulkImports.set(token, {
+      chatId,
+      storeId: store.id,
+      sellerId: store.sellerId,
+      items: applicable,
+      createdAt: Date.now(),
+    });
+
+    const lines = applicable.map((item, i) => {
+      const label =
+        item.action === 'update'
+          ? fa.telegram.bulkImportLineUpdate(item.matchedProductName || item.name)
+          : fa.telegram.bulkImportLineCreate(item.name);
+      const price =
+        item.basePrice !== undefined
+          ? fa.telegram.bulkImportLinePrice(item.basePrice)
+          : '';
+      return `${i + 1}. ${label}${price}`;
+    });
+    const assumptionsBlock = result.assumptions.length
+      ? `\n\n${fa.telegram.bulkImportAssumptionsTitle}\n${result.assumptions.map((a) => `• ${a}`).join('\n')}`
+      : '';
+    const skippedNote =
+      skipped > 0 ? `\n\n${fa.telegram.bulkImportSkippedNote(skipped)}` : '';
+
+    const keyboard: TelegramInlineKeyboard = {
+      inline_keyboard: [
+        [
+          {
+            text: fa.telegram.bulkImportConfirmButton(applicable.length),
+            callback_data: `bpi:${token}`,
+          },
+        ],
+      ],
+    };
+    await this.sendText(
+      chatId,
+      `${fa.telegram.bulkImportReviewTitle(applicable.length)}\n\n${lines.join('\n')}${assumptionsBlock}${skippedNote}`,
+      keyboard,
+    );
+  }
+
+  private async handleBulkImportConfirm(
+    chatId: string,
+    token: string,
+  ): Promise<void> {
+    const pending = this.pendingBulkImports.get(token);
+    this.pendingBulkImports.delete(token);
+    if (
+      !pending ||
+      pending.chatId !== chatId ||
+      Date.now() - pending.createdAt > BULK_IMPORT_TTL_MS
+    ) {
+      await this.sendText(chatId, fa.telegram.bulkImportExpired);
+      return;
+    }
+
+    let ok = 0;
+    let fail = 0;
+    for (const item of pending.items) {
+      try {
+        if (item.action === 'update' && item.matchedProductId) {
+          await this.storeService.updateProduct(
+            pending.sellerId,
+            pending.storeId,
+            item.matchedProductId,
+            {
+              name: item.name,
+              description: item.description,
+              basePrice: item.basePrice,
+              stock: item.stock,
+              code: item.code,
+            },
+          );
+        } else {
+          await this.storeService.createProduct(
+            pending.sellerId,
+            pending.storeId,
+            {
+              name: item.name,
+              basePrice: item.basePrice ?? 0,
+              description: item.description,
+              stock: item.stock,
+              code: item.code,
+            },
+          );
+        }
+        ok++;
+      } catch (err) {
+        this.logger.warn(
+          `handleBulkImportConfirm item failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        fail++;
+      }
+    }
+    await this.sendText(chatId, fa.telegram.bulkImportApplyResult(ok, fail));
   }
 
   // یک chat_id می‌تواند در چند فروشگاه مختلف مشتری باشد (یکتایی per-store، بخش ۲ سند) —

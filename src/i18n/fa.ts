@@ -239,7 +239,8 @@ export const fa = {
   },
   storeKb: {
     notFound: 'این مورد در باکس دانش یافت نشد',
-    invalidFile: 'فرمت فایل پذیرفته نیست — فقط PDF، Word، Excel یا متن ساده',
+    invalidFile: 'فرمت فایل پذیرفته نیست — فقط PDF، Word، Excel، صوت یا متن ساده',
+    textRequired: 'لطفاً متن رو بنویس یا فایل/صوت رو آپلود کن',
   },
   salesAgent: {
     invalidSession: 'نشست معتبر نیست',
@@ -460,6 +461,33 @@ export const fa = {
       `📜 گفتگو با «${storeName}» — وضعیت: ${status}\n—`,
     historyCustomerLabel: 'شما',
     historyAgentLabel: 'ربات/فروشنده',
+    // docs/PRD-bulk-product-import-from-document.md — افزودن/آپدیت محصول از همین چت شخصی
+    // فروشنده در تلگرام (فایل PDF/Word یا پیام صوتی)، عیناً همون قابلیت پنل وب
+    bulkImportMultiStoreUnsupported:
+      'این چت به چند فروشگاه وصل است — فعلاً افزودن دسته‌جمعی محصول از تلگرام فقط برای یک فروشگاه پشتیبانی می‌شود، از پنل وب استفاده کن.',
+    bulkImportFileTooLarge: 'حجم فایل زیاد است — حداکثر ۱۵ مگابایت.',
+    bulkImportProcessing: '⏳ در حال خواندن فایل و استخراج محصولات...',
+    bulkImportTranscribing: '⏳ در حال تبدیل صوت به متن و استخراج محصولات...',
+    bulkImportError: 'پردازش فایل با خطا مواجه شد، دوباره امتحان کن.',
+    bulkImportEmpty: 'محصولی توی این فایل/صوت پیدا نشد.',
+    bulkImportAllMissingPrice:
+      'محصولاتی پیدا شدند ولی قیمت هیچ‌کدام مشخص نبود — برای ساخت محصول جدید قیمت لازم است؛ از پنل وب اضافه‌شون کن یا قیمت رو توی متن/صوت بگو.',
+    bulkImportReviewTitle: (count: number) =>
+      `📋 ${count.toLocaleString('fa-IR')} محصول پیدا شد:`,
+    bulkImportLineCreate: (name: string) => `🆕 ${name}`,
+    bulkImportLineUpdate: (name: string) => `🔄 آپدیت: ${name}`,
+    bulkImportLinePrice: (price: number) =>
+      ` — ${price.toLocaleString('fa-IR')} تومان`,
+    bulkImportAssumptionsTitle: '💡 فرض‌های AI:',
+    bulkImportSkippedNote: (count: number) =>
+      `⚠️ ${count.toLocaleString('fa-IR')} مورد چون قیمت نداشت رد شد (محصول جدید نیاز به قیمت دارد) — از پنل وب اضافه‌شون کن.`,
+    bulkImportConfirmButton: (count: number) =>
+      `✅ تایید و اعمال ${count.toLocaleString('fa-IR')} مورد`,
+    bulkImportExpired: 'این لیست منقضی شده — فایل رو دوباره بفرست.',
+    bulkImportApplyResult: (ok: number, fail: number) =>
+      fail > 0
+        ? `✅ ${ok.toLocaleString('fa-IR')} مورد اعمال شد، ${fail.toLocaleString('fa-IR')} مورد با خطا.`
+        : `✅ ${ok.toLocaleString('fa-IR')} مورد با موفقیت اعمال شد.`,
   },
   sms: {
     otpText: (code: string) =>

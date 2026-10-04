@@ -39,7 +39,7 @@ export class TelegramController {
         '?'
       } type=${
         update.message
-          ? `message:${update.message.text ? 'text' : update.message.photo ? 'photo' : update.message.voice ? 'voice' : '?'}`
+          ? `message:${update.message.text ? 'text' : update.message.photo ? 'photo' : update.message.voice ? 'voice' : update.message.document ? 'document' : '?'}`
           : update.callback_query
             ? 'callback_query'
             : 'unknown'

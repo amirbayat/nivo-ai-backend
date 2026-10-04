@@ -9,6 +9,21 @@ export interface ExtractedChatFile {
   truncated: boolean;
 }
 
+// فیدبک کاربر ۱۴۰۵/۰۷/۱۲ — متن خام pdf-parse/mammoth پر از کاراکترهای کنترلی/فاصله‌های
+// تکراری/خط‌های خالی زیاد است (آرتیفکت استخراج، نه محتوای واقعی فایل)؛ قبل از رسیدن به AI
+// یک‌بار تمیز می‌شود تا هم توکن کمتر مصرف شود هم مدل گیج نشود. فقط نرمال‌سازی whitespace —
+// هیچ محتوایی که ممکن است واقعی باشد (مثل خطی که فقط یک عدد/قیمت است) حذف نمی‌شود.
+function cleanExtractedText(text: string): string {
+  return text
+    .replace(/\r\n?/g, '\n')
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+    .split('\n')
+    .map((line) => line.replace(/[ \t]{2,}/g, ' ').trimEnd())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n');
+}
+
 // docs/PRD-chat-files-and-pdf.md بخش ۳.۱ — استخراج متن سمت سرور (نه ارسال فایل خام به مدل)؛
 // خروجی هر فایل به maxExtractedChars (ChatConfig، ادمین‌قابل‌تنظیم) truncate می‌شود تا یک فایل
 // خیلی بزرگ بودجه‌ی توکن ورودی پیام را یک‌جا نخورد
@@ -22,13 +37,13 @@ export async function extractChatFileText(
       const parser = new PDFParse({ data: file.buffer });
       try {
         const result = await parser.getText();
-        text = result.text;
+        text = cleanExtractedText(result.text);
       } finally {
         await parser.destroy();
       }
     } else if (file.kind === 'docx') {
       const result = await mammoth.extractRawText({ buffer: file.buffer });
-      text = result.value;
+      text = cleanExtractedText(result.value);
     } else if (file.kind === 'xlsx') {
       const workbook = XLSX.read(file.buffer, { type: 'buffer' });
       text = workbook.SheetNames.map((name) => {

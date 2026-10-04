@@ -112,6 +112,18 @@ const EMBEDDING_MODEL = 'openai/text-embedding-3-small'; // همان مدل پی
 const CACHE_TTL_MS = 60_000;
 const SIMILARITY_THRESHOLD = 0.75;
 const MAX_EXTRACTED_CHARS = 20_000;
+// فیدبک کاربر ۱۴۰۵/۰۷/۱۲ — پسوندهای صوتی که extractCandidatesFromFile به‌جای parseUploadedKbFile
+// (که فقط سند/متن می‌شناسد) به مسیر رونویسی ASR می‌فرستد
+const AUDIO_FILE_EXTENSIONS = new Set([
+  'mp3',
+  'wav',
+  'm4a',
+  'ogg',
+  'oga',
+  'webm',
+  'aac',
+  'flac',
+]);
 
 export interface StoreKbEntryInput {
   kind: StoreKbKind;
@@ -137,6 +149,24 @@ export interface KbCandidateEntry {
   kind: StoreKbKind;
   question: string;
   answer: string;
+}
+
+// docs/PRD-bulk-product-import-from-document.md — یک ردیف استخراج‌شده از فایل/متن/صوت؛
+// همین تایپ در telegram.service.ts هم برای فلوی تلگرام reuse می‌شود
+export interface ExtractedProductCandidate {
+  action: 'create' | 'update';
+  matchedProductId?: string;
+  matchedProductName?: string;
+  name: string;
+  description?: string;
+  basePrice?: number;
+  stock?: number;
+  code?: string;
+}
+
+export interface ExtractProductsResult {
+  items: ExtractedProductCandidate[];
+  assumptions: string[];
 }
 
 @Injectable()
@@ -321,20 +351,12 @@ JSON را برگردان، بدون توضیح یا markdown fence.`,
     return entry;
   }
 
-  // فایل آپلودی را به چند KB entry کاندید می‌شکند — فروشنده باید قبل از ذخیره‌ی هرکدام
-  // تأیید/ویرایش کند (human-in-the-loop، طبق بخش ۳.۳ سند: هیچ‌چیز خودکار ذخیره نمی‌شود)
-  async extractCandidatesFromFile(
-    sellerId: string,
-    storeId: string,
-    file: { buffer: Buffer; originalname: string },
+  // هسته‌ی مشترک استخراج کاندید از متن — هم فایل (بعد از extractChatFileText/رونویسی صوت) و
+  // هم متن مستقیم پیست‌شده از همین عبور می‌کنند (فیدبک کاربر ۱۴۰۵/۰۷/۱۲)
+  private async extractKbCandidatesFromText(
+    text: string,
   ): Promise<KbCandidateEntry[]> {
-    await this.storeService.getOwned(sellerId, storeId);
-
-    const parsed = parseUploadedKbFile(file.buffer, file.originalname);
-    if (!parsed) throw new NotFoundException(fa.storeKb.invalidFile);
-
-    const extracted = await extractChatFileText(parsed, MAX_EXTRACTED_CHARS);
-    if (!extracted.text.trim()) return [];
+    if (!text.trim()) return [];
 
     const { object } = await generateObject({
       model: this.provider('openai/gpt-5.4-mini'),
@@ -347,7 +369,7 @@ JSON را برگردان، بدون توضیح یا markdown fence.`,
           }),
         ),
       }),
-      system: `از متن زیر (که فروشنده‌ی یک فروشگاه آنلاین آپلود کرده) چند مورد «سؤال/جواب» یا
+      system: `از متن زیر (که فروشنده‌ی یک فروشگاه آنلاین داده) چند مورد «سؤال/جواب» یا
 «نکته‌ی مهم» برای یک باکس دانش استخراج کن — چیزی که به یک ربات فروش کمک می‌کند به سؤالات
 مشتری دقیق‌تر جواب بدهد. هر مورد یک kind مناسب بگیرد:
 - FAQ: سؤال متداول با جواب مشخص
@@ -356,11 +378,58 @@ JSON را برگردان، بدون توضیح یا markdown fence.`,
 - GENERAL: هرچیز دیگر (معرفی برند، ساعت پاسخ‌گویی، ...)
 فقط از متن واقعی استخراج کن، چیزی اضافه نکن. اگر متن هیچ نکته‌ی قابل‌استفاده‌ای نداشت،
 آرایه‌ی خالی برگردان.`,
-      prompt: extracted.text,
+      prompt: text,
       experimental_repairText: this.repairStructuredOutput(),
     });
 
     return object.candidates;
+  }
+
+  // فایل آپلودی را به چند KB entry کاندید می‌شکند — فروشنده باید قبل از ذخیره‌ی هرکدام
+  // تأیید/ویرایش کند (human-in-the-loop، طبق بخش ۳.۳ سند: هیچ‌چیز خودکار ذخیره نمی‌شود).
+  // فیدبک کاربر ۱۴۰۵/۰۷/۱۲ — فایل صوتی هم پذیرفته می‌شود؛ تشخیص بر اساس پسوند است، فروشنده
+  // لازم نیست نوع فایل را جدا انتخاب کند («سیستم خودش تشخیص بده»)
+  async extractCandidatesFromFile(
+    sellerId: string,
+    storeId: string,
+    file: { buffer: Buffer; originalname: string },
+  ): Promise<KbCandidateEntry[]> {
+    await this.storeService.getOwned(sellerId, storeId);
+
+    const ext = (file.originalname.split('.').pop() || '').toLowerCase();
+    if (AUDIO_FILE_EXTENSIONS.has(ext)) {
+      const mp3Buffer = await this.mediaTranscode.extractAudio(
+        file.buffer,
+        ext,
+      );
+      const transcript = await this.asr.transcribeWithFallback(
+        mp3Buffer,
+        this.aiProvider.sharedApiKey,
+        'fa',
+        undefined,
+        VOICE_MESSAGE_ASR_CHAIN,
+        false,
+      );
+      return this.extractKbCandidatesFromText(transcript.text);
+    }
+
+    const parsed = parseUploadedKbFile(file.buffer, file.originalname);
+    if (!parsed) throw new NotFoundException(fa.storeKb.invalidFile);
+
+    const extracted = await extractChatFileText(parsed, MAX_EXTRACTED_CHARS);
+    return this.extractKbCandidatesFromText(extracted.text);
+  }
+
+  // همان استخراج بالا برای متن مستقیم پیست‌شده (بدون فایل)
+  async extractCandidatesFromText(
+    sellerId: string,
+    storeId: string,
+    rawText: string,
+  ): Promise<KbCandidateEntry[]> {
+    await this.storeService.getOwned(sellerId, storeId);
+    const trimmed = rawText.trim().slice(0, MAX_EXTRACTED_CHARS);
+    if (!trimmed) throw new BadRequestException(fa.storeKb.textRequired);
+    return this.extractKbCandidatesFromText(trimmed);
   }
 
   // دستیار تکمیل محصول با AI (بخش ۲ سند) — مدل هرگز چیزی درباره‌ی قیمت/موجودی واقعی حدس
@@ -881,19 +950,7 @@ assumptions بنویس. فقط از همان اطلاعاتی که فروشند�
   private async extractProductCandidatesFromText(
     storeId: string,
     text: string,
-  ): Promise<{
-    items: {
-      action: 'create' | 'update';
-      matchedProductId?: string;
-      matchedProductName?: string;
-      name: string;
-      description?: string;
-      basePrice?: number;
-      stock?: number;
-      code?: string;
-    }[];
-    assumptions: string[];
-  }> {
+  ): Promise<ExtractProductsResult> {
     const { object } = await generateObject({
       model: this.provider('openai/gpt-5.4-mini'),
       schema: z.object({
