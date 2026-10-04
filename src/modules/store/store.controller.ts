@@ -677,6 +677,18 @@ export class StoreController {
     return this.storeCreditService.getStatus(user.sub, id);
   }
 
+  // docs/PRD-seller-telegram-management-bot.md — وضعیت اتصال بات مدیریت پنل (اتصال خودش از
+  // داخل بات انجام می‌شود، نه از اینجا)
+  @Get(':id/seller-bot-status')
+  getSellerBotStatus(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    return this.storeService.getSellerBotStatus(user.sub, id);
+  }
+
+  @Post(':id/seller-bot-disconnect')
+  disconnectSellerBot(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    return this.storeService.disconnectSellerBot(user.sub, id);
+  }
+
   // فیدبک کاربر ۱۴۰۵/۰۷/۰۱ — بسته‌های عمومی + مخصوص همین فروشگاه (برخلاف مسیر عمومی
   // v2/credits/packages که فقط بسته‌های عمومی را می‌بیند، چون storeId ندارد)
   @Get(':id/credit/packages')

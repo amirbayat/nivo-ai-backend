@@ -1249,6 +1249,25 @@ export class StoreService {
     return { token };
   }
 
+  // docs/PRD-seller-telegram-management-bot.md — وضعیت اتصال بات مدیریت پنل؛ اتصال خودش از
+  // داخل بات انجام می‌شود (اشتراک شماره + OTP)، نه از پنل وب — اینجا فقط برای نمایش وضعیت/قطع
+  async getSellerBotStatus(sellerId: string, storeId: string) {
+    const store = await this.getOwned(sellerId, storeId);
+    return {
+      linked: !!store.sellerBotChatId,
+      linkedAt: store.sellerBotLinkedAt,
+    };
+  }
+
+  async disconnectSellerBot(sellerId: string, storeId: string) {
+    await this.getOwned(sellerId, storeId);
+    await this.prisma.store.update({
+      where: { id: storeId },
+      data: { sellerBotChatId: null, sellerBotLinkedAt: null },
+    });
+    return { linked: false, linkedAt: null };
+  }
+
   // «برگردون به ربات» — دستی، هیچ‌جا خودکار ریست نمی‌شود؛ currentState هم به BROWSING
   // برمی‌گردد چون دیسپچ موتور مکالمه (doUpdateCart و مشابه) فقط BROWSING/CART_REVIEW را
   // قبول می‌کند و سبد داخل contextData همچنان دست‌نخورده می‌ماند
