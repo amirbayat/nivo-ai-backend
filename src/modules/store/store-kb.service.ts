@@ -371,6 +371,7 @@ JSON را برگردان، بدون توضیح یا markdown fence.`,
     storeId: string,
     productId: string,
     withWebSearch = false,
+    currentDraft?: string,
   ) {
     const store = await this.storeService.getOwned(sellerId, storeId);
     const product = await this.prisma.product.findUnique({
@@ -475,7 +476,7 @@ sourceNote را خالی بگذار. پاسخ را فقط به‌صورت یک �
           : BASIC_SUGGESTIONS_SYSTEM_PROMPT,
         prompt: `دسته‌بندی فروشگاه: ${store.category ?? 'نامشخص'}
 نام محصول: ${product.name}
-توضیح فعلی: ${product.description ?? '(هنوز توضیحی ثبت نشده)'}${commentsHint}`,
+توضیح فعلی: ${currentDraft ?? product.description ?? '(هنوز توضیحی ثبت نشده)'}${commentsHint}`,
         experimental_repairText: this.repairStructuredOutput(),
       });
       const object = clampEnrichmentOutput(rawObject);

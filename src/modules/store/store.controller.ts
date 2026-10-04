@@ -439,12 +439,14 @@ export class StoreController {
     @Param('id') id: string,
     @Param('productId') productId: string,
     @Query('withWebSearch') withWebSearch?: string,
+    @Body('currentDraft') currentDraft?: string,
   ) {
     return this.storeKbService.completeProductInfo(
       user.sub,
       id,
       productId,
       withWebSearch === 'true',
+      currentDraft,
     );
   }
 
