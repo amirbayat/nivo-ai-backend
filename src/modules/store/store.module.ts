@@ -55,9 +55,12 @@ import { ProductEnrichmentReminderService } from './product-enrichment-reminder.
   // docs/PRD-seller-multi-bank-card-rotation.md بخش ۲
   // ProductEnrichmentService هم از AdminModule لازم است — docs/PRD-admin-product-enrichment-review.md
   // ProductEnrichmentReminderService هم از QueueModule لازم است (cron هفتگی یادآوری)
+  // StoreCreditService هم از SellerBotModule لازم است (دستور /credit) —
+  // docs/PRD-seller-telegram-management-bot.md
   exports: [
     StoreService,
     StoreKbService,
+    StoreCreditService,
     CardSelectorService,
     ProductEnrichmentService,
     ProductEnrichmentReminderService,

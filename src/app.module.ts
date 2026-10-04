@@ -52,6 +52,7 @@ import { ContentAgentModule } from './modules/content-agent/content-agent.module
 import { StoreModule } from './modules/store/store.module';
 import { SalesAgentModule } from './modules/sales-agent/sales-agent.module';
 import { TelegramModule } from './modules/telegram/telegram.module';
+import { SellerBotModule } from './modules/seller-bot/seller-bot.module';
 import { CommentsModule } from './modules/comments/comments.module';
 import { MarketplaceModule } from './modules/marketplace/marketplace.module';
 
@@ -108,6 +109,7 @@ import { MarketplaceModule } from './modules/marketplace/marketplace.module';
     SalesAgentModule,
     CommentsModule,
     TelegramModule,
+    SellerBotModule,
     MarketplaceModule,
   ],
   providers: [{ provide: APP_FILTER, useClass: AllExceptionsFilter }],

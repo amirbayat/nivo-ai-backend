@@ -137,6 +137,34 @@ export class AuthService {
     return { message: fa.auth.otpSent };
   }
 
+  // docs/PRD-seller-telegram-management-bot.md — فقط تایید کد، بدون ساخت/آپدیت User یا هیچ
+  // منطق ثبت‌نامی (کمپین/پاداش معرف/پلن)؛ verifyOtp بالا برای لاگین پنل وب است و برای این
+  // مورد (فروشنده‌ای که از قبل حساب دارد، فقط می‌خواهیم مالکیت شماره را تایید کنیم) زیادی
+  // سنگین/بی‌ربط است
+  async verifyOtpCodeOnly(rawPhone: string, code: string): Promise<boolean> {
+    const phone = normalizePhone(rawPhone);
+    if (phone === TEST_PHONE && this.isTestUserEnabled()) {
+      return code === TEST_OTP_CODE;
+    }
+
+    const attemptWindow = this.getOtpAttemptWindow();
+    const attemptKey = otpAttemptKey(phone);
+    const attempts = await this.redis.incr(attemptKey);
+    if (attempts === 1) await this.redis.expire(attemptKey, attemptWindow);
+    if (attempts > this.getOtpAttemptLimit()) {
+      throw new HttpException(
+        fa.auth.otpTooManyAttempts(Math.ceil(attemptWindow / 60)),
+        429,
+      );
+    }
+
+    const stored = await this.redis.get(otpKey(phone));
+    if (!stored || stored !== code) return false;
+
+    await this.redis.del(otpKey(phone), otpRateKey(phone), attemptKey);
+    return true;
+  }
+
   isOtpViewerEnabled(): boolean {
     // برای پشتیبانی («کد رو نگرفتم») و دیباگ — بعداً از طریق env قابل خاموش‌کردن (پیش‌فرض: فعال)
     return (
@@ -311,7 +339,10 @@ export class AuthService {
       // (token.service.ts: getCachedPlan) — یعنی انتخاب دستی مدل override می‌شود و کسر نیوو
       // انجام نمی‌شود. شکست این کار هرگز نباید ثبت‌نام را fail کند (همان الگوی defensive بالا)
       await this.attachPayAsYouGoPlan(user.id).catch((err) =>
-        this.logger.error(`attachPayAsYouGoPlan failed for user=${user.id}`, err),
+        this.logger.error(
+          `attachPayAsYouGoPlan failed for user=${user.id}`,
+          err,
+        ),
       );
       // پاداش معرف — همین‌جا (نه موقع پرداخت) چون پاداش الان روی «ثبت‌نام دوست» است، نه خریدش
       if (referredByUserId) {

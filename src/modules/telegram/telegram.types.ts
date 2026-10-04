@@ -25,12 +25,21 @@ export interface TelegramDocument {
   file_size?: number;
 }
 
+// docs/PRD-seller-telegram-management-bot.md — دکمه‌ی «اشتراک‌گذاری شماره» (request_contact)
+// شماره‌ی تلفن متصل به همان اکانت تلگرام کاربر را برمی‌گرداند؛ phone_number از قالب ایران
+// بدون نرمال‌سازی می‌آید (normalizePhone خودش این را هندل می‌کند)
+export interface TelegramContact {
+  phone_number: string;
+  user_id?: number;
+}
+
 export interface TelegramMessage {
   chat: TelegramChat;
   text?: string;
   photo?: TelegramPhotoSize[];
   voice?: TelegramVoice;
   document?: TelegramDocument;
+  contact?: TelegramContact;
   // docs/PRD-telegram-bot-channel.md بخش ۹.۱ — force_reply: وقتی فروشنده به پیام
   // force_reply بات جواب می‌دهد، تلگرام این فیلد را با همان پیام اصلی پر می‌کند؛ conversationId
   // از متن همان پیام اصلی (که ما ساختیم) استخراج می‌شود، نیازی به session state جدا نیست
@@ -61,8 +70,11 @@ export interface TelegramInlineKeyboard {
 // پیام خاص می‌چسبد و با تایپ دکمه، متن روی دکمه (نه یک callback_data مخفی) برمی‌گردد — پس فقط
 // برای چند اکشن کلی/ثابت مناسب است، نه نتایج دینامیک (مثل نتایج سرچ فروشگاه)
 export interface TelegramReplyKeyboard {
-  keyboard: { text: string }[][];
+  // request_contact: دکمه‌ای که با لمس، شماره‌ی تلفن متصل به اکانت تلگرام کاربر را به‌عنوان
+  // یک پیام contact می‌فرستد — docs/PRD-seller-telegram-management-bot.md
+  keyboard: { text: string; request_contact?: boolean }[][];
   resize_keyboard?: boolean;
+  one_time_keyboard?: boolean;
 }
 
 export type TelegramKeyboard = TelegramInlineKeyboard | TelegramReplyKeyboard;

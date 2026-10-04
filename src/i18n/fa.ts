@@ -520,6 +520,72 @@ export const fa = {
         ? `✅ ${ok.toLocaleString('fa-IR')} مورد اعمال شد، ${fail.toLocaleString('fa-IR')} مورد با خطا.`
         : `✅ ${ok.toLocaleString('fa-IR')} مورد با موفقیت اعمال شد.`,
   },
+  // docs/PRD-seller-telegram-management-bot.md — بات جدا برای مدیریت پنل فروشنده (نه مشتری)
+  sellerBot: {
+    shareContactPrompt:
+      'سلام 👋 این بات مخصوص مدیریت پنل فروشگاه شماست. برای ورود، لطفاً دکمه‌ی زیر رو بزن تا شماره‌ات رو تایید کنیم.',
+    shareContactButton: '📱 اشتراک‌گذاری شماره',
+    contactPhoneNotFound:
+      'این شماره به هیچ فروشگاهی در نیوو وصل نیست. با همون شماره‌ای که توی پنل وب ثبت‌نام کردی وارد شو.',
+    otpSent: 'یک کد ۶ رقمی به شماره‌ت پیامک شد — همین‌جا بفرستش.',
+    otpInvalid: 'کد اشتباهه یا منقضی شده — دوباره امتحان کن یا /start رو بزن.',
+    linked: (storeName: string) =>
+      `وصل شدی ✅ فروشگاه «${storeName}». برای دیدن دستورات /help رو بزن.`,
+    alreadyLinked: (storeName: string) =>
+      `قبلاً به فروشگاه «${storeName}» وصل شدی. /help رو بزن برای دیدن دستورات.`,
+    notLinked:
+      'برای استفاده از این دستور، اول باید وارد بشی — /start رو بزن و شماره‌ت رو تایید کن.',
+    logoutSuccess:
+      'از بات مدیریت خارج شدی. هر وقت خواستی با /start دوباره وارد شو.',
+    logoutNotLinked: 'الان به هیچ فروشگاهی وصل نیستی.',
+    help: [
+      'دستورات:',
+      '/orders — سفارش‌های اخیر',
+      '/stock <اسم یا کد محصول> — دیدن/تغییر موجودی',
+      '/credit — موجودی اعتبار فروشگاه',
+      '/logout — خروج',
+    ].join('\n'),
+    unknownCommand: 'متوجه نشدم — /help رو بزن برای دیدن دستورات.',
+    ordersEmpty: 'هنوز سفارشی ثبت نشده.',
+    ordersHeader: '📦 سفارش‌های اخیر:',
+    orderLine: (
+      itemsSummary: string,
+      amountToman: number,
+      status: string,
+      createdAt: Date,
+    ) =>
+      `${itemsSummary} — ${amountToman.toLocaleString('fa-IR')} تومان (${status}) — ${createdAt.toLocaleDateString('fa-IR')}`,
+    orderStatusLabel: {
+      PENDING_PAYMENT: 'در انتظار پرداخت',
+      RECEIPT_SUBMITTED: 'نیازمند تایید رسید',
+      APPROVED: 'تایید شده',
+      REJECTED: 'رد شده',
+    } as Record<string, string>,
+    orderNeedsDecision: (itemsSummary: string, amountToman: number) =>
+      `🧾 نیازمند تایید رسید:\n${itemsSummary} — ${amountToman.toLocaleString('fa-IR')} تومان`,
+    orderApproveButton: '✅ تایید',
+    orderRejectButton: '❌ رد',
+    orderApproved: 'سفارش تایید شد ✅',
+    orderRejectReasonPrompt: (orderId: string) =>
+      `دلیل رد سفارش رو بنویس (یا فقط «-» بفرست اگه نمی‌خوای دلیل بدی).\nکد سفارش رد: ${orderId}`,
+    orderRejectReasonSkipKeyword: '-',
+    orderRejected: 'سفارش رد شد ❌',
+    stockUsage: 'به این شکل بفرست: /stock <اسم یا کد محصول>',
+    stockSearchEmpty: 'محصولی با این اسم/کد پیدا نشد.',
+    stockSearchHeader: '🔎 یکی رو انتخاب کن:',
+    stockPrompt: (
+      productName: string,
+      currentStock: number,
+      productId: string,
+    ) =>
+      `موجودی فعلی «${productName}»: ${currentStock.toLocaleString('fa-IR')}\nعدد موجودی جدید رو بفرست.\nکد محصول: ${productId}`,
+    stockInvalidNumber: 'یک عدد صحیح و غیرمنفی بفرست.',
+    stockUpdated: (productName: string, newStock: number) =>
+      `موجودی «${productName}» شد ${newStock.toLocaleString('fa-IR')} ✅`,
+    creditBalance: (balanceToman: number) =>
+      `💳 موجودی اعتبار فروشگاه: ${balanceToman.toLocaleString('fa-IR')} تومان`,
+    genericError: 'یه مشکلی پیش اومد — دوباره امتحان کن.',
+  },
   sms: {
     otpText: (code: string) =>
       `کد تأیید دستیار AI: ${code}\nاین کد ۲ دقیقه اعتبار دارد`,

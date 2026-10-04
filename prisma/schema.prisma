@@ -2070,6 +2070,13 @@ model Store {
   ownerTelegramChatId           String?
   telegramConnectToken          String?           @unique
   telegramConnectTokenExpiresAt DateTime?
+  // docs/PRD-seller-telegram-management-bot.md — بات دوم و جدا (توکن/وبهوک جدا) برای مدیریت
+  // پنل از تلگرام، با احراز هویت واقعی (اشتراک‌گذاری شماره + همان OTP پیامکی ورود پنل وب) —
+  // عمداً فیلد جدا از ownerTelegramChatId بالا (که فقط برای اعلان‌رسانی/پاسخ‌دهی روی بات
+  // مشترک مشتری‌محور است)، چون این یکی گیت ورود به اکشن‌های مدیریتی (تایید/رد سفارش، تغییر
+  // موجودی) است و نیاز به اطمینان بیشتری از هویت فروشنده دارد
+  sellerBotChatId               String?           @unique
+  sellerBotLinkedAt             DateTime?
   // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۹ (غنی‌سازی دوره‌ای) — آخرین بار
   // که برای این فروشگاه یادآوری «محصولات قدیمی‌نشده» تلگرام فرستاده شد؛ cron فقط فروشگاه‌هایی
   // که این فیلدشان خالی یا قدیمی‌تر از cooldown است را دوباره نوتیف می‌کند (جلوگیری از اسپم)
