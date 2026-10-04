@@ -887,7 +887,12 @@ export class StoreService {
     const [, updated] = await this.prisma.$transaction([
       this.prisma.salesConversation.update({
         where: { id: order.conversationId },
-        data: { currentState: 'REJECTED', archivedAt: new Date() },
+        // isMutedForHuman: true — بدون این، پیام بعدی خریدار (که فرانت دیگر برایش input را
+        // قفل نمی‌کند، طبق همان بنر/پیامی که می‌گوید «می‌تونی همینجا صحبت کنی») مستقیم به
+        // موتور مکالمه‌ی رباتی می‌رفت که اصلاً برای state=REJECTED طراحی نشده؛ همان مکانیزمی
+        // که برای HANDOFF_HUMAN استفاده می‌شود (sales-agent.service.ts سطر ۲۳۲) پیام را لاگ
+        // می‌کند تا فروشنده در تب «نیاز به توجه» ببیندش
+        data: { currentState: 'REJECTED', archivedAt: new Date(), isMutedForHuman: true },
       }),
       this.prisma.order.update({
         where: { id: orderId },
