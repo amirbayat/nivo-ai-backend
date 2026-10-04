@@ -4478,8 +4478,9 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
   }
 
   // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۲ — همیشه یک تایید نهایی قبل از
-  // نهایی‌شدن (هم برای آدرس تازه هم آدرس ذخیره‌شده‌ی انتخاب‌شده)؛ اگر شهر پوشش ارسال ندارد،
-  // صادقانه هشدار داده می‌شود ولی فلو مسدود نمی‌شود (فروشنده می‌تواند بعداً دستی هماهنگ کند)
+  // نهایی‌شدن (هم برای آدرس تازه هم آدرس ذخیره‌شده‌ی انتخاب‌شده)؛ اگر استان پوشش ارسال ندارد،
+  // فلو مسدود می‌شود — صادقانه گفته می‌شود و دوباره انتخاب استان خواسته می‌شود، سفارش ثبت نمی‌شود
+  // مگر خریدار استان دیگری انتخاب کند (فیدبک کاربر ۱۴۰۵/۰۷/۱۳)
   private async showAddressConfirm(
     conversation: ConversationWithStore,
     ctx: ConversationContext,
@@ -4491,6 +4492,15 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       province,
     );
 
+    if (!covered) {
+      return this.promptProvinceSelection(
+        conversation,
+        ctx,
+        { ...pending, province: undefined },
+        fa.salesAgent.provinceNotCoveredWarning(province),
+      );
+    }
+
     const nextCtx: ConversationContext = {
       ...ctx,
       addressStep: 'confirm',
@@ -4498,16 +4508,14 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     };
     await this.persistTransition(conversation, 'ADDRESS_COLLECTION', nextCtx);
 
-    const summary =
-      fa.salesAgent.addressFullSummary(
-        pending.recipientName ?? '',
-        pending.recipientPhone ?? '',
-        province,
-        pending.address ?? '',
-        pending.postalCode ?? null,
-        cost,
-      ) +
-      (covered ? '' : `\n${fa.salesAgent.provinceNotCoveredWarning(province)}`);
+    const summary = fa.salesAgent.addressFullSummary(
+      pending.recipientName ?? '',
+      pending.recipientPhone ?? '',
+      province,
+      pending.address ?? '',
+      pending.postalCode ?? null,
+      cost,
+    );
     const uiBlock: UiBlock = {
       type: 'ADDRESS_PROMPT',
       mode: 'CONFIRM',

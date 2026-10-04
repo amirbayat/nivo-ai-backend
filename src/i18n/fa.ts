@@ -382,7 +382,7 @@ export const fa = {
     addressConfirmButton: '✅ بله، درسته',
     addressEditButton: '✏️ از اول وارد کنم',
     provinceNotCoveredWarning: (province: string) =>
-      `⚠️ فعلاً امکان ارسال به استان «${province}» نیست. می‌تونی استان دیگه‌ای انتخاب کنی یا منتظر تماس فروشنده بمونی.`,
+      `⚠️ متاسفانه فروشنده فعلاً به استان «${province}» ارسال نداره. لطفاً یه استان دیگه انتخاب کن:`,
     addressSavePrompt: 'این آدرس رو برای دفعات بعد ذخیره کنم؟',
     addressSaveYesButton: '✅ بله، ذخیره کن',
     addressSaveNoButton: 'فقط همین‌بار',
