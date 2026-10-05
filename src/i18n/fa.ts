@@ -173,6 +173,12 @@ export const fa = {
     productNotesRequired: 'لطفاً چیزی که درباره‌ی این محصول می‌دونی بنویس',
     productCodeTaken:
       'این کد قبلاً برای محصول دیگری در همین فروشگاه استفاده شده',
+    // docs/PRD-category-specific-product-pricing-and-attributes.md بخش ۲/۳
+    goldPricingFieldsRequired:
+      'برای قیمت‌گذاری بر اساس وزن، وزن (گرم) و عیار الزامی است',
+    goldPricingNotConfigured:
+      'برای محاسبه‌ی قیمت باید اول اجرت و درصد سود طلا را در تنظیمات فروشگاه مشخص کنی',
+    goldPriceUnavailable: 'نرخ لحظه‌ای طلا موقتاً در دسترس نیست',
     // docs/PRD-product-display-focus-and-variations.md §۴.۱
     variantOptionNamesDuplicate: 'اسم گزینه‌ها باید با هم فرق داشته باشند',
     variantCombinationInvalid:

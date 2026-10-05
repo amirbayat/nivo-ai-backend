@@ -8,6 +8,7 @@ import { TelegramApiClientModule } from '../telegram/telegram-api-client.module'
 import { SellerBotApiClientModule } from '../seller-bot/seller-bot-api-client.module';
 import { CommentsModule } from '../comments/comments.module';
 import { SmsModule } from '../../sms/sms.module';
+import { MarketPricesModule } from '../market-prices/market-prices.module';
 import { SalesAgentController } from './sales-agent.controller';
 import { SalesAgentService } from './sales-agent.service';
 import { ConversationEngineService } from './conversation-engine.service';
@@ -37,6 +38,9 @@ import { SalesAgentQaController } from './sales-agent-qa.controller';
     CommentsModule,
     // docs/PRD-buyer-phone-otp-registration.md — ارسال کد OTP
     SmsModule,
+    // docs/PRD-category-specific-product-pricing-and-attributes.md بخش ۲.۳ — نرخ لحظه‌ای طلا
+    // برای resolveProductPrices
+    MarketPricesModule,
   ],
   controllers: [SalesAgentController, SalesAgentQaController],
   providers: [

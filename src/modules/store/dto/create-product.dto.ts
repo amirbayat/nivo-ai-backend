@@ -1,12 +1,15 @@
 import {
   IsArray,
   IsBoolean,
+  IsEnum,
   IsInt,
+  IsNumber,
   IsOptional,
   IsString,
   Min,
   MaxLength,
 } from 'class-validator';
+import { PricingModel } from '@prisma/client';
 import { fa } from '../../../i18n/fa';
 import type { ProductSpecItem } from '../product-specs.types';
 
@@ -50,4 +53,21 @@ export class CreateProductDto {
   @IsOptional()
   @IsArray()
   specs?: ProductSpecItem[] | null;
+
+  // docs/PRD-category-specific-product-pricing-and-attributes.md بخش ۲/۳ — وقتی
+  // WEIGHT_BASED_FORMULA باشد basePrice نادیده گرفته می‌شود و weightGrams/purityKarat الزامی
+  // می‌شوند (اعتبارسنجی در store.service.ts، نه اینجا — تا شرطی‌بودن ساده بماند)
+  @IsOptional()
+  @IsEnum(PricingModel)
+  pricingModel?: PricingModel;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0, { message: fa.validation.numberPositive })
+  weightGrams?: number;
+
+  @IsOptional()
+  @IsInt({ message: fa.validation.mustBeNumber })
+  @Min(1, { message: fa.validation.numberPositive })
+  purityKarat?: number;
 }

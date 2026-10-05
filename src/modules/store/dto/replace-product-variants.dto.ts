@@ -3,6 +3,7 @@ import {
   ArrayMinSize,
   IsArray,
   IsInt,
+  IsNumber,
   IsObject,
   IsOptional,
   IsString,
@@ -47,6 +48,18 @@ export class ProductVariantInputDto {
   @IsString()
   @MaxLength(60)
   sku?: string;
+
+  // docs/PRD-category-specific-product-pricing-and-attributes.md بخش ۳.۴ — فقط برای محصول
+  // WEIGHT_BASED_FORMULA معنی دارد؛ خالی = از مقدار سطح محصول استفاده کن
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  weightGrams?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  purityKarat?: number;
 }
 
 export class ReplaceProductVariantsDto {

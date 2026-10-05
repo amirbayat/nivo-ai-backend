@@ -149,6 +149,24 @@ export class StoreController {
     return this.storeService.listProducts(user.sub, id);
   }
 
+  // docs/PRD-category-specific-product-pricing-and-attributes.md بخش ۳.۲ — پیش‌نمایش زنده‌ی
+  // فرم، قبل از ذخیره؛ همان computeDisplayPrice که listPublicProducts مصرف می‌کند، فقط روی
+  // مقادیر فرم (نه یک محصول واقعی) تا فروشنده حین تایپ ببیند قیمت نهایی چقدر می‌شود
+  @Get(':id/gold-price-preview')
+  getGoldPricePreview(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Query('weightGrams') weightGrams: string,
+    @Query('purityKarat') purityKarat: string,
+  ) {
+    return this.storeService.previewGoldPrice(
+      user.sub,
+      id,
+      Number(weightGrams),
+      Number(purityKarat),
+    );
+  }
+
   @Patch(':id/products/:productId')
   updateProduct(
     @CurrentUser() user: JwtPayload,

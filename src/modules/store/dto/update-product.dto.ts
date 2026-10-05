@@ -3,12 +3,13 @@ import {
   IsBoolean,
   IsEnum,
   IsInt,
+  IsNumber,
   IsOptional,
   IsString,
   Min,
   MaxLength,
 } from 'class-validator';
-import { ContentChangeSource } from '@prisma/client';
+import { ContentChangeSource, PricingModel } from '@prisma/client';
 import { fa } from '../../../i18n/fa';
 import type { ProductSpecItem } from '../product-specs.types';
 
@@ -65,4 +66,21 @@ export class UpdateProductDto {
   @IsOptional()
   @IsEnum(ContentChangeSource)
   source?: ContentChangeSource;
+
+  // docs/PRD-category-specific-product-pricing-and-attributes.md بخش ۲/۳ — همان قاعده‌ی
+  // CreateProductDto؛ اعتبارسنجی شرطی (الزامی‌بودن weight/purity وقتی WEIGHT_BASED_FORMULA)
+  // در store.service.ts انجام می‌شود
+  @IsOptional()
+  @IsEnum(PricingModel)
+  pricingModel?: PricingModel;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0, { message: fa.validation.numberPositive })
+  weightGrams?: number;
+
+  @IsOptional()
+  @IsInt({ message: fa.validation.mustBeNumber })
+  @Min(1, { message: fa.validation.numberPositive })
+  purityKarat?: number;
 }

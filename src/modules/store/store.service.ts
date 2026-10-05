@@ -32,6 +32,12 @@ import {
 import { clampProductSpecs } from './product-specs.types';
 import { ContentChangeLogService } from './content-change-log.service';
 import { getSalesAgentGlobalConfig } from '../sales-agent/sales-agent-global-config.util';
+import { MarketPricesService } from '../market-prices/market-prices.service';
+import {
+  computeDisplayPrice,
+  GoldPriceUnavailableError,
+  GoldPricingNotConfiguredError,
+} from './product-pricing.util';
 
 // docs/PRD-product-strategy-and-roadmap.md بخش ۳.۱ — چک‌لیست سطح فروشگاه
 const MIN_STORE_KB_ENTRIES = 3;
@@ -84,6 +90,7 @@ export class StoreService {
     private readonly telegramApi: TelegramApiClientService,
     private readonly mediaTranscode: MediaTranscodeService,
     private readonly changeLog: ContentChangeLogService,
+    private readonly marketPrices: MarketPricesService,
   ) {}
 
   list(sellerId: string) {
@@ -178,6 +185,11 @@ export class StoreService {
   ) {
     await this.getOwned(sellerId, storeId);
     if (dto.code) await this.assertProductCodeAvailable(storeId, dto.code);
+    this.assertGoldPricingFieldsValid(
+      dto.pricingModel,
+      dto.weightGrams,
+      dto.purityKarat,
+    );
     // عیناً الگوی updateProduct پایین‌تر — specs یک فیلد Prisma.Json است، null خام قابل‌پاس
     // به create نیست (باید Prisma.DbNull باشد)
     const { specs: rawSpecs, ...rest } = dto;
@@ -185,6 +197,57 @@ export class StoreService {
     return this.prisma.product.create({
       data: { ...rest, specs, storeId },
     });
+  }
+
+  // docs/PRD-category-specific-product-pricing-and-attributes.md بخش ۳.۲ — پیش‌نمایش زنده‌ی
+  // فرم (نه یک محصول واقعی DB)؛ همان computeDisplayPrice، فقط روی basePrice=0 موقت
+  async previewGoldPrice(
+    sellerId: string,
+    storeId: string,
+    weightGrams: number,
+    purityKarat: number,
+  ): Promise<{ price: number | null; error: string | null }> {
+    const store = await this.getOwned(sellerId, storeId);
+    if (!weightGrams || !purityKarat) {
+      return { price: null, error: null };
+    }
+    try {
+      const goldItems = (await this.marketPrices.getGoldPrices()).items;
+      const price = computeDisplayPrice(
+        {
+          pricingModel: 'WEIGHT_BASED_FORMULA',
+          basePrice: 0,
+          weightGrams,
+          purityKarat,
+        },
+        null,
+        store,
+        goldItems,
+      );
+      return { price, error: null };
+    } catch (err) {
+      if (err instanceof GoldPricingNotConfiguredError) {
+        return { price: null, error: fa.store.goldPricingNotConfigured };
+      }
+      if (err instanceof GoldPriceUnavailableError) {
+        return { price: null, error: fa.store.goldPriceUnavailable };
+      }
+      throw err;
+    }
+  }
+
+  // docs/PRD-category-specific-product-pricing-and-attributes.md بخش ۲/۳ — وقتی
+  // pricingModel=WEIGHT_BASED_FORMULA انتخاب شده، وزن و عیار باید صریح ست شده باشند؛ نمی‌شود
+  // این را در DTO با decorator ساده بیان کرد چون شرطی به یک فیلد دیگر است
+  private assertGoldPricingFieldsValid(
+    pricingModel: CreateProductDto['pricingModel'],
+    weightGrams: number | undefined,
+    purityKarat: number | undefined,
+  ): void {
+    if (pricingModel !== 'WEIGHT_BASED_FORMULA') return;
+    if (!weightGrams || !purityKarat) {
+      throw new BadRequestException(fa.store.goldPricingFieldsRequired);
+    }
   }
 
   // docs/PRD-telegram-bot-channel.md بخش ۹.۳ — کد کوتاه یکتا فقط در سطح فروشگاه
@@ -275,12 +338,62 @@ export class StoreService {
           images: true,
           videos: true,
           description: true,
+          pricingModel: true,
+          weightGrams: true,
+          purityKarat: true,
         },
       }),
       this.prisma.product.count({ where }),
     ]);
+
+    // docs/PRD-category-specific-product-pricing-and-attributes.md بخش ۲.۳/۴.۱ — قیمت محصولات
+    // WEIGHT_BASED_FORMULA هیچ‌وقت از basePrice خوانده نمی‌شود، همیشه at-request-time محاسبه
+    // می‌شود. فقط اگر حداقل یک محصول این مدل را دارد نرخ طلا را می‌گیریم (fetch رایگان است،
+    // از کش Redis می‌آید، ولی بی‌دلیل برای فروشگاه‌های بدون محصول طلا صدا زده نشود)
+    const hasGoldProducts = items.some(
+      (p) => p.pricingModel === 'WEIGHT_BASED_FORMULA',
+    );
+    const goldItems = hasGoldProducts
+      ? (await this.marketPrices.getGoldPrices()).items
+      : [];
+
     return {
-      items: items.map((p) => ({ ...p, videos: parseProductVideos(p.videos) })),
+      items: items.map((p) => {
+        const { pricingModel, weightGrams, purityKarat, ...publicFields } = p;
+        let displayPrice = p.basePrice;
+        let priceUnavailable = false;
+        if (pricingModel === 'WEIGHT_BASED_FORMULA') {
+          try {
+            displayPrice = computeDisplayPrice(
+              {
+                pricingModel,
+                basePrice: p.basePrice,
+                weightGrams,
+                purityKarat,
+              },
+              null,
+              store,
+              goldItems,
+            );
+          } catch (err) {
+            if (
+              err instanceof GoldPriceUnavailableError ||
+              err instanceof GoldPricingNotConfiguredError
+            ) {
+              priceUnavailable = true;
+            } else throw err;
+          }
+        }
+        return {
+          ...publicFields,
+          videos: parseProductVideos(p.videos),
+          isWeightBasedPricing: pricingModel === 'WEIGHT_BASED_FORMULA',
+          weightGrams,
+          purityKarat,
+          basePrice: displayPrice,
+          priceUnavailable,
+        };
+      }),
       total,
       page: opts.page,
       pageSize: opts.pageSize,
@@ -368,6 +481,11 @@ export class StoreService {
     const before = await this.getOwnedProduct(sellerId, storeId, productId);
     if (dto.code)
       await this.assertProductCodeAvailable(storeId, dto.code, productId);
+    this.assertGoldPricingFieldsValid(
+      dto.pricingModel ?? before.pricingModel,
+      dto.weightGrams ?? before.weightGrams ?? undefined,
+      dto.purityKarat ?? before.purityKarat ?? undefined,
+    );
     const { specs: rawSpecs, source, ...rest } = dto;
     const specs =
       rawSpecs !== undefined
@@ -477,6 +595,8 @@ export class StoreService {
             stock: v.stock,
             priceOverride: v.priceOverride ?? null,
             sku: v.sku ?? null,
+            weightGrams: v.weightGrams ?? null,
+            purityKarat: v.purityKarat ?? null,
           },
         }),
       ),

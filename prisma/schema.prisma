@@ -2134,6 +2134,14 @@ model Store {
   // به آدرس ندارد؛ وقتی false باشد، ADDRESS_COLLECTION کلاً رد می‌شود (doCreateOrder همان
   // فلوی قدیمی مستقیم به AWAITING_PAYMENT را طی می‌کند)
   requiresShipping              Boolean           @default(true)
+  // docs/PRD-category-specific-product-pricing-and-attributes.md بخش ۲.۲/۳.۳ — اجرت/سود/مالیات
+  // برای محصولات با pricingModel=WEIGHT_BASED_FORMULA؛ یک‌بار در سطح فروشگاه تنظیم می‌شود،
+  // نه به‌ازای هر محصول. goldVatPercent پیش‌فرض ۱۰ (نرخ مالیات طلای ۱۴۰۴)، چون قانون مالیاتی
+  // سالانه تغییر می‌کند و نباید در کد هاردکد شود.
+  goldWageType                  GoldWageType?
+  goldWageValue                 Float?
+  goldProfitPercent             Float?
+  goldVatPercent                Float             @default(10)
   createdAt                     DateTime          @default(now())
   updatedAt                     DateTime          @updatedAt
 
@@ -2169,6 +2177,19 @@ enum StoreStatus {
 enum StoreBusinessType {
   PRODUCT_SALES
   APPOINTMENT_BOOKING
+}
+
+// docs/PRD-category-specific-product-pricing-and-attributes.md بخش ۲.۲ — نحوه‌ی محاسبه‌ی
+// قیمت واحد کالا، مستقل از category/businessType (یک محصول طلا هنوز PRODUCT_SALES است،
+// فقط basePrice آن نادیده گرفته می‌شود و قیمت at-request-time از فرمول محاسبه می‌شود)
+enum PricingModel {
+  FIXED
+  WEIGHT_BASED_FORMULA
+}
+
+enum GoldWageType {
+  PERCENT
+  FIXED_PER_GRAM
 }
 
 // docs/PRD-seller-multi-bank-card-rotation.md — فروشنده‌ی خرد با یک کارت خیلی زود به سقف
@@ -2235,6 +2256,13 @@ model Product {
   // مستقل از Store.persuasionTechniquesEnabled (effective = AND هر دو) تا فروشنده بتواند
   // فقط یک محصول خاص (مثلاً حساس/قانونی) را از لحن ترغیبی مستثنا کند
   persuasionTechniquesEnabled Boolean  @default(true)
+  // docs/PRD-category-specific-product-pricing-and-attributes.md بخش ۲.۲ — فقط وقتی
+  // pricingModel=WEIGHT_BASED_FORMULA معنی دارد؛ basePrice در آن حالت نادیده گرفته می‌شود و
+  // قیمت at-request-time از فرمول (وزن × نرخ لحظه‌ای طلا بر اساس عیار + اجرت + سود + مالیات)
+  // محاسبه می‌شود، هرگز در DB ذخیره نمی‌شود — همان الزام «قیمت همیشه به‌روز»
+  pricingModel                PricingModel @default(FIXED)
+  weightGrams                 Float?
+  purityKarat                 Int?
   createdAt                   DateTime @default(now())
   // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۹ (غنی‌سازی دوره‌ای) — قبلاً
   // Product هیچ timestamp آپدیتی نداشت، پس تشخیص «این محصول مدت‌هاست دست‌نخورده مانده»
@@ -2317,9 +2345,14 @@ model ProductVariant {
   productId     String
   product       Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
   optionValues  Json
-  priceOverride Int? // null = از basePrice محصول استفاده می‌شود
+  priceOverride Int? // null = از basePrice محصول استفاده می‌شود (فقط برای pricingModel=FIXED)
   stock         Int      @default(0)
   sku           String?
+  // docs/PRD-category-specific-product-pricing-and-attributes.md بخش ۲.۲/۳.۴ — override
+  // اختیاری برای محصول WEIGHT_BASED_FORMULA که در چند وزن/عیار موجود است (مثلاً گردنبند در
+  // ۲/۳/۵ گرم)؛ null = از مقدار سطح محصول (Product.weightGrams/purityKarat) استفاده کن
+  weightGrams   Float?
+  purityKarat   Int?
 
   @@unique([productId, optionValues])
   @@index([productId])

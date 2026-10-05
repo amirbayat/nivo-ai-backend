@@ -1,12 +1,15 @@
 import {
   IsBoolean,
   IsEnum,
+  IsNumber,
   IsOptional,
   IsString,
   Matches,
+  Max,
+  Min,
   MaxLength,
 } from 'class-validator';
-import { ContentChangeSource } from '@prisma/client';
+import { ContentChangeSource, GoldWageType } from '@prisma/client';
 import { fa } from '../../../i18n/fa';
 
 // docs/PRD-product-strategy-and-roadmap.md بخش ۳.۲ — فیلدهای ساختاریافته‌ی سطح فروشگاه،
@@ -75,4 +78,27 @@ export class UpdateStoreDto {
   @IsOptional()
   @IsEnum(ContentChangeSource)
   source?: ContentChangeSource;
+
+  // docs/PRD-category-specific-product-pricing-and-attributes.md بخش ۳.۳ — اجرت/سود/مالیات
+  // طلا، یک‌بار برای کل فروشگاه (نه به‌ازای هر محصول)
+  @IsOptional()
+  @IsEnum(GoldWageType)
+  goldWageType?: GoldWageType;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  goldWageValue?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  goldProfitPercent?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  goldVatPercent?: number;
 }

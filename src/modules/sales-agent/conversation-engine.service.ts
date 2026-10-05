@@ -18,6 +18,12 @@ import { IRAN_PROVINCES } from '../../common/constants/iran-provinces';
 import { toEnglishDigits } from '../../common/utils/normalize-digits';
 import { StoreKbService } from '../store/store-kb.service';
 import { CardSelectorService } from '../store/card-selector.service';
+import { MarketPricesService } from '../market-prices/market-prices.service';
+import {
+  computeDisplayPrice,
+  GoldPriceUnavailableError,
+  GoldPricingNotConfiguredError,
+} from '../store/product-pricing.util';
 import {
   parseProductVideos,
   type ProductVideoItem,
@@ -74,6 +80,13 @@ type ProductLike = {
   name: string;
   basePrice: number;
   stock: number;
+  // docs/PRD-category-specific-product-pricing-and-attributes.md بخش ۲.۳ — basePrice برای
+  // WEIGHT_BASED_FORMULA نادیده گرفته می‌شود؛ resolveProductPrices قبل از هر مصرف این را
+  // با قیمت محاسبه‌شده‌ی لحظه‌ای overwrite می‌کند. اختیاری چون بعضی select های محدود
+  // (مثل tryAnswerFromProductDescriptions) این فیلدها را اصلاً نمی‌خوانند و نیازی هم ندارند
+  pricingModel?: 'FIXED' | 'WEIGHT_BASED_FORMULA';
+  weightGrams?: number | null;
+  purityKarat?: number | null;
   images: string[];
   description?: string | null;
   // docs/PRD-product-video.md بخش ۴ — ستون Json خام (Prisma.JsonValue)، با parseProductVideos می‌خوانیم
@@ -109,6 +122,9 @@ type ProductVariantRow = {
   optionValues: unknown;
   priceOverride: number | null;
   stock: number;
+  // docs/PRD-category-specific-product-pricing-and-attributes.md بخش ۳.۴
+  weightGrams?: number | null;
+  purityKarat?: number | null;
 };
 
 // محصول با گزینه فعال است یعنی حداقل یک ProductOptionType دارد — خودِ وجود واریانت‌ها هم
@@ -288,9 +304,88 @@ export class ConversationEngineService {
     private readonly storage: StorageService,
     private readonly sellerBotApi: SellerBotApiClientService,
     private readonly comments: CommentsService,
+    private readonly marketPrices: MarketPricesService,
     @InjectQueue('sales-agent-voice')
     private readonly voiceQueue: Queue<SalesAgentVoiceJobData>,
   ) {}
+
+  // docs/PRD-category-specific-product-pricing-and-attributes.md بخش ۲.۳ — نقطه‌ی مرکزی حل
+  // قیمت طلا برای هر مسیری که محصول از DB می‌خواند (جست‌وجو، سبد، تک‌محصول، مقایسه، ابزارهای
+  // FULL_AGENT). no-op کامل برای محصولات FIXED (اکثریت قریب‌به‌اتفاق) — فقط اگر حداقل یک
+  // محصول WEIGHT_BASED_FORMULA باشد یک کوئری اضافه (تنظیمات اجرت/سود فروشگاه) و یک خواندن
+  // کش Redis (نرخ طلا) انجام می‌شود. basePrice/priceOverride را in-place overwrite می‌کند
+  // تا هر جای فراخوان‌کننده که از قبل `.basePrice`/`variant.priceOverride` می‌خواند بدون
+  // تغییر دیگری درست کار کند.
+  private async resolveProductPrices<
+    T extends ProductLike & { variants?: ProductVariantRow[] },
+  >(storeId: string, products: T[]): Promise<void> {
+    const goldProducts = products.filter(
+      (p) => p.pricingModel === 'WEIGHT_BASED_FORMULA',
+    );
+    if (goldProducts.length === 0) return;
+
+    const [store, goldPrices] = await Promise.all([
+      this.prisma.store.findUnique({
+        where: { id: storeId },
+        select: {
+          goldWageType: true,
+          goldWageValue: true,
+          goldProfitPercent: true,
+          goldVatPercent: true,
+        },
+      }),
+      this.marketPrices.getGoldPrices(),
+    ]);
+    if (!store) return;
+    const goldItems = goldPrices.items;
+
+    for (const product of goldProducts) {
+      try {
+        product.basePrice = computeDisplayPrice(
+          {
+            pricingModel: product.pricingModel!,
+            basePrice: product.basePrice,
+            weightGrams: product.weightGrams ?? null,
+            purityKarat: product.purityKarat ?? null,
+          },
+          null,
+          store,
+          goldItems,
+        );
+        for (const v of product.variants ?? []) {
+          v.priceOverride = computeDisplayPrice(
+            {
+              pricingModel: product.pricingModel!,
+              basePrice: product.basePrice,
+              weightGrams: product.weightGrams ?? null,
+              purityKarat: product.purityKarat ?? null,
+            },
+            {
+              priceOverride: v.priceOverride,
+              weightGrams: v.weightGrams ?? null,
+              purityKarat: v.purityKarat ?? null,
+            },
+            store,
+            goldItems,
+          );
+        }
+      } catch (err) {
+        // محصول طلا ولی تنظیمات فروشگاه ناقص/نرخ لحظه‌ای در دسترس نیست — basePrice همان
+        // مقدار قدیمی/۰ ذخیره‌شده می‌ماند (مثل همیشه)؛ این حالت فقط لاگ می‌شود، نه کرش، چون
+        // یک پیام چت زنده با خریدار واقعی هرگز نباید به‌خاطر این متوقف شود
+        const reason =
+          err instanceof GoldPricingNotConfiguredError ||
+          err instanceof GoldPriceUnavailableError
+            ? err.message
+            : err instanceof Error
+              ? err.message
+              : String(err);
+        this.logger.warn(
+          `gold price resolution failed for product ${product.id}: ${reason}`,
+        );
+      }
+    }
+  }
 
   private getContext(conversation: ConversationWithStore): ConversationContext {
     const raw =
@@ -1048,9 +1143,12 @@ export class ConversationEngineService {
         where: { storeId, code: { equals: query, mode: 'insensitive' } },
         include: PRODUCT_VARIANT_INCLUDE,
       });
-      if (exact) return [exact];
+      if (exact) {
+        await this.resolveProductPrices(storeId, [exact]);
+        return [exact];
+      }
     }
-    return this.prisma.product.findMany({
+    const results = await this.prisma.product.findMany({
       where: {
         storeId,
         ...(query ? { name: { contains: query, mode: 'insensitive' } } : {}),
@@ -1059,6 +1157,8 @@ export class ConversationEngineService {
       take: 5,
       include: PRODUCT_VARIANT_INCLUDE,
     });
+    await this.resolveProductPrices(storeId, results);
+    return results;
   }
 
   // docs/PRD-sales-agent-consultative-recommendation.md بخش ۳.۲ — فقط برای ابزار search_products
@@ -1069,7 +1169,10 @@ export class ConversationEngineService {
     const exact = await this.prisma.product.findFirst({
       where: { storeId, code: { equals: query, mode: 'insensitive' } },
     });
-    if (exact) return [exact];
+    if (exact) {
+      await this.resolveProductPrices(storeId, [exact]);
+      return [exact];
+    }
 
     const literalMatches = await this.prisma.product.findMany({
       where: {
@@ -1082,7 +1185,10 @@ export class ConversationEngineService {
       orderBy: { createdAt: 'desc' },
       take: 8,
     });
-    if (literalMatches.length > 0) return literalMatches;
+    if (literalMatches.length > 0) {
+      await this.resolveProductPrices(storeId, literalMatches);
+      return literalMatches;
+    }
 
     // هیچ تطابق تحت‌اللفظی‌ای نبود — احتمالاً پیام نیازمحور است، نه اسم محصول (مثل «پیجم رشد
     // نمی‌کنه»). کل کاتالوگ را تا سقف ثابت برگردان تا خودِ مدل با توضیحات واقعی هر محصول
@@ -1100,11 +1206,13 @@ export class ConversationEngineService {
           `products (cap ${CONSULTATION_FULL_CATALOG_FALLBACK_CAP}), query="${query}"`,
       );
     }
-    return this.prisma.product.findMany({
+    const fallback = await this.prisma.product.findMany({
       where: { storeId },
       orderBy: { createdAt: 'desc' },
       take: CONSULTATION_FULL_CATALOG_FALLBACK_CAP,
     });
+    await this.resolveProductPrices(storeId, fallback);
+    return fallback;
   }
 
   // docs/PRD-sales-agent-tool-calling-architecture.md بخش ۳.۲ — فیکس باگ واقعی کاربر (پیام
@@ -1169,6 +1277,7 @@ export class ConversationEngineService {
         if (!product || product.storeId !== storeId) {
           return { error: 'محصولی با این شناسه در این فروشگاه پیدا نشد' };
         }
+        await this.resolveProductPrices(storeId, [product]);
         return {
           id: product.id,
           name: product.name,
@@ -1734,6 +1843,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         if (!product || product.storeId !== storeId) {
           return { error: 'محصولی با این شناسه در این فروشگاه پیدا نشد' };
         }
+        await this.resolveProductPrices(storeId, [product]);
         seenProducts.set(product.id, {
           id: product.id,
           name: product.name,
@@ -1786,6 +1896,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         if (!product || product.storeId !== storeId) {
           return { error: 'محصولی با این شناسه در این فروشگاه پیدا نشد' };
         }
+        await this.resolveProductPrices(storeId, [product]);
         // docs/PRD-product-display-focus-and-variations.md §۴.۴ — مسیر FULL_AGENT فعلاً فعال
         // نیست (pickResponseStrategy همیشه RULE_BASED برمی‌گرداند)؛ فاز ۱ واریانت را به این
         // ابزار گسترش نمی‌دهد، اگر/وقتی فعال شد باید جداگانه اضافه شود
@@ -1979,6 +2090,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         const products = await this.prisma.product.findMany({
           where: { id: { in: productIds }, storeId },
         });
+        await this.resolveProductPrices(storeId, products);
         for (const p of products) {
           seenProducts.set(p.id, {
             id: p.id,
@@ -3016,6 +3128,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         });
         return this.doClarify(conversation, fa.salesAgent.productNotFound);
       }
+      await this.resolveProductPrices(conversation.storeId, [product]);
       await this.prisma.conversationEvent.create({
         data: {
           conversationId: conversation.id,
@@ -3255,6 +3368,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           where: { id: item.productId },
         });
         if (!product || product.storeId !== conversation.storeId) continue;
+        await this.resolveProductPrices(conversation.storeId, [product]);
         // docs/PRD-product-display-focus-and-variations.md §۴.۴ — فاز ۱ عمداً دوباره‌سفارش را
         // به سطح واریانت گسترش نمی‌دهد؛ اگر محصول گزینه دارد، همان نسخه‌ی ساده (بدون واریانت
         // خاص) دوباره اضافه می‌شود — مشتری در صورت نیاز از نو گزینه را انتخاب می‌کند
@@ -3384,6 +3498,11 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     if (this.billingBlocked(conversation)) {
       return this.transitionToHandoff(conversation, 'BILLING_BLOCKED');
     }
+
+    // docs/PRD-category-specific-product-pricing-and-attributes.md بخش ۲.۳ — در همین‌جا حل
+    // می‌شود، نه در هر جای فراخوان‌کننده، چون uiBlock و facts پایین هر دو از همین یک product
+    // می‌خوانند (no-op برای محصولات غیرطلا)
+    await this.resolveProductPrices(conversation.storeId, [product]);
 
     const uiBlock: UiBlock = {
       type: 'PRODUCT_CARD',
@@ -3681,6 +3800,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     if (!product || product.storeId !== conversation.storeId) {
       return this.doClarify(conversation, fa.salesAgent.productNotFound);
     }
+    await this.resolveProductPrices(conversation.storeId, [product]);
 
     // docs/PRD-product-display-focus-and-variations.md §۴.۲ — فاز ۱: پیام آزاد اول («فلان رو
     // می‌خوام») هر نیت واریانتی را که همان پیام حمل کرده باشد نادیده می‌گیرد و همیشه با چیپ
@@ -3955,6 +4075,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       });
       return this.doClarify(conversation, fa.salesAgent.productNotFound);
     }
+    await this.resolveProductPrices(conversation.storeId, [product]);
 
     if (pending.mode === 'ALTERNATIVES') {
       const alternatives = product.variants.filter((v) => v.stock > 0);
@@ -4022,6 +4143,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       });
       return this.doClarify(conversation, fa.salesAgent.productNotFound);
     }
+    await this.resolveProductPrices(conversation.storeId, [product]);
 
     if (pending.mode === 'ALTERNATIVES') {
       const variant = product.variants.find(

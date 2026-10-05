@@ -6,6 +6,7 @@ import { TelegramApiClientModule } from '../telegram/telegram-api-client.module'
 import { CommentsModule } from '../comments/comments.module';
 import { AsrModule } from '../../common/services/asr.module';
 import { MediaTranscodeModule } from '../../common/services/media-transcode.module';
+import { MarketPricesModule } from '../market-prices/market-prices.module';
 import { StoreController } from './store.controller';
 import { StoreService } from './store.service';
 import { StoreKbService } from './store-kb.service';
@@ -38,6 +39,7 @@ import { ContentChangeLogService } from './content-change-log.service';
     // فیدبک کاربر ۱۴۰۵/۰۷/۰۱ — میکروفون/تبدیل صدا به متن فروشنده روی فرم محصول
     AsrModule,
     MediaTranscodeModule,
+    MarketPricesModule,
   ],
   controllers: [StoreController],
   providers: [
