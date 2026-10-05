@@ -159,6 +159,11 @@ export const fa = {
     // docs/PRD-seller-knowledge-base.md بخش ۹.۲ (دوم، مورد ۵)
     insufficientCreditForPhotoEnrichment:
       'اعتبار فروشگاه برای تکمیل از روی عکس کافی نیست — از بخش «اعتبار هوش مصنوعی» شارژ کن',
+    // docs/PRD-seller-guide-assistant-modal.md بخش ۱.۲
+    insufficientCreditForNotesAnalysis:
+      'اعتبار فروشگاه برای تحلیل یادداشت کافی نیست — از بخش «اعتبار هوش مصنوعی» شارژ کن',
+    notesAnalysisTextRequired:
+      'یا متنی برای ثبت بفرست یا قبلاً یادداشتی داشته باش تا بتوان دوباره تحلیلش کرد',
     // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۹ (رصد رقبا)
     brandIntroTextRequired: 'لطفاً چند جمله درباره‌ی برند/فروشگاهت بنویس',
     // docs/PRD-ai-assisted-business-setup.md — تشخیص نوع کسب‌وکار/دسته‌بندی از روی توضیح آزاد

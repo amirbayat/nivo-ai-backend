@@ -30,6 +30,7 @@ import {
   type ProductVideoItem,
 } from './product-video.types';
 import { clampProductSpecs } from './product-specs.types';
+import { ContentChangeLogService } from './content-change-log.service';
 
 // docs/PRD-product-strategy-and-roadmap.md بخش ۳.۱ — چک‌لیست سطح فروشگاه
 const MIN_STORE_KB_ENTRIES = 3;
@@ -81,6 +82,7 @@ export class StoreService {
     private readonly storage: StorageService,
     private readonly telegramApi: TelegramApiClientService,
     private readonly mediaTranscode: MediaTranscodeService,
+    private readonly changeLog: ContentChangeLogService,
   ) {}
 
   list(sellerId: string) {
@@ -106,8 +108,36 @@ export class StoreService {
   // docs/PRD-product-strategy-and-roadmap.md بخش ۳.۲ — فیلدهای ساختاریافته (ارسال/مرجوعی/
   // معرفی برند/ساعت پاسخ‌گویی)؛ برخلاف create، این‌ها بعد از ثبت‌نام هم قابل ویرایش‌اند
   async update(sellerId: string, storeId: string, dto: UpdateStoreDto) {
-    await this.getOwned(sellerId, storeId);
-    return this.prisma.store.update({ where: { id: storeId }, data: dto });
+    const before = await this.getOwned(sellerId, storeId);
+    const { source, ...data } = dto;
+    const updated = await this.prisma.store.update({
+      where: { id: storeId },
+      data,
+    });
+    // docs/PRD-seller-guide-assistant-modal.md بخش ۱.۳ — فقط فیلدهای متنی/توصیفی تراکینگ می‌شوند
+    await this.changeLog.logMany(
+      (
+        [
+          'category',
+          'brandIntro',
+          'shippingInfo',
+          'returnPolicy',
+          'ownerNotes',
+        ] as const
+      )
+        .filter((f) => data[f] !== undefined && data[f] !== before[f])
+        .map((f) => ({
+          storeId,
+          sellerId,
+          entityType: 'STORE' as const,
+          entityId: null,
+          fieldName: f,
+          oldValue: before[f] ?? null,
+          newValue: (data[f] as string) ?? null,
+          source,
+        })),
+    );
+    return updated;
   }
 
   // مالکیت را چک می‌کند (۴۰۴/۴۰۳ مناسب پرتاب می‌کند) — الگوی ProjectsService.get
@@ -273,7 +303,8 @@ export class StoreService {
             ...p,
             hasVariants: p.optionTypes.length > 0,
             hasZeroStockVariants:
-              p.optionTypes.length > 0 && p.variants.every((v) => v.stock === 0),
+              p.optionTypes.length > 0 &&
+              p.variants.every((v) => v.stock === 0),
           },
           kbCountByProduct.get(p.id) ?? 0,
         ).percent,
@@ -314,18 +345,53 @@ export class StoreService {
     productId: string,
     dto: UpdateProductDto,
   ) {
-    await this.getOwnedProduct(sellerId, storeId, productId);
+    const before = await this.getOwnedProduct(sellerId, storeId, productId);
     if (dto.code)
       await this.assertProductCodeAvailable(storeId, dto.code, productId);
-    const { specs: rawSpecs, ...rest } = dto;
+    const { specs: rawSpecs, source, ...rest } = dto;
     const specs =
       rawSpecs !== undefined
         ? (clampProductSpecs(rawSpecs ?? undefined) ?? Prisma.DbNull)
         : undefined;
-    return this.prisma.product.update({
+    const updated = await this.prisma.product.update({
       where: { id: productId },
       data: { ...rest, ...(specs !== undefined ? { specs } : {}) },
     });
+    // docs/PRD-seller-guide-assistant-modal.md بخش ۱.۳
+    const textFieldChanges = (['name', 'description', 'ownerNotes'] as const)
+      .filter((f) => rest[f] !== undefined && rest[f] !== before[f])
+      .map((f) => ({
+        storeId,
+        sellerId,
+        entityType: 'PRODUCT' as const,
+        entityId: productId,
+        fieldName: f,
+        oldValue: before[f] ?? null,
+        newValue: (rest[f] as string) ?? null,
+        source,
+      }));
+    const specsChanged =
+      specs !== undefined &&
+      JSON.stringify(before.specs ?? null) !==
+        JSON.stringify(updated.specs ?? null);
+    await this.changeLog.logMany([
+      ...textFieldChanges,
+      ...(specsChanged
+        ? [
+            {
+              storeId,
+              sellerId,
+              entityType: 'PRODUCT' as const,
+              entityId: productId,
+              fieldName: 'specs',
+              oldValue: before.specs ? JSON.stringify(before.specs) : null,
+              newValue: updated.specs ? JSON.stringify(updated.specs) : null,
+              source,
+            },
+          ]
+        : []),
+    ]);
+    return updated;
   }
 
   // docs/PRD-product-display-focus-and-variations.md §۴.۱ — همیشه جایگزین کامل (نه patch
@@ -813,7 +879,7 @@ export class StoreService {
       });
       return tx.order.update({
         where: { id: orderId },
-        data: { status: 'APPROVED' },
+        data: { status: 'APPROVED', approvedAt: new Date() },
       });
     });
     await this.requestReviewFollowUp(order);
@@ -892,11 +958,19 @@ export class StoreService {
         // موتور مکالمه‌ی رباتی می‌رفت که اصلاً برای state=REJECTED طراحی نشده؛ همان مکانیزمی
         // که برای HANDOFF_HUMAN استفاده می‌شود (sales-agent.service.ts سطر ۲۳۲) پیام را لاگ
         // می‌کند تا فروشنده در تب «نیاز به توجه» ببیندش
-        data: { currentState: 'REJECTED', archivedAt: new Date(), isMutedForHuman: true },
+        data: {
+          currentState: 'REJECTED',
+          archivedAt: new Date(),
+          isMutedForHuman: true,
+        },
       }),
       this.prisma.order.update({
         where: { id: orderId },
-        data: { status: 'REJECTED', rejectReason: reason },
+        data: {
+          status: 'REJECTED',
+          rejectReason: reason,
+          rejectedAt: new Date(),
+        },
       }),
     ]);
     await this.notifyBuyerOfRejection(order, reason);

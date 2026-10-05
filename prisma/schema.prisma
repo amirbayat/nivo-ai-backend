@@ -2109,6 +2109,10 @@ model Store {
   returnPolicy                  String?           @db.Text
   // معرفی کوتاه برند (۱-۲ جمله) — برای سؤالات عمومی نامرتبط با یک محصول خاص
   brandIntro                    String?           @db.Text
+  // docs/PRD-seller-guide-assistant-modal.md بخش ۱.۲ — متن خام فروشنده (از راهنمای پرامپت
+  // ChatGPT یا تایپ دستی)، append-only و هرگز خلاصه/overwrite نمی‌شود؛ منبع تحلیل خودکار
+  // برای پیشنهاد brandIntro/shippingInfo/returnPolicy/category/باکس‌دانش
+  ownerNotes                    String?           @db.Text
   // ساعت پاسخ‌گویی به قالب "HH:mm" — وقتی هر دو خالی باشند یعنی محدودیتی نیست (۲۴ساعته)؛
   // در transitionToHandoff برای انتخاب پیام «الان»/«فردا» استفاده می‌شود
   workingHoursStart             String?
@@ -2149,6 +2153,9 @@ model Store {
   // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۲ — هزینه/پوشش ارسال به تفکیک
   // شهر؛ city=null یعنی ردیف پیش‌فرض «سایر شهرها»
   shippingRules     StoreShippingRule[]
+  // docs/PRD-seller-guide-assistant-modal.md بخش ۱.۳ — لاگ تغییرات محتوا (چه فیلدی، کی،
+  // چی‌به‌چی، دستی یا از پیشنهاد AI)
+  contentChangeLogs ContentChangeLog[]
 
   @@index([sellerId])
   @@map("stores")
@@ -2216,6 +2223,10 @@ model Product {
   // ساختاریافته‌ای در DB نبود. nullable (نه آرایه‌ی پیش‌فرض خالی) چون اکثر محصولات قدیمی اصلاً
   // specs ندارند و تمایز «هنوز enrich نشده» با «enrich شده ولی specs نداشت» مهم است
   specs                       Json?
+  // docs/PRD-seller-guide-assistant-modal.md بخش ۱.۲ — متن خام فروشنده درباره‌ی این محصول
+  // (توضیح/تنوع/هرچیز دیگر از راهنمای پرامپت ChatGPT یا تایپ دستی)، append-only، هرگز
+  // خلاصه/overwrite نمی‌شود؛ منبع تحلیل خودکار برای پیشنهاد description/specs/باکس‌دانش
+  ownerNotes                  String?  @db.Text
   // docs/PRD-telegram-bot-channel.md بخش ۹.۳ — کد کوتاه اختیاری که فروشنده روی محتوای
   // تبلیغاتی‌اش می‌گذارد؛ خریدار به‌جای اسم محصول می‌تواند کد را بگوید (searchProducts اول
   // یک exact match روی این را امتحان می‌کند). یکتا فقط در سطح فروشگاه، نه سراسری.
@@ -2652,6 +2663,42 @@ enum CreditUsageKind {
   PRODUCT_ENRICHMENT
   // docs/PRD-seller-advertising-placements.md — خرید جایگاه تبلیغاتی از همان کیف‌پول فروشگاهی
   AD_PLACEMENT
+  // docs/PRD-seller-guide-assistant-modal.md بخش ۱.۲ — تحلیل یادداشت خام فروشنده
+  // (ownerNotes) با gpt-6.1-sol ثابت؛ جدا از PRODUCT_ENRICHMENT چون دامنه‌اش کل
+  // فروشگاه/محصول است، نه enrichment یک محصول خاص
+  NOTES_ANALYSIS
+}
+
+// docs/PRD-seller-guide-assistant-modal.md بخش ۱.۳ — لاگ تغییرات محتوا: فروشنده کی چه
+// فیلدی را به چه چیزی تغییر داده، دستی یا از پیشنهاد AI اعمال‌شده. فقط فیلدهای
+// متنی/توصیفی را تراکینگ می‌کند (نه قیمت/موجودی/تصاویر).
+enum ContentChangeSource {
+  MANUAL
+  AI_ENRICHMENT
+}
+
+enum ContentEntityType {
+  STORE
+  PRODUCT
+  KB_ENTRY
+  SHIPPING_RULE
+}
+
+model ContentChangeLog {
+  id         String              @id @default(uuid())
+  storeId    String
+  store      Store               @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  sellerId   String
+  entityType ContentEntityType
+  entityId   String? // null برای فیلدهای سطح فروشگاه؛ وگرنه productId/kbEntryId/shippingRuleId
+  fieldName  String
+  oldValue   String?             @db.Text
+  newValue   String?             @db.Text
+  source     ContentChangeSource @default(MANUAL)
+  createdAt  DateTime            @default(now())
+
+  @@index([storeId, entityType, entityId, createdAt])
+  @@map("content_change_logs")
 }
 
 // یک ردیف به‌ازای هر فراخوانی واقعی مدل AI در موتور مکالمه (parseIntent/caption) — برای
@@ -2746,6 +2793,12 @@ model Order {
   // در غیر این صورت نال می‌ماند (یعنی «نامشخص»، نه «مغایرت»)
   receiptExtractedAmountToman Int?
   receiptVerifiedMatch        Boolean?
+  // docs/PRD-seller-guide-assistant-modal.md بخش ۱.۴ — updatedAt با هر تغییری آپدیت می‌شود،
+  // پس نمی‌شود از رویش فهمید «کی واقعاً تایید/رد شد»؛ این دو فقط در approveOrder/rejectOrder
+  // ست می‌شوند (و چون آن متدها برای status تکراری early-return دارند، با کلیک دوباره
+  // overwrite نمی‌شوند)
+  approvedAt                  DateTime?
+  rejectedAt                  DateTime?
   createdAt                   DateTime           @default(now())
   updatedAt                   DateTime           @updatedAt
 

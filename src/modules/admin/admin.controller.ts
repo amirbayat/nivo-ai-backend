@@ -246,6 +246,22 @@ export class AdminController {
     });
   }
 
+  // docs/PRD-seller-guide-assistant-modal.md بخش ۱.۳ — دیباگ/اعتمادسازی: فروشنده کی چه فیلدی
+  // را به چه چیزی تغییر داده (دستی یا از پیشنهاد AI)
+  @Get('stores/:id/content-change-log')
+  getContentChangeLog(
+    @Param('id') id: string,
+    @Query('entityType')
+    entityType?: 'STORE' | 'PRODUCT' | 'KB_ENTRY' | 'SHIPPING_RULE',
+    @Query('page') page?: string,
+  ) {
+    return this.adminService.getContentChangeLog({
+      storeId: id,
+      entityType,
+      page: page ? parseInt(page, 10) : undefined,
+    });
+  }
+
   // docs/PRD-admin-ai-decision-trace-log.md بخش ۳ — تایم‌لاین کامل یک مکالمه برای دیباگ ادمین
   @Get('sales-agent/conversations/:id/trace')
   getSalesAgentConversationTrace(@Param('id') id: string) {

@@ -7,7 +7,11 @@ import {
 import { embed, cosineSimilarity, generateObject, generateText } from 'ai';
 import type { RepairTextFunction, UserModelMessage } from 'ai';
 import { z } from 'zod';
-import type { StoreKbKind, CanonicalProduct } from '@prisma/client';
+import type {
+  StoreKbKind,
+  CanonicalProduct,
+  ContentChangeSource,
+} from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AiProviderService } from '../../common/services/ai-provider.service';
 import {
@@ -22,9 +26,14 @@ import { fa } from '../../i18n/fa';
 import { PricingService } from '../usage/pricing.service';
 import { StoreService } from './store.service';
 import { CommentsService } from '../comments/comments.service';
+import { ContentChangeLogService } from './content-change-log.service';
 import { defaultModel } from '../sales-agent/model-variants';
 import { clampProductSpecs } from './product-specs.types';
 import { BUSINESS_CATEGORIES } from './business-categories';
+import {
+  AnalyzeOwnerNotesDto,
+  NotesAnalysisEntityType,
+} from './dto/analyze-owner-notes.dto';
 
 // docs/PRD-seller-knowledge-base.md بخش ۲.۳ — دقیقاً همان shape که chat.service.ts's
 // OPENROUTER_WEB_SEARCH_TOOLS استفاده می‌کند (کپی محلی، نه import — آن فایل چیزی export نمی‌کند
@@ -132,6 +141,8 @@ export interface StoreKbEntryInput {
   answer: string;
   tags?: string[];
   relatedProductId?: string | null;
+  // docs/PRD-seller-guide-assistant-modal.md بخش ۱.۳ — فقط برای لاگ تغییرات محتوا
+  source?: ContentChangeSource;
 }
 
 export type StoreKbEntryUpdateInput = Partial<StoreKbEntryInput> & {
@@ -188,6 +199,7 @@ export class StoreKbService {
     private readonly comments: CommentsService,
     private readonly asr: AsrService,
     private readonly mediaTranscode: MediaTranscodeService,
+    private readonly changeLog: ContentChangeLogService,
   ) {
     // supportsStructuredOutputs=true — بدون این، @ai-sdk/openai-compatible فقط
     // response_format: {type:'json_object'} می‌فرستد (JSON معتبر ولی بدون تضمین سمت سرور برای
@@ -310,6 +322,28 @@ JSON را برگردان، بدون توضیح یا markdown fence.`,
       },
     });
     this.invalidateCache(storeId);
+    await this.changeLog.logMany([
+      {
+        storeId,
+        sellerId,
+        entityType: 'KB_ENTRY',
+        entityId: entry.id,
+        fieldName: 'question',
+        oldValue: null,
+        newValue: entry.question,
+        source: input.source,
+      },
+      {
+        storeId,
+        sellerId,
+        entityType: 'KB_ENTRY',
+        entityId: entry.id,
+        fieldName: 'answer',
+        oldValue: null,
+        newValue: entry.answer,
+        source: input.source,
+      },
+    ]);
     return entry;
   }
 
@@ -319,8 +353,9 @@ JSON را برگردان، بدون توضیح یا markdown fence.`,
     id: string,
     input: StoreKbEntryUpdateInput,
   ) {
-    await this.getOwnedEntry(sellerId, storeId, id);
-    const data: Record<string, unknown> = { ...input };
+    const before = await this.getOwnedEntry(sellerId, storeId, id);
+    const { source, ...rest } = input;
+    const data: Record<string, unknown> = { ...rest };
     if (input.question !== undefined) {
       const embedded = await this.computeEmbedding(input.question);
       if (embedded) {
@@ -333,13 +368,55 @@ JSON را برگردان، بدون توضیح یا markdown fence.`,
       data,
     });
     this.invalidateCache(storeId);
+    await this.changeLog.logMany([
+      {
+        storeId,
+        sellerId,
+        entityType: 'KB_ENTRY',
+        entityId: id,
+        fieldName: 'question',
+        oldValue: before.question,
+        newValue: entry.question,
+        source,
+      },
+      {
+        storeId,
+        sellerId,
+        entityType: 'KB_ENTRY',
+        entityId: id,
+        fieldName: 'answer',
+        oldValue: before.answer,
+        newValue: entry.answer,
+        source,
+      },
+    ]);
     return entry;
   }
 
   async remove(sellerId: string, storeId: string, id: string) {
-    await this.getOwnedEntry(sellerId, storeId, id);
+    const before = await this.getOwnedEntry(sellerId, storeId, id);
     await this.prisma.storeKbEntry.delete({ where: { id } });
     this.invalidateCache(storeId);
+    await this.changeLog.logMany([
+      {
+        storeId,
+        sellerId,
+        entityType: 'KB_ENTRY',
+        entityId: id,
+        fieldName: 'question',
+        oldValue: before.question,
+        newValue: null,
+      },
+      {
+        storeId,
+        sellerId,
+        entityType: 'KB_ENTRY',
+        entityId: id,
+        fieldName: 'answer',
+        oldValue: before.answer,
+        newValue: null,
+      },
+    ]);
     return { success: true };
   }
 
@@ -1003,6 +1080,217 @@ assumptions بنویس. فقط از همان اطلاعاتی که فروشند�
         .filter(Boolean)
         .slice(0, 5),
     };
+  }
+
+  // docs/PRD-seller-guide-assistant-modal.md بخش ۱.۲ — فروشنده خودش در ChatGPT بیرونی با یکی
+  // از سه پرامپت آماده کار می‌کند (یا مستقیم یادداشت می‌نویسد) و نتیجه را این‌جا پیست می‌کند.
+  // این متن خام هرگز خلاصه نمی‌شود — کامل به ownerNotes مربوطه append می‌شود (append-only)،
+  // بعد یک تحلیل جدا (همیشه gpt-6.1-sol ثابت، نه pool A/B خریدار — این یک استخراج
+  // ساخت‌یافته است نه مکالمه‌ی آزاد) پیشنهاد می‌دهد این متن به چه فیلدهای دیگری هم می‌خورد.
+  // هیچ‌چیز خودکار در فیلد اصلی نمی‌نشیند — فقط پیشنهاد (human-in-the-loop).
+  async analyzeOwnerNotes(
+    sellerId: string,
+    storeId: string,
+    dto: AnalyzeOwnerNotesDto,
+  ) {
+    const store = await this.storeService.getOwned(sellerId, storeId);
+    const rawText = dto.rawText?.trim() || undefined;
+
+    let product: {
+      id: string;
+      name: string;
+      ownerNotes: string | null;
+    } | null = null;
+    if (dto.entityType === NotesAnalysisEntityType.PRODUCT) {
+      if (!dto.productId) throw new NotFoundException(fa.store.productNotFound);
+      const found = await this.prisma.product.findUnique({
+        where: { id: dto.productId },
+      });
+      if (!found || found.storeId !== storeId) {
+        throw new NotFoundException(fa.store.productNotFound);
+      }
+      product = found;
+    }
+
+    const previousNotes =
+      dto.entityType === NotesAnalysisEntityType.STORE
+        ? store.ownerNotes
+        : product!.ownerNotes;
+
+    if (!rawText && !previousNotes) {
+      throw new BadRequestException(fa.store.notesAnalysisTextRequired);
+    }
+    if (store.creditBalanceToman <= 0) {
+      throw new BadRequestException(
+        fa.store.insufficientCreditForNotesAnalysis,
+      );
+    }
+
+    const updatedNotes = rawText
+      ? previousNotes
+        ? `${previousNotes}\n\n---\n${new Date().toISOString().slice(0, 10)}:\n${rawText}`
+        : rawText
+      : (previousNotes ?? '');
+
+    if (rawText) {
+      if (dto.entityType === NotesAnalysisEntityType.STORE) {
+        await this.prisma.store.update({
+          where: { id: storeId },
+          data: { ownerNotes: updatedNotes },
+        });
+        await this.changeLog.logFieldChange({
+          storeId,
+          sellerId,
+          entityType: 'STORE',
+          entityId: null,
+          fieldName: 'ownerNotes',
+          oldValue: previousNotes,
+          newValue: updatedNotes,
+        });
+      } else {
+        await this.prisma.product.update({
+          where: { id: product!.id },
+          data: { ownerNotes: updatedNotes },
+        });
+        await this.changeLog.logFieldChange({
+          storeId,
+          sellerId,
+          entityType: 'PRODUCT',
+          entityId: product!.id,
+          fieldName: 'ownerNotes',
+          oldValue: previousNotes,
+          newValue: updatedNotes,
+        });
+      }
+    }
+
+    const model = 'openai/gpt-6.1-sol';
+    const kbCandidateSchema = z.array(
+      z.object({
+        question: z.string(),
+        answer: z.string(),
+        kind: z.enum(['FAQ', 'POLICY', 'PRODUCT_INFO', 'GENERAL']),
+        tags: z.array(z.string()),
+      }),
+    );
+
+    if (dto.entityType === NotesAnalysisEntityType.STORE) {
+      const { object, usage } = await generateObject({
+        model: this.provider(model),
+        schema: z.object({
+          brandIntroSuggestion: z.string().nullable(),
+          shippingInfoSuggestion: z.string().nullable(),
+          returnPolicySuggestion: z.string().nullable(),
+          categoryHint: z.enum(BUSINESS_CATEGORIES).nullable(),
+          kbCandidates: kbCandidateSchema,
+        }),
+        system: `تو دستیار تحلیل یادداشت فروشنده‌ی یک فروشگاه آنلاین ایرانی هستی. یادداشت خام
+زیر شامل هرچیزی است که فروشنده تا امروز درباره‌ی فروشگاهش نوشته (ممکن است از قبل جواب‌هایی که
+از ChatGPT گرفته هم داخلش باشد). کارت:
+۱. اگر متن شامل معرفی/داستان برند بود، یک brandIntroSuggestion کوتاه (۱-۳ جمله فارسی) بنویس؛
+وگرنه null.
+۲. اگر متن شامل جزئیات ارسال (زمان/هزینه/نحوه) بود، یک shippingInfoSuggestion بنویس؛ وگرنه null.
+۳. اگر متن شامل شرایط مرجوعی/گارانتی بود، یک returnPolicySuggestion بنویس؛ وگرنه null.
+۴. categoryHint: اگر از متن می‌شود نوع کسب‌وکار را فهمید، دقیقاً یکی از این مقادیر را برگردان
+(نه چیز دیگری): ${BUSINESS_CATEGORIES.join('، ')} — وگرنه null.
+۵. kbCandidates: هر نکته‌ی مجزا که برای ۱ تا ۴ بالا استفاده نشد ولی ارزش ثبت در باکس دانش
+فروشگاه را دارد (سؤال رایج مشتری=FAQ، سیاست دیگر=POLICY، نکته‌ی یک محصول خاص=PRODUCT_INFO،
+هرچیز دیگر=GENERAL). حداکثر ۱۰ مورد.
+قانون مهم: هیچ جزئیاتی که فروشنده گفته را حذف/خلاصه نکن — اگر چیزی برای یک فیلد زیاد است، آن
+را به‌جای چپاندن در همان فیلد، در kbCandidates بگذار. چیزی که فروشنده نگفته اختراع نکن. هر
+suggestion که تکرار محض چیزی است که از قبل در فیلد مقصد هست را دوباره پیشنهاد نده. پاسخ را
+فقط به‌صورت یک شیء JSON معتبر برگردان.`,
+        prompt: `دسته‌بندی فعلی فروشگاه: ${store.category ?? 'نامشخص'}
+یادداشت کامل فروشنده:
+${updatedNotes}`,
+        experimental_repairText: this.repairStructuredOutput(),
+      });
+
+      await this.logNotesAnalysisCost(storeId, model, usage);
+
+      return {
+        ownerNotes: updatedNotes,
+        brandIntroSuggestion:
+          object.brandIntroSuggestion?.trim().slice(0, 300) || null,
+        shippingInfoSuggestion:
+          object.shippingInfoSuggestion?.trim().slice(0, 1000) || null,
+        returnPolicySuggestion:
+          object.returnPolicySuggestion?.trim().slice(0, 1000) || null,
+        categoryHint: object.categoryHint,
+        kbCandidates: object.kbCandidates.slice(0, 10).map((c) => ({
+          question: c.question.trim().slice(0, 500),
+          answer: c.answer.trim().slice(0, 5000),
+          kind: c.kind,
+          tags: c.tags.slice(0, 5),
+        })),
+      };
+    }
+
+    const { object, usage } = await generateObject({
+      model: this.provider(model),
+      schema: z.object({
+        descriptionSuggestion: z.string().nullable(),
+        specsSuggestion: z
+          .array(z.object({ label: z.string(), value: z.string() }))
+          .nullable(),
+        kbCandidates: kbCandidateSchema,
+      }),
+      system: `تو دستیار تحلیل یادداشت فروشنده درباره‌ی محصول «${product!.name}» در یک فروشگاه
+آنلاین ایرانی هستی. یادداشت خام زیر شامل هرچیزی است که فروشنده تا امروز درباره‌ی این محصول
+نوشته. کارت:
+۱. descriptionSuggestion: یک توضیح محصول کامل و فروش‌محور (Markdown فارسی) که تمام جزئیات
+یادداشت را عیناً منعکس کند — خلاصه‌کردن/حذف‌کردن جزئیات (رنگ/سایز/جنس/نکته‌ی خاص) ممنوع است،
+حتی اگر متن طولانی شود. اگر یادداشت چیزی برای توضیح ندارد، null.
+۲. specsSuggestion: مشخصات فنی ساخت‌یافته (مثل جنس/سایزبندی) به‌صورت {label, value}؛ وگرنه null.
+۳. kbCandidates: سؤالاتی که مشتری درباره‌ی همین محصول می‌پرسد (kind باید FAQ یا PRODUCT_INFO
+باشد)، حداکثر ۶ مورد.
+قیمت/موجودی/کد محصول را هرگز پیشنهاد نده. چیزی که فروشنده نگفته اختراع نکن. پاسخ را فقط
+به‌صورت یک شیء JSON معتبر برگردان.`,
+      prompt: updatedNotes,
+      experimental_repairText: this.repairStructuredOutput(),
+    });
+
+    await this.logNotesAnalysisCost(storeId, model, usage);
+
+    return {
+      ownerNotes: updatedNotes,
+      descriptionSuggestion:
+        object.descriptionSuggestion?.trim().slice(0, 5000) || null,
+      specsSuggestion: object.specsSuggestion
+        ? (clampProductSpecs(object.specsSuggestion) ?? null)
+        : null,
+      kbCandidates: object.kbCandidates.slice(0, 6).map((c) => ({
+        question: c.question.trim().slice(0, 500),
+        answer: c.answer.trim().slice(0, 5000),
+        kind: c.kind,
+        tags: c.tags.slice(0, 5),
+      })),
+    };
+  }
+
+  private async logNotesAnalysisCost(
+    storeId: string,
+    model: string,
+    usage: { inputTokens?: number; outputTokens?: number },
+  ) {
+    const { costToman } = await this.pricing.calcCost(
+      usage.inputTokens ?? 0,
+      usage.outputTokens ?? 0,
+      model,
+    );
+    await this.prisma.creditUsageEvent.create({
+      data: {
+        storeId,
+        model,
+        kind: 'NOTES_ANALYSIS',
+        costToman,
+        isFreeQuota: false,
+      },
+    });
+    await this.prisma.store.update({
+      where: { id: storeId },
+      data: { creditBalanceToman: { decrement: costToman } },
+    });
   }
 
   // docs/PRD-bulk-product-import-from-document.md — فروشنده یک متن بلند/فایل (PDF/Word) یا

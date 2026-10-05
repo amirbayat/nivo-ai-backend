@@ -5,7 +5,7 @@ import {
   IsString,
   MaxLength,
 } from 'class-validator';
-import { StoreKbKind } from '@prisma/client';
+import { StoreKbKind, ContentChangeSource } from '@prisma/client';
 import { fa } from '../../../i18n/fa';
 
 // docs/PRD-seller-knowledge-base.md بخش ۳.۲ — افزودن دستی به باکس دانش
@@ -29,4 +29,9 @@ export class CreateKbEntryDto {
   @IsOptional()
   @IsString()
   relatedProductId?: string;
+
+  // docs/PRD-seller-guide-assistant-modal.md بخش ۱.۳ — فقط برای لاگ تغییرات محتوا
+  @IsOptional()
+  @IsEnum(ContentChangeSource)
+  source?: ContentChangeSource;
 }

@@ -1318,6 +1318,33 @@ export class AdminService {
     return { items, total, page };
   }
 
+  // docs/PRD-seller-guide-assistant-modal.md بخش ۱.۳ — دیباگ/اعتمادسازی داخلی: فروشنده کی چه
+  // فیلدی را به چه چیزی تغییر داده (دستی یا از پیشنهاد AI)؛ صفحه‌ی مستقل فروشنده این فاز نیست
+  async getContentChangeLog(params: {
+    storeId: string;
+    entityType?: 'STORE' | 'PRODUCT' | 'KB_ENTRY' | 'SHIPPING_RULE';
+    page?: number;
+  }) {
+    const page = params.page && params.page > 0 ? params.page : 1;
+    const pageSize = 50;
+    const where = {
+      storeId: params.storeId,
+      ...(params.entityType ? { entityType: params.entityType } : {}),
+    };
+
+    const [total, items] = await Promise.all([
+      this.prisma.contentChangeLog.count({ where }),
+      this.prisma.contentChangeLog.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+    ]);
+
+    return { items, total, page };
+  }
+
   // docs/PRD-admin-ai-decision-trace-log.md بخش ۳ — تایم‌لاین کامل یک مکالمه، CUSTOMER_MESSAGE
   // را با AGENT_REPLY بعدی‌اش و (اگر بود) AI_TRACE بلافاصله بعد از همان AGENT_REPLY جفت می‌کند؛
   // منطق ترکیب اینجاست، فرانت فقط رندر می‌کند

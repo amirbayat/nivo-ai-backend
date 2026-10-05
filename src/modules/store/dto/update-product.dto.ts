@@ -1,12 +1,14 @@
 import {
   IsArray,
   IsBoolean,
+  IsEnum,
   IsInt,
   IsOptional,
   IsString,
   Min,
   MaxLength,
 } from 'class-validator';
+import { ContentChangeSource } from '@prisma/client';
 import { fa } from '../../../i18n/fa';
 import type { ProductSpecItem } from '../product-specs.types';
 
@@ -51,4 +53,16 @@ export class UpdateProductDto {
   @IsOptional()
   @IsArray()
   specs?: ProductSpecItem[] | null;
+
+  // docs/PRD-seller-guide-assistant-modal.md بخش ۱.۲ — متن خام فروشنده درباره‌ی این محصول
+  // (توضیح/تنوع/هرچیز دیگر)؛ هم دستی قابل‌ویرایش هم از تحلیل یادداشت append می‌شود
+  @IsOptional()
+  @IsString()
+  @MaxLength(20000, { message: fa.validation.stringTooLong })
+  ownerNotes?: string;
+
+  // docs/PRD-seller-guide-assistant-modal.md بخش ۱.۳ — فقط برای لاگ تغییرات محتوا
+  @IsOptional()
+  @IsEnum(ContentChangeSource)
+  source?: ContentChangeSource;
 }

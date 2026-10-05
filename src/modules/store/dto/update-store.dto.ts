@@ -1,15 +1,24 @@
 import {
   IsBoolean,
+  IsEnum,
   IsOptional,
   IsString,
   Matches,
   MaxLength,
 } from 'class-validator';
+import { ContentChangeSource } from '@prisma/client';
 import { fa } from '../../../i18n/fa';
 
 // docs/PRD-product-strategy-and-roadmap.md بخش ۳.۲ — فیلدهای ساختاریافته‌ی سطح فروشگاه،
 // همه اختیاری (partial update، هیچ فیلدی اجباری برای پرکردن نیست)
 export class UpdateStoreDto {
+  // docs/PRD-seller-guide-assistant-modal.md بخش ۱.۲ — قبلاً فقط در CreateStoreDto بود؛ برای
+  // اعمال‌کردن پیشنهاد دسته‌بندی از تحلیل یادداشت خام، باید بعد از ثبت‌نام هم قابل ویرایش باشد
+  @IsOptional()
+  @IsString()
+  @MaxLength(100, { message: fa.validation.stringTooLong })
+  category?: string;
+
   @IsOptional()
   @IsString()
   @MaxLength(1000, { message: fa.validation.stringTooLong })
@@ -53,4 +62,17 @@ export class UpdateStoreDto {
   @IsOptional()
   @IsBoolean()
   requiresShipping?: boolean;
+
+  // docs/PRD-seller-guide-assistant-modal.md بخش ۱.۲ — متن خام فروشنده؛ هم مستقیم دستی
+  // قابل‌ویرایش است (textarea مستقل) هم از تحلیل یادداشت append می‌شود
+  @IsOptional()
+  @IsString()
+  @MaxLength(20000, { message: fa.validation.stringTooLong })
+  ownerNotes?: string;
+
+  // docs/PRD-seller-guide-assistant-modal.md بخش ۱.۳ — فقط برای لاگ تغییرات محتوا؛ خودِ
+  // Store این فیلد را ندارد، در سرویس قبل از persist حذف می‌شود
+  @IsOptional()
+  @IsEnum(ContentChangeSource)
+  source?: ContentChangeSource;
 }

@@ -57,6 +57,7 @@ import { GenerateBrandIntroDto } from './dto/generate-brand-intro.dto';
 import { ClassifyBusinessSetupDto } from './dto/classify-business-setup.dto';
 import { GenerateProductDescriptionDto } from './dto/generate-product-description.dto';
 import { GenerateProductOptionsDto } from './dto/generate-product-options.dto';
+import { AnalyzeOwnerNotesDto } from './dto/analyze-owner-notes.dto';
 import { fa } from '../../i18n/fa';
 
 // docs/PRD-mvp-launch-plan.md گام ۰ — ثبت‌نام فروشنده و ساخت فروشگاه
@@ -581,6 +582,19 @@ export class StoreController {
     );
   }
 
+  // docs/PRD-seller-guide-assistant-modal.md بخش ۱.۲ — تحلیل یادداشت خام فروشنده (از راهنمای
+  // پرامپت ChatGPT پیست‌شده یا تایپ دستی) با gpt-6.1-sol ثابت؛ append به ownerNotes + پیشنهاد
+  // برای فیلدهای دیگر (دسته‌بندی/ارسال/مرجوعی/باکس‌دانش). ذخیره‌ی واقعی پیشنهادها با همان
+  // PATCH/POST معمولی فروشگاه/محصول/باکس‌دانش انجام می‌شود، این مسیر فقط پیشنهاد می‌دهد.
+  @Post(':id/notes-analysis')
+  analyzeOwnerNotes(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: AnalyzeOwnerNotesDto,
+  ) {
+    return this.storeKbService.analyzeOwnerNotes(user.sub, id, dto);
+  }
+
   // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۹ (رصد رقبا)
   @Post(':id/competitor-analysis')
   analyzeCompetitors(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
@@ -685,7 +699,10 @@ export class StoreController {
   }
 
   @Post(':id/seller-bot-disconnect')
-  disconnectSellerBot(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+  disconnectSellerBot(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+  ) {
     return this.storeService.disconnectSellerBot(user.sub, id);
   }
 

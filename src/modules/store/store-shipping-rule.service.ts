@@ -7,7 +7,20 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { StoreService } from './store.service';
 import { CreateShippingRuleDto } from './dto/create-shipping-rule.dto';
 import { UpdateShippingRuleDto } from './dto/update-shipping-rule.dto';
+import { ContentChangeLogService } from './content-change-log.service';
 import { fa } from '../../i18n/fa';
+
+function shippingRuleSnapshot(rule: {
+  provinces: string[];
+  cost: number;
+  enabled: boolean;
+}): string {
+  return JSON.stringify({
+    provinces: rule.provinces,
+    cost: rule.cost,
+    enabled: rule.enabled,
+  });
+}
 
 // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۲ (فاز ۱.۵) — مدیریت هزینه/پوشش
 // ارسال به تفکیک استان در پنل فروشنده (همان الگوی StoreDiscountCodeService)
@@ -16,6 +29,7 @@ export class StoreShippingRuleService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storeService: StoreService,
+    private readonly changeLog: ContentChangeLogService,
   ) {}
 
   async list(sellerId: string, storeId: string) {
@@ -65,7 +79,7 @@ export class StoreShippingRuleService {
     } else {
       await this.reassignProvinces(storeId, provinces);
     }
-    return this.prisma.storeShippingRule.create({
+    const rule = await this.prisma.storeShippingRule.create({
       data: {
         storeId,
         provinces,
@@ -73,6 +87,16 @@ export class StoreShippingRuleService {
         enabled: dto.enabled ?? true,
       },
     });
+    await this.changeLog.logFieldChange({
+      storeId,
+      sellerId,
+      entityType: 'SHIPPING_RULE',
+      entityId: rule.id,
+      fieldName: 'shippingRule',
+      oldValue: null,
+      newValue: shippingRuleSnapshot(rule),
+    });
+    return rule;
   }
 
   async update(
@@ -100,10 +124,20 @@ export class StoreShippingRuleService {
         await this.reassignProvinces(storeId, dto.provinces, ruleId);
       }
     }
-    return this.prisma.storeShippingRule.update({
+    const updated = await this.prisma.storeShippingRule.update({
       where: { id: ruleId },
       data: dto,
     });
+    await this.changeLog.logFieldChange({
+      storeId,
+      sellerId,
+      entityType: 'SHIPPING_RULE',
+      entityId: ruleId,
+      fieldName: 'shippingRule',
+      oldValue: shippingRuleSnapshot(rule),
+      newValue: shippingRuleSnapshot(updated),
+    });
+    return updated;
   }
 
   async delete(sellerId: string, storeId: string, ruleId: string) {
@@ -115,6 +149,15 @@ export class StoreShippingRuleService {
       throw new NotFoundException(fa.store.shippingRuleNotFound);
     }
     await this.prisma.storeShippingRule.delete({ where: { id: ruleId } });
+    await this.changeLog.logFieldChange({
+      storeId,
+      sellerId,
+      entityType: 'SHIPPING_RULE',
+      entityId: ruleId,
+      fieldName: 'shippingRule',
+      oldValue: shippingRuleSnapshot(rule),
+      newValue: null,
+    });
     return { success: true };
   }
 }
