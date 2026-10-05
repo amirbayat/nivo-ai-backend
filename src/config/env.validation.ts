@@ -76,6 +76,11 @@ class EnvironmentVariables {
   @IsOptional() @IsString() SENTRY_DSN?: string;
   @IsOptional() @IsString() SENTRY_ENVIRONMENT?: string;
 
+  // docs/PRD-gold-silver-price-ticker.md — قیمت طلا برای فروشنده‌های طلا. عمداً اختیاری:
+  // بدون آن فقط رفرش قیمت غیرفعال می‌ماند (لاگ WARN) و GET /market-prices/gold آرایه‌ی
+  // خالی برمی‌گرداند، بقیه‌ی اپ طبیعی کار می‌کند.
+  @IsOptional() @IsString() BRSAPI_API_KEY?: string;
+
   @IsInt() @Min(1) PORT: number = 3001;
 }
 

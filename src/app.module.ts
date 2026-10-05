@@ -55,6 +55,7 @@ import { TelegramModule } from './modules/telegram/telegram.module';
 import { SellerBotModule } from './modules/seller-bot/seller-bot.module';
 import { CommentsModule } from './modules/comments/comments.module';
 import { MarketplaceModule } from './modules/marketplace/marketplace.module';
+import { MarketPricesModule } from './modules/market-prices/market-prices.module';
 
 @Module({
   imports: [
@@ -111,6 +112,7 @@ import { MarketplaceModule } from './modules/marketplace/marketplace.module';
     TelegramModule,
     SellerBotModule,
     MarketplaceModule,
+    MarketPricesModule,
   ],
   providers: [{ provide: APP_FILTER, useClass: AllExceptionsFilter }],
 })
