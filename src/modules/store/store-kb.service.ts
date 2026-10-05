@@ -164,6 +164,13 @@ export interface KbCandidateEntry {
   answer: string;
 }
 
+// فیدبک کاربر ۱۴۰۵/۰۷/۱۵ — همان شکلی که generateProductOptionsFromText برمی‌گرداند (§۴.۱.۱)،
+// به‌علاوه‌ی stock اختیاری هر مقدار؛ وقتی متن تعداد هر حالت را هم می‌گوید («سایز M سه تا»)
+export interface ExtractedVariantOption {
+  name: string;
+  values: { value: string; stock?: number }[];
+}
+
 // docs/PRD-bulk-product-import-from-document.md — یک ردیف استخراج‌شده از فایل/متن/صوت؛
 // همین تایپ در telegram.service.ts هم برای فلوی تلگرام reuse می‌شود
 export interface ExtractedProductCandidate {
@@ -175,6 +182,18 @@ export interface ExtractedProductCandidate {
   basePrice?: number;
   stock?: number;
   code?: string;
+  // فیدبک کاربر ۱۴۰۵/۰۷/۱۵ — فروشنده‌ی طلا متن می‌دهد («گردنبند ۵ گرمی عیار ۱۸»)، انتظار دارد
+  // وزن/عیار هم پیش‌پر شود، نه فقط نام/قیمت. فقط فیزیکی/صریح
+  weightGrams?: number;
+  purityKarat?: number;
+  // فیدبک کاربر ۱۴۰۵/۰۷/۱۵ (دور دوم) — اگر متن صریح اجرت/سود همین محصول را هم گفته؛ یا هر سه
+  // باهم‌اند یا هیچ‌کدام (همان all-or-nothing پایین در extractProductCandidatesFromText)
+  goldWageType?: 'PERCENT' | 'FIXED_PER_GRAM';
+  goldWageValue?: number;
+  goldProfitPercent?: number;
+  // همان فیدبک — برای دسته‌هایی که variant دارند (لباس/سایز/رنگ)، اگر متن حالت‌ها را گفته
+  // باشد همین‌جا هم استخراج شود، نه فقط در ProductVariantsEditor بعد از ذخیره‌ی محصول پایه
+  variantOptions?: ExtractedVariantOption[];
 }
 
 export interface ExtractProductsResult {
@@ -1054,7 +1073,7 @@ MEDIUM بگذار، نه HIGH. businessTypeReason/categoryReason باید خیل
     productId: string,
     rawText: string,
   ): Promise<{
-    optionTypes: { name: string; values: string[] }[];
+    optionTypes: ExtractedVariantOption[];
     assumptions: string[];
   }> {
     await this.storeService.getOwned(sellerId, storeId);
@@ -1076,7 +1095,16 @@ MEDIUM بگذار، نه HIGH. businessTypeReason/categoryReason باید خیل
           .array(
             z.object({
               name: z.string(),
-              values: z.array(z.string()),
+              values: z
+                .array(
+                  z.object({
+                    value: z.string(),
+                    // فیدبک کاربر ۱۴۰۵/۰۷/۱۵ — موجودی هر حالت («سایز M سه تا موجوده») هم
+                    // استخراج شود، نه فقط اسم حالت‌ها
+                    stock: z.number().nullable(),
+                  }),
+                )
+                .max(30),
             }),
           )
           .max(2),
@@ -1085,11 +1113,12 @@ MEDIUM بگذار، نه HIGH. businessTypeReason/categoryReason باید خیل
       system: `تو دستیار یک فروشنده‌ی فروشگاه آنلاین ایرانی هستی. از توضیح متنی آزاد زیر درباره‌ی
 محصول «${product.name}» (ممکن است شبیه کپشن اینستاگرام یا تیکه‌تیکه باشد)، گزینه‌های محصول (مثل
 سایز، رنگ) و مقادیر هر گزینه را استخراج کن. حداکثر ۲ نوع گزینه (مثلاً «سایز» و «رنگ») برگردان؛
-مقادیر هر گزینه را به ترتیب طبیعی (مثلاً سایزها از کوچک به بزرگ) بچین. اگر برای چیزی مجبور به فرض
-شدی (مثلاً فاصله‌ی سایزها، یا تعبیر یک کلمه‌ی مبهم)، آن فرض را به‌صورت یک جمله‌ی کوتاه فارسی در
-assumptions بنویس. فقط از همان اطلاعاتی که فروشنده داده استفاده کن، گزینه/مقداری که اصلاً اشاره
-نشده اختراع نکن. اگر هیچ گزینه‌ای در متن پیدا نشد، optionTypes را آرایه‌ی خالی برگردان. پاسخ را
-فقط به‌صورت یک شیء JSON معتبر برگردان.`,
+مقادیر هر گزینه را به ترتیب طبیعی (مثلاً سایزها از کوچک به بزرگ) بچین. اگر متن موجودی هر حالت را
+هم گفته (مثلاً «سایز M سه تا، سایز L دوتا»)، همان عدد را در stock همان مقدار بگذار؛ اگر نگفته،
+stock را null بگذار (حدس نزن). اگر برای چیزی مجبور به فرض شدی (مثلاً فاصله‌ی سایزها، یا تعبیر یک
+کلمه‌ی مبهم)، آن فرض را به‌صورت یک جمله‌ی کوتاه فارسی در assumptions بنویس. فقط از همان اطلاعاتی
+که فروشنده داده استفاده کن، گزینه/مقداری که اصلاً اشاره نشده اختراع نکن. اگر هیچ گزینه‌ای در متن
+پیدا نشد، optionTypes را آرایه‌ی خالی برگردان. پاسخ را فقط به‌صورت یک شیء JSON معتبر برگردان.`,
       prompt: trimmed,
       experimental_repairText: this.repairStructuredOutput(),
     });
@@ -1100,8 +1129,14 @@ assumptions بنویس. فقط از همان اطلاعاتی که فروشند�
         .map((o) => ({
           name: o.name.trim().slice(0, 40),
           values: o.values
-            .map((v) => v.trim().slice(0, 40))
-            .filter(Boolean)
+            .map((v) => ({
+              value: v.value.trim().slice(0, 40),
+              stock:
+                typeof v.stock === 'number' && v.stock >= 0
+                  ? Math.round(v.stock)
+                  : undefined,
+            }))
+            .filter((v) => v.value)
             .slice(0, 30),
         }))
         .slice(0, 2),
@@ -1381,6 +1416,35 @@ ${updatedNotes}`,
               description: z.string().nullable(),
               basePrice: z.number().nullable(),
               stock: z.number().nullable(),
+              // فیدبک کاربر ۱۴۰۵/۰۷/۱۵ — فقط وقتی متن صریحاً وزن/عیار طلا گفته («۵ گرمی عیار
+              // ۱۸»)؛ هرگز حدس زده نشود (برخلاف basePrice/stock که عمدی .nullable هستند، اینجا
+              // هم همان الگو تا با strict mode OpenAI مشکل نخورد)
+              weightGrams: z.number().nullable(),
+              purityKarat: z.number().nullable(),
+              // فیدبک کاربر ۱۴۰۵/۰۷/۱۵ (دور دوم) — برخلاف تصمیم اولیه، اگر فروشنده خودش صریح
+              // در متن اجرت/سود همین محصول را گفته («اجرت ۷ درصد»، «سود ۱۰٪»)، همان را هم
+              // استخراج کن؛ فقط وقتی حدس نیست، صریح در متن آمده
+              goldWageType: z.enum(['PERCENT', 'FIXED_PER_GRAM']).nullable(),
+              goldWageValue: z.number().nullable(),
+              goldProfitPercent: z.number().nullable(),
+              // همان فیدبک — برای محصولی که چند حالت دارد (سایز/رنگ)؛ حداکثر ۲ نوع گزینه،
+              // عیناً سقف generateProductOptionsFromText
+              variantOptions: z
+                .array(
+                  z.object({
+                    name: z.string(),
+                    values: z
+                      .array(
+                        z.object({
+                          value: z.string(),
+                          // تعداد هر حالت، فقط اگر متن صریح گفته باشد («سایز M سه تا»)
+                          stock: z.number().nullable(),
+                        }),
+                      )
+                      .max(30),
+                  }),
+                )
+                .max(2),
             }),
           )
           .max(50),
@@ -1391,8 +1455,22 @@ ${updatedNotes}`,
 محصولی که در متن پیدا می‌کنی یک مورد جدا در items برگردان: name (اسم محصول)، description (توضیح
 کوتاه، اگر چیزی گفته شده)، basePrice (قیمت به تومان، فقط اگر صریح گفته شده — حدس نزن)، stock
 (موجودی، فقط اگر صریح گفته شده)، code (کد/SKU محصول، فقط اگر صریح در متن آمده). هرگز قیمت یا
-موجودی را از روی حدس یا میانگین بازار اختراع نکن — اگر گفته نشده، آن فیلد را کلاً نیاور. اگر برای
-چیزی مجبور به فرض شدی (مثلاً تفسیر یک کلمه‌ی مبهم)، آن فرض را به‌صورت یک جمله‌ی کوتاه فارسی در
+موجودی را از روی حدس یا میانگین بازار اختراع نکن — اگر گفته نشده، آن فیلد را کلاً نیاور.
+اگر محصول طلا/جواهر است و متن وزن و عیار را گفته (مثلاً «گردنبند ۵ گرمی عیار ۱۸»)، weightGrams
+(به گرم) و purityKarat (عیار، معمولاً ۱۸/۲۱/۲۲/۲۴) را هم پر کن — هرگز این دو را حدس نزن، فقط اگر
+صریح گفته شده. اگر متن اجرت یا سود همین محصول را هم صریح گفته («اجرت ۷ درصد»، «اجرت ۵۰ هزار تومن
+هر گرم»، «سود ۱۰٪»)، goldWageType/goldWageValue/goldProfitPercent را هم پر کن: اگر اجرت به‌صورت
+درصد گفته شده goldWageType را "PERCENT" و goldWageValue را همان عدد درصد بگذار؛ اگر اجرت به‌صورت
+مبلغ ثابت به ازای هر گرم گفته شده (نه درصد)، goldWageType را "FIXED_PER_GRAM" و goldWageValue را
+همان مبلغ (تومان) بگذار؛ goldProfitPercent فقط همان درصد سودی است که فروشنده صریح گفته. هرگز
+این سه فیلد را حدس نزن یا از میانگین بازار اختراع نکن — این‌ها تصمیم فروشنده‌اند، فقط وقتی خودش
+در متن گفته باشد پر کن.
+اگر محصول چند حالت دارد (مثل سایز/رنگ لباس)، variantOptions را پر کن: هر نوع گزینه (مثلاً
+«سایز») با مقادیرش (مثلاً M، L، XL)؛ اگر متن تعداد هر حالت را هم گفته («سایز M سه تا موجوده») آن
+عدد را در stock همان مقدار بگذار، وگرنه stock آن مقدار را null بگذار. وقتی محصول variant دارد،
+stock کلی محصول دیگر مهم نیست (همان را null بگذار) چون موجودیِ واقعی به تفکیک هر حالت است، نه کل
+محصول. حداکثر ۲ نوع گزینه برگردان. اگر محصول چند حالته نیست، variantOptions را آرایه‌ی خالی بگذار.
+اگر برای چیزی مجبور به فرض شدی (مثلاً تفسیر یک کلمه‌ی مبهم)، آن فرض را به‌صورت یک جمله‌ی کوتاه فارسی در
 assumptions بنویس. اگر متن هیچ محصول قابل‌تشخیصی نداشت، items را آرایه‌ی خالی برگردان. پاسخ را
 فقط به‌صورت یک شیء JSON معتبر برگردان.`,
       prompt: text,
@@ -1417,8 +1495,9 @@ assumptions بنویس. اگر متن هیچ محصول قابل‌تشخیصی 
         const matched =
           (code && byCode.get(normalize(code))) ||
           byName.get(normalize(i.name.trim()));
+        const action: 'create' | 'update' = matched ? 'update' : 'create';
         return {
-          action: (matched ? 'update' : 'create') as 'create' | 'update',
+          action,
           matchedProductId: matched?.id,
           matchedProductName: matched?.name,
           name: i.name.trim().slice(0, 200),
@@ -1432,6 +1511,45 @@ assumptions بنویس. اگر متن هیچ محصول قابل‌تشخیصی 
               ? Math.round(i.stock)
               : undefined,
           code,
+          weightGrams:
+            typeof i.weightGrams === 'number' && i.weightGrams > 0
+              ? i.weightGrams
+              : undefined,
+          purityKarat:
+            typeof i.purityKarat === 'number' && i.purityKarat > 0
+              ? Math.round(i.purityKarat)
+              : undefined,
+          // فیدبک کاربر ۱۴۰۵/۰۷/۱۵ (دور دوم) — عیناً همان قاعده‌ی all-or-nothing
+          // assertGoldPricingFieldsValid در store.service.ts: یا هر سه معتبرند یا هیچ‌کدام
+          // برگردانده نمی‌شود (یک goldWageValue تنها بدون type/profit بی‌معنی و غیرقابل‌ذخیره است)
+          ...(i.goldWageType &&
+          typeof i.goldWageValue === 'number' &&
+          i.goldWageValue >= 0 &&
+          typeof i.goldProfitPercent === 'number' &&
+          i.goldProfitPercent >= 0
+            ? {
+                goldWageType: i.goldWageType,
+                goldWageValue: i.goldWageValue,
+                goldProfitPercent: i.goldProfitPercent,
+              }
+            : {}),
+          variantOptions: i.variantOptions
+            .filter((o) => o.name.trim() && o.values.length > 0)
+            .map((o) => ({
+              name: o.name.trim().slice(0, 40),
+              values: o.values
+                .map((v) => ({
+                  value: v.value.trim().slice(0, 40),
+                  stock:
+                    typeof v.stock === 'number' && v.stock >= 0
+                      ? Math.round(v.stock)
+                      : undefined,
+                }))
+                .filter((v) => v.value)
+                .slice(0, 30),
+            }))
+            .filter((o) => o.values.length > 0)
+            .slice(0, 2),
         };
       });
 
