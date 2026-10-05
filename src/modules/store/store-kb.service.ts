@@ -30,6 +30,7 @@ import { ContentChangeLogService } from './content-change-log.service';
 import { defaultModel } from '../sales-agent/model-variants';
 import { clampProductSpecs } from './product-specs.types';
 import { BUSINESS_CATEGORIES } from './business-categories';
+import { IRAN_PROVINCES } from '../../common/constants/iran-provinces';
 import {
   AnalyzeOwnerNotesDto,
   NotesAnalysisEntityType,
@@ -1211,6 +1212,12 @@ assumptions بنویس. فقط از همان اطلاعاتی که فروشند�
           shippingInfoSuggestion: z.string().nullable(),
           returnPolicySuggestion: z.string().nullable(),
           categoryHint: z.enum(BUSINESS_CATEGORIES).nullable(),
+          shippingRuleSuggestions: z.array(
+            z.object({
+              provinces: z.array(z.string()),
+              cost: z.number().int().min(0),
+            }),
+          ),
           kbCandidates: kbCandidateSchema,
         }),
         system: `تو دستیار تحلیل یادداشت فروشنده‌ی یک فروشگاه آنلاین ایرانی هستی. یادداشت خام
@@ -1219,6 +1226,14 @@ assumptions بنویس. فقط از همان اطلاعاتی که فروشند�
 ۱. اگر متن شامل معرفی/داستان برند بود، یک brandIntroSuggestion کوتاه (۱-۳ جمله فارسی) بنویس؛
 وگرنه null.
 ۲. اگر متن شامل جزئیات ارسال (زمان/هزینه/نحوه) بود، یک shippingInfoSuggestion بنویس؛ وگرنه null.
+۲ب. اگر متن هزینه‌ی ارسال را به تفکیک شهر/استان مشخص کرد (مثلاً «تهران رایگان، اصفهان ۱۰۰
+هزار تومان»)، همین را علاوه بر shippingInfoSuggestion، ساخت‌یافته هم در shippingRuleSuggestions
+بده: هر آیتم {provinces, cost}. provinces باید دقیقاً نام استان از این فهرست بسته باشد (نه
+شهر، نه چیز دیگر): ${IRAN_PROVINCES.join('، ')}. اگر فروشنده نام شهر گفت، به استان متناظرش
+نگاشت کن (مثلاً مشهد→خراسان رضوی، شیراز→فارس، تبریز→آذربایجان شرقی، تهران→تهران، اصفهان→اصفهان).
+اگر یک نرخ برای «بقیه‌ی شهرها»/«سراسر ایران» گفت، آن را با provinces خالی ([]) به‌عنوان نرخ
+پیش‌فرض بده (حداکثر یک آیتم با provinces خالی). اگر متن هزینه‌ی ارسال به تفکیک مکان نداشت،
+shippingRuleSuggestions را آرایه‌ی خالی برگردان — هزینه‌ای که فروشنده نگفته حدس نزن.
 ۳. اگر متن شامل شرایط مرجوعی/گارانتی بود، یک returnPolicySuggestion بنویس؛ وگرنه null.
 ۴. categoryHint: اگر از متن می‌شود نوع کسب‌وکار را فهمید، دقیقاً یکی از این مقادیر را برگردان
 (نه چیز دیگری): ${BUSINESS_CATEGORIES.join('، ')} — وگرنه null.
@@ -1237,6 +1252,23 @@ ${updatedNotes}`,
 
       await this.logNotesAnalysisCost(storeId, model, usage);
 
+      let sawNationwideShippingRule = false;
+      const shippingRuleSuggestions = object.shippingRuleSuggestions
+        .map((r) => ({
+          provinces: Array.from(
+            new Set(r.provinces.filter((p) => IRAN_PROVINCES.includes(p))),
+          ),
+          cost: Math.max(0, Math.round(r.cost)),
+        }))
+        .filter((r) => {
+          if (r.provinces.length === 0) {
+            if (sawNationwideShippingRule) return false;
+            sawNationwideShippingRule = true;
+          }
+          return true;
+        })
+        .slice(0, 10);
+
       return {
         ownerNotes: updatedNotes,
         brandIntroSuggestion:
@@ -1246,6 +1278,7 @@ ${updatedNotes}`,
         returnPolicySuggestion:
           object.returnPolicySuggestion?.trim().slice(0, 1000) || null,
         categoryHint: object.categoryHint,
+        shippingRuleSuggestions,
         kbCandidates: object.kbCandidates.slice(0, 10).map((c) => ({
           question: c.question.trim().slice(0, 500),
           answer: c.answer.trim().slice(0, 5000),
