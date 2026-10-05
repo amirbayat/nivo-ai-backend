@@ -241,6 +241,44 @@ JSON را برگردان، بدون توضیح یا markdown fence.`,
     };
   }
 
+  // فیدبک کاربر ۱۴۰۵/۰۷/۱۵ — ابزارهای AI فروشگاه (notes-analysis/enrichment/web-search) باید
+  // دقیقاً مثل credit.service.ts's logUsage بودجه‌ی آزمایشی (trial) را هم اعتبار حساب کنند، نه
+  // فقط creditBalanceToman خریداری‌شده — وگرنه فروشگاه تازه‌ساز که هنوز خریدی نکرده با خطای
+  // «اعتبار نداری» بلاک می‌شود با وجود trial فعال
+  private hasUsableCredit(store: {
+    creditBalanceToman: number;
+    trialEndsAt: Date | null;
+    trialCreditRemainingToman: number;
+  }): boolean {
+    const trialActive =
+      !!store.trialEndsAt &&
+      store.trialEndsAt > new Date() &&
+      store.trialCreditRemainingToman > 0;
+    return store.creditBalanceToman > 0 || trialActive;
+  }
+
+  // همون الگوی credit.service.ts's logUsage — اول از بودجه‌ی آزمایشی کم می‌شود (اگر فعال/مثبت)،
+  // وگرنه از اعتبار واقعی فروشگاه
+  private async decrementStoreCredit(
+    storeId: string,
+    costToman: number,
+  ): Promise<void> {
+    const store = await this.prisma.store.findUnique({
+      where: { id: storeId },
+      select: { trialEndsAt: true, trialCreditRemainingToman: true },
+    });
+    const trialActive =
+      !!store?.trialEndsAt &&
+      store.trialEndsAt > new Date() &&
+      store.trialCreditRemainingToman > 0;
+    await this.prisma.store.update({
+      where: { id: storeId },
+      data: trialActive
+        ? { trialCreditRemainingToman: { decrement: costToman } }
+        : { creditBalanceToman: { decrement: costToman } },
+    });
+  }
+
   // ابزار داخلی فروشنده روی فرم محصول (میکروفون کنار توضیحات) — فیدبک کاربر ۱۴۰۵/۰۷/۰۱.
   // عمداً هیچ semantics مکالمه/billing ندارد (این مصرف مشتری نیست)؛ همان الگوی
   // sales-agent.service.ts's submitVoiceMessage (extractAudio → ASR بدون timestamp کلمه‌ای)
@@ -527,7 +565,7 @@ JSON را برگردان، بدون توضیح یا markdown fence.`,
     if (!product || product.storeId !== storeId) {
       throw new NotFoundException(fa.store.productNotFound);
     }
-    if (withWebSearch && store.creditBalanceToman <= 0) {
+    if (withWebSearch && !this.hasUsableCredit(store)) {
       throw new BadRequestException(fa.store.insufficientCreditForWebSearch);
     }
 
@@ -643,10 +681,7 @@ sourceNote را خالی بگذار. پاسخ را فقط به‌صورت یک �
             isFreeQuota: false,
           },
         });
-        await this.prisma.store.update({
-          where: { id: storeId },
-          data: { creditBalanceToman: { decrement: costToman } },
-        });
+        await this.decrementStoreCredit(storeId, costToman);
 
         const savedCanonical = staleCanonical
           ? await this.prisma.canonicalProduct.update({
@@ -709,7 +744,7 @@ sourceNote را خالی بگذار. پاسخ را فقط به‌صورت یک �
     if (!file.mimetype.startsWith('image/')) {
       throw new BadRequestException(fa.store.imageOnly);
     }
-    if (store.creditBalanceToman <= 0) {
+    if (!this.hasUsableCredit(store)) {
       throw new BadRequestException(
         fa.store.insufficientCreditForPhotoEnrichment,
       );
@@ -769,10 +804,7 @@ sourceNote را خالی بگذار. پاسخ را فقط به‌صورت یک �
           isFreeQuota: false,
         },
       });
-      await this.prisma.store.update({
-        where: { id: storeId },
-        data: { creditBalanceToman: { decrement: costToman } },
-      });
+      await this.decrementStoreCredit(storeId, costToman);
 
       return {
         suggestedName:
@@ -799,7 +831,7 @@ sourceNote را خالی بگذار. پاسخ را فقط به‌صورت یک �
   // با withWebSearch از اعتبار فروشگاه کسر می‌شود؛ چیزی persist نمی‌شود (استاتلس، مثل ai-complete).
   async analyzeCompetitors(sellerId: string, storeId: string) {
     const store = await this.storeService.getOwned(sellerId, storeId);
-    if (store.creditBalanceToman <= 0) {
+    if (!this.hasUsableCredit(store)) {
       throw new BadRequestException(fa.store.insufficientCreditForWebSearch);
     }
 
@@ -855,10 +887,7 @@ sourceNote را خالی بگذار. پاسخ را فقط به‌صورت یک �
           isFreeQuota: false,
         },
       });
-      await this.prisma.store.update({
-        where: { id: storeId },
-        data: { creditBalanceToman: { decrement: costToman } },
-      });
+      await this.decrementStoreCredit(storeId, costToman);
 
       return {
         competitors: rawObject.competitors.slice(0, 3).map((c) => ({
@@ -1120,7 +1149,7 @@ assumptions بنویس. فقط از همان اطلاعاتی که فروشند�
     if (!rawText && !previousNotes) {
       throw new BadRequestException(fa.store.notesAnalysisTextRequired);
     }
-    if (store.creditBalanceToman <= 0) {
+    if (!this.hasUsableCredit(store)) {
       throw new BadRequestException(
         fa.store.insufficientCreditForNotesAnalysis,
       );
@@ -1287,10 +1316,7 @@ ${updatedNotes}`,
         isFreeQuota: false,
       },
     });
-    await this.prisma.store.update({
-      where: { id: storeId },
-      data: { creditBalanceToman: { decrement: costToman } },
-    });
+    await this.decrementStoreCredit(storeId, costToman);
   }
 
   // docs/PRD-bulk-product-import-from-document.md — فروشنده یک متن بلند/فایل (PDF/Word) یا

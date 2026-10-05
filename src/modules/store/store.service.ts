@@ -31,6 +31,7 @@ import {
 } from './product-video.types';
 import { clampProductSpecs } from './product-specs.types';
 import { ContentChangeLogService } from './content-change-log.service';
+import { getSalesAgentGlobalConfig } from '../sales-agent/sales-agent-global-config.util';
 
 // docs/PRD-product-strategy-and-roadmap.md بخش ۳.۱ — چک‌لیست سطح فروشگاه
 const MIN_STORE_KB_ENTRIES = 3;
@@ -98,11 +99,30 @@ export class StoreService {
     return !existing;
   }
 
+  // فیدبک کاربر ۱۴۰۵/۰۷/۱۵ — بودجه‌ی آزمایشی (trial) قبلاً فقط لحظه‌ی اولین چتِ خریدار گرنت
+  // می‌شد (credit.service.ts's grantTrialIfFirstChat)، یعنی توی onboarding (قبل از هر خریداری)
+  // فروشگاه هیچ اعتباری نداشت و ابزارهای AI (راهنما/enrichment) بلافاصله خطای «اعتبار نداری»
+  // می‌دادند. حالا همان‌جا گرنت می‌شود؛ grantTrialIfFirstChat دست‌نخورده می‌ماند (guard
+  // trialStartedAt آن از این به بعد روی فروشگاه‌های جدید no-op است، برای فروشگاه‌های قدیمی‌تر
+  // که از قبل trial نگرفته‌اند همچنان کار می‌کند)
   async create(sellerId: string, dto: CreateStoreDto) {
     if (!(await this.isSlugAvailable(dto.slug))) {
       throw new ConflictException(fa.store.slugTaken);
     }
-    return this.prisma.store.create({ data: { ...dto, sellerId } });
+    const config = await getSalesAgentGlobalConfig(this.prisma);
+    const now = new Date();
+    const trialEndsAt = new Date(
+      now.getTime() + config.trialDurationDays * 24 * 60 * 60 * 1000,
+    );
+    return this.prisma.store.create({
+      data: {
+        ...dto,
+        sellerId,
+        trialStartedAt: now,
+        trialEndsAt,
+        trialCreditRemainingToman: config.trialCreditToman,
+      },
+    });
   }
 
   // docs/PRD-product-strategy-and-roadmap.md بخش ۳.۲ — فیلدهای ساختاریافته (ارسال/مرجوعی/
