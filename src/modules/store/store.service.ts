@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import type { OrderStatus } from '@prisma/client';
+import type { OrderStatus, GoldWageType } from '@prisma/client';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import * as XLSX from 'xlsx';
@@ -189,6 +189,9 @@ export class StoreService {
       dto.pricingModel,
       dto.weightGrams,
       dto.purityKarat,
+      dto.goldWageType,
+      dto.goldWageValue,
+      dto.goldProfitPercent,
     );
     // عیناً الگوی updateProduct پایین‌تر — specs یک فیلد Prisma.Json است، null خام قابل‌پاس
     // به create نیست (باید Prisma.DbNull باشد)
@@ -206,6 +209,12 @@ export class StoreService {
     storeId: string,
     weightGrams: number,
     purityKarat: number,
+    // docs/PRD-category-specific-product-pricing-and-attributes.md بخش ۲.۲ — فروشنده حین
+    // تایپ ممکن است اجرت/سود اختصاصی این محصول را هم هم‌زمان پر کند؛ پیش‌نمایش باید همان
+    // مقادیر در-حال-تایپ را منعکس کند، نه فقط پیش‌فرض ذخیره‌شده‌ی فروشگاه
+    productGoldWageType?: GoldWageType,
+    productGoldWageValue?: number,
+    productGoldProfitPercent?: number,
   ): Promise<{ price: number | null; error: string | null }> {
     const store = await this.getOwned(sellerId, storeId);
     if (!weightGrams || !purityKarat) {
@@ -219,6 +228,9 @@ export class StoreService {
           basePrice: 0,
           weightGrams,
           purityKarat,
+          goldWageType: productGoldWageType,
+          goldWageValue: productGoldWageValue,
+          goldProfitPercent: productGoldProfitPercent,
         },
         null,
         store,
@@ -243,10 +255,21 @@ export class StoreService {
     pricingModel: CreateProductDto['pricingModel'],
     weightGrams: number | undefined,
     purityKarat: number | undefined,
+    goldWageType?: GoldWageType | null,
+    goldWageValue?: number | null,
+    goldProfitPercent?: number | null,
   ): void {
     if (pricingModel !== 'WEIGHT_BASED_FORMULA') return;
     if (!weightGrams || !purityKarat) {
       throw new BadRequestException(fa.store.goldPricingFieldsRequired);
+    }
+    // فیدبک کاربر ۱۴۰۵/۰۷/۱۴ — اجرت/سود اختصاصی این محصول یا هر سه باید ست شوند یا هیچ‌کدام
+    // (یعنی برگشت کامل به پیش‌فرض فروشگاه)؛ یک مقدار تنها بدون بقیه معنی ندارد
+    const provided = [goldWageType, goldWageValue, goldProfitPercent].filter(
+      (v) => v != null,
+    );
+    if (provided.length > 0 && provided.length < 3) {
+      throw new BadRequestException(fa.store.goldPricingOverridePartial);
     }
   }
 
@@ -341,6 +364,9 @@ export class StoreService {
           pricingModel: true,
           weightGrams: true,
           purityKarat: true,
+          goldWageType: true,
+          goldWageValue: true,
+          goldProfitPercent: true,
         },
       }),
       this.prisma.product.count({ where }),
@@ -359,7 +385,15 @@ export class StoreService {
 
     return {
       items: items.map((p) => {
-        const { pricingModel, weightGrams, purityKarat, ...publicFields } = p;
+        const {
+          pricingModel,
+          weightGrams,
+          purityKarat,
+          goldWageType,
+          goldWageValue,
+          goldProfitPercent,
+          ...publicFields
+        } = p;
         let displayPrice = p.basePrice;
         let priceUnavailable = false;
         if (pricingModel === 'WEIGHT_BASED_FORMULA') {
@@ -370,6 +404,9 @@ export class StoreService {
                 basePrice: p.basePrice,
                 weightGrams,
                 purityKarat,
+                goldWageType,
+                goldWageValue,
+                goldProfitPercent,
               },
               null,
               store,
@@ -485,6 +522,16 @@ export class StoreService {
       dto.pricingModel ?? before.pricingModel,
       dto.weightGrams ?? before.weightGrams ?? undefined,
       dto.purityKarat ?? before.purityKarat ?? undefined,
+      // فیدبک کاربر ۱۴۰۵/۰۷/۱۴ — برخلاف weight/purity بالا، اینجا باید null صریح (برگشت به
+      // پیش‌فرض فروشگاه) را از undefined (فیلد اصلاً نفرستاده) تشخیص بدهیم؛ ?? با null هم
+      // fallback می‌کند که اینجا اشتباه است
+      dto.goldWageType !== undefined ? dto.goldWageType : before.goldWageType,
+      dto.goldWageValue !== undefined
+        ? dto.goldWageValue
+        : before.goldWageValue,
+      dto.goldProfitPercent !== undefined
+        ? dto.goldProfitPercent
+        : before.goldProfitPercent,
     );
     const { specs: rawSpecs, source, ...rest } = dto;
     const specs =

@@ -13,6 +13,13 @@ export interface GoldPricingInputs {
   basePrice: number;
   weightGrams: number | null;
   purityKarat: number | null;
+  // فیدبک کاربر ۱۴۰۵/۰۷/۱۴ — اجرت/سود می‌تواند بین محصولات یک فروشگاه فرق کند (مثلاً طرح
+  // ظریف در برابر مدل ساده)؛ هر سه null/undefined = از تنظیمات پیش‌فرض فروشگاه استفاده کن.
+  // عمداً partial override نیست — یا هر سه ست می‌شوند یا هیچ‌کدام، چون یک goldWageValue بدون
+  // goldWageType معنی ندارد
+  goldWageType?: GoldWageType | null;
+  goldWageValue?: number | null;
+  goldProfitPercent?: number | null;
 }
 
 export interface StoreGoldPricingSettings {
@@ -85,11 +92,13 @@ export function computeDisplayPrice(
     return product.basePrice;
   }
 
-  if (
-    !store.goldWageType ||
-    store.goldWageValue == null ||
-    store.goldProfitPercent == null
-  ) {
+  // بخش ۲.۲ سند — اجرت/سود اختصاصی محصول (اگر ست شده) روی پیش‌فرض فروشگاه اولویت دارد
+  const goldWageType = product.goldWageType ?? store.goldWageType;
+  const goldWageValue = product.goldWageValue ?? store.goldWageValue;
+  const goldProfitPercent =
+    product.goldProfitPercent ?? store.goldProfitPercent;
+
+  if (!goldWageType || goldWageValue == null || goldProfitPercent == null) {
     throw new GoldPricingNotConfiguredError();
   }
 
@@ -100,10 +109,10 @@ export function computeDisplayPrice(
   const pricePerGram = gold18k.price * (purityKarat / 18);
   const basePriceCalc = weightGrams * pricePerGram;
   const wage =
-    store.goldWageType === 'PERCENT'
-      ? basePriceCalc * (store.goldWageValue / 100)
-      : store.goldWageValue * weightGrams;
-  const profit = (basePriceCalc + wage) * (store.goldProfitPercent / 100);
+    goldWageType === 'PERCENT'
+      ? basePriceCalc * (goldWageValue / 100)
+      : goldWageValue * weightGrams;
+  const profit = (basePriceCalc + wage) * (goldProfitPercent / 100);
   const vat = (wage + profit) * (store.goldVatPercent / 100);
   const finalPrice = basePriceCalc + wage + profit + vat;
 

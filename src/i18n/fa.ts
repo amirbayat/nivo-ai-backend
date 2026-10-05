@@ -179,6 +179,8 @@ export const fa = {
     goldPricingNotConfigured:
       'برای محاسبه‌ی قیمت باید اول اجرت و درصد سود طلا را در تنظیمات فروشگاه مشخص کنی',
     goldPriceUnavailable: 'نرخ لحظه‌ای طلا موقتاً در دسترس نیست',
+    goldPricingOverridePartial:
+      'برای اجرت/سود اختصاصی این محصول باید هر سه مقدار (نوع اجرت، مقدار اجرت، درصد سود) پر شوند؛ اگر می‌خوای از پیش‌فرض فروشگاه استفاده کنی، هر سه را خالی بگذار',
     // docs/PRD-product-display-focus-and-variations.md §۴.۱
     variantOptionNamesDuplicate: 'اسم گزینه‌ها باید با هم فرق داشته باشند',
     variantCombinationInvalid:

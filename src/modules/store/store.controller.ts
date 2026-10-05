@@ -17,7 +17,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
-import type { OrderStatus } from '@prisma/client';
+import type { OrderStatus, GoldWageType } from '@prisma/client';
 import { SkipThrottle } from '@nestjs/throttler';
 import { JwtGuard } from '../../common/guards/jwt.guard';
 import {
@@ -158,12 +158,18 @@ export class StoreController {
     @Param('id') id: string,
     @Query('weightGrams') weightGrams: string,
     @Query('purityKarat') purityKarat: string,
+    @Query('goldWageType') goldWageType?: GoldWageType,
+    @Query('goldWageValue') goldWageValue?: string,
+    @Query('goldProfitPercent') goldProfitPercent?: string,
   ) {
     return this.storeService.previewGoldPrice(
       user.sub,
       id,
       Number(weightGrams),
       Number(purityKarat),
+      goldWageType,
+      goldWageValue ? Number(goldWageValue) : undefined,
+      goldProfitPercent ? Number(goldProfitPercent) : undefined,
     );
   }
 

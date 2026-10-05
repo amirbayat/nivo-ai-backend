@@ -9,7 +9,7 @@ import {
   Min,
   MaxLength,
 } from 'class-validator';
-import { PricingModel } from '@prisma/client';
+import { GoldWageType, PricingModel } from '@prisma/client';
 import { fa } from '../../../i18n/fa';
 import type { ProductSpecItem } from '../product-specs.types';
 
@@ -70,4 +70,20 @@ export class CreateProductDto {
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(1, { message: fa.validation.numberPositive })
   purityKarat?: number;
+
+  // فیدبک کاربر ۱۴۰۵/۰۷/۱۴ — اجرت/سود اختصاصی این محصول؛ خالی = از تنظیمات پیش‌فرض فروشگاه
+  // استفاده کن. یا هر سه ست می‌شوند یا هیچ‌کدام (اعتبارسنجی در store.service.ts)
+  @IsOptional()
+  @IsEnum(GoldWageType)
+  goldWageType?: GoldWageType;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0, { message: fa.validation.numberPositive })
+  goldWageValue?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0, { message: fa.validation.numberPositive })
+  goldProfitPercent?: number;
 }

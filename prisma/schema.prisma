@@ -2263,6 +2263,13 @@ model Product {
   pricingModel                PricingModel @default(FIXED)
   weightGrams                 Float?
   purityKarat                 Int?
+  // فیدبک کاربر ۱۴۰۵/۰۷/۱۴ — اجرت/سود می‌تواند بین محصولات همان فروشگاه فرق کند (مثلاً
+  // گردنبند ساده در برابر طرح ظریف با اجرت بالاتر)؛ null = از تنظیمات پیش‌فرض فروشگاه
+  // (Store.goldWageType/...) استفاده کن. مالیات (goldVatPercent) عمداً این‌جا override ندارد
+  // چون نرخ قانونی است، نه تصمیم فروشنده.
+  goldWageType                GoldWageType?
+  goldWageValue                Float?
+  goldProfitPercent            Float?
   createdAt                   DateTime @default(now())
   // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۹ (غنی‌سازی دوره‌ای) — قبلاً
   // Product هیچ timestamp آپدیتی نداشت، پس تشخیص «این محصول مدت‌هاست دست‌نخورده مانده»

@@ -87,6 +87,10 @@ type ProductLike = {
   pricingModel?: 'FIXED' | 'WEIGHT_BASED_FORMULA';
   weightGrams?: number | null;
   purityKarat?: number | null;
+  // فیدبک کاربر ۱۴۰۵/۰۷/۱۴ — اجرت/سود اختصاصی این محصول؛ null/undefined = از پیش‌فرض فروشگاه
+  goldWageType?: 'PERCENT' | 'FIXED_PER_GRAM' | null;
+  goldWageValue?: number | null;
+  goldProfitPercent?: number | null;
   images: string[];
   description?: string | null;
   // docs/PRD-product-video.md بخش ۴ — ستون Json خام (Prisma.JsonValue)، با parseProductVideos می‌خوانیم
@@ -347,6 +351,9 @@ export class ConversationEngineService {
             basePrice: product.basePrice,
             weightGrams: product.weightGrams ?? null,
             purityKarat: product.purityKarat ?? null,
+            goldWageType: product.goldWageType,
+            goldWageValue: product.goldWageValue,
+            goldProfitPercent: product.goldProfitPercent,
           },
           null,
           store,
@@ -359,6 +366,9 @@ export class ConversationEngineService {
               basePrice: product.basePrice,
               weightGrams: product.weightGrams ?? null,
               purityKarat: product.purityKarat ?? null,
+              goldWageType: product.goldWageType,
+              goldWageValue: product.goldWageValue,
+              goldProfitPercent: product.goldProfitPercent,
             },
             {
               priceOverride: v.priceOverride,
