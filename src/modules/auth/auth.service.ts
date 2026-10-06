@@ -356,6 +356,23 @@ export class AuthService {
       }
     }
 
+    // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۴.۲ — اگر این شماره قبلاً
+    // به‌عنوان خریدار در چت یک یا چند فروشگاه ظاهر شده (Customer.phone با OTP داخل همان چت
+    // تأیید شده)، همین لاگین (فروشنده یا خریدار، فرقی نمی‌کند) آن رکوردها را به همین User وصل
+    // می‌کند — بدون این، «سفارش‌های من» نمی‌تواند بعداً از Customer.userId استفاده کند. شکست
+    // این کار هرگز نباید لاگین را fail کند (همان الگوی defensive بالا برای deviceUuid/anonSessionId)
+    await this.prisma.customer
+      .updateMany({
+        where: { phone: user.phone, userId: null },
+        data: { userId: user.id },
+      })
+      .catch((err) =>
+        this.logger.error(
+          `customer userId backfill failed for user=${user.id}`,
+          err,
+        ),
+      );
+
     const tokens = await this.issueTokens(user.id, user.phone, user.role);
     return {
       ...tokens,

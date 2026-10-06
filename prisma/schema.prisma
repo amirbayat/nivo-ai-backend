@@ -59,6 +59,9 @@ model User {
   videoEditJobs             VideoEditJob[]
   videoEditSessions         VideoEditSession[]
   stores                    Store[]
+  // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۴.۲ — همین User اگر با
+  // همین شماره در یک یا چند فروشگاه هم به‌عنوان خریدار چت کرده باشد، آن رکوردهای Customer
+  customerLinks             Customer[]
 
   @@map("users")
 }
@@ -2497,6 +2500,12 @@ model Customer {
   // دیده‌شده برای این خریدار (Record<BuyerNeedTag, number>)؛ با هر AI_TRACE جدید incremental
   // آپدیت می‌شود، نه یک job دوره‌ای سنگین. فاز ۱: فقط جمع‌آوری، هیچ رفتار ایجنتی از رویش تصمیم نمی‌گیرد
   buyerNeedCounts Json?
+  // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۴.۲ — پل بین این Customer
+  // (مخصوص همین فروشگاه) و هویت پایدار خریدار در کل مارکت‌پلیس؛ با هر لاگین OTP موفق
+  // (AuthService.verifyOtp) که phone آن با phone این Customer یکی باشد، backfill پر می‌شود.
+  // نال یعنی این خریدار هنوز هیچ‌وقت با همین شماره در جایی از پلتفرم (غیر از این فروشگاه) لاگین نکرده
+  userId          String?
+  user            User?           @relation(fields: [userId], references: [id])
 
   // docs/PRD-conversation-history.md — دیگر یک‌به‌یک نیست؛ خریدار می‌تواند چند مکالمه‌ی
   // آرشیوشده داشته باشد («گفتگوی جدید» یا رسیدن به COMPLETED/REJECTED، بدون ساخت Customer تازه)
@@ -2511,6 +2520,7 @@ model Customer {
   @@unique([storeId, sessionToken])
   @@unique([storeId, telegramChatId])
   @@index([storeId])
+  @@index([userId])
   @@map("customers")
 }
 
