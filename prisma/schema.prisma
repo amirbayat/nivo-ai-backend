@@ -2801,6 +2801,7 @@ enum OrderStatus {
   RECEIPT_SUBMITTED
   APPROVED
   REJECTED
+  SHIPPED
 }
 
 model Order {
@@ -2853,6 +2854,9 @@ model Order {
   // overwrite نمی‌شوند)
   approvedAt                  DateTime?
   rejectedAt                  DateTime?
+  // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۱۳.۲ — ست می‌شود در
+  // shipOrder (status=APPROVED → SHIPPED)؛ نال یعنی هنوز ارسال نشده
+  shippedAt                   DateTime?
   createdAt                   DateTime           @default(now())
   updatedAt                   DateTime           @updatedAt
 

@@ -361,6 +361,9 @@ export const fa = {
       reason
         ? `متأسفانه فروشنده این سفارش رو رد کرد 😔\nدلیل: ${reason}\nاگه سوالی داری همین‌جا بپرس.`
         : 'متأسفانه فروشنده این سفارش رو رد کرد 😔 اگه سوالی داری همین‌جا بپرس.',
+    // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۱۳.۲ — عیناً الگوی
+    // orderRejectedMessage بالا، از shipOrder در store.service.ts صدا زده می‌شود
+    orderShippedMessage: 'سفارش شما ارسال شد 📦 به‌زودی دستتون می‌رسه.',
     // docs/PRD-customer-comments-and-discounts.md بخش ۹
     discountCodeMissing: 'کد تخفیف رو متوجه نشدم، می‌تونی دوباره بگی؟',
     discountCodeInvalid: 'این کد تخفیف معتبر نیست یا منقضی/تمام‌شده',

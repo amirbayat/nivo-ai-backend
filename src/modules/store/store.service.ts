@@ -1026,10 +1026,43 @@ export class StoreService {
   // با نمایش تصویر رسید در پنل موبایل، گام ۳ است.
   async listOrders(sellerId: string, storeId: string, status?: OrderStatus) {
     await this.getOwned(sellerId, storeId);
-    return this.prisma.order.findMany({
+    const orders = await this.prisma.order.findMany({
       where: { storeId, ...(status ? { status } : {}) },
       orderBy: { createdAt: 'desc' },
     });
+    // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۱۳.۲ — عکس محصول در
+    // جزئیات سفارش؛ items فقط productId/name/unitPrice/qty را snapshot کرده (نه عکس)، پس
+    // اینجا join سبک با Product انجام می‌شود (فقط همین صفحه، نه تغییر در ساختار items ذخیره‌شده)
+    const productIds = [
+      ...new Set(
+        orders.flatMap((o) =>
+          (o.items as { productId: string }[]).map((i) => i.productId),
+        ),
+      ),
+    ];
+    const products = productIds.length
+      ? await this.prisma.product.findMany({
+          where: { id: { in: productIds } },
+          select: { id: true, images: true },
+        })
+      : [];
+    const imageByProductId = new Map(
+      products.map((p) => [p.id, p.images[0] ?? null]),
+    );
+    return orders.map((order) => ({
+      ...order,
+      items: (
+        order.items as {
+          productId: string;
+          name: string;
+          unitPrice: number;
+          qty: number;
+        }[]
+      ).map((item) => ({
+        ...item,
+        imageKey: imageByProductId.get(item.productId) ?? null,
+      })),
+    }));
   }
 
   async getOwnedOrder(sellerId: string, storeId: string, orderId: string) {
@@ -1196,6 +1229,51 @@ export class StoreService {
     }
   }
 
+  // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۱۳.۲ — عیناً هم‌الگوی
+  // approveOrder/rejectOrder بالا؛ نیازی به دست‌زدن به salesConversation نیست چون با تایید
+  // سفارش از قبل COMPLETED/archived شده است
+  async shipOrder(sellerId: string, storeId: string, orderId: string) {
+    const order = await this.getOwnedOrder(sellerId, storeId, orderId);
+    // فیدبک کاربر — کلیک دوباره‌ی دکمه‌ی «ارسال شد» نباید notifyBuyerOfShipment را دوباره بفرستد
+    if (order.status === 'SHIPPED') return order;
+    const shipped = await this.prisma.order.update({
+      where: { id: orderId },
+      data: { status: 'SHIPPED', shippedAt: new Date() },
+    });
+    await this.notifyBuyerOfShipment(order);
+    return shipped;
+  }
+
+  // عیناً الگوی notifyBuyerOfRejection بالا — خریدار باید بفهمد سفارشش ارسال شده
+  private async notifyBuyerOfShipment(order: {
+    conversationId: string;
+  }): Promise<void> {
+    const conversation = await this.prisma.salesConversation.findUnique({
+      where: { id: order.conversationId },
+      include: { customer: true },
+    });
+    if (!conversation) return;
+
+    const text = fa.salesAgent.orderShippedMessage;
+    await this.prisma.conversationEvent.create({
+      data: {
+        conversationId: conversation.id,
+        type: 'AGENT_REPLY',
+        payload: { text },
+      },
+    });
+
+    if (
+      conversation.customer.channel === 'TELEGRAM' &&
+      conversation.customer.telegramChatId
+    ) {
+      await this.telegramApi.sendText(
+        conversation.customer.telegramChatId,
+        text,
+      );
+    }
+  }
+
   // الگوی conversations.service.ts getImage — کلید در storage هیچ‌وقت مستقیم به فرانت داده
   // نمی‌شود، همیشه از پشت JwtGuard+مالکیت سرو می‌شود
   async getReceiptImage(sellerId: string, storeId: string, orderId: string) {
@@ -1293,6 +1371,7 @@ export class StoreService {
       RECEIPT_SUBMITTED: 0,
       APPROVED: 0,
       REJECTED: 0,
+      SHIPPED: 0,
     };
     for (const row of orderCountsByStatus) {
       countByStatus[row.status] = row._count._all;

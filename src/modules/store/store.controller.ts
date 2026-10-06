@@ -411,6 +411,16 @@ export class StoreController {
     return this.storeService.rejectOrder(user.sub, id, orderId, reason);
   }
 
+  // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۱۳.۲
+  @Post(':id/orders/:orderId/ship')
+  shipOrder(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('orderId') orderId: string,
+  ) {
+    return this.storeService.shipOrder(user.sub, id, orderId);
+  }
+
   // مثل conversations.controller.ts getImage — SkipThrottle چون filename/orderId قابل
   // حدس‌زدن تصادفی نیست و مالکیت در سرویس چک می‌شود
   @SkipThrottle()
