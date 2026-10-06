@@ -294,6 +294,16 @@ persuasionTechniquesUsed بگذار (برای ثبت/گزارش داخلی فر�
 دانش عمومی خودت (بند بالا) استفاده کردی usedGeneralKnowledge را true کن — اگر هیچ‌کدام را استفاده
 نکردی، این‌ها را خالی/false بگذار، صادقانه.`;
 
+// docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۱۶ — فروشگاه دموی خودِ فروشنده
+// (toggle فقط از پنل ادمین، هرگز از پنل فروشنده): این‌جا هیچ سفارش/پرداخت واقعی در کار نیست،
+// هدف فقط جمع‌آوری شماره‌ی تماس علاقه‌مندهاست؛ همین است که جایگزین قانون create_order در پرامپت
+// اصلی می‌شود
+const LEAD_CAPTURE_ONLY_INSTRUCTION = `این فروشگاه حالت ثبت سفارش/پرداخت ندارد — هرگز ادعا نکن
+سفارشی ثبت شده یا قرار است پرداختی انجام شود، و create_order اصلاً در اختیارت نیست. وقتی مشتری
+علاقه‌ی واقعی نشان داد (نه صرفاً سؤال عمومی)، مؤدبانه شماره تماسش را بپرس؛ به‌محض گرفتن شماره
+(و اگر گفت، اسمش) بلافاصله capture_lead را صدا بزن — دیگر respond_to_customer لازم نیست، مکالمه
+همان‌جا تمام می‌شود.`;
+
 @Injectable()
 export class ConversationEngineService {
   private readonly logger = new Logger(ConversationEngineService.name);
@@ -1497,6 +1507,7 @@ relevantProductIds را خالی بگذار.${
     nudgeActive: boolean,
     persuasionEnabled: boolean,
     urgentDiscount: { code: string; expiresAt: Date } | null,
+    leadCaptureOnly: boolean,
   ): Promise<string> {
     const tone = toneForCategory(conversation.store.category);
     const store = conversation.store;
@@ -1546,8 +1557,12 @@ ${
   get_product_details را صدا بزن — حدس نزن.
 - افزودن/حذف واقعی از سبد فقط با update_cart انجام می‌شود؛ هرگز فقط در متن بگو «به سبد اضافه
   کردم» بدون این‌که واقعاً این ابزار را صدا زده باشی.
-- ثبت نهایی سفارش فقط با create_order انجام می‌شود، و فقط وقتی مشتری صریحاً تایید خرید کرده
-  (نه صرفاً علاقه نشان داده).
+${
+  leadCaptureOnly
+    ? '- این فروشگاه هیچ create_order ندارد؛ پایین دستورالعمل جدا برایش آمده.'
+    : `- ثبت نهایی سفارش فقط با create_order انجام می‌شود، و فقط وقتی مشتری صریحاً تایید خرید کرده
+  (نه صرفاً علاقه نشان داده).`
+}
 - اگر مشتری مشکل پرداخت یا سوال پس از خرید (مثل سفارش قبلاً ثبت‌شده) دارد که با ابزارهای بالا
   قابل‌حل نیست، یا صریح خواست با یک آدم/پشتیبان صحبت کند، request_human_handoff را صدا بزن و
   دیگر respond_to_customer را صدا نزن — مکالمه همان‌جا تمام می‌شود.
@@ -1576,7 +1591,9 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       persuasionEnabled && urgentDiscount
         ? `\n\nیک کد تخفیف واقعی و زمان‌دار همین الان فعال است: «${urgentDiscount.code}»، تا ${urgentDiscount.expiresAt.toLocaleString('fa-IR')} معتبر. اگر به مکالمه مرتبط است (مثلاً مشتری نزدیک تصمیم خرید است)، می‌توانی طبیعی مطرحش کنی، حتی اگر مشتری نپرسیده — وگرنه لازم نیست اشاره کنی.`
         : ''
-    }${nudgeActive ? `\n\n${OPEN_QUESTION_NUDGE_INSTRUCTION}` : ''}`;
+    }${nudgeActive ? `\n\n${OPEN_QUESTION_NUDGE_INSTRUCTION}` : ''}${
+      leadCaptureOnly ? `\n\n${LEAD_CAPTURE_ONLY_INSTRUCTION}` : ''
+    }`;
   }
 
   // docs/PRD-sales-agent-tool-calling-architecture.md بخش ۳.۴ — نرده‌ی حفاظتی حیاتی: قیمت/
@@ -2020,6 +2037,29 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       },
     });
 
+    // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۱۶ — فقط وقتی
+    // conversation.store.leadCaptureOnly=true در tools زیر جایگزین createOrderTool می‌شود؛ مثل
+    // requestHumanHandoffTool، همین handoffResult را ست می‌کند تا همان مسیر کوتاه (بدون نیاز به
+    // respond_to_customer) طی شود — هیچ Order ای در کار نیست
+    const captureLeadTool = tool({
+      description:
+        'وقتی مشتری علاقه‌ی واقعی نشان داده و شماره تماسش را گرفتی، همین‌جا ثبتش کن — این فروشگاه سفارش/پرداخت ندارد',
+      inputSchema: z.object({
+        phone: z.string(),
+        name: z.string().optional(),
+        interest: z.string().optional(),
+      }),
+      execute: async ({ phone, name, interest }) => {
+        handoffResult = await this.captureLead(conversation, {
+          phone,
+          name,
+          interest,
+        });
+        mutationHappened = true;
+        return { done: true };
+      },
+    });
+
     const cancelOrderTool = tool({
       description: 'سبد فعلی را کاملاً خالی می‌کند (انصراف مشتری از خرید فعلی)',
       inputSchema: z.object({}),
@@ -2192,6 +2232,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       nudgeActive,
       storePersuasionEnabled,
       urgentDiscount,
+      conversation.store.leadCaptureOnly,
     );
 
     let result;
@@ -2206,7 +2247,9 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           update_cart: updateCartTool,
           view_cart: viewCartTool,
           apply_discount: applyDiscountTool,
-          create_order: createOrderTool,
+          ...(conversation.store.leadCaptureOnly
+            ? { capture_lead: captureLeadTool }
+            : { create_order: createOrderTool }),
           cancel_order: cancelOrderTool,
           answer_faq: answerFaqTool,
           request_human_handoff: requestHumanHandoffTool,
@@ -5315,6 +5358,36 @@ answered=false بده (به‌جای حدس‌زدن).`,
     return { reply, uiBlocks: [], state: nextState };
   }
 
+  // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۱۶ — جایگزین doCreateOrder/
+  // finalizeOrder برای فروشگاه‌های leadCaptureOnly: هیچ Order ای ساخته نمی‌شود، فقط یک
+  // LeadProfile. مکالمه را مثل یک handoff موفق به COMPLETED می‌برد (نه HANDOFF_HUMAN، چون منتظر
+  // پاسخ انسانی هم‌اکنون نیست، فقط به هدفش رسیده)
+  private async captureLead(
+    conversation: ConversationWithStore,
+    args: { phone: string; name?: string; interest?: string },
+  ): Promise<EngineResult> {
+    await this.prisma.leadProfile.create({
+      data: {
+        storeId: conversation.storeId,
+        phone: args.phone,
+        name: args.name,
+        interests: args.interest ? [args.interest] : undefined,
+        source: 'sales_agent_lead_capture',
+      },
+    });
+    const nextState: ConversationState = 'COMPLETED';
+    await this.persistTransition(
+      conversation,
+      nextState,
+      this.getContext(conversation),
+      'capture_lead',
+    );
+    const reply = fa.salesAgent.leadCaptured;
+    await this.logReply(conversation, reply, { type: 'NONE' });
+    await this.notifySellerOfLeadCapture(conversation, args.phone, args.name);
+    return { reply, uiBlocks: [], state: nextState };
+  }
+
   // docs/PRD-product-strategy-and-roadmap.md بخش ۳.۲ — وقتی هر دو فیلد ست نشده، یعنی
   // فروشگاه محدودیتی اعلام نکرده و همیشه «در ساعت کاری» حساب می‌شود. مقایسه با ساعت تهران
   // (تک‌منطقه‌ی زمانی، نیازی به ذخیره‌ی timezone جدا نیست) روی دقیقه‌های روز، شامل بازه‌ی
@@ -5374,6 +5447,22 @@ answered=false بده (به‌جای حدس‌زدن).`,
           ],
         ],
       },
+    );
+  }
+
+  // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۱۶ — همان گیت
+  // sellerBotChatId بالا؛ عمداً تابعی جدا از notifySellerOfHandoff چون این یک لید است، نه یک
+  // مکالمه‌ی در انتظار پاسخ انسانی (بدون دکمه‌ی «پاسخ بده»)
+  private async notifySellerOfLeadCapture(
+    conversation: ConversationWithStore,
+    phone: string,
+    name?: string,
+  ): Promise<void> {
+    const chatId = conversation.store.sellerBotChatId;
+    if (!chatId) return;
+    await this.sellerBotApi.sendText(
+      chatId,
+      fa.telegram.leadCaptureNotification(phone, name),
     );
   }
 

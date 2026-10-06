@@ -339,6 +339,11 @@ export const fa = {
     // موضوع پس از خرید (P1)؛ ربات فعلاً Tool ای برای حلشان ندارد، مستقیم به فروشنده ارجاع می‌شود
     supportNeededHandoff:
       'این موضوع رو به فروشنده اطلاع دادم، به‌زودی خودش بهتون پیام می‌ده 🙏',
+    // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۱۶ — capture_lead روی
+    // فروشگاه‌های leadCaptureOnly؛ عمداً پیام ثابت (نه LLM-generated)، چون هیچ سفارش/پرداختی
+    // در کار نیست و نباید چیزی شبیه آن القا شود
+    leadCaptured:
+      'ممنون! شماره‌تون رو یادداشت کردم، به‌زودی خودم باهاتون تماس می‌گیرم 🙏',
     // docs/PRD-buyer-abuse-rate-limit.md — فقط یک‌بار (لحظه‌ی قفل‌شدن) نشان داده می‌شود، بعدش سکوت کامل
     abuseLocked: 'یکم آروم‌تر 🙏 لطفاً چند دقیقه صبر کن و دوباره پیام بده',
     // docs/PRD-customer-comments-and-discounts.md بخش الف/۳ — بعد از تایید سفارش، پیام ثابت
@@ -463,6 +468,9 @@ export const fa = {
     handoffNotification: (customerText: string) =>
       `🔔 یک مشتری نیاز به پاسخ شما داره:\n\n«${customerText}»`,
     handoffReplyButton: '💬 پاسخ بده',
+    // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۱۶
+    leadCaptureNotification: (phone: string, name?: string | null) =>
+      `📝 یک لید جدید ثبت شد:\n👤 ${name ?? '—'}\n📞 ${phone}`,
     receiptNotificationCaption: '🧾 رسید جدید برای بررسی رسید.',
     // فیدبک کاربر — فروشنده قبل از تایید/رد، آدرس و مشخصات گیرنده رو نمی‌دید؛ فقط وقتی
     // Store.requiresShipping بوده و این فیلدها روی سفارش ست شده‌اند نمایش داده می‌شود

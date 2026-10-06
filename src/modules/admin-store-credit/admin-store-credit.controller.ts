@@ -1,4 +1,12 @@
-import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import type { CreditUsageKind } from '@prisma/client';
 import { JwtGuard } from '../../common/guards/jwt.guard';
 import { AdminGuard } from '../../common/guards/admin.guard';
@@ -24,6 +32,16 @@ export class AdminStoreCreditController {
       range: parseDateRange(from, to),
       page: page ? parseInt(page, 10) : undefined,
     });
+  }
+
+  // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۱۶ — فقط ادمین می‌تواند این
+  // را روشن/خاموش کند؛ عمداً اینجا (کنار AdminGuard موجود)، نه در store.controller.ts فروشنده
+  @Patch(':id/lead-capture-only')
+  setLeadCaptureOnly(
+    @Param('id') id: string,
+    @Body() body: { enabled: boolean },
+  ) {
+    return this.service.setLeadCaptureOnly(id, body.enabled);
   }
 
   @Get(':id/credit-usage')

@@ -1108,7 +1108,13 @@ model LeadProfile {
   guideContentMd  String?            @db.Text // فاز ۲ — صفحه راهنمای AI شخصی‌سازی‌شده
   guideSentAt     DateTime?
   createdAt       DateTime           @default(now())
+  // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۱۶ — فقط وقتی source
+  // "sales_agent_lead_capture" است ست می‌شود (ابزار capture_lead روی فروشگاه‌های
+  // leadCaptureOnly)؛ برای لیدهای صفحه‌ی قیمت‌گذاری قدیمی null می‌ماند
+  storeId         String?
+  store           Store?             @relation(fields: [storeId], references: [id], onDelete: Cascade)
 
+  @@index([storeId])
   @@map("lead_profiles")
 }
 
@@ -2134,6 +2140,12 @@ model Store {
   // به آدرس ندارد؛ وقتی false باشد، ADDRESS_COLLECTION کلاً رد می‌شود (doCreateOrder همان
   // فلوی قدیمی مستقیم به AWAITING_PAYMENT را طی می‌کند)
   requiresShipping              Boolean           @default(true)
+  // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۱۶ — فقط ادمین این فیلد را
+  // عوض می‌کند (هیچ endpoint فروشنده‌ای آن را در whitelist خودش ندارد)؛ وقتی true باشد،
+  // conversation-engine به‌جای create_order از capture_lead استفاده می‌کند — یعنی هیچ‌وقت Order
+  // واقعی برای این فروشگاه ساخته نمی‌شود، فقط یک LeadProfile. مخصوص فروشگاه دموی خودِ فروشنده
+  // (امیر) برای معرفی محصول نرم‌افزاری، نه فروشگاه‌های واقعی مشتری‌ها
+  leadCaptureOnly               Boolean           @default(false)
   // docs/PRD-category-specific-product-pricing-and-attributes.md بخش ۲.۲/۳.۳ — اجرت/سود/مالیات
   // برای محصولات با pricingModel=WEIGHT_BASED_FORMULA؛ یک‌بار در سطح فروشگاه تنظیم می‌شود،
   // نه به‌ازای هر محصول. goldVatPercent پیش‌فرض ۱۰ (نرخ مالیات طلای ۱۴۰۴)، چون قانون مالیاتی
@@ -2164,6 +2176,8 @@ model Store {
   // docs/PRD-seller-guide-assistant-modal.md بخش ۱.۳ — لاگ تغییرات محتوا (چه فیلدی، کی،
   // چی‌به‌چی، دستی یا از پیشنهاد AI)
   contentChangeLogs ContentChangeLog[]
+  // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۱۶ — لیدهای capture_lead
+  leadProfiles      LeadProfile[]
 
   @@index([sellerId])
   @@map("stores")

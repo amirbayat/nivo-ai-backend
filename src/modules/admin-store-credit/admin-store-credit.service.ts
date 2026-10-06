@@ -38,6 +38,7 @@ export class AdminStoreCreditService {
           status: true,
           creditBalanceToman: true,
           trialCreditRemainingToman: true,
+          leadCaptureOnly: true,
           seller: { select: { phone: true, name: true } },
         },
       }),
@@ -100,6 +101,7 @@ export class AdminStoreCreditService {
         seller: store.seller,
         creditBalanceToman: store.creditBalanceToman,
         trialCreditRemainingToman: store.trialCreditRemainingToman,
+        leadCaptureOnly: store.leadCaptureOnly,
         totalPurchasedToman,
         totalAiCostToman,
         totalChargedToman,
@@ -110,6 +112,17 @@ export class AdminStoreCreditService {
     });
 
     return { total, page, pageSize, items };
+  }
+
+  // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۱۶ — فقط همین متد
+  // Store.leadCaptureOnly را می‌نویسد؛ هیچ endpoint فروشنده‌ای این فیلد را ندارد
+  // (UpdateStoreDto عمداً این فیلد را ندارد)
+  async setLeadCaptureOnly(storeId: string, enabled: boolean) {
+    return this.prisma.store.update({
+      where: { id: storeId },
+      data: { leadCaptureOnly: enabled },
+      select: { id: true, leadCaptureOnly: true },
+    });
   }
 
   async getStoreCreditUsage(params: {
