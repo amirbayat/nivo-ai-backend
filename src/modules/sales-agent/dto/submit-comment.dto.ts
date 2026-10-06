@@ -26,4 +26,21 @@ export class SubmitCommentDto {
   @Min(1)
   @Max(5)
   rating?: number;
+
+  // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۱۴.۲ — کلید MinIO، از
+  // POST chat/:conversationId/comment-media آپلود و این‌جا پاس داده می‌شود
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  imageKey?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  videoKey?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  audioKey?: string;
 }

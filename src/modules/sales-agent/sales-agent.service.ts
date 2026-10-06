@@ -391,8 +391,54 @@ export class SalesAgentService {
       productId: dto.productId ?? null,
       text: dto.text,
       rating: dto.rating,
+      imageKey: dto.imageKey,
+      videoKey: dto.videoKey,
+      audioKey: dto.audioKey,
     });
     return { ok: true };
+  }
+
+  // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۱۴.۲ — آپلود عکس/ویدیو/صدای
+  // نظر، قبل از submitDirectComment بالا؛ عیناً الگوی submitReceipt (همان storage.uploadImage
+  // برای هر سه نوع، طبق کانونشن موجود پروژه — بخش A8 بررسی‌شده)
+  private static readonly COMMENT_MEDIA_MAX_BYTES: Record<string, number> = {
+    image: 5 * 1024 * 1024,
+    video: 20 * 1024 * 1024,
+    audio: 8 * 1024 * 1024,
+  };
+
+  async submitCommentMedia(
+    conversationId: string,
+    sessionToken: string,
+    file: Express.Multer.File | undefined,
+  ): Promise<{ key: string; kind: 'image' | 'video' | 'audio' }> {
+    if (!file) throw new BadRequestException(fa.errors.validation);
+    const kind = file.mimetype.startsWith('image/')
+      ? 'image'
+      : file.mimetype.startsWith('video/')
+        ? 'video'
+        : file.mimetype.startsWith('audio/')
+          ? 'audio'
+          : null;
+    if (!kind) throw new BadRequestException(fa.errors.validation);
+    if (file.size > SalesAgentService.COMMENT_MEDIA_MAX_BYTES[kind]) {
+      throw new BadRequestException(fa.errors.validation);
+    }
+
+    const conversation = await this.loadOwned(conversationId, sessionToken);
+    // برای image همون نرمال‌سازی jpeg→jpg موجود؛ برای video/audio پسوند واقعی حفظ می‌شود چون
+    // (برخلاف ویدیوی محصول) این‌جا transcode نمی‌کنیم — پسوند همان چیزی است که در Content-Type
+    // سرو دوباره استفاده می‌شود (getReviewMedia)
+    const ext =
+      kind === 'image'
+        ? (file.mimetype.split('/')[1]?.replace('jpeg', 'jpg') ?? 'jpg')
+        : (file.mimetype.split('/')[1] ?? 'bin');
+    const key = await this.storage.uploadImage(
+      file.buffer,
+      ext,
+      conversation.id,
+    );
+    return { key, kind };
   }
 
   // docs/PRD-buyer-phone-otp-registration.md — برخلاف marketplace.service.ts's sendOtp/verifyOtp

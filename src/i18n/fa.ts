@@ -152,6 +152,8 @@ export const fa = {
     videoTranscodeFailed:
       'پردازش ویدیو با مشکل مواجه شد، فایل دیگه‌ای امتحان کن',
     videoNotFound: 'ویدیوی محصول یافت نشد',
+    // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۱۴.۲
+    reviewMediaNotFound: 'این رسانه یافت نشد',
     bankCardNotFound: 'این کارت بانکی یافت نشد',
     lastActiveBankCard: 'حداقل یک کارت بانکی باید فعال بماند',
     urlNotReadable:
@@ -387,6 +389,10 @@ export const fa = {
       'خوشحالیم که راضی بودی! هر وقت باز چیزی خواستی، همین‌جا هستیم 🌟',
     satisfactionNegativeAck:
       'بابت این تجربه متاسفیم 🙏 همین الان به فروشنده اطلاع دادیم تا پیگیری کنه.',
+    // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۱۴.۲ — پیگیری سوم و
+    // مستقل (۷ روز بعد)، کاملاً جدا از satisfactionFollowUpPrompt بالا؛ پیام ثابت، بدون AI
+    mediaReviewFollowUpPrompt:
+      'اگه هنوز دوست داری نظر بدی، می‌تونی عکس/ویدیو/صدا هم برای نظرت بفرستی — کافیه روی محصول توی لیست بزنی و «ثبت نظر» رو انتخاب کنی 📸',
     // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۴ + بخش ۵.۱۰ بند ۱ — سبد رهاشده: یادآوری
     // یک‌باره، بدون فراخوان AI (پیام ثابت)، وقتی مکالمه در CART_REVIEW/AWAITING_PAYMENT بیش از حد
     // بماند؛ اگه اسم اولین آیتم سبد در دسترس بود شخصی‌سازی می‌شود، وگرنه متن ژنریک قبلی

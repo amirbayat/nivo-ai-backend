@@ -37,6 +37,7 @@ import { clampProductSpecs } from './product-specs.types';
 import { ContentChangeLogService } from './content-change-log.service';
 import { getSalesAgentGlobalConfig } from '../sales-agent/sales-agent-global-config.util';
 import { MarketPricesService } from '../market-prices/market-prices.service';
+import { CommentsService } from '../comments/comments.service';
 import {
   computeDisplayPrice,
   GoldPriceUnavailableError,
@@ -117,6 +118,7 @@ export class StoreService {
     private readonly changeLog: ContentChangeLogService,
     private readonly marketPrices: MarketPricesService,
     private readonly aiProvider: AiProviderService,
+    private readonly comments: CommentsService,
   ) {}
 
   list(sellerId: string) {
@@ -461,6 +463,16 @@ export class StoreService {
       page: opts.page,
       pageSize: opts.pageSize,
     };
+  }
+
+  // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۱۴.۲ — «مشاهده نظرات
+  // خریداران قبلی» در چت خریدار؛ عمداً از روی slug (مثل listPublicProducts بالا) نه storeId،
+  // چون این endpoint هم بدون session-token/auth است
+  async getApprovedProductReviews(slug: string, productId: string) {
+    const store = await this.prisma.store.findUnique({ where: { slug } });
+    if (!store || store.status !== 'ACTIVE')
+      throw new NotFoundException(fa.store.notFound);
+    return this.comments.getApprovedForProductWithMedia(productId, store.id);
   }
 
   // docs/PRD-product-strategy-and-roadmap.md بخش ۳.۱ — یک groupBy به‌جای N کوئری جدا به‌ازای

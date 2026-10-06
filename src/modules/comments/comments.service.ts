@@ -1,8 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
 import type { Queue } from 'bull';
 import type { CommentStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { fa } from '../../i18n/fa';
 
 export type ProductCommentModerationJobData = { commentId: string };
 
@@ -24,6 +25,9 @@ export class CommentsService {
     productId: string | null;
     text: string;
     rating?: number;
+    imageKey?: string;
+    videoKey?: string;
+    audioKey?: string;
   }): Promise<void> {
     const comment = await this.prisma.productComment.create({
       data: {
@@ -32,9 +36,16 @@ export class CommentsService {
         productId: input.productId,
         text: input.text,
         rating: input.rating,
+        imageKey: input.imageKey,
+        videoKey: input.videoKey,
+        audioKey: input.audioKey,
       },
     });
-    await this.moderationQueue.add('moderate', { commentId: comment.id });
+    // بخش ۱۴.۲ — پیش‌فیلتر AI فعلی فقط متنی است و نمی‌تواند محتوای رسانه را بررسی کند؛ نظرات
+    // رسانه‌دار همیشه مستقیم PENDING برای ادمین می‌مانند، بدون صف‌شدن در این پیش‌فیلتر
+    if (!input.imageKey && !input.videoKey && !input.audioKey) {
+      await this.moderationQueue.add('moderate', { commentId: comment.id });
+    }
   }
 
   // فقط برای doFaq/showProduct (نمایش به خریدار بعدی) و store-kb.service.ts's completeProductInfo
@@ -46,6 +57,64 @@ export class CommentsService {
       take: limit,
       select: { text: true, rating: true },
     });
+  }
+
+  // بخش ۱۴.۲ — برخلاف getApprovedForProduct بالا (فقط مصرف داخلی AI)، این برای endpoint عمومی
+  // «مشاهده نظرات خریداران قبلی» در چت خریدار است؛ رسانه هم برمی‌گردد
+  async getApprovedForProductWithMedia(
+    productId: string,
+    storeId: string,
+    limit = 20,
+  ) {
+    return this.prisma.productComment.findMany({
+      where: { productId, storeId, status: 'ADMIN_APPROVED' },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      select: {
+        id: true,
+        text: true,
+        rating: true,
+        imageKey: true,
+        videoKey: true,
+        audioKey: true,
+        createdAt: true,
+      },
+    });
+  }
+
+  // مالکیت/تاییدشدگی کلید رسانه برای endpoint سرو عمومی (sales-agent.controller.ts) — فقط
+  // رسانه‌ی نظرات ADMIN_APPROVED قابل‌مشاهده است، نه نظرات در صف بررسی
+  async assertReviewMediaKey(
+    commentId: string,
+    key: string,
+  ): Promise<'image' | 'video' | 'audio'> {
+    return this.resolveMediaKind(commentId, key, true);
+  }
+
+  // عیناً بالا ولی بدون شرط ADMIN_APPROVED — ادمین باید بتواند رسانه‌ی نظرات PENDING را هم
+  // ببیند تا اصلاً بتواند تصمیم تاییدش را بگیرد (comments-admin.controller.ts)
+  async assertReviewMediaKeyForAdmin(
+    commentId: string,
+    key: string,
+  ): Promise<'image' | 'video' | 'audio'> {
+    return this.resolveMediaKind(commentId, key, false);
+  }
+
+  private async resolveMediaKind(
+    commentId: string,
+    key: string,
+    requireApproved: boolean,
+  ): Promise<'image' | 'video' | 'audio'> {
+    const comment = await this.prisma.productComment.findUnique({
+      where: { id: commentId },
+    });
+    if (!comment || (requireApproved && comment.status !== 'ADMIN_APPROVED')) {
+      throw new NotFoundException(fa.store.reviewMediaNotFound);
+    }
+    if (comment.imageKey === key) return 'image';
+    if (comment.videoKey === key) return 'video';
+    if (comment.audioKey === key) return 'audio';
+    throw new NotFoundException(fa.store.reviewMediaNotFound);
   }
 
   // صف تعدیل پنل ادمین (docs/PRD-customer-comments-and-discounts.md بخش ۵) — همان الگوی

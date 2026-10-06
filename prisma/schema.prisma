@@ -2854,6 +2854,10 @@ model Order {
   // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۳ — فالوآپ رضایت چند روز بعد از تایید
   // سفارش (نه فوری مثل درخواست نظر بالا)؛ نال یعنی هنوز فرستاده نشده
   satisfactionFollowUpSentAt  DateTime?
+  // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۱۴.۲ — پیگیری سوم و مستقل
+  // (۷ روز بعد)، درخواست نظر رسانه‌دار؛ کاملاً جدا از satisfactionFollowUpSentAt بالا تا با آن
+  // قاطی نشود. نال یعنی هنوز فرستاده نشده
+  mediaReviewFollowUpSentAt   DateTime?
   // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۱ — snapshot آدرس، نه فقط FK:
   // اگر خریدار بعداً CustomerAddress را ویرایش/حذف کند، این سفارش نباید عوض شود. همه نال
   // می‌مانند وقتی Store.requiresShipping=false بوده (فروش حضوری/دیجیتال)
@@ -2889,6 +2893,7 @@ model Order {
 
   @@index([storeId])
   @@index([status, satisfactionFollowUpSentAt])
+  @@index([status, mediaReviewFollowUpSentAt])
   // docs/PRD-seller-growth-tools-and-marketplace-trust.md بخش ۱.۱ — کوئری تجمیعی داشبورد
   // فروش (بازه‌ی تاریخ به‌ازای فروشگاه)؛ دو ایندکس بالا برای این کوئری خاص بهینه نیستند
   @@index([storeId, createdAt])
@@ -2917,6 +2922,12 @@ model ProductComment {
   customer     Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
   text         String        @db.Text
   rating       Int? // ۱ تا ۵، اختیاری — سؤال باز §۱۱ سند: فعلاً متن آزاد کافی است، رتبه اختیاری می‌ماند
+  // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۱۴.۲ — رسانه‌ی اختیاری نظر؛
+  // طبق کانونشن <چیزی>Key موجود (فقط کلید MinIO). وجود هرکدام یعنی این نظر پیش‌فیلتر AI را
+  // دور می‌زند و مستقیم PENDING برای ادمین می‌ماند (comments.service.ts's submitComment)
+  imageKey     String?
+  videoKey     String?
+  audioKey     String?
   status       CommentStatus @default(PENDING)
   aiVerdict    String? // خروجی خام مرحله‌ی AI برای شفافیت به ادمین
   aiConfidence Float?

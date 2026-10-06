@@ -20,7 +20,9 @@ import { SetResponseStrategyDto } from './dto/set-response-strategy.dto';
 import { SendBuyerOtpDto, VerifyBuyerOtpDto } from './dto/register-buyer.dto';
 import { SubmitCommentDto } from './dto/submit-comment.dto';
 import { StoreService } from '../store/store.service';
+import { CommentsService } from '../comments/comments.service';
 import { StorageService } from '../../storage/storage.service';
+import { mimeTypeForExt } from '../../common/validators/chat-image.validator';
 import { fa } from '../../i18n/fa';
 
 // docs/PRD-mvp-launch-plan.md گام ۱ — بدون JwtGuard: مشتری این فروشگاه یک User نیست،
@@ -32,6 +34,7 @@ export class SalesAgentController {
   constructor(
     private readonly salesAgentService: SalesAgentService,
     private readonly storeService: StoreService,
+    private readonly comments: CommentsService,
     private readonly storage: StorageService,
   ) {}
 
@@ -75,6 +78,17 @@ export class SalesAgentController {
       page: Math.max(1, parseInt(page ?? '1', 10) || 1),
       pageSize: Math.min(60, Math.max(1, parseInt(pageSize ?? '24', 10) || 24)),
     });
+  }
+
+  // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۱۴.۲ — «مشاهده نظرات
+  // خریداران قبلی»، عمومی/بدون session-token (عیناً الگوی public-products بالا) چون محتوای
+  // تاییدشده‌ی نمایشی است، نه چیز خصوصی؛ برخلاف getApprovedForProduct داخلی (فقط مصرف AI)
+  @Get('stores/:slug/products/:productId/reviews')
+  getProductReviews(
+    @Param('slug') slug: string,
+    @Param('productId') productId: string,
+  ) {
+    return this.storeService.getApprovedProductReviews(slug, productId);
   }
 
   // docs/PRD-conversation-history.md بخش ۳ — تاریخچه‌ی همه‌ی مکالمات (فعال+آرشیوشده) همین خریدار
@@ -153,6 +167,25 @@ export class SalesAgentController {
       conversationId,
       sessionToken,
       dto,
+    );
+  }
+
+  // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۱۴.۲ — آپلود رسانه‌ی نظر
+  // قبل از ثبت؛ کلید برگشتی در بدنه‌ی POST .../comments بالا (imageKey/videoKey/audioKey) پاس
+  // داده می‌شود. سقف ۲۰ مگابایت در سطح interceptor؛ سقف دقیق‌تر هر نوع در سرویس
+  @Post('chat/:conversationId/comment-media')
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: 20 * 1024 * 1024 } }),
+  )
+  submitCommentMedia(
+    @Param('conversationId') conversationId: string,
+    @Headers('x-session-token') sessionToken: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    return this.salesAgentService.submitCommentMedia(
+      conversationId,
+      sessionToken,
+      file,
     );
   }
 
@@ -380,5 +413,58 @@ export class SalesAgentController {
     res.setHeader('Content-Length', String(size));
     const stream = await this.storage.getObjectStream(key);
     stream.pipe(res);
+  }
+
+  // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۱۴.۲ — سرو رسانه‌ی نظرات
+  // تاییدشده؛ عمومی (بدون auth، مثل getProductImage/getProductVideo بالا) چون محتوای نمایشی
+  // عمومی است، فقط مالکیت/تاییدشدگی در سرویس چک می‌شود. برخلاف ویدیوی محصول، ویدیوی نظر
+  // transcode نمی‌شود، پس پسوند واقعی فایل تعیین‌کننده‌ی Content-Type است
+  @SkipThrottle()
+  @Get('comments/:commentId/media/:key')
+  async getReviewMedia(
+    @Param('commentId') commentId: string,
+    @Param('key') key: string,
+    @Headers('range') range: string | undefined,
+    @Res() res: Response,
+  ) {
+    const kind = await this.comments.assertReviewMediaKey(commentId, key);
+    const ext = key.split('.').pop() ?? '';
+
+    if (kind === 'video') {
+      let size: number;
+      try {
+        const stat = await this.storage.statObject(key);
+        size = stat.size;
+      } catch {
+        throw new NotFoundException(fa.store.reviewMediaNotFound);
+      }
+      res.setHeader('Content-Type', `video/${ext}`);
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      res.setHeader('Accept-Ranges', 'bytes');
+      const match = range ? /bytes=(\d+)-(\d*)/.exec(range) : null;
+      if (match) {
+        const start = Number(match[1]);
+        const end = match[2] ? Number(match[2]) : size - 1;
+        const stream = await this.storage.getObjectStream(key, { start, end });
+        res.status(206);
+        res.setHeader('Content-Range', `bytes ${start}-${end}/${size}`);
+        res.setHeader('Content-Length', String(end - start + 1));
+        stream.pipe(res);
+        return;
+      }
+      res.setHeader('Content-Length', String(size));
+      const stream = await this.storage.getObjectStream(key);
+      stream.pipe(res);
+      return;
+    }
+
+    const buffer = await this.storage.downloadImage(key);
+    const mimeType =
+      kind === 'audio'
+        ? `audio/${ext === 'mp3' ? 'mpeg' : ext}`
+        : mimeTypeForExt(ext);
+    res.setHeader('Content-Type', mimeType);
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    res.send(buffer);
   }
 }

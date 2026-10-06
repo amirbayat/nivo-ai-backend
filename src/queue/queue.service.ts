@@ -23,6 +23,9 @@ const VIDEO_MODEL_COST_ESTIMATE_CRON = '15 4 * * *';
 // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۳ — روزی یک‌بار کافی است، این پیام «چند روز
 // بعد» است، نه چیزی که با تاخیر دقیقه‌ای فرقی کند
 const POST_PURCHASE_FOLLOWUP_CRON = '0 10 * * *';
+// docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۱۴.۲ — پیگیری سوم (۷روزه)؛
+// یک ساعت بعد از فالوآپ رضایت بالا تا هم‌زمان با آن روی یک batch از سفارش‌ها اجرا نشوند
+const MEDIA_REVIEW_FOLLOWUP_CRON = '0 11 * * *';
 // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۴ — هر نیم‌ساعت، چون آستانه‌ی خودِ فیچر
 // (۳ ساعت) به این دقت حساس‌تر از فالوآپ رضایت است
 const ABANDONED_CART_REMINDER_CRON = '*/30 * * * *';
@@ -250,6 +253,14 @@ export class QueueService implements OnApplicationBootstrap {
     );
     this.logger.log(
       `Post-purchase follow-up job scheduled: ${POST_PURCHASE_FOLLOWUP_CRON}`,
+    );
+    await this.postPurchaseFollowUpQueue.add(
+      'send-media-review-followups',
+      {},
+      { repeat: { cron: MEDIA_REVIEW_FOLLOWUP_CRON } },
+    );
+    this.logger.log(
+      `Media-review follow-up job scheduled: ${MEDIA_REVIEW_FOLLOWUP_CRON}`,
     );
 
     const abandonedCartReminderRepeatables =
