@@ -22,6 +22,8 @@ export const fa = {
     tokenExpired: 'نشست شما منقضی شده است',
     refreshTokenInvalid: 'توکن نامعتبر است',
     userDisabled: 'حساب کاربری شما غیرفعال شده است',
+    impersonateUserNotFound: 'کاربری با این مشخصات پیدا نشد',
+    impersonateCodeInvalid: 'لینک ورود منقضی شده یا قبلاً استفاده شده است',
   },
   conversations: {
     notFound: 'مکالمه یافت نشد',

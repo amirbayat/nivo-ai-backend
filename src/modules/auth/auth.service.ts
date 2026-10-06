@@ -2,6 +2,7 @@ import {
   HttpException,
   Injectable,
   Logger,
+  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -56,6 +57,14 @@ function otpRateKey(phone: string) {
 function otpAttemptKey(phone: string) {
   return `otp:attempt:${phone}`;
 }
+function impersonateKey(code: string) {
+  return `impersonate:${code}`;
+}
+
+// کد ورود ادمین به‌جای کاربر فقط برای همین مدت کوتاه در Redis زنده می‌ماند و یک‌بارمصرف است
+// (بلافاصله بعد از consume پاک می‌شود) — بردار حمله‌ی اصلی (کد توی URL/تاریخچه‌ی مرورگر/لاگ
+// سرور بماند) را با کوتاه‌بودن عمر و یک‌بارمصرف‌بودن کد می‌بندد، نه با رمزنگاری پیچیده
+const IMPERSONATE_CODE_TTL_SECONDS = 60;
 
 @Injectable()
 export class AuthService {
@@ -571,6 +580,60 @@ export class AuthService {
       }));
 
     return { ...user, plan };
+  }
+
+  // درخواست «ادمین»: لاگین مستقیم به‌جای یک فروشنده یا خریدار، بدون دانستن OTP آن کاربر —
+  // برای ویرایش دستی دیتای فروشگاه‌های دمو (ادمین از همین راه وارد پنل فروشنده‌ی همان
+  // فروشگاه می‌شود و از پنل واقعی خودش استفاده می‌کند، نه یک UI جدا) و برای دیباگ حساب خریدار.
+  // خروجی فقط یک کد یک‌بارمصرف است، نه خودِ توکن — توکن واقعی را consumeImpersonationCode
+  // پایین، از مرورگر هدف (نه مرورگر ادمین) صادر می‌کند
+  async createImpersonationCode(
+    opts: { userId?: string; phone?: string },
+    adminUserId: string,
+  ): Promise<string> {
+    const user = opts.userId
+      ? await this.prisma.user.findUnique({ where: { id: opts.userId } })
+      : opts.phone
+        ? await this.prisma.user.findUnique({
+            where: { phone: normalizePhone(opts.phone) },
+          })
+        : null;
+    if (!user) throw new NotFoundException(fa.auth.impersonateUserNotFound);
+
+    const code = crypto.randomBytes(24).toString('hex');
+    await this.redis.set(
+      impersonateKey(code),
+      user.id,
+      'EX',
+      IMPERSONATE_CODE_TTL_SECONDS,
+    );
+    this.logger.warn(
+      `admin ${adminUserId} created impersonation code for user=${user.id} phone=${user.phone}`,
+    );
+    return code;
+  }
+
+  async consumeImpersonationCode(code: string) {
+    const userId = await this.redis.get(impersonateKey(code));
+    if (!userId)
+      throw new UnauthorizedException(fa.auth.impersonateCodeInvalid);
+    // یک‌بارمصرف — حتی اگر لینک لو برود، بار دوم کار نمی‌کند
+    await this.redis.del(impersonateKey(code));
+
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || !user.isActive)
+      throw new UnauthorizedException(fa.auth.userDisabled);
+
+    const tokens = await this.issueTokens(user.id, user.phone, user.role);
+    return {
+      ...tokens,
+      user: {
+        id: user.id,
+        phone: user.phone,
+        role: user.role,
+        name: user.name,
+      },
+    };
   }
 
   private async issueTokens(userId: string, phone: string, role: string) {

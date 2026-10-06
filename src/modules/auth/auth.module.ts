@@ -3,6 +3,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { AuthController } from './auth.controller';
 import { AdminOtpController } from './admin-otp.controller';
+import { AdminImpersonateController } from './admin-impersonate.controller';
 import { AuthService } from './auth.service';
 import { JwtStrategy } from './jwt.strategy';
 import { SmsModule } from '../../sms/sms.module';
@@ -19,7 +20,7 @@ import { AnonChatModule } from '../anon-chat/anon-chat.module';
     DeviceTokensModule,
     AnonChatModule,
   ],
-  controllers: [AuthController, AdminOtpController],
+  controllers: [AuthController, AdminOtpController, AdminImpersonateController],
   providers: [AuthService, JwtStrategy],
   exports: [AuthService],
 })

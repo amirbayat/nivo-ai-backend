@@ -11,6 +11,7 @@ import { AuthService } from './auth.service';
 import { SendOtpDto } from './dto/send-otp.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { ConsumeImpersonationDto } from './dto/consume-impersonation.dto';
 import { JwtGuard } from '../../common/guards/jwt.guard';
 import {
   CurrentUser,
@@ -43,6 +44,14 @@ export class AuthController {
   @HttpCode(200)
   refresh(@Body() dto: RefreshTokenDto) {
     return this.authService.refresh(dto.refreshToken);
+  }
+
+  // عمداً بدون JwtGuard — خود کدِ یک‌بارمصرف (از AdminImpersonateController صادر می‌شود)
+  // همان نقش را بازی می‌کند؛ این endpoint از مرورگر کاربر هدف صدا زده می‌شود، نه ادمین
+  @Post('impersonate/consume')
+  @HttpCode(200)
+  consumeImpersonation(@Body() dto: ConsumeImpersonationDto) {
+    return this.authService.consumeImpersonationCode(dto.code);
   }
 
   @Post('logout')
