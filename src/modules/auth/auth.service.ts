@@ -334,7 +334,7 @@ export class AuthService {
     // حساب تستی هیچ‌وقت پشت گیت waitlist سافت‌لانچ گیر نمی‌افتد
     let waitlisted: { message: string; queuePosition: number } | null = null;
     if (isNewUser && !isTestPhone) {
-      waitlisted = await this.campaign.applyToNewUser(user.id, user.phone);
+      waitlisted = await this.campaign.applyToNewUser(user.id, phone);
     }
 
     // شارژ اولیه‌ی رایگان نیوو — فقط دقیقاً یک‌بار، لحظه‌ی اولین ثبت‌نام واقعی
@@ -382,7 +382,7 @@ export class AuthService {
         ),
       );
 
-    const tokens = await this.issueTokens(user.id, user.phone, user.role);
+    const tokens = await this.issueTokens(user.id, phone, user.role);
     return {
       ...tokens,
       user: {
@@ -531,9 +531,11 @@ export class AuthService {
       data: { revokedAt: new Date() },
     });
 
+    // این متد فقط مسیر phone (ایران) است؛ کاربر ایمیلی (REGION=INTL) توکن تازه‌سازی را از
+    // IntlAuthService جدا می‌گیرد — phone اینجا همیشه ست است (همان الگوی issueTokens زیر)
     return this.issueTokens(
       stored.user.id,
-      stored.user.phone,
+      stored.user.phone!,
       stored.user.role,
     );
   }
@@ -624,7 +626,7 @@ export class AuthService {
     if (!user || !user.isActive)
       throw new UnauthorizedException(fa.auth.userDisabled);
 
-    const tokens = await this.issueTokens(user.id, user.phone, user.role);
+    const tokens = await this.issueTokens(user.id, user.phone!, user.role);
     return {
       ...tokens,
       user: {

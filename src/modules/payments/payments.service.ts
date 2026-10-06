@@ -619,7 +619,7 @@ export class PaymentsService {
           provider: payment.provider,
           refId: refId!,
           buyerName: payment.user.name,
-          buyerPhone: payment.user.phone,
+          buyerPhone: payment.user.phone!, // پرداخت/wallet فقط IR (phone-based) است، INTL فاز ۱ چک‌اوت ندارد
         },
       });
     });
@@ -639,7 +639,7 @@ export class PaymentsService {
         fa.adminNotification.paymentBody(
           plan.name,
           payment.amount,
-          payment.user.phone,
+          payment.user.phone!,
         ),
         {
           paymentId: payment.id,
@@ -772,7 +772,7 @@ export class PaymentsService {
           provider: payment.provider,
           refId,
           buyerName: payment.user.name,
-          buyerPhone: payment.user.phone,
+          buyerPhone: payment.user.phone!, // پرداخت/wallet فقط IR (phone-based) است، INTL فاز ۱ چک‌اوت ندارد
         },
       });
     });
@@ -788,7 +788,7 @@ export class PaymentsService {
         fa.adminNotification.walletTopupTitle,
         fa.adminNotification.walletTopupBody(
           payment.amount,
-          payment.user.phone,
+          payment.user.phone!,
         ),
         {
           paymentId: payment.id,
@@ -859,7 +859,7 @@ export class PaymentsService {
           provider: payment.provider,
           refId,
           buyerName: payment.user.name,
-          buyerPhone: payment.user.phone,
+          buyerPhone: payment.user.phone!, // پرداخت/wallet فقط IR (phone-based) است، INTL فاز ۱ چک‌اوت ندارد
         },
       });
     });
@@ -875,7 +875,7 @@ export class PaymentsService {
         fa.adminNotification.storeCreditTopupBody(
           payment.store.name,
           payment.amount,
-          payment.user.phone,
+          payment.user.phone!,
         ),
         {
           paymentId: payment.id,

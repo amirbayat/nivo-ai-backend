@@ -63,7 +63,8 @@ export class LiaraKeyProvisioningService {
         where: { id: userId },
         select: { phone: true },
       });
-      const keyName = this.keyNameFor(user.phone);
+      // لیارا یک سرویس ابری ایرانی است — این مسیر فقط برای کاربر ایرانی (phone-based) صدا زده می‌شود
+      const keyName = this.keyNameFor(user.phone!);
       const { key, liaraKeyId } =
         await this.management.createApiKeyForUser(keyName);
       const encryptedKey = encryptSecret(key, this.encryptionSecret());

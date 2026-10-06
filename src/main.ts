@@ -16,7 +16,15 @@ async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     bodyParser: false,
   });
-  app.useBodyParser('json', { limit: BODY_SIZE_LIMIT });
+  // docs/PRD-instagram-smart-dm-and-ir-intl-split.md بخش ۷.۲ — وبهوک اینستاگرام امضای
+  // X-Hub-Signature-256 را روی بایت خام بدنه چک می‌کند (نه JSON.parse شده دوباره)؛ verify
+  // همین بافر را روی req.rawBody می‌گذارد، برای همه‌ی request ها (هزینه‌اش ناچیز است)
+  app.useBodyParser('json', {
+    limit: BODY_SIZE_LIMIT,
+    verify: (req: { rawBody?: Buffer }, _res: unknown, buf: Buffer) => {
+      req.rawBody = buf;
+    },
+  });
   app.useBodyParser('urlencoded', { limit: BODY_SIZE_LIMIT, extended: true });
 
   // مسیرهای مقالات عمداً بدون پیشوند api/v1 هستند — این‌ها آدرس‌های عمومی SEO

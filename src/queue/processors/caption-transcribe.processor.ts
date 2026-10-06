@@ -1,7 +1,7 @@
 import { Process, Processor } from '@nestjs/bull';
 import { Logger } from '@nestjs/common';
 import type { Job } from 'bull';
-import { CaptionProjectStatus } from '@prisma/client';
+import { CaptionProjectStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
 import { MediaTranscodeService } from '../../common/services/media-transcode.service';
@@ -119,7 +119,7 @@ export class CaptionTranscribeProcessor {
       await this.prisma.captionProject.update({
         where: { id: captionProjectId },
         data: {
-          transcriptWords: result.words,
+          transcriptWords: result.words as unknown as Prisma.InputJsonValue,
           asrModelName: result.modelUsed,
           asrCostUsd: result.costUsd,
           sourceDurationSec: result.durationSec,

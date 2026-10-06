@@ -81,6 +81,28 @@ class EnvironmentVariables {
   // خالی برمی‌گرداند، بقیه‌ی اپ طبیعی کار می‌کند.
   @IsOptional() @IsString() BRSAPI_API_KEY?: string;
 
+  // docs/PRD-instagram-smart-dm-and-ir-intl-split.md بخش ۳ — کدام دیپلوی: ایران (دارکوب، موجود)
+  // یا خارجی (آلمان، nivoai.site، تازه). عمداً اختیاری با پیش‌فرض IR تا دیپلوی فعلی دست‌نخورده بماند.
+  @IsOptional() @IsIn(['IR', 'INTL']) REGION?: string;
+
+  // بخش ۷.۱ — کد تایید ایمیلی فروشنده‌ی REGION=INTL (آینه‌ی SEND_SMS/Kavenegar بالا برای SMS).
+  // بدون SEND_EMAIL=true، کد فقط لاگ می‌شود (devMode)، هیچ ایمیل واقعی ارسال نمی‌شود — دقیقاً
+  // همون الگوی sms.service.ts. SMTP عمومی (نه یک provider خاص) چون هنوز provider نهایی مشخص نیست.
+  @IsOptional() @IsString() SEND_EMAIL?: string;
+  @IsOptional() @IsString() SMTP_HOST?: string;
+  @IsOptional() @IsInt() SMTP_PORT?: number;
+  @IsOptional() @IsString() SMTP_USER?: string;
+  @IsOptional() @IsString() SMTP_PASS?: string;
+  @IsOptional() @IsString() SMTP_FROM?: string;
+
+  // بخش ۴.۱/۷.۲ — اتصال Instagram API with Instagram Login. عمداً اختیاری (مثل
+  // TELEGRAM_BOT_TOKEN بالا): قبل از ساخت App واقعی در Meta Developer، وبهوک/OAuth فقط رد
+  // می‌شوند، بقیه‌ی بک‌اند بی‌اثر از این نیست.
+  @IsOptional() @IsString() INSTAGRAM_APP_ID?: string;
+  @IsOptional() @IsString() INSTAGRAM_APP_SECRET?: string;
+  @IsOptional() @IsString() INSTAGRAM_WEBHOOK_VERIFY_TOKEN?: string;
+  @IsOptional() @IsUrl({ require_tld: false }) INSTAGRAM_REDIRECT_URI?: string;
+
   @IsInt() @Min(1) PORT: number = 3001;
 }
 

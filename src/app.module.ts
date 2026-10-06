@@ -57,6 +57,8 @@ import { SellerBotModule } from './modules/seller-bot/seller-bot.module';
 import { CommentsModule } from './modules/comments/comments.module';
 import { MarketplaceModule } from './modules/marketplace/marketplace.module';
 import { MarketPricesModule } from './modules/market-prices/market-prices.module';
+import { IntlAuthModule } from './modules/intl-auth/intl-auth.module';
+import { InstagramModule } from './modules/instagram/instagram.module';
 
 @Module({
   imports: [
@@ -112,6 +114,8 @@ import { MarketPricesModule } from './modules/market-prices/market-prices.module
     SalesAgentModule,
     CommentsModule,
     TelegramModule,
+    IntlAuthModule,
+    InstagramModule,
     SellerBotModule,
     MarketplaceModule,
     MarketPricesModule,

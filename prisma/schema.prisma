@@ -8,7 +8,12 @@ datasource db {
 
 model User {
   id        String   @id @default(uuid())
-  phone     String   @unique
+  // docs/PRD-instagram-smart-dm-and-ir-intl-split.md بخش ۳/۷.۱ — فروشنده‌ی REGION=INTL با
+  // ایمیل+کد ثبت‌نام می‌کند، نه شماره؛ phone نال‌پذیر شد تا این کاربرها بدون شماره ساخته شوند
+  // (دیتابیس INTL از ایران کاملاً جداست — بخش ۳.۱ — پس در عمل این دو هیچ‌وقت در یک ردیف قاطی
+  // نمی‌شوند؛ نال‌پذیری فقط چون schema مشترک بین دو دیپلوی است). دقیقاً یکی از phone/email همیشه ست است
+  phone     String?  @unique
+  email     String?  @unique
   name      String?
   role      Role     @default(USER)
   isActive  Boolean  @default(true)
@@ -2065,8 +2070,11 @@ model Store {
   // APPOINTMENT_BOOKING فعلاً فقط ذخیره می‌شود تا تقاضای واقعی سنجیده شود — ماشین‌حالت/پنل/
   // مدل داده‌ی نوبت‌دهی هنوز ساخته نشده (فاز جدا، تأیید نشده).
   businessType                  StoreBusinessType @default(PRODUCT_SALES)
-  bankCardNumber                String
-  bankOwnerName                 String
+  // docs/PRD-instagram-smart-dm-and-ir-intl-split.md بخش ۳ — فروشنده‌ی REGION=INTL فاز ۱ اصلاً
+  // کارت بانکی ندارد (چک‌اوت در فاز ۱ وجود ندارد)؛ در DTO ثبت‌نام ایرانی (CreateStoreDto) همچنان
+  // required است — این نال‌پذیری فقط در سطح دیتابیس است، نه تغییر رفتار ویزارد فعلی ایران
+  bankCardNumber                String?
+  bankOwnerName                 String?
   // فیدبک اول پایلوت — فروشنده می‌خواست بتواند لینک صفحه/کانالش را هم بدهد (نه ویرایش
   // موجودی‌ها؛ فقط در ثبت‌نام اختیاری پر می‌شود). عمداً String آزاد، نه IsUrl سخت‌گیر — فروشنده
   // ممکن است "@nam-shop" یا "t.me/xxx" بدون https:// بنویسد.
@@ -2079,6 +2087,14 @@ model Store {
   ownerTelegramChatId           String?
   telegramConnectToken          String?           @unique
   telegramConnectTokenExpiresAt DateTime?
+  // docs/PRD-instagram-smart-dm-and-ir-intl-split.md بخش ۴.۱ — «Instagram API with Instagram
+  // Login» (بدون نیاز به فیس‌بوک پیج)؛ آینه‌ی سه فیلد telegramConnectToken بالا ولی برای OAuth
+  // استاندارد (نه دیپ‌لینک یک‌بارمصرف). instagramAccessToken توکن long-lived است (~۶۰ روز، نیاز
+  // به refresh دوره‌ای)؛ instagramBusinessId همان IG User ID است که وبهوک با آن match می‌شود
+  instagramBusinessId           String?           @unique
+  instagramAccessToken          String?           @db.Text
+  instagramTokenExpiresAt       DateTime?
+  instagramConnectedAt          DateTime?
   // docs/PRD-seller-telegram-management-bot.md — بات دوم و جدا (توکن/وبهوک جدا) برای مدیریت
   // پنل از تلگرام، با احراز هویت واقعی (اشتراک‌گذاری شماره + همان OTP پیامکی ورود پنل وب) —
   // عمداً فیلد جدا از ownerTelegramChatId بالا (که فقط برای اعلان‌رسانی/پاسخ‌دهی روی بات
@@ -2196,6 +2212,8 @@ model Store {
   contentChangeLogs ContentChangeLog[]
   // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۱۶ — لیدهای capture_lead
   leadProfiles      LeadProfile[]
+  // docs/PRD-instagram-smart-dm-and-ir-intl-split.md بخش ۴.۲ — rule های اتوماسیون دایرکت هوشمند
+  instagramAutomationRules InstagramAutomationRule[]
 
   @@index([sellerId])
   @@index([isDemoTemplate, category])
@@ -2492,9 +2510,40 @@ model StoreKbEntry {
 // نمایش/تماس بعدی است.
 // docs/PRD-telegram-bot-channel.md بخش ۲ — تعمیم چند-کاناله. یکتایی‌ها عمداً ترکیبی
 // (per-store) شدند نه سراسری: یک telegramChatId می‌تواند از چند فروشگاه مختلف خرید کند
+// docs/PRD-instagram-smart-dm-and-ir-intl-split.md بخش ۴.۱ — کانال سوم؛ شناسه‌ی هویتی‌اش
+// instagramPsid است (Page-Scoped ID مشتری در Messaging API)، نه phone/sessionToken
 enum CustomerChannel {
   WEB
   TELEGRAM
+  INSTAGRAM
+}
+
+// docs/PRD-instagram-smart-dm-and-ir-intl-split.md بخش ۴.۲ — فاز ۱: کاملاً rule-based، بدون
+// AI_DYNAMIC (آن فیلد عمداً حذف شده، فاز بعد برمی‌گردد — بخش ۴.۷)
+enum AutomationTriggerType {
+  COMMENT_KEYWORD // کامنت حاوی کلیدواژه روی یک پست/ریل خاص (یا همه‌ی پست‌ها)
+  STORY_REPLY // ریپلای به استوری (شامل پاسخ به استیکر «سوال» استوری)
+  STORY_MENTION // منشن در استوری کاربر دیگر
+  DM_KEYWORD // کلیدواژه در یک دایرکت معمولی (نه لزوماً از مسیر کامنت/استوری)
+}
+
+// docs/PRD-instagram-smart-dm-and-ir-intl-split.md بخش ۴.۲ — مستقل از ConversationEngineService
+// (فاز ۱ هیچ‌وقت آن را صدا نمی‌زند)؛ مشترک بین هر دو ریجن (بخش ۳)
+model InstagramAutomationRule {
+  id                 String                @id @default(uuid())
+  storeId            String
+  store              Store                 @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  triggerType        AutomationTriggerType
+  targetMediaId      String? // نال = روی همه‌ی پست‌های فروشگاه فعال است
+  keyword            String? // نال = هر تعاملی از این نوع match می‌شود
+  staticReplyText    String?               @db.Text // پاسخ عمومی زیر کامنت (کوتاه)
+  staticDmText       String                @db.Text // پیام دایرکت — در فاز ۱ همیشه لازم است
+  publicReplyEnabled Boolean               @default(true)
+  isActive           Boolean               @default(true)
+  createdAt          DateTime              @default(now())
+
+  @@index([storeId, isActive])
+  @@map("instagram_automation_rules")
 }
 
 model Customer {
@@ -2504,6 +2553,9 @@ model Customer {
   channel         CustomerChannel @default(WEB)
   sessionToken    String? // فقط WEB
   telegramChatId  String? // فقط TELEGRAM
+  // docs/PRD-instagram-smart-dm-and-ir-intl-split.md بخش ۴.۱ — فقط INSTAGRAM؛ PSID، نه username
+  // (اینستاگرام username پایدار نیست، PSID پایدار و per-app است)
+  instagramPsid   String?
   phone           String?
   fullName        String?
   // docs/PRD-buyer-phone-otp-registration.md بخش ۲ — نال یعنی phone هنوز با OTP تایید نشده
@@ -2536,6 +2588,7 @@ model Customer {
 
   @@unique([storeId, sessionToken])
   @@unique([storeId, telegramChatId])
+  @@unique([storeId, instagramPsid])
   @@index([storeId])
   @@index([userId])
   @@map("customers")

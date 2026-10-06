@@ -4468,11 +4468,14 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       const card = await this.prisma.storeBankCard.findUnique({
         where: { id: order.bankCardId },
       });
-      cardNumber = card?.cardNumber ?? conversation.store.bankCardNumber;
-      ownerName = card?.ownerName ?? conversation.store.bankOwnerName;
+      // bankCardNumber/bankOwnerName فقط برای فروشگاه REGION=INTL می‌تواند نال باشد
+      // (docs/PRD-instagram-smart-dm-and-ir-intl-split.md بخش ۳)؛ آن فروشگاه‌ها چک‌اوت/Order
+      // ندارند پس به این مسیر هرگز نمی‌رسند — برای فروشگاه ایرانی همیشه از DTO ثبت‌نام ست شده
+      cardNumber = card?.cardNumber ?? conversation.store.bankCardNumber!;
+      ownerName = card?.ownerName ?? conversation.store.bankOwnerName!;
     } else {
-      cardNumber = conversation.store.bankCardNumber;
-      ownerName = conversation.store.bankOwnerName;
+      cardNumber = conversation.store.bankCardNumber!;
+      ownerName = conversation.store.bankOwnerName!;
     }
 
     const nextState: ConversationState = 'AWAITING_PAYMENT';

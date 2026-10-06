@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
 import type { Queue } from 'bull';
-import { CaptionProjectStatus } from '@prisma/client';
+import { CaptionProjectStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
 import { PricingService } from '../usage/pricing.service';
@@ -173,7 +173,7 @@ export class CaptionStudioService {
           : {}),
         ...(dto.styleId !== undefined ? { styleId: dto.styleId } : {}),
         ...(dto.styleOverrides !== undefined
-          ? { styleOverrides: dto.styleOverrides }
+          ? { styleOverrides: dto.styleOverrides as Prisma.InputJsonValue }
           : {}),
       },
     });
