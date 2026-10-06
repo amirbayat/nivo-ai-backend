@@ -157,6 +157,11 @@ function displayStock(product: ProductLike): number {
 // داده می‌شدند
 const HANDOFF_CLARIFY_THRESHOLD = 4;
 
+// docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۲.۵ — سقف پیام خریدار در هر
+// مکالمه‌ی دمو (store.isDemo)؛ چت واقعی = توکن واقعی مدل، این عدد جلوی هزینه‌ی نامحدود یک سشن
+// دمو را می‌گیرد. فقط برای isDemo چک می‌شود، فروشگاه‌های واقعی اصلاً از این مسیر رد نمی‌شوند
+const DEMO_MESSAGE_CAP = 15;
+
 // docs/PRD-sales-agent-voice.md بخش ۱.۳/۳ — آستانه‌ی طول پاسخ برای تولید وویس + سقف تعداد
 // وویس به‌ازای هر مکالمه (جلوی مکالمه‌ای که هر پاسخش وویس می‌گیرد)
 const VOICE_MIN_REPLY_CHARS = 200;
@@ -2575,6 +2580,9 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         payload: { text },
       },
     });
+
+    const demoCapResult = await this.checkDemoMessageCap(conversation);
+    if (demoCapResult) return demoCapResult;
 
     const abuseResult = await this.checkAbuseGuard(conversation);
     if (abuseResult) return abuseResult;
@@ -5470,6 +5478,26 @@ answered=false بده (به‌جای حدس‌زدن).`,
   // این مکالمه از قبل (لحظه‌ی ساخت، decideBillingMode) به همین حالت قفل شده — بدون هیچ فراخوان AI
   private billingBlocked(conversation: ConversationWithStore): boolean {
     return conversation.billingMode === 'BLOCKED';
+  }
+
+  // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۲.۵ — فقط فروشگاه‌های دمو
+  // (isDemo) را چک می‌کند؛ بعد از عبور از سقف، همیشه همین پیام ثابت برمی‌گردد (بدون فراخوان AI)
+  private async checkDemoMessageCap(
+    conversation: ConversationWithStore,
+  ): Promise<EngineResult | null> {
+    if (!conversation.store.isDemo) return null;
+    const messageCount = await this.prisma.conversationEvent.count({
+      where: { conversationId: conversation.id, type: 'CUSTOMER_MESSAGE' },
+    });
+    if (messageCount <= DEMO_MESSAGE_CAP) return null;
+    await this.logReply(conversation, fa.salesAgent.demoMessageLimitReached, {
+      type: 'NONE',
+    });
+    return {
+      reply: fa.salesAgent.demoMessageLimitReached,
+      uiBlocks: [],
+      state: conversation.currentState,
+    };
   }
 
   // docs/PRD-buyer-abuse-rate-limit.md — باید همین ابتدای هر پیام/اکشن واقعی مشتری چک شود،

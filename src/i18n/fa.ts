@@ -348,6 +348,9 @@ export const fa = {
       'ممنون! شماره‌تون رو یادداشت کردم، به‌زودی خودم باهاتون تماس می‌گیرم 🙏',
     // docs/PRD-buyer-abuse-rate-limit.md — فقط یک‌بار (لحظه‌ی قفل‌شدن) نشان داده می‌شود، بعدش سکوت کامل
     abuseLocked: 'یکم آروم‌تر 🙏 لطفاً چند دقیقه صبر کن و دوباره پیام بده',
+    // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۲.۵ — سقف پیام هر سشن دمو
+    demoMessageLimitReached:
+      'این یک دموی رایگانه و به سقف پیام این گفتگو رسیدیم 🙏 برای ساختن فروشگاه واقعی خودت با همین هوش مصنوعی، دکمه‌ی «فروشگاه خودم رو بسازم» رو بزن',
     // docs/PRD-customer-comments-and-discounts.md بخش الف/۳ — بعد از تایید سفارش، پیام ثابت
     // (نه LLM-generated) که یک پیام آزاد بعدی مشتری را به یک ProductComment تبدیل می‌کند
     reviewFollowUpPrompt:
@@ -864,5 +867,10 @@ export const fa = {
   marketplace: {
     invalidSession: 'نشست شما منقضی شده — دوباره شماره‌ات رو تأیید کن',
     noOrdersFound: 'هنوز سفارشی با این شماره ثبت نشده',
+  },
+  // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۵
+  demo: {
+    categoryInvalid: 'این دسته‌بندی دمو پیدا نشد',
+    templateNotFound: 'دموی این دسته‌بندی هنوز آماده نشده',
   },
 } as const;

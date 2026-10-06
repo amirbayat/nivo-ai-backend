@@ -50,6 +50,7 @@ import { VideoEditConfigModule } from './modules/video-edit-config/video-edit-co
 import { KieVideoModelsModule } from './modules/kie-video-models/kie-video-models.module';
 import { ContentAgentModule } from './modules/content-agent/content-agent.module';
 import { StoreModule } from './modules/store/store.module';
+import { DemoModule } from './modules/demo/demo.module';
 import { SalesAgentModule } from './modules/sales-agent/sales-agent.module';
 import { TelegramModule } from './modules/telegram/telegram.module';
 import { SellerBotModule } from './modules/seller-bot/seller-bot.module';
@@ -107,6 +108,7 @@ import { MarketPricesModule } from './modules/market-prices/market-prices.module
     KieVideoModelsModule,
     ContentAgentModule,
     StoreModule,
+    DemoModule,
     SalesAgentModule,
     CommentsModule,
     TelegramModule,

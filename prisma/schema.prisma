@@ -2157,6 +2157,15 @@ model Store {
   goldWageValue                 Float?
   goldProfitPercent             Float?
   goldVatPercent                Float             @default(10)
+  // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۵.۱ — فروشگاه «قالب»:
+  // دستی seed می‌شود، هیچ‌وقت مستقیم به بازدیدکننده نشان داده نمی‌شود، فقط منبع کپی است
+  isDemoTemplate                Boolean           @default(false)
+  // همان بخش — کپی شخصی هر بازدیدکننده‌ی لینک /demo/...؛ همیشه leadCaptureOnly=true
+  // (هیچ‌وقت Order واقعی نمی‌سازد) تا نیازی به کارت بانکی/تسویه‌ی واقعی نباشد
+  isDemo                        Boolean           @default(false)
+  clonedFromStoreId             String?
+  clonedFromStore               Store?            @relation("StoreClones", fields: [clonedFromStoreId], references: [id], onDelete: SetNull)
+  clones                        Store[]           @relation("StoreClones")
   createdAt                     DateTime          @default(now())
   updatedAt                     DateTime          @updatedAt
 
@@ -2183,6 +2192,8 @@ model Store {
   leadProfiles      LeadProfile[]
 
   @@index([sellerId])
+  @@index([isDemoTemplate, category])
+  @@index([sellerId, isDemo])
   @@map("stores")
 }
 
