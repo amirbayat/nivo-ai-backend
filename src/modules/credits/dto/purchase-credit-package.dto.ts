@@ -1,5 +1,12 @@
 import { Transform, Type } from 'class-transformer';
-import { IsIn, IsInt, IsOptional, IsString, IsUUID, Min } from 'class-validator';
+import {
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Min,
+} from 'class-validator';
 import { PaymentProvider } from '@prisma/client';
 import { fa } from '../../../i18n/fa';
 import { PAYMENT_GATEWAY_NAMES } from '../../payments/gateways/payment-gateway.interface';

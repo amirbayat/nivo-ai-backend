@@ -21,13 +21,19 @@ function vttTime(ms: number): string {
 
 export function buildSrt(segments: CaptionSegment[]): string {
   return segments
-    .map((seg, i) => `${i + 1}\n${srtTime(seg.startMs)} --> ${srtTime(seg.endMs)}\n${seg.text}\n`)
+    .map(
+      (seg, i) =>
+        `${i + 1}\n${srtTime(seg.startMs)} --> ${srtTime(seg.endMs)}\n${seg.text}\n`,
+    )
     .join('\n');
 }
 
 export function buildVtt(segments: CaptionSegment[]): string {
   const body = segments
-    .map((seg) => `${vttTime(seg.startMs)} --> ${vttTime(seg.endMs)}\n${seg.text}\n`)
+    .map(
+      (seg) =>
+        `${vttTime(seg.startMs)} --> ${vttTime(seg.endMs)}\n${seg.text}\n`,
+    )
     .join('\n');
   return `WEBVTT\n\n${body}`;
 }

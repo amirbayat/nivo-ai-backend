@@ -1,10 +1,18 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import * as XLSX from 'xlsx';
 import { PrismaService } from '../../prisma/prisma.service';
 import { KieVideoCategory, Prisma, VideoModelProvider } from '@prisma/client';
 import type { KieVideoModel } from '@prisma/client';
 import { fa } from '../../i18n/fa';
-import { parseInputFields, safeParseInputFields, type InputFieldsSchema } from './input-fields.schema';
+import {
+  parseInputFields,
+  safeParseInputFields,
+  type InputFieldsSchema,
+} from './input-fields.schema';
 
 // inputFields عمداً unknown است، نه InputFieldsSchema — از کنترلر (DTO) خام می‌رسد و فقط
 // داخل create/update/importFromXlsx همین سرویس با parseInputFields اعتبارسنجی می‌شود
@@ -70,7 +78,10 @@ function cellToStringArray(value: unknown): string[] | undefined {
 // ستون inputFields خالی یعنی «دست‌نخورده بماند» (undefined، نه null) — چون بیشتر ردیف‌های
 // اکسل هنوز این ستون را پر نکرده‌اند و نباید یک ایمپورت جزئی (مثلاً فقط برای آپدیت قیمت)
 // عمداً inputFields مدل‌های قبلاً کامل‌شده را null کند
-function cellToJsonInputFields(value: unknown): { value?: InputFieldsSchema | null; error?: string } {
+function cellToJsonInputFields(value: unknown): {
+  value?: InputFieldsSchema | null;
+  error?: string;
+} {
   const s = cellToString(value);
   if (s === undefined) return { value: undefined };
   if (s.toLowerCase() === 'null') return { value: null };
@@ -92,8 +103,7 @@ function parseKieVideoModelImportRow(raw: Record<string, unknown>) {
     slug: cellToString(raw.slug),
     displayName: cellToString(raw.displayName),
     category: cellToString(raw.category)?.toUpperCase() as
-      | KieVideoCategory
-      | undefined,
+      KieVideoCategory | undefined,
     isActive: cellToBoolean(raw.isActive, true),
     sortOrder: cellToNumber(raw.sortOrder) ?? 0,
     supportsImages: cellToBoolean(raw.supportsImages, false),
@@ -163,7 +173,8 @@ export class KieVideoModelsService {
 
   async create(data: CreateKieVideoModelData): Promise<KieVideoModel> {
     const { inputFields, ...rest } = data;
-    const validated = inputFields != null ? parseInputFields(inputFields) : inputFields;
+    const validated =
+      inputFields != null ? parseInputFields(inputFields) : inputFields;
     return this.prisma.kieVideoModel.create({
       data: { ...rest, inputFields: this.toPrismaInputFields(validated) },
     });
@@ -175,7 +186,8 @@ export class KieVideoModelsService {
   ): Promise<KieVideoModel> {
     await this.getById(id);
     const { inputFields, ...rest } = data;
-    const validated = inputFields != null ? parseInputFields(inputFields) : inputFields;
+    const validated =
+      inputFields != null ? parseInputFields(inputFields) : inputFields;
     return this.prisma.kieVideoModel.update({
       where: { id },
       data: { ...rest, inputFields: this.toPrismaInputFields(validated) },
@@ -240,11 +252,17 @@ export class KieVideoModelsService {
         continue;
       }
       if (!Object.values(KieVideoCategory).includes(data.category)) {
-        errors.push({ row: rowNumber, message: `category نامعتبر: ${data.category}` });
+        errors.push({
+          row: rowNumber,
+          message: `category نامعتبر: ${data.category}`,
+        });
         continue;
       }
       if (data.inputFieldsError) {
-        errors.push({ row: rowNumber, message: `ستون inputFields نامعتبر: ${data.inputFieldsError}` });
+        errors.push({
+          row: rowNumber,
+          message: `ستون inputFields نامعتبر: ${data.inputFieldsError}`,
+        });
         continue;
       }
 
@@ -253,10 +271,15 @@ export class KieVideoModelsService {
         const existing = await this.prisma.kieVideoModel.findUnique({
           where: { slug: rowData.slug },
         });
-        const inputFieldsForWrite = this.toPrismaInputFields(rowData.inputFields);
+        const inputFieldsForWrite = this.toPrismaInputFields(
+          rowData.inputFields,
+        );
         await this.prisma.kieVideoModel.upsert({
           where: { slug: rowData.slug },
-          create: { ...rowData, inputFields: inputFieldsForWrite } as Prisma.KieVideoModelCreateInput,
+          create: {
+            ...rowData,
+            inputFields: inputFieldsForWrite,
+          } as Prisma.KieVideoModelCreateInput,
           update: { ...rowData, inputFields: inputFieldsForWrite },
         });
         if (existing) updated++;

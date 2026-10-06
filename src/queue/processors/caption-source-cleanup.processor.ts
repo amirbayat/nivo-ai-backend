@@ -27,7 +27,9 @@ export class CaptionSourceCleanupProcessor {
 
     const projects = await this.prisma.captionProject.findMany({
       where: {
-        status: { in: [CaptionProjectStatus.DONE, CaptionProjectStatus.FAILED] },
+        status: {
+          in: [CaptionProjectStatus.DONE, CaptionProjectStatus.FAILED],
+        },
         sourceDeletedAt: null,
         updatedAt: { lt: cutoff },
       },

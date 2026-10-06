@@ -2097,10 +2097,11 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       description:
         'مکالمه را به یک فروشنده‌ی انسانی ارجاع می‌دهد — برای درخواست صریح صحبت با انسان یا مشکلاتی (پرداخت/پس از خرید) که ابزاری برای حلش نداری',
       inputSchema: z.object({ reason: z.string().optional() }),
-      execute: async () => {
+      execute: async ({ reason }: { reason?: string }) => {
         handoffResult = await this.transitionToHandoff(
           conversation,
           'CUSTOMER_REQUESTED',
+          reason,
         );
         mutationHappened = true;
         return { done: true };
@@ -5345,6 +5346,10 @@ answered=false بده (به‌جای حدس‌زدن).`,
       // docs/PRD-buyer-purchase-intent-taxonomy.md بخش ۲ — گروه‌های P1 (PAYMENT_ISSUE/
       // POST_PURCHASE_SUPPORT در buyerNeeds)؛ ربات Tool ای برای این‌ها ندارد، مستقیم ارجاع
       | 'SUPPORT_NEEDED',
+    // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۳.۲ — دلیل آزاد مدل وقتی
+    // request_human_handoff را صدا می‌زند؛ قبلاً دور ریخته می‌شد، الان در ConversationEvent
+    // ذخیره می‌شود تا aggregator پیشنهاد تکمیل پروفایل (بخش ۳.۳) از آن استفاده کند
+    freeTextReason?: string,
   ): Promise<EngineResult> {
     const nextState: ConversationState = 'HANDOFF_HUMAN';
     await this.persistTransition(
@@ -5352,6 +5357,7 @@ answered=false بده (به‌جای حدس‌زدن).`,
       nextState,
       this.getContext(conversation),
       reason,
+      freeTextReason,
     );
     const reply =
       reason === 'BILLING_BLOCKED'
@@ -5531,6 +5537,8 @@ answered=false بده (به‌جای حدس‌زدن).`,
     nextState: ConversationState,
     context: ConversationContext,
     toolName?: string,
+    // بخش ۳.۲ — دلیل آزاد `request_human_handoff`؛ فقط برای CUSTOMER_REQUESTED پر می‌شود
+    note?: string,
   ) {
     const fromState = conversation.currentState;
     await this.prisma.$transaction([
@@ -5540,7 +5548,7 @@ answered=false بده (به‌جای حدس‌زدن).`,
               data: {
                 conversationId: conversation.id,
                 type: 'TOOL_CALL',
-                payload: { toolName },
+                payload: note ? { toolName, note } : { toolName },
               },
             }),
           ]

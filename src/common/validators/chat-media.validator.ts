@@ -94,7 +94,8 @@ function isFlac(buffer: Buffer): boolean {
 
 function matchesVideoMagic(buffer: Buffer, ext: string): boolean {
   if (ext === 'webm') return isWebm(buffer);
-  if (ext === 'mpeg' || ext === 'mpg') return isMpegPs(buffer) || isIsoBmf(buffer);
+  if (ext === 'mpeg' || ext === 'mpg')
+    return isMpegPs(buffer) || isIsoBmf(buffer);
   return isIsoBmf(buffer);
 }
 

@@ -4,7 +4,10 @@ import { PrismaService } from '../../prisma/prisma.service';
 
 const CACHE_TTL_MS = 60_000;
 
-export type UpdatableCaptionPricingTier = Pick<CaptionPricingTier, 'creditCost'> & {
+export type UpdatableCaptionPricingTier = Pick<
+  CaptionPricingTier,
+  'creditCost'
+> & {
   maxDurationSec?: number | null;
   sortOrder?: number;
 };
@@ -57,7 +60,9 @@ export class CaptionPricingService {
     return this.getAllTiers();
   }
 
-  async createTier(data: UpdatableCaptionPricingTier): Promise<CaptionPricingTier> {
+  async createTier(
+    data: UpdatableCaptionPricingTier,
+  ): Promise<CaptionPricingTier> {
     const tier = await this.prisma.captionPricingTier.create({ data });
     this.invalidateCache();
     return tier;
@@ -67,7 +72,10 @@ export class CaptionPricingService {
     id: string,
     data: Partial<UpdatableCaptionPricingTier>,
   ): Promise<CaptionPricingTier> {
-    const tier = await this.prisma.captionPricingTier.update({ where: { id }, data });
+    const tier = await this.prisma.captionPricingTier.update({
+      where: { id },
+      data,
+    });
     this.invalidateCache();
     return tier;
   }

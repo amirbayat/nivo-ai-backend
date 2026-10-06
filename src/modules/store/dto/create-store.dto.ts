@@ -1,4 +1,10 @@
-import { IsEnum, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
+import {
+  IsEnum,
+  IsOptional,
+  IsString,
+  Matches,
+  MaxLength,
+} from 'class-validator';
 import { StoreBusinessType } from '@prisma/client';
 import { fa } from '../../../i18n/fa';
 

@@ -4,11 +4,7 @@
 // jobs/createTask عمومی، endpoint اختصاصی خودشان را دارند (تایید‌شده از docs.kie.ai:
 // /api/v1/veo/generate+record-info، /api/v1/runway/generate+record-detail).
 export type VideoProviderState =
-  | 'waiting'
-  | 'queuing'
-  | 'generating'
-  | 'success'
-  | 'fail';
+  'waiting' | 'queuing' | 'generating' | 'success' | 'fail';
 
 export interface VideoProviderClient {
   submit(

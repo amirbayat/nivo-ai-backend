@@ -7,7 +7,11 @@ import {
   IsString,
   Min,
 } from 'class-validator';
-import { KieInputSchema, KieVideoCategory, VideoModelProvider } from '@prisma/client';
+import {
+  KieInputSchema,
+  KieVideoCategory,
+  VideoModelProvider,
+} from '@prisma/client';
 
 const CATEGORIES = Object.values(KieVideoCategory);
 const PROVIDERS = Object.values(VideoModelProvider);

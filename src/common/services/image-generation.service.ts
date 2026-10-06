@@ -402,7 +402,9 @@ export class ImageGenerationService {
     if (!finalBase64)
       throw new Error(
         `${errorLabel} streaming ended without a completed image (seen event types: ${
-          seenEventTypes.size ? [...seenEventTypes].join(', ') : 'none — connection was idle'
+          seenEventTypes.size
+            ? [...seenEventTypes].join(', ')
+            : 'none — connection was idle'
         })`,
       );
     return { base64: finalBase64, mediaType, usage };

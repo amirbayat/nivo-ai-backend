@@ -11,6 +11,10 @@ import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import * as XLSX from 'xlsx';
 import { randomBytes } from 'crypto';
+import { generateObject } from 'ai';
+import { z } from 'zod';
+import { AiProviderService } from '../../common/services/ai-provider.service';
+import { defaultModel } from '../sales-agent/model-variants';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
 import { MediaTranscodeService } from '../../common/services/media-transcode.service';
@@ -41,6 +45,27 @@ import {
 
 // docs/PRD-product-strategy-and-roadmap.md بخش ۳.۱ — چک‌لیست سطح فروشگاه
 const MIN_STORE_KB_ENTRIES = 3;
+
+// docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۳.۳ — کش aggregator پیشنهاد
+// تکمیل پروفایل: ۲۴ ساعت بین دو فراخوان LLM کافی است (این داده به‌کندی تغییر می‌کند)
+const ATTENTION_SUGGESTIONS_TTL_MS = 24 * 60 * 60 * 1000;
+const ATTENTION_SUGGESTIONS_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000;
+// کمتر از این تعداد مورد گیرکردن/درخواست انسان، خوشه‌بندی معنادار نیست — حدس تک‌موردی به
+// فروشنده نشان داده نمی‌شود
+const MIN_STUCK_EVENTS_FOR_SUMMARY = 3;
+
+export interface AttentionSuggestionTopic {
+  topic: string;
+  field:
+    | 'brandIntro'
+    | 'returnPolicy'
+    | 'shippingInfo'
+    | 'ownerNotes'
+    | 'workingHours'
+    | 'other';
+  summary: string;
+  occurrences: number;
+}
 
 // docs/PRD-telegram-bot-channel.md بخش ۹.۱ — عمر لینک اتصال تلگرام فروشنده، یک‌بارمصرف
 const TELEGRAM_CONNECT_TOKEN_TTL_MS = 15 * 60 * 1000;
@@ -91,6 +116,7 @@ export class StoreService {
     private readonly mediaTranscode: MediaTranscodeService,
     private readonly changeLog: ContentChangeLogService,
     private readonly marketPrices: MarketPricesService,
+    private readonly aiProvider: AiProviderService,
   ) {}
 
   list(sellerId: string) {
@@ -493,8 +519,143 @@ export class StoreService {
         hasProductWithPhoto: products.some((p) => p.images.length > 0),
         hasEnoughKbEntries: totalKbEntries >= MIN_STORE_KB_ENTRIES,
         hasShippingPolicy: !!store.shippingInfo,
+        // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۳.۳ — گسترش چک‌لیست
+        // (قبلاً فقط hasShippingPolicy)؛ همه‌ی این فیلدها از قبل روی Store هستند، بدون کوئری اضافه
+        hasReturnPolicy: !!store.returnPolicy,
+        hasBrandIntro: !!store.brandIntro,
+        hasOwnerNotes: !!store.ownerNotes,
+        hasWorkingHours: !!(store.workingHoursStart && store.workingHoursEnd),
       },
     };
+  }
+
+  // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۳.۳/۳.۴ — موضوعات
+  // تکرارشونده‌ای که ربات گیر کرده (AGENT_STUCK/SUPPORT_NEEDED) یا مشتری صریح خواسته انسان
+  // (CUSTOMER_REQUESTED، همراه دلیل آزاد)، خوشه‌بندی‌شده با یک فراخوان LLM؛ برای تب «توجه».
+  // نتیجه روی خود Store کش می‌شود (ATTENTION_SUGGESTIONS_TTL_MS) چون تولیدش یک فراخوان LLM
+  // است و نباید با هر بار باز شدن تب دوباره محاسبه شود
+  async getAttentionSuggestions(sellerId: string, storeId: string) {
+    const store = await this.getOwned(sellerId, storeId);
+    const isFresh =
+      !!store.attentionSuggestionsComputedAt &&
+      Date.now() - store.attentionSuggestionsComputedAt.getTime() <
+        ATTENTION_SUGGESTIONS_TTL_MS;
+    if (isFresh) {
+      return {
+        topics:
+          (store.attentionSuggestions as unknown as AttentionSuggestionTopic[]) ??
+          [],
+        computedAt: store.attentionSuggestionsComputedAt,
+      };
+    }
+
+    const topics = await this.computeAttentionSuggestionTopics(storeId);
+    const computedAt = new Date();
+    await this.prisma.store.update({
+      where: { id: storeId },
+      data: {
+        attentionSuggestions: topics as unknown as Prisma.InputJsonValue,
+        attentionSuggestionsComputedAt: computedAt,
+      },
+    });
+    return { topics, computedAt };
+  }
+
+  private async computeAttentionSuggestionTopics(
+    storeId: string,
+  ): Promise<AttentionSuggestionTopic[]> {
+    const since = new Date(Date.now() - ATTENTION_SUGGESTIONS_LOOKBACK_MS);
+    const handoffEvents = await this.prisma.conversationEvent.findMany({
+      where: {
+        type: 'TOOL_CALL',
+        createdAt: { gte: since },
+        conversation: { storeId },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 60,
+      select: { conversationId: true, payload: true, createdAt: true },
+    });
+    const stuckEvents = handoffEvents.filter((e) => {
+      const toolName = (e.payload as { toolName?: string })?.toolName;
+      return (
+        toolName === 'AGENT_STUCK' ||
+        toolName === 'SUPPORT_NEEDED' ||
+        toolName === 'CUSTOMER_REQUESTED'
+      );
+    });
+    if (stuckEvents.length < MIN_STUCK_EVENTS_FOR_SUMMARY) return [];
+
+    const conversationIds = [
+      ...new Set(stuckEvents.map((e) => e.conversationId)),
+    ];
+    const customerMessages = await this.prisma.conversationEvent.findMany({
+      where: {
+        conversationId: { in: conversationIds },
+        type: 'CUSTOMER_MESSAGE',
+      },
+      orderBy: { createdAt: 'asc' },
+      select: { conversationId: true, payload: true, createdAt: true },
+    });
+    const messagesByConversation = new Map<string, string[]>();
+    for (const m of customerMessages) {
+      const text = (m.payload as { text?: string })?.text;
+      if (!text) continue;
+      const list = messagesByConversation.get(m.conversationId) ?? [];
+      list.push(text);
+      messagesByConversation.set(m.conversationId, list);
+    }
+
+    const cases = stuckEvents.map((e, i) => {
+      const toolName = (e.payload as { toolName?: string }).toolName;
+      const note = (e.payload as { note?: string }).note;
+      const recentMessages = (
+        messagesByConversation.get(e.conversationId) ?? []
+      ).slice(-3);
+      return `مورد ${i + 1} — دلیل: ${toolName}${note ? ` — یادداشت: ${note}` : ''}${
+        recentMessages.length
+          ? ` — آخرین پیام‌های مشتری: ${recentMessages.join(' / ')}`
+          : ''
+      }`;
+    });
+
+    const { object } = await generateObject({
+      model: this.aiProvider.buildClient(undefined, {
+        supportsStructuredOutputs: true,
+      })(defaultModel()),
+      schema: z.object({
+        topics: z
+          .array(
+            z.object({
+              topic: z
+                .string()
+                .describe('خلاصه‌ی کوتاه فارسی موضوع تکرارشونده'),
+              field: z.enum([
+                'brandIntro',
+                'returnPolicy',
+                'shippingInfo',
+                'ownerNotes',
+                'workingHours',
+                'other',
+              ]),
+              summary: z
+                .string()
+                .describe(
+                  'یک جمله توضیح برای فروشنده که چرا این را به پروفایلش اضافه کند',
+                ),
+              occurrences: z.number(),
+            }),
+          )
+          .max(5),
+      }),
+      system: `فهرست زیر مواردی است که ربات فروش یک فروشگاه نتوانسته جواب مشتری را بدهد یا مشتری
+صریح خواسته با انسان صحبت کند. موضوعات تکرارشونده را پیدا کن و خوشه‌بندی کن — هر خوشه یکی از
+فیلدهای پروفایل فروشگاه (brandIntro=معرفی برند، returnPolicy=قوانین مرجوعی، shippingInfo=شرایط
+ارسال، ownerNotes=یادداشت‌های آزاد فروشنده، workingHours=ساعت پاسخ‌گویی، other=هیچ‌کدام) را نشانه
+می‌گیرد که اگر فروشنده پر کند، دفعه‌ی بعد ربات خودش جواب می‌دهد. فقط موضوعات واقعاً تکرارشونده
+(حداقل ۲ مورد مشابه) را برگردان، نه موارد تکی. حداکثر ۵ خوشه، فقط JSON مطابق schema.`,
+      prompt: cases.join('\n'),
+    });
+    return object.topics;
   }
 
   // عمداً public — StoreAdPlacementService (جایگاه تبلیغاتی محصول‌محور) هم از همین چک

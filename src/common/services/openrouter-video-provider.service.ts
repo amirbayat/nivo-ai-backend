@@ -16,12 +16,7 @@ export class OpenRouterVideoApiError extends Error {
 }
 
 export type OpenRouterVideoJobStatus =
-  | 'pending'
-  | 'processing'
-  | 'completed'
-  | 'failed'
-  | 'cancelled'
-  | 'expired';
+  'pending' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'expired';
 
 function extractErrorMessage(
   error:
@@ -106,7 +101,8 @@ export class OpenRouterVideoProviderService {
   ): Promise<{ id: string }> {
     const { res, json, text } = await this.request<{
       id?: string;
-      error?: string | { message?: string; code?: string | number; type?: string };
+      error?:
+        string | { message?: string; code?: string | number; type?: string };
     }>(
       `${this.baseURL}/videos`,
       {
@@ -139,7 +135,8 @@ export class OpenRouterVideoProviderService {
     const { res, json, text } = await this.request<{
       status?: OpenRouterVideoJobStatus;
       unsigned_urls?: string[];
-      error?: string | { message?: string; code?: string | number; type?: string };
+      error?:
+        string | { message?: string; code?: string | number; type?: string };
       usage?: { cost?: number };
     }>(
       `${this.baseURL}/videos/${id}`,

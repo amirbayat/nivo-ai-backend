@@ -186,9 +186,7 @@ export class VideoEditService {
 
   // مدت واقعی فایل (نه فرضی) هم برمی‌گرداند — فرانت از آن برای نمایش/اعتبارسنجی تریمر
   // پنجره‌ی start/end استفاده می‌کند (بخش ۵.۴ سند)، preflight هزینه هم از همین مقدار استفاده می‌کند
-  async uploadVideo(
-    file: Express.Multer.File,
-  ): Promise<{
+  async uploadVideo(file: Express.Multer.File): Promise<{
     key: string;
     durationSec: number;
     width: number;
@@ -259,7 +257,10 @@ export class VideoEditService {
       orderBy: { createdAt: 'desc' },
       take: 50,
       include: {
-        jobs: { orderBy: { createdAt: 'desc' }, include: { kieVideoModel: true } },
+        jobs: {
+          orderBy: { createdAt: 'desc' },
+          include: { kieVideoModel: true },
+        },
       },
     });
   }
@@ -300,9 +301,7 @@ export class VideoEditService {
       // Seedance/Wan-R2V/Wan-V2V هم روی Kie هستند ولی فقط GENERATE-with-reference دارند
       // (تحقیق ۱۴۰۵/۰۶/۱۷)
       if (!model.supportsScenePreservingEdit) {
-        throw new BadRequestException(
-          fa.videoEdit.editModeNotSupportedByModel,
-        );
+        throw new BadRequestException(fa.videoEdit.editModeNotSupportedByModel);
       }
     }
     if (dto.videoKey) {
@@ -348,7 +347,9 @@ export class VideoEditService {
     const model = await this.getActiveModelOrThrow(dto.kieVideoModelId);
     // دیسپچر معماری جدید/قدیمی — طبق پلن بخش ۳.۳: inputFields غیر-null یعنی اعتبارسنجی عمومی
     // (validateInputValues) جای منطق دستی validateAgainstMode را می‌گیرد
-    const schema = model.inputFields ? parseInputFields(model.inputFields) : null;
+    const schema = model.inputFields
+      ? parseInputFields(model.inputFields)
+      : null;
     const valuesJson = (dto.valuesJson ?? {}) as FieldValues;
     if (schema) {
       validateInputValues(schema, valuesJson);
@@ -553,7 +554,9 @@ export class VideoEditService {
         orderBy: { createdAt: 'desc' },
         take: 200,
       });
-      const match = candidates.find((c) => JSON.stringify(c.valuesJson).includes(key));
+      const match = candidates.find((c) =>
+        JSON.stringify(c.valuesJson).includes(key),
+      );
       if (match) owned = { id: match.id };
     }
     if (!owned) throw new NotFoundException(fa.errors.notFound);
@@ -631,14 +634,22 @@ export class VideoEditService {
       const marker = '---پیشنهاد نهایی---';
       const markerIdx = text.indexOf(marker);
       if (markerIdx === -1) {
-        return { critique: text.trim(), suggestedPrompt: null, expectedOutput: null };
+        return {
+          critique: text.trim(),
+          suggestedPrompt: null,
+          expectedOutput: null,
+        };
       }
       const critique = text.slice(0, markerIdx).trim();
       const afterSuggestion = text.slice(markerIdx + marker.length);
 
       const expectedMarkerIdx = afterSuggestion.indexOf(EXPECTED_OUTPUT_MARKER);
       if (expectedMarkerIdx === -1) {
-        return { critique, suggestedPrompt: afterSuggestion.trim(), expectedOutput: null };
+        return {
+          critique,
+          suggestedPrompt: afterSuggestion.trim(),
+          expectedOutput: null,
+        };
       }
       return {
         critique,

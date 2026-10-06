@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
@@ -140,12 +144,15 @@ export class AdminCreativeService {
 
   // عکس اصلی کاربر برای یک پیشنهاد — برخلاف DiscoveryPublicController.getExampleImage این‌جا
   // isActive فیلتر نمی‌شود چون این مسیر پشت AdminGuard است، نه عمومی
-  async getPromptSourceImage(id: string): Promise<{ buffer: Buffer; mimeType: string }> {
+  async getPromptSourceImage(
+    id: string,
+  ): Promise<{ buffer: Buffer; mimeType: string }> {
     const prompt = await this.prisma.creativePrompt.findUnique({
       where: { id },
       select: { sourceImageKey: true },
     });
-    if (!prompt?.sourceImageKey) throw new NotFoundException(fa.errors.notFound);
+    if (!prompt?.sourceImageKey)
+      throw new NotFoundException(fa.errors.notFound);
     const ext = prompt.sourceImageKey.split('.').pop() ?? 'png';
     const buffer = await this.storage.downloadImage(prompt.sourceImageKey);
     return { buffer, mimeType: mimeTypeForExt(ext) };
@@ -301,7 +308,9 @@ export class AdminCreativeService {
       this.prisma.creditPackage.findMany({
         select: { id: true, isCustomAmount: true },
       }),
-      this.prisma.creativePrompt.findMany({ select: { id: true, title: true } }),
+      this.prisma.creativePrompt.findMany({
+        select: { id: true, title: true },
+      }),
     ]);
 
     const packageById = new Map(packages.map((p) => [p.id, p]));

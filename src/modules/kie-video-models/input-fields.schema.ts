@@ -31,8 +31,14 @@ export const FieldConditionSchema: z.ZodType<FieldConditionShape> = z.lazy(() =>
       fieldKey,
       value: z.union([z.string(), z.number(), z.boolean()]),
     }),
-    z.object({ kind: z.literal('and'), all: z.array(FieldConditionSchema).min(1) }),
-    z.object({ kind: z.literal('or'), any: z.array(FieldConditionSchema).min(1) }),
+    z.object({
+      kind: z.literal('and'),
+      all: z.array(FieldConditionSchema).min(1),
+    }),
+    z.object({
+      kind: z.literal('or'),
+      any: z.array(FieldConditionSchema).min(1),
+    }),
   ]),
 );
 
@@ -56,7 +62,9 @@ const TextFieldSchema = z.object({
   multiline: z.boolean(),
   maxLength: z.number().int().positive().optional(),
   placeholder: z.string().optional(),
-  semantic: z.enum(['mainPrompt', 'shotPrompt', 'characterDescription', 'generic']).optional(),
+  semantic: z
+    .enum(['mainPrompt', 'shotPrompt', 'characterDescription', 'generic'])
+    .optional(),
 });
 
 const BooleanFieldSchema = z.object({
@@ -103,7 +111,9 @@ const DurationFieldSchema = z.object({
   range: z.object({ min: z.number(), max: z.number() }).optional(),
   wireValueType: z.enum(['number', 'string']),
   default: z.number(),
-  autoSentinel: z.object({ value: z.number(), triggerWhen: FieldConditionSchema }).optional(),
+  autoSentinel: z
+    .object({ value: z.number(), triggerWhen: FieldConditionSchema })
+    .optional(),
   omitWhen: FieldConditionSchema.optional(),
 });
 
@@ -121,7 +131,11 @@ const ImageFieldSchema = z.object({
   minCount: z.number().int().nonnegative().optional(),
 });
 
-const objectWindowKeysSchema = z.object({ url: z.string().min(1), start: z.string().min(1), end: z.string().min(1) });
+const objectWindowKeysSchema = z.object({
+  url: z.string().min(1),
+  start: z.string().min(1),
+  end: z.string().min(1),
+});
 
 const VideoFieldSchema = z.object({
   ...mediaBaseShape,
@@ -129,7 +143,9 @@ const VideoFieldSchema = z.object({
   maxDurationSec: z.number().positive().optional(), // حداکثر طول کل فایل مبدأ آپلودی
   wireShape: z.enum(['scalarUrl', 'arrayOfUrl', 'objectWithWindow']),
   objectWindowKeys: objectWindowKeysSchema.optional(), // فقط برای wireShape=objectWithWindow (الگوی Omni: video_list:[{url,start,ends}])
-  trim: z.object({ enabled: z.boolean(), maxWindowSec: z.number().positive() }).optional(),
+  trim: z
+    .object({ enabled: z.boolean(), maxWindowSec: z.number().positive() })
+    .optional(),
 });
 
 const AudioFieldSchema = z.object({
@@ -225,7 +241,11 @@ const ExclusivityGroupSchema = z.object({
   atMostOne: z.boolean(),
 });
 
-const UiGroupSchema = z.object({ id: z.string().min(1), label: z.string().min(1), order: z.number() });
+const UiGroupSchema = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1),
+  order: z.number(),
+});
 
 export const InputFieldsSchemaZod = z.object({
   version: z.literal(1),
@@ -280,10 +300,14 @@ function hidesWhenVideoAbsent(
     return !!condition.fieldKey && videoKeys.has(condition.fieldKey);
   }
   if (condition.kind === 'and') {
-    return (condition.all ?? []).some((c) => hidesWhenVideoAbsent(c, videoKeys));
+    return (condition.all ?? []).some((c) =>
+      hidesWhenVideoAbsent(c, videoKeys),
+    );
   }
   if (condition.kind === 'or') {
-    return (condition.any ?? []).every((c) => hidesWhenVideoAbsent(c, videoKeys));
+    return (condition.any ?? []).every((c) =>
+      hidesWhenVideoAbsent(c, videoKeys),
+    );
   }
   return false;
 }
@@ -291,18 +315,25 @@ function hidesWhenVideoAbsent(
 export function parseInputFields(raw: unknown): InputFieldsSchema {
   const result = InputFieldsSchemaZod.safeParse(raw);
   if (!result.success) {
-    throw new BadRequestException(`inputFields نامعتبر: ${formatZodError(result.error)}`);
+    throw new BadRequestException(
+      `inputFields نامعتبر: ${formatZodError(result.error)}`,
+    );
   }
   const keys = result.data.fields.map((f) => f.key);
   const dupes = [...new Set(keys.filter((k, i) => keys.indexOf(k) !== i))];
   if (dupes.length > 0) {
-    throw new BadRequestException(`inputFields نامعتبر: کلید(های) تکراری در fields: ${dupes.join('، ')}`);
+    throw new BadRequestException(
+      `inputFields نامعتبر: کلید(های) تکراری در fields: ${dupes.join('، ')}`,
+    );
   }
   return keepAspectRatioVisibleWithVideo(result.data);
 }
 
 // نسخه‌ی نرم برای مسیر ایمپورت اکسل — خطا را throw نمی‌کند، برای گزارش row-level برمی‌گرداند
-export function safeParseInputFields(raw: unknown): { data?: InputFieldsSchema; error?: string } {
+export function safeParseInputFields(raw: unknown): {
+  data?: InputFieldsSchema;
+  error?: string;
+} {
   try {
     return { data: parseInputFields(raw) };
   } catch (e) {

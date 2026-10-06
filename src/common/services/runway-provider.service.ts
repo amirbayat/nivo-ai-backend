@@ -59,7 +59,9 @@ export class RunwayProviderService implements VideoProviderClient {
     try {
       res = await fetch(url, init);
     } catch (err) {
-      throw new RunwayApiError(`${label} network error: ${(err as Error).message}`);
+      throw new RunwayApiError(
+        `${label} network error: ${(err as Error).message}`,
+      );
     }
     const text = await res.text();
     let json: T;
@@ -125,7 +127,10 @@ export class RunwayProviderService implements VideoProviderClient {
     }>(
       `${this.baseURL}/api/v1/runway/record-detail?taskId=${encodeURIComponent(taskId)}`,
       {
-        headers: { Authorization: `Bearer ${this.apiKey}`, ...this.relayHeaders },
+        headers: {
+          Authorization: `Bearer ${this.apiKey}`,
+          ...this.relayHeaders,
+        },
         signal: AbortSignal.timeout(30_000),
       },
       'Runway record-detail',
@@ -139,7 +144,11 @@ export class RunwayProviderService implements VideoProviderClient {
     // (waiting/queuing) — همون قراردادی که KieProviderService.pollTask هم برمی‌گرداند
     const rawState = json.data.state ?? 'wait';
     const state =
-      rawState === 'wait' ? 'waiting' : rawState === 'queueing' ? 'queuing' : rawState;
+      rawState === 'wait'
+        ? 'waiting'
+        : rawState === 'queueing'
+          ? 'queuing'
+          : rawState;
     const url = json.data.videoInfo?.videoUrl;
     return {
       state,
@@ -151,7 +160,9 @@ export class RunwayProviderService implements VideoProviderClient {
   async downloadResult(url: string): Promise<Buffer> {
     const res = await fetch(url, { signal: AbortSignal.timeout(120_000) });
     if (!res.ok) {
-      throw new RunwayApiError(`Failed to download Runway result (status=${res.status}): ${url}`);
+      throw new RunwayApiError(
+        `Failed to download Runway result (status=${res.status}): ${url}`,
+      );
     }
     return Buffer.from(await res.arrayBuffer());
   }

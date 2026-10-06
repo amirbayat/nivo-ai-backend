@@ -110,8 +110,13 @@ function formatCatalogItem(
   } & Record<string, unknown>,
   sourceImageAccuracyCreditCost: number,
 ) {
-  const { sourceImageKey, sourceType, userPromptTemplate, preferredModel, ...rest } =
-    prompt;
+  const {
+    sourceImageKey,
+    sourceType,
+    userPromptTemplate,
+    preferredModel,
+    ...rest
+  } = prompt;
   return {
     ...rest,
     hasSourceImage: !!sourceImageKey,

@@ -10,7 +10,11 @@ import { DateRange } from '../usage-analytics/usage-analytics.service';
 export class AdminStoreCreditService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async getStores(params: { search?: string; range: DateRange; page?: number }) {
+  async getStores(params: {
+    search?: string;
+    range: DateRange;
+    page?: number;
+  }) {
     const page = params.page && params.page > 0 ? params.page : 1;
     const pageSize = 20;
     const where: Prisma.StoreWhereInput = params.search
@@ -19,7 +23,11 @@ export class AdminStoreCreditService {
             { name: { contains: params.search, mode: 'insensitive' } },
             { slug: { contains: params.search, mode: 'insensitive' } },
             { seller: { phone: { contains: params.search } } },
-            { seller: { name: { contains: params.search, mode: 'insensitive' } } },
+            {
+              seller: {
+                name: { contains: params.search, mode: 'insensitive' },
+              },
+            },
           ],
         }
       : {};

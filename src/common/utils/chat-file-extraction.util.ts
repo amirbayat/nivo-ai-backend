@@ -14,14 +14,16 @@ export interface ExtractedChatFile {
 // یک‌بار تمیز می‌شود تا هم توکن کمتر مصرف شود هم مدل گیج نشود. فقط نرمال‌سازی whitespace —
 // هیچ محتوایی که ممکن است واقعی باشد (مثل خطی که فقط یک عدد/قیمت است) حذف نمی‌شود.
 function cleanExtractedText(text: string): string {
-  return text
-    .replace(/\r\n?/g, '\n')
-    // eslint-disable-next-line no-control-regex
-    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
-    .split('\n')
-    .map((line) => line.replace(/[ \t]{2,}/g, ' ').trimEnd())
-    .join('\n')
-    .replace(/\n{3,}/g, '\n\n');
+  return (
+    text
+      .replace(/\r\n?/g, '\n')
+      // eslint-disable-next-line no-control-regex
+      .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+      .split('\n')
+      .map((line) => line.replace(/[ \t]{2,}/g, ' ').trimEnd())
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+  );
 }
 
 // docs/PRD-chat-files-and-pdf.md بخش ۳.۱ — استخراج متن سمت سرور (نه ارسال فایل خام به مدل)؛

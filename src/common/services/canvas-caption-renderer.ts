@@ -187,7 +187,8 @@ function drawLine(
 ): void {
   layout.words.forEach((word, i) => {
     const x = centerX + layout.wordCenterX[i];
-    const color = i === activeWordIndex ? style.highlightColor : style.textColor;
+    const color =
+      i === activeWordIndex ? style.highlightColor : style.textColor;
     ctx.shadowColor = 'rgba(0,0,0,0.55)';
     ctx.shadowBlur = Math.max(2, Math.round(style.outlineWidth));
     ctx.shadowOffsetY = 2;

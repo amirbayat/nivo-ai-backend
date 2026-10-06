@@ -56,7 +56,9 @@ export class ImageModelCostEstimateProcessor {
     );
   }
 
-  private async averageRecentCostUsd(modelName: string): Promise<number | null> {
+  private async averageRecentCostUsd(
+    modelName: string,
+  ): Promise<number | null> {
     const since = new Date(
       Date.now() - RECENT_MESSAGE_WINDOW_DAYS * 24 * 60 * 60 * 1000,
     );
@@ -69,7 +71,9 @@ export class ImageModelCostEstimateProcessor {
     if (!messages.length) return null;
 
     const amounts = messages
-      .map((m) => (m.openrouterRealCostUsdMicros ?? m.costUsdMicros) / 1_000_000)
+      .map(
+        (m) => (m.openrouterRealCostUsdMicros ?? m.costUsdMicros) / 1_000_000,
+      )
       .filter((usd) => usd > 0);
     if (!amounts.length) return null;
 

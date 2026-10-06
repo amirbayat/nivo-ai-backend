@@ -899,7 +899,9 @@ export class TelegramService {
   private static readonly SELLER_REJECT_REASON_REF_REGEX =
     /کد سفارش رد: ([0-9a-fA-F-]{36})/;
 
-  private extractSellerRejectReasonRef(message: TelegramMessage): string | null {
+  private extractSellerRejectReasonRef(
+    message: TelegramMessage,
+  ): string | null {
     const promptText = message.reply_to_message?.text;
     if (!promptText) return null;
     const match = promptText.match(
@@ -1125,7 +1127,9 @@ export class TelegramService {
     const lines = applicable.map((item, i) => {
       const label =
         item.action === 'update'
-          ? fa.telegram.bulkImportLineUpdate(item.matchedProductName || item.name)
+          ? fa.telegram.bulkImportLineUpdate(
+              item.matchedProductName || item.name,
+            )
           : fa.telegram.bulkImportLineCreate(item.name);
       const price =
         item.basePrice !== undefined

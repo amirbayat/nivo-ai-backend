@@ -50,7 +50,8 @@ export class ProjectsService {
       where: { id: pinnedPromptId, isActive: true },
       select: { id: true },
     });
-    if (!prompt) throw new BadRequestException(fa.discovery.pinnedPromptMustBeActive);
+    if (!prompt)
+      throw new BadRequestException(fa.discovery.pinnedPromptMustBeActive);
   }
 
   async create(userId: string, dto: CreateProjectDto) {

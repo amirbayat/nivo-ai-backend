@@ -11,7 +11,10 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import type { Response } from 'express';
-import { CreativePromptReviewStatus, CreativePromptSourceType } from '@prisma/client';
+import {
+  CreativePromptReviewStatus,
+  CreativePromptSourceType,
+} from '@prisma/client';
 import { JwtGuard } from '../../common/guards/jwt.guard';
 import { AdminGuard } from '../../common/guards/admin.guard';
 import { parseDateRange } from '../usage-analytics/usage-analytics.service';

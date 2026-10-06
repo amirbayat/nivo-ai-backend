@@ -49,7 +49,9 @@ export class CaptionRenderProcessor {
   }
 
   @Process('render')
-  async handleRender(job: Job<{ captionProjectId: string; targetHeight?: number }>) {
+  async handleRender(
+    job: Job<{ captionProjectId: string; targetHeight?: number }>,
+  ) {
     const { captionProjectId, targetHeight } = job.data;
     this.logger.log(
       `caption-render: job دریافت شد project=${captionProjectId} jobId=${job.id} attemptsMade=${job.attemptsMade}`,
@@ -58,7 +60,9 @@ export class CaptionRenderProcessor {
       where: { id: captionProjectId },
     });
     if (!project) {
-      this.logger.warn(`caption-render: project ${captionProjectId} not found, skipping`);
+      this.logger.warn(
+        `caption-render: project ${captionProjectId} not found, skipping`,
+      );
       return;
     }
 
@@ -87,13 +91,18 @@ export class CaptionRenderProcessor {
       this.logger.log(
         `caption-render project=${captionProjectId}: شروع، دانلود ویدیوی مبدأ از MinIO key=${project.sourceVideoKey} targetHeight=${targetHeight ?? 'source'}`,
       );
-      const videoBuffer = await this.storage.downloadImage(project.sourceVideoKey);
+      const videoBuffer = await this.storage.downloadImage(
+        project.sourceVideoKey,
+      );
       const ext = project.sourceVideoKey.split('.').pop() ?? 'mp4';
       this.logger.log(
         `caption-render project=${captionProjectId}: ویدیو دانلود شد (${videoBuffer.length} بایت) در ${Date.now() - t0}ms`,
       );
 
-      const dims = await this.mediaTranscode.getVideoDimensions(videoBuffer, ext);
+      const dims = await this.mediaTranscode.getVideoDimensions(
+        videoBuffer,
+        ext,
+      );
       this.logger.log(
         `caption-render project=${captionProjectId}: ابعاد سورس ${dims.width}x${dims.height}`,
       );
@@ -103,7 +112,8 @@ export class CaptionRenderProcessor {
       const targetDimensions =
         targetHeight && targetHeight > 0 && targetHeight < dims.height
           ? {
-              width: Math.round((dims.width * (targetHeight / dims.height)) / 2) * 2,
+              width:
+                Math.round((dims.width * (targetHeight / dims.height)) / 2) * 2,
               height: targetHeight,
             }
           : undefined;
@@ -113,9 +123,11 @@ export class CaptionRenderProcessor {
       const segments =
         (project.segments as unknown as CaptionSegment[] | null) ??
         buildDefaultSegments(
-          (project.transcriptWords as unknown as { word: string; start: number; end: number }[] | null) ?? [],
+          (project.transcriptWords as unknown as
+            { word: string; start: number; end: number }[] | null) ?? [],
         );
-      const styleOverrides = project.styleOverrides as unknown as CaptionStyleOverrides | null;
+      const styleOverrides =
+        project.styleOverrides as unknown as CaptionStyleOverrides | null;
       this.logger.log(
         `caption-render project=${captionProjectId}: ${segments.length} segment، خروجی ${outputWidth}x${outputHeight}`,
       );
@@ -143,9 +155,14 @@ export class CaptionRenderProcessor {
           if (percent <= lastReportedProgress) return;
           lastReportedProgress = percent;
           this.prisma.captionProject
-            .update({ where: { id: captionProjectId }, data: { renderProgress: percent } })
+            .update({
+              where: { id: captionProjectId },
+              data: { renderProgress: percent },
+            })
             .catch((err) =>
-              this.logger.warn(`caption-render progress update failed project=${captionProjectId}: ${err}`),
+              this.logger.warn(
+                `caption-render progress update failed project=${captionProjectId}: ${err}`,
+              ),
             );
         },
       );
@@ -153,12 +170,17 @@ export class CaptionRenderProcessor {
         `caption-render project=${captionProjectId}: ffmpeg burnCaptions تمام شد در ${Date.now() - burnStart}ms (خروجی ${renderedBuffer.length} بایت)`,
       );
 
-      const renderedVideoKey = await this.storage.uploadImage(renderedBuffer, 'mp4');
+      const renderedVideoKey = await this.storage.uploadImage(
+        renderedBuffer,
+        'mp4',
+      );
       this.logger.log(
         `caption-render project=${captionProjectId}: خروجی در MinIO آپلود شد key=${renderedVideoKey}`,
       );
 
-      const creditCost = await this.captionPricing.getCreditCost(project.sourceDurationSec ?? 0);
+      const creditCost = await this.captionPricing.getCreditCost(
+        project.sourceDurationSec ?? 0,
+      );
       const creditConfig = await this.credits.getConfig();
       const finalToman = creditCost * creditConfig.tomanPerCredit;
 

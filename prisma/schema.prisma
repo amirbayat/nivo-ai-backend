@@ -2166,6 +2166,12 @@ model Store {
   clonedFromStoreId             String?
   clonedFromStore               Store?            @relation("StoreClones", fields: [clonedFromStoreId], references: [id], onDelete: SetNull)
   clones                        Store[]           @relation("StoreClones")
+  // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۳.۳ — خروجی کش‌شده‌ی
+  // aggregator موضوعات تکرارشونده‌ی AGENT_STUCK/SUPPORT_NEEDED/CUSTOMER_REQUESTED (تب «توجه»)؛
+  // چون تولیدش یک فراخوان LLM است، هر بازدید صفحه دوباره محاسبه نمی‌شود — فقط بعد از گذشتن
+  // TTL (نگاه کن به store.service.ts getAttentionSuggestions)
+  attentionSuggestions           Json?
+  attentionSuggestionsComputedAt DateTime?
   createdAt                     DateTime          @default(now())
   updatedAt                     DateTime          @updatedAt
 

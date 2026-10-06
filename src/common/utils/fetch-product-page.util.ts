@@ -46,7 +46,11 @@ function parseJsonLdProduct($: cheerio.CheerioAPI): JsonLdProduct | null {
       if (item && typeof item === 'object') {
         const graph = (item as Record<string, unknown>)['@graph'];
         if (Array.isArray(graph)) {
-          nodes.push(...graph.filter((n): n is Record<string, unknown> => !!n && typeof n === 'object'));
+          nodes.push(
+            ...graph.filter(
+              (n): n is Record<string, unknown> => !!n && typeof n === 'object',
+            ),
+          );
         } else {
           nodes.push(item as Record<string, unknown>);
         }
@@ -56,7 +60,9 @@ function parseJsonLdProduct($: cheerio.CheerioAPI): JsonLdProduct | null {
 
   const product = nodes.find((node) => {
     const type = node['@type'];
-    return type === 'Product' || (Array.isArray(type) && type.includes('Product'));
+    return (
+      type === 'Product' || (Array.isArray(type) && type.includes('Product'))
+    );
   });
   if (!product) return null;
 
@@ -68,8 +74,9 @@ function parseJsonLdProduct($: cheerio.CheerioAPI): JsonLdProduct | null {
       : undefined;
 
   const rawImage = product.image;
-  const images = (Array.isArray(rawImage) ? rawImage : rawImage ? [rawImage] : [])
-    .filter((src): src is string => typeof src === 'string');
+  const images = (
+    Array.isArray(rawImage) ? rawImage : rawImage ? [rawImage] : []
+  ).filter((src): src is string => typeof src === 'string');
 
   return {
     name: typeof product.name === 'string' ? product.name : undefined,

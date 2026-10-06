@@ -212,7 +212,9 @@ function renderCardCover(a: ArticleWithCategory): string {
 function renderCardMeta(a: ArticleWithCategory): string {
   const parts: string[] = [];
   if (a.publishedAt) parts.push(`<time>${formatDate(a.publishedAt)}</time>`);
-  parts.push(`<span>${estimateReadingMinutes(a.contentMd)} دقیقه مطالعه</span>`);
+  parts.push(
+    `<span>${estimateReadingMinutes(a.contentMd)} دقیقه مطالعه</span>`,
+  );
   return `<div class="card-meta">${parts.join('<span class="dot">·</span>')}</div>`;
 }
 

@@ -377,14 +377,22 @@ export class ChatService {
       const marker = '---پیشنهاد نهایی---';
       const markerIdx = text.indexOf(marker);
       if (markerIdx === -1) {
-        return { critique: text.trim(), suggestedPrompt: null, expectedOutput: null };
+        return {
+          critique: text.trim(),
+          suggestedPrompt: null,
+          expectedOutput: null,
+        };
       }
       const critique = text.slice(0, markerIdx).trim();
       const afterSuggestion = text.slice(markerIdx + marker.length);
 
       const expectedMarkerIdx = afterSuggestion.indexOf(EXPECTED_OUTPUT_MARKER);
       if (expectedMarkerIdx === -1) {
-        return { critique, suggestedPrompt: afterSuggestion.trim(), expectedOutput: null };
+        return {
+          critique,
+          suggestedPrompt: afterSuggestion.trim(),
+          expectedOutput: null,
+        };
       }
       return {
         critique,
@@ -640,7 +648,11 @@ export class ChatService {
     // تکراری برای چیزی که همین الان جوابش را گرفته‌ایم)
     const declinedImageGen = dto.generateImage === false;
     let imageIntent: { wantsImage: boolean; isEdit: boolean } | null = null;
-    if (!explicitImageToggle && !declinedImageGen && chatConfig.implicitImageGenEnabled) {
+    if (
+      !explicitImageToggle &&
+      !declinedImageGen &&
+      chatConfig.implicitImageGenEnabled
+    ) {
       const hasAttachedImage = Boolean(dto.images?.length);
       const hasRecentConversationImage =
         !hasAttachedImage &&
@@ -722,8 +734,12 @@ export class ChatService {
     const wantsWebSearch = dto.webSearch === true;
 
     const incomingFiles = dto.files ?? [];
-    const videoInputs = incomingFiles.filter((f) => isVideoFilename(f.filename));
-    const audioInputs = incomingFiles.filter((f) => isAudioFilename(f.filename));
+    const videoInputs = incomingFiles.filter((f) =>
+      isVideoFilename(f.filename),
+    );
+    const audioInputs = incomingFiles.filter((f) =>
+      isAudioFilename(f.filename),
+    );
     const docInputs = incomingFiles.filter(
       (f) => !isVideoFilename(f.filename) && !isAudioFilename(f.filename),
     );
@@ -838,7 +854,9 @@ export class ChatService {
     );
     const fileBlocks = extractedFiles.map((e) =>
       formatExtractedFileBlock(
-        e.text ? e : { ...e, text: fa.chatFiles.emptyExtractedText(e.filename) },
+        e.text
+          ? e
+          : { ...e, text: fa.chatFiles.emptyExtractedText(e.filename) },
       ),
     );
     const contentWithFiles = fileBlocks.length
@@ -2115,7 +2133,10 @@ size را هم از توی توصیف تشخیص بده: اگر صحنه‌ی ع
       const visionMessage: UserModelMessage = {
         role: 'user',
         content: [
-          { type: 'image', image: `data:${imageMediaType};base64,${imageBase64}` },
+          {
+            type: 'image',
+            image: `data:${imageMediaType};base64,${imageBase64}`,
+          },
           {
             type: 'text',
             text:

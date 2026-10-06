@@ -12,7 +12,11 @@ import { ExchangeRateModule } from '../../exchange-rate/exchange-rate.module';
 
 @Module({
   imports: [ExchangeRateModule],
-  controllers: [UsageController, PricingTiersController, CaptionPricingController],
+  controllers: [
+    UsageController,
+    PricingTiersController,
+    CaptionPricingController,
+  ],
   providers: [
     TokenService,
     PricingService,

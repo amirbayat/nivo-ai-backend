@@ -1,6 +1,10 @@
 import { BadRequestException } from '@nestjs/common';
 import type { KieVideoModel } from '@prisma/client';
-import type { FieldCondition, InputFieldsSchema, KieField } from './input-fields.schema';
+import type {
+  FieldCondition,
+  InputFieldsSchema,
+  KieField,
+} from './input-fields.schema';
 import { parseInputFields } from './input-fields.schema';
 
 // لایه‌ی عمومی معماری data-driven — طرف‌مقابل input-fields.schema.ts (که فقط شکل توصیفی
@@ -119,8 +123,14 @@ export function validateInputValues(
       continue;
     }
 
-    if (field.allowedOnlyWhen && isPresent(raw) && !evaluateCondition(field.allowedOnlyWhen, values)) {
-      throw new BadRequestException(`فیلد «${field.label}» در این حالت مجاز نیست`);
+    if (
+      field.allowedOnlyWhen &&
+      isPresent(raw) &&
+      !evaluateCondition(field.allowedOnlyWhen, values)
+    ) {
+      throw new BadRequestException(
+        `فیلد «${field.label}» در این حالت مجاز نیست`,
+      );
     }
 
     const required = isFieldRequired(field, values);
@@ -148,40 +158,55 @@ export function validateInputValues(
           throw new BadRequestException(`فیلد «${field.label}» باید عدد باشد`);
         }
         if (field.min != null && n < field.min) {
-          throw new BadRequestException(`فیلد «${field.label}» نباید کمتر از ${field.min} باشد`);
+          throw new BadRequestException(
+            `فیلد «${field.label}» نباید کمتر از ${field.min} باشد`,
+          );
         }
         if (field.max != null && n > field.max) {
-          throw new BadRequestException(`فیلد «${field.label}» نباید بیشتر از ${field.max} باشد`);
+          throw new BadRequestException(
+            `فیلد «${field.label}» نباید بیشتر از ${field.max} باشد`,
+          );
         }
         break;
       }
       case 'enum': {
         const allowed = field.options.map((o) => o.value);
         if (!allowed.includes(String(raw))) {
-          throw new BadRequestException(`مقدار فیلد «${field.label}» نامعتبر است`);
+          throw new BadRequestException(
+            `مقدار فیلد «${field.label}» نامعتبر است`,
+          );
         }
         break;
       }
       case 'imageArray': {
         const arr = raw as string[];
         if (field.minCount != null && arr.length < field.minCount) {
-          throw new BadRequestException(`فیلد «${field.label}» به حداقل ${field.minCount} مورد نیاز دارد`);
+          throw new BadRequestException(
+            `فیلد «${field.label}» به حداقل ${field.minCount} مورد نیاز دارد`,
+          );
         }
         if (field.maxCount != null && arr.length > field.maxCount) {
-          throw new BadRequestException(`فیلد «${field.label}» حداکثر ${field.maxCount} مورد می‌پذیرد`);
+          throw new BadRequestException(
+            `فیلد «${field.label}» حداکثر ${field.maxCount} مورد می‌پذیرد`,
+          );
         }
         break;
       }
       case 'video': {
         const v = raw as VideoFieldSubmission;
-        if (!v.key) throw new BadRequestException(`فیلد «${field.label}» نامعتبر است`);
+        if (!v.key)
+          throw new BadRequestException(`فیلد «${field.label}» نامعتبر است`);
         if (field.trim?.enabled) {
           if (v.windowStartSec == null || v.windowEndSec == null) {
-            throw new BadRequestException(`پنجره‌ی شروع/پایان فیلد «${field.label}» اجباری است`);
+            throw new BadRequestException(
+              `پنجره‌ی شروع/پایان فیلد «${field.label}» اجباری است`,
+            );
           }
           const width = v.windowEndSec - v.windowStartSec;
           if (width <= 0) {
-            throw new BadRequestException(`پنجره‌ی فیلد «${field.label}» نامعتبر است`);
+            throw new BadRequestException(
+              `پنجره‌ی فیلد «${field.label}» نامعتبر است`,
+            );
           }
           if (width > field.trim.maxWindowSec) {
             throw new BadRequestException(
@@ -194,17 +219,25 @@ export function validateInputValues(
       case 'elementGroup': {
         const arr = raw as ElementMemberSubmission[];
         if (arr.length < field.minCount) {
-          throw new BadRequestException(`فیلد «${field.label}» به حداقل ${field.minCount} عنصر نیاز دارد`);
+          throw new BadRequestException(
+            `فیلد «${field.label}» به حداقل ${field.minCount} عنصر نیاز دارد`,
+          );
         }
         if (arr.length > field.maxCount) {
-          throw new BadRequestException(`فیلد «${field.label}» حداکثر ${field.maxCount} عنصر می‌پذیرد`);
+          throw new BadRequestException(
+            `فیلد «${field.label}» حداکثر ${field.maxCount} عنصر می‌پذیرد`,
+          );
         }
         for (const member of arr) {
           if (!member.name) {
-            throw new BadRequestException(`نام همه‌ی عناصر «${field.label}» اجباری است`);
+            throw new BadRequestException(
+              `نام همه‌ی عناصر «${field.label}» اجباری است`,
+            );
           }
           if (!member.description) {
-            throw new BadRequestException(`توضیح همه‌ی عناصر «${field.label}» اجباری است`);
+            throw new BadRequestException(
+              `توضیح همه‌ی عناصر «${field.label}» اجباری است`,
+            );
           }
           const hasImages = (member.imageKeys?.length ?? 0) > 0;
           const hasVideo = !!member.videoKey;
@@ -218,17 +251,28 @@ export function validateInputValues(
             const { minCount, maxCount } = field.memberShape.imageField;
             const n = member.imageKeys!.length;
             if (minCount != null && n < minCount) {
-              throw new BadRequestException(`عنصر «${member.name}» به حداقل ${minCount} عکس نیاز دارد`);
+              throw new BadRequestException(
+                `عنصر «${member.name}» به حداقل ${minCount} عکس نیاز دارد`,
+              );
             }
             if (maxCount != null && n > maxCount) {
-              throw new BadRequestException(`عنصر «${member.name}» حداکثر ${maxCount} عکس می‌پذیرد`);
+              throw new BadRequestException(
+                `عنصر «${member.name}» حداکثر ${maxCount} عکس می‌پذیرد`,
+              );
             }
           }
           if (hasVideo) {
-            if (member.videoWindowStartSec == null || member.videoWindowEndSec == null) {
-              throw new BadRequestException(`پنجره‌ی ویدیوی عنصر «${member.name}» اجباری است`);
+            if (
+              member.videoWindowStartSec == null ||
+              member.videoWindowEndSec == null
+            ) {
+              throw new BadRequestException(
+                `پنجره‌ی ویدیوی عنصر «${member.name}» اجباری است`,
+              );
             }
-            const widthMs = Math.round((member.videoWindowEndSec - member.videoWindowStartSec) * 1000);
+            const widthMs = Math.round(
+              (member.videoWindowEndSec - member.videoWindowStartSec) * 1000,
+            );
             // طبق Kie: end_time - start_time باید بین ۳۰۰۰ تا ۸۰۰۰ میلی‌ثانیه باشد
             if (widthMs < 3000 || widthMs > 8000) {
               throw new BadRequestException(
@@ -242,10 +286,14 @@ export function validateInputValues(
       case 'shotGroup': {
         const arr = raw as ShotSubmission[];
         if (arr.length < field.minShots) {
-          throw new BadRequestException(`فیلد «${field.label}» به حداقل ${field.minShots} شات نیاز دارد`);
+          throw new BadRequestException(
+            `فیلد «${field.label}» به حداقل ${field.minShots} شات نیاز دارد`,
+          );
         }
         if (arr.length > field.maxShots) {
-          throw new BadRequestException(`فیلد «${field.label}» حداکثر ${field.maxShots} شات می‌پذیرد`);
+          throw new BadRequestException(
+            `فیلد «${field.label}» حداکثر ${field.maxShots} شات می‌پذیرد`,
+          );
         }
         for (const shot of arr) {
           if (!shot.prompt) {
@@ -268,12 +316,18 @@ export function validateInputValues(
   }
 
   for (const group of schema.exclusivityGroups ?? []) {
-    const presentCount = group.fieldKeys.filter((k) => isPresent(values[k])).length;
+    const presentCount = group.fieldKeys.filter((k) =>
+      isPresent(values[k]),
+    ).length;
     if (group.atLeastOneRequired && presentCount === 0) {
-      throw new BadRequestException('حداقل یکی از فیلدهای این گروه باید پر شود');
+      throw new BadRequestException(
+        'حداقل یکی از فیلدهای این گروه باید پر شود',
+      );
     }
     if (group.atMostOne && presentCount > 1) {
-      throw new BadRequestException('فقط یکی از فیلدهای این گروه می‌تواند پر شود');
+      throw new BadRequestException(
+        'فقط یکی از فیلدهای این گروه می‌تواند پر شود',
+      );
     }
   }
 }
@@ -291,10 +345,16 @@ export function resolveEffectiveDurationSec(
   const durationField = schema.fields.find((f) => f.type === 'duration');
   if (!durationField) return fallbackReferenceDurationSec ?? 4;
 
-  if (durationField.autoSentinel && evaluateCondition(durationField.autoSentinel.triggerWhen, values)) {
+  if (
+    durationField.autoSentinel &&
+    evaluateCondition(durationField.autoSentinel.triggerWhen, values)
+  ) {
     return fallbackReferenceDurationSec ?? durationField.default;
   }
-  if (durationField.omitWhen && evaluateCondition(durationField.omitWhen, values)) {
+  if (
+    durationField.omitWhen &&
+    evaluateCondition(durationField.omitWhen, values)
+  ) {
     return fallbackReferenceDurationSec ?? durationField.default;
   }
   const raw = values[durationField.key];
@@ -366,19 +426,30 @@ export async function buildGenericKiePayload(
       }
       case 'duration': {
         let value: number;
-        if (field.autoSentinel && evaluateCondition(field.autoSentinel.triggerWhen, values)) {
+        if (
+          field.autoSentinel &&
+          evaluateCondition(field.autoSentinel.triggerWhen, values)
+        ) {
           value = field.autoSentinel.value;
-        } else if (field.omitWhen && evaluateCondition(field.omitWhen, values)) {
+        } else if (
+          field.omitWhen &&
+          evaluateCondition(field.omitWhen, values)
+        ) {
           continue; // مثل Omni: duration وقتی ویدیو داده شده کلاً حذف می‌شود
         } else {
           value = typeof raw === 'number' ? raw : field.default;
-          if (field.mode === 'fixedList' && field.fixedOptions?.length && field.snapToNearestAllowed) {
+          if (
+            field.mode === 'fixedList' &&
+            field.fixedOptions?.length &&
+            field.snapToNearestAllowed
+          ) {
             value = pickClosest(field.fixedOptions, value);
           } else if (field.mode === 'freeRange' && field.range) {
             value = clamp(value, field.range.min, field.range.max);
           }
         }
-        payload[field.kieField] = field.wireValueType === 'string' ? String(value) : value;
+        payload[field.kieField] =
+          field.wireValueType === 'string' ? String(value) : value;
         break;
       }
       case 'image':
@@ -439,7 +510,9 @@ export async function buildGenericKiePayload(
               item.end_time = Math.round((m.videoWindowEndSec ?? 8) * 1000);
             }
             if (m.audioKey) {
-              item.element_input_audio_urls = [await uploader.uploadOne(m.audioKey)];
+              item.element_input_audio_urls = [
+                await uploader.uploadOne(m.audioKey),
+              ];
             }
             return item;
           }),

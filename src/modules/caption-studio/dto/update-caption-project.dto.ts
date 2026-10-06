@@ -1,4 +1,10 @@
-import { IsArray, IsObject, IsOptional, IsString, MaxLength } from 'class-validator';
+import {
+  IsArray,
+  IsObject,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from 'class-validator';
 
 // autosave — بخش ۵.۳ سند (localStorage + این PATCH). هر سه فیلد اختیاری‌اند چون فرانت فقط
 // چیزی را می‌فرستد که واقعاً تغییر کرده (مثلاً فقط segments هنگام ادیت متن، یا فقط styleId

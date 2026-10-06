@@ -42,7 +42,9 @@ const ALLOWED_VIDEO_MIME_EXT: Record<string, string> = {
 };
 
 function matchesVideoMagicBytes(buffer: Buffer): boolean {
-  return buffer.length > 8 && buffer.subarray(4, 8).toString('ascii') === 'ftyp';
+  return (
+    buffer.length > 8 && buffer.subarray(4, 8).toString('ascii') === 'ftyp'
+  );
 }
 
 // سقف محصول ۲۰ دقیقه (docs/PRD-video-auto-captions.md §۱۰/§۱۴) — چک نهایی/دقیق روی
@@ -106,7 +108,9 @@ export class CaptionStudioService {
   }
 
   private async findOwnedProject(userId: string, id: string) {
-    const project = await this.prisma.captionProject.findUnique({ where: { id } });
+    const project = await this.prisma.captionProject.findUnique({
+      where: { id },
+    });
     if (!project) throw new NotFoundException(fa.captionStudio.projectNotFound);
     if (project.userId !== userId) throw new ForbiddenException();
     return project;
@@ -131,7 +135,10 @@ export class CaptionStudioService {
     range: { start: number; end: number } | null;
   }> {
     const owned = await this.prisma.captionProject.findFirst({
-      where: { userId, OR: [{ sourceVideoKey: key }, { renderedVideoKey: key }] },
+      where: {
+        userId,
+        OR: [{ sourceVideoKey: key }, { renderedVideoKey: key }],
+      },
       select: { id: true },
     });
     if (!owned) throw new NotFoundException(fa.captionStudio.projectNotFound);
@@ -152,15 +159,21 @@ export class CaptionStudioService {
     return { stream, ext, size, range: null };
   }
 
-  async updateProject(userId: string, id: string, dto: UpdateCaptionProjectDto) {
+  async updateProject(
+    userId: string,
+    id: string,
+    dto: UpdateCaptionProjectDto,
+  ) {
     await this.findOwnedProject(userId, id);
     return this.prisma.captionProject.update({
       where: { id },
       data: {
-        ...(dto.segments !== undefined ? { segments: dto.segments as unknown as object } : {}),
+        ...(dto.segments !== undefined
+          ? { segments: dto.segments as unknown as object }
+          : {}),
         ...(dto.styleId !== undefined ? { styleId: dto.styleId } : {}),
         ...(dto.styleOverrides !== undefined
-          ? { styleOverrides: dto.styleOverrides as unknown as object }
+          ? { styleOverrides: dto.styleOverrides }
           : {}),
       },
     });
@@ -176,10 +189,18 @@ export class CaptionStudioService {
     const project = await this.findOwnedProject(userId, id);
     const segments =
       (project.segments as unknown as CaptionSegment[] | null) ??
-      buildDefaultSegments((project.transcriptWords as unknown as CaptionWord[] | null) ?? []);
+      buildDefaultSegments(
+        (project.transcriptWords as unknown as CaptionWord[] | null) ?? [],
+      );
 
-    if (format === 'srt') return { content: buildSrt(segments), mime: 'application/x-subrip', ext: 'srt' };
-    if (format === 'vtt') return { content: buildVtt(segments), mime: 'text/vtt', ext: 'vtt' };
+    if (format === 'srt')
+      return {
+        content: buildSrt(segments),
+        mime: 'application/x-subrip',
+        ext: 'srt',
+      };
+    if (format === 'vtt')
+      return { content: buildVtt(segments), mime: 'text/vtt', ext: 'vtt' };
     return {
       content: await buildAssSubtitle(
         segments,
@@ -209,11 +230,15 @@ export class CaptionStudioService {
       throw new BadRequestException(fa.captionStudio.sourceAlreadyDeleted);
     }
     const validTargetHeight =
-      targetHeight && project.sourceHeight && targetHeight < project.sourceHeight
+      targetHeight &&
+      project.sourceHeight &&
+      targetHeight < project.sourceHeight
         ? targetHeight
         : undefined;
 
-    const creditCost = await this.captionPricing.getCreditCost(project.sourceDurationSec ?? 0);
+    const creditCost = await this.captionPricing.getCreditCost(
+      project.sourceDurationSec ?? 0,
+    );
     const creditConfig = await this.credits.getConfig();
     const precheckToman = creditCost * creditConfig.tomanPerCredit;
     const walletBalance = await this.pricing.getWalletBalance(userId);
@@ -272,7 +297,9 @@ export class CaptionStudioService {
     await Promise.all([
       this.storage.deleteObject(project.sourceVideoKey).catch(() => undefined),
       project.debugAudioKey
-        ? this.storage.deleteObject(project.debugAudioKey).catch(() => undefined)
+        ? this.storage
+            .deleteObject(project.debugAudioKey)
+            .catch(() => undefined)
         : Promise.resolve(),
     ]);
     return this.prisma.captionProject.update({

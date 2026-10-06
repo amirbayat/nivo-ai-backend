@@ -63,7 +63,13 @@ describe('renderCaptionFrames', () => {
         words: [{ word: 'سلام', start: 0, end: 0.4 }],
       },
     ];
-    const frames = await renderCaptionFrames(segments, null, videoWidth, videoHeight, 400);
+    const frames = await renderCaptionFrames(
+      segments,
+      null,
+      videoWidth,
+      videoHeight,
+      400,
+    );
 
     expect(frames.length).toBe(1);
     for (const frame of frames) {
@@ -88,7 +94,13 @@ describe('renderCaptionFrames', () => {
         ],
       },
     ];
-    const frames = await renderCaptionFrames(segments, null, videoWidth, videoHeight, 1200);
+    const frames = await renderCaptionFrames(
+      segments,
+      null,
+      videoWidth,
+      videoHeight,
+      1200,
+    );
 
     // ۳ کلمه → ۳ فریم هایلایت، بدون فریم گپ اضافه (segment کل تایم‌لاین را پر می‌کند)
     expect(frames.length).toBe(3);
@@ -106,7 +118,8 @@ describe('renderCaptionFrames', () => {
     // نتیجه با رندر واقعی ۳ فریم و مقایسه‌ی نسبی موقعیت کلمات (کلمه‌ی اول باید سمت راست‌ترین/
     // بزرگ‌ترین x باشد، بعدی کوچک‌تر، آخری کوچک‌ترین) تایید می‌شود — یعنی ترتیب معکوس نیست و
     // فاصله‌ها صفر یا منفی نمی‌شوند.
-    const { createCanvas } = require('@napi-rs/canvas') as typeof import('@napi-rs/canvas');
+    const { createCanvas } =
+      require('@napi-rs/canvas') as typeof import('@napi-rs/canvas');
     const words = ['سلام', 'خوبی', 'عزیزم؟'];
     const canvas = createCanvas(videoWidth, videoHeight);
     const ctx = canvas.getContext('2d');

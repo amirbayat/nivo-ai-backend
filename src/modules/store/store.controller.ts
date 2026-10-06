@@ -114,6 +114,15 @@ export class StoreController {
     return this.storeService.getCompleteness(user.sub, id);
   }
 
+  // بخش ۳.۳/۳.۴ — پیشنهادهای aggregator (موضوعات تکرارشونده‌ی گیرکردن ربات)، برای تب «توجه»
+  @Get(':id/attention-suggestions')
+  getAttentionSuggestions(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+  ) {
+    return this.storeService.getAttentionSuggestions(user.sub, id);
+  }
+
   // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۹ (پروفایل برند عمیق‌تر در
   // آنبوردینگ) — متن خام فروشنده را به یک brandIntro کوتاه/حرفه‌ای تبدیل می‌کند؛ ذخیره‌ی واقعی
   // با همان PATCH معمولی بالا انجام می‌شود، این مسیر فقط پیشنهاد تولید می‌کند

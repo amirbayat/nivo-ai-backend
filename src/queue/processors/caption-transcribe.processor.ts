@@ -35,7 +35,9 @@ export class CaptionTranscribeProcessor {
       where: { id: captionProjectId },
     });
     if (!project) {
-      this.logger.warn(`caption-transcribe: project ${captionProjectId} not found, skipping`);
+      this.logger.warn(
+        `caption-transcribe: project ${captionProjectId} not found, skipping`,
+      );
       return;
     }
 
@@ -48,13 +50,18 @@ export class CaptionTranscribeProcessor {
       this.logger.log(
         `caption-transcribe project=${captionProjectId}: دانلود ویدیوی مبدأ از MinIO، key=${project.sourceVideoKey}`,
       );
-      const videoBuffer = await this.storage.downloadImage(project.sourceVideoKey);
+      const videoBuffer = await this.storage.downloadImage(
+        project.sourceVideoKey,
+      );
       const ext = project.sourceVideoKey.split('.').pop() ?? 'mp4';
       this.logger.log(
         `caption-transcribe project=${captionProjectId}: ویدیو دانلود شد، videoBytes=${videoBuffer.length} ext=${ext}`,
       );
 
-      const audioBuffer = await this.mediaTranscode.extractAudio(videoBuffer, ext);
+      const audioBuffer = await this.mediaTranscode.extractAudio(
+        videoBuffer,
+        ext,
+      );
       this.logger.log(
         `caption-transcribe project=${captionProjectId}: استخراج صدا با ffmpeg تمام شد، audioBytes=${audioBuffer.length}`,
       );
@@ -64,7 +71,10 @@ export class CaptionTranscribeProcessor {
       let sourceWidth: number | null = null;
       let sourceHeight: number | null = null;
       try {
-        const dims = await this.mediaTranscode.getVideoDimensions(videoBuffer, ext);
+        const dims = await this.mediaTranscode.getVideoDimensions(
+          videoBuffer,
+          ext,
+        );
         sourceWidth = dims.width;
         sourceHeight = dims.height;
       } catch (dimsErr) {
@@ -97,7 +107,11 @@ export class CaptionTranscribeProcessor {
       this.logger.log(
         `caption-transcribe project=${captionProjectId}: شروع ASR (زبان=fa) با زنجیره‌ی fallback`,
       );
-      const result = await this.asr.transcribeWithFallback(audioBuffer, apiKey, 'fa');
+      const result = await this.asr.transcribeWithFallback(
+        audioBuffer,
+        apiKey,
+        'fa',
+      );
       this.logger.log(
         `caption-transcribe project=${captionProjectId}: ASR موفق شد با مدل=${result.modelUsed} durationSec=${result.durationSec} costUsd=${result.costUsd}`,
       );
@@ -105,7 +119,7 @@ export class CaptionTranscribeProcessor {
       await this.prisma.captionProject.update({
         where: { id: captionProjectId },
         data: {
-          transcriptWords: result.words as unknown as object,
+          transcriptWords: result.words,
           asrModelName: result.modelUsed,
           asrCostUsd: result.costUsd,
           sourceDurationSec: result.durationSec,

@@ -17,8 +17,14 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import { SkipThrottle } from '@nestjs/throttler';
 import { JwtGuard } from '../../common/guards/jwt.guard';
-import { CurrentUser, JwtPayload } from '../../common/decorators/current-user.decorator';
-import { CaptionStudioService, type SubtitleExportFormat } from './caption-studio.service';
+import {
+  CurrentUser,
+  JwtPayload,
+} from '../../common/decorators/current-user.decorator';
+import {
+  CaptionStudioService,
+  type SubtitleExportFormat,
+} from './caption-studio.service';
 import { UpdateCaptionProjectDto } from './dto/update-caption-project.dto';
 import { StartRenderDto } from './dto/start-render.dto';
 
@@ -36,7 +42,9 @@ export class CaptionStudioController {
   constructor(private readonly captionStudio: CaptionStudioService) {}
 
   @Post('projects')
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 500 * 1024 * 1024 } }))
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: 500 * 1024 * 1024 } }),
+  )
   createProject(
     @CurrentUser() user: JwtPayload,
     @UploadedFile() file: Express.Multer.File,
@@ -97,7 +105,10 @@ export class CaptionStudioController {
       format as SubtitleExportFormat,
     );
     res.setHeader('Content-Type', `${mime}; charset=utf-8`);
-    res.setHeader('Content-Disposition', `attachment; filename="captions.${ext}"`);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="captions.${ext}"`,
+    );
     res.send(content);
   }
 
@@ -113,19 +124,26 @@ export class CaptionStudioController {
     @Res() res: Response,
   ) {
     const key = keySegments.join('/');
-    const { stream, ext, size, range: resolvedRange } = await this.captionStudio.getAssetStream(
-      user.sub,
-      key,
-      range,
-    );
+    const {
+      stream,
+      ext,
+      size,
+      range: resolvedRange,
+    } = await this.captionStudio.getAssetStream(user.sub, key, range);
     res.setHeader('Content-Type', mimeTypeForCaptionExt(ext));
     res.setHeader('Accept-Ranges', 'bytes');
     res.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
 
     if (resolvedRange) {
       res.status(206);
-      res.setHeader('Content-Range', `bytes ${resolvedRange.start}-${resolvedRange.end}/${size}`);
-      res.setHeader('Content-Length', String(resolvedRange.end - resolvedRange.start + 1));
+      res.setHeader(
+        'Content-Range',
+        `bytes ${resolvedRange.start}-${resolvedRange.end}/${size}`,
+      );
+      res.setHeader(
+        'Content-Length',
+        String(resolvedRange.end - resolvedRange.start + 1),
+      );
     } else {
       res.setHeader('Content-Length', String(size));
     }

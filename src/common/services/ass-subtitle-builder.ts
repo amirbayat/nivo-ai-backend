@@ -150,9 +150,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
       number,
       Awaited<ReturnType<typeof measureLine>>
     >();
-    for (const { wordIndex: i, startMs, endMs } of computeWordHighlightIntervals(
-      segment,
-    )) {
+    for (const {
+      wordIndex: i,
+      startMs,
+      endMs,
+    } of computeWordHighlightIntervals(segment)) {
       const lineIdx = Math.floor(i / wordsPerLine);
       const idxInLine = i % wordsPerLine;
       let measurement = lineMeasurements.get(lineIdx);
