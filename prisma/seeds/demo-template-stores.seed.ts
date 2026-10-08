@@ -43,8 +43,8 @@ interface TemplateStore {
   products: TemplateProduct[];
 }
 
-// docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۱۸ فاز ۲ — ۱۳ دسته‌ی کالا
-// (demo-categories.ts)؛ ۴ دسته‌ی خدماتی/نوبت‌دهی + «سایر» عمداً خارج از این seed هستند
+// docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۱۸ فاز ۲، §۱۹.۵ — ۱۶ دسته‌ی
+// کالا/دیجیتال (demo-categories.ts)؛ ۴ دسته‌ی خدماتی/نوبت‌دهی + «سایر» عمداً خارج از این seed هستند
 const TEMPLATES: TemplateStore[] = [
   {
     slug: 'demo-template-clothing',
@@ -468,6 +468,105 @@ const TEMPLATES: TemplateStore[] = [
         basePrice: 165000,
         stock: 40,
         description: 'اسباب‌بازی لاستیکی ضدحساسیت',
+      },
+    ],
+  },
+  {
+    slug: 'demo-template-online-courses',
+    category: 'دوره آموزشی و محصولات دیجیتال',
+    name: 'فروشگاه نمونه دوره‌های آموزشی',
+    brandIntro:
+      'فروشگاه نمونه‌ی دوره‌های آموزشی آنلاین — ویدیو و فایل قابل‌دانلود، تحویل بعد از تایید سفارش.',
+    products: [
+      {
+        name: 'دوره‌ی جامع مربی‌گری آنلاین',
+        basePrice: 1450000,
+        stock: 999,
+        description: 'بیش از ۲۰ ساعت ویدیوی آموزشی + فایل تمرین، دسترسی دائمی',
+      },
+      {
+        name: 'پکیج مقدماتی عکاسی با موبایل',
+        basePrice: 390000,
+        stock: 999,
+        description: 'آموزش گام‌به‌گام ۸ جلسه‌ای به‌صورت ویدیو',
+      },
+      {
+        name: 'قالب آماده صفحه فرود (لندینگ)',
+        basePrice: 190000,
+        stock: 999,
+        description: 'فایل Figma + HTML آماده، قابل‌شخصی‌سازی',
+      },
+      {
+        name: 'کتاب الکترونیک آموزش فروش دایرکت',
+        basePrice: 120000,
+        stock: 999,
+        description: 'فایل PDF، ۸۰ صفحه، ارسال فوری بعد از خرید',
+      },
+    ],
+  },
+  {
+    slug: 'demo-template-carpets-antiques',
+    category: 'فرش دستباف و عتیقه',
+    name: 'فروشگاه نمونه فرش و عتیقه',
+    brandIntro:
+      'فروشگاه نمونه‌ی فرش دستباف و اشیای عتیقه — قیمت نهایی بعد از مذاکره در چت.',
+    products: [
+      {
+        name: 'فرش دستباف قشقایی (۶ متری)',
+        basePrice: 18500000,
+        stock: 3,
+        description: 'فرش دستباف اصیل، طرح سنتی، قابل‌معاینه حضوری',
+      },
+      {
+        name: 'گلیم دستباف کردستان',
+        basePrice: 4200000,
+        stock: 6,
+        description: 'گلیم دورو، نخ و رنگ طبیعی',
+      },
+      {
+        name: 'ساعت دیواری عتیقه برنجی',
+        basePrice: 2850000,
+        stock: 2,
+        description: 'ساعت دیواری قدیمی، کارکرده و اصل، سالم و سرویس‌شده',
+      },
+      {
+        name: 'سماور زغالی آنتیک',
+        basePrice: 3600000,
+        stock: 4,
+        description: 'سماور قدیمی برنجی، قابل‌استفاده و تزئینی',
+      },
+    ],
+  },
+  {
+    slug: 'demo-template-repair-services',
+    category: 'خدمات تعمیر',
+    name: 'فروشگاه نمونه خدمات تعمیر',
+    brandIntro:
+      'فروشگاه نمونه‌ی تعمیرات موبایل و لوازم خانگی — هزینه‌ی بازدید اولیه، ادامه‌ی قیمت در چت.',
+    products: [
+      {
+        name: 'هزینه بازدید و عیب‌یابی موبایل',
+        basePrice: 150000,
+        stock: 999,
+        description: 'بازدید حضوری/اکسپرس + تشخیص ایراد، قابل‌کسر از هزینه‌ی تعمیر',
+      },
+      {
+        name: 'تعویض باتری گوشی (قطعه اورجینال)',
+        basePrice: 650000,
+        stock: 999,
+        description: 'شامل باتری + نصب، گارانتی ۳ ماهه',
+      },
+      {
+        name: 'تعمیر صفحه نمایش گوشی',
+        basePrice: 1200000,
+        stock: 999,
+        description: 'قیمت پایه برای مدل‌های پرتقاضا، نهایی بعد از دیدن دستگاه',
+      },
+      {
+        name: 'سرویس و تعمیر لباسشویی',
+        basePrice: 400000,
+        stock: 999,
+        description: 'هزینه اعزام تکنسین + بازدید، قطعه جدا محاسبه می‌شود',
       },
     ],
   },

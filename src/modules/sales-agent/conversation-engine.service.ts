@@ -767,7 +767,9 @@ export class ConversationEngineService {
       model: this.aiProvider.buildClient()(model),
       system: `تو دستیار فروش یک فروشگاه در دایرکت اینستاگرام هستی. فقط و فقط از «واقعیت‌های»
 داده‌شده یک پیام فارسی کوتاه (حداکثر ۲-۳ جمله)، دوستانه و محاوره‌ای بساز — هیچ عدد/اسم/شماره‌ی
-تازه‌ای که در واقعیت‌ها نیامده اضافه نکن، و پیشنهاد بعدی اختراع نکن. هرگز تعداد دقیق موجودی
+تازه‌ای که در واقعیت‌ها نیامده اضافه نکن، و پیشنهاد بعدی اختراع نکن. هر کد/شناسه‌ی حروفی-عددی
+(مثل کد تخفیف) که در واقعیت‌ها آمده باید عیناً و حرف‌به‌حرف همان‌طور کپی شود — هیچ تبدیل رقم
+فارسی⇄انگلیسی، تغییر حروف، یا بازنویسی روی آن مجاز نیست. هرگز تعداد دقیق موجودی
 انبار را اعلام نکن (حتی اگر مشتری صریح بپرسد)، فقط «موجود است» یا «فعلاً ناموجود».
 لحن نوشتار باید ${tone} باشد.${
         customerQuestion
@@ -908,7 +910,9 @@ export class ConversationEngineService {
       }),
       system: `تو دستیار فروش یک فروشگاه در دایرکت اینستاگرام هستی. فقط و فقط از «واقعیت‌های»
 داده‌شده یک پیام فارسی کوتاه (حداکثر ۲-۳ جمله)، دوستانه و محاوره‌ای بساز — هیچ عدد/اسم/شماره‌ی
-تازه‌ای که در واقعیت‌ها نیامده اضافه نکن، و پیشنهاد بعدی اختراع نکن. هرگز تعداد دقیق موجودی
+تازه‌ای که در واقعیت‌ها نیامده اضافه نکن، و پیشنهاد بعدی اختراع نکن. هر کد/شناسه‌ی حروفی-عددی
+(مثل کد تخفیف) که در واقعیت‌ها آمده باید عیناً و حرف‌به‌حرف همان‌طور کپی شود — هیچ تبدیل رقم
+فارسی⇄انگلیسی، تغییر حروف، یا بازنویسی روی آن مجاز نیست. هرگز تعداد دقیق موجودی
 انبار را اعلام نکن (حتی اگر مشتری صریح بپرسد)، فقط «موجود است» یا «فعلاً ناموجود».
 لحن نوشتار باید ${tone} باشد.${
         customerQuestion
@@ -1553,6 +1557,8 @@ ${
     }
 قوانین حیاتی:
 - هیچ عدد/اسم/شماره‌ای که از ابزارها یا واقعیت‌های بالا نیامده اختراع نکن.
+- هر کد/شناسه‌ی حروفی-عددی (مثل کد تخفیف) که از ابزارها برگشته، در پاسخ باید عیناً و حرف‌به‌حرف
+  همان‌طور تکرار شود — هیچ تبدیل رقم فارسی⇄انگلیسی، تغییر حروف، یا بازنویسی روی آن مجاز نیست.
 - هرگز تعداد دقیق موجودی انبار را اعلام نکن، فقط «موجود است» یا «فعلاً ناموجود».
 - اگر پیام مشتری مبهم است و اسم هیچ محصولی را نمی‌آورد (مثل «کدوم بهتره؟»، «فرقشون چیه؟»،
   «همینو بذار تو سبد»)، منظورش تقریباً همیشه «آخرین محصولاتی که مطرح/پیشنهاد شده‌اند» (بالا) یا
@@ -1948,12 +1954,37 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         // را صدا بزند، این‌بار روی ctx ای که از قبل (بدون persist موفق) تغییر کرده بود — یعنی
         // تعداد می‌توانست دوبرابر شود. حالا دقیقاً مثل cancel_order/request_human_handoff: فقط
         // بعد از موفقیت persist، ctx/مینی‌حالت لوکال آپدیت می‌شوند.
-        const nextCtx = { ...ctx, cart: mutation.cart };
+        // فیدبک کاربر ۱۴۰۵/۰۷/۱۶ — همون باگ applyCartUpdate (مسیر RULE_BASED): appliedDiscount
+        // نادیده گرفته می‌شد. این مسیر (FULL_AGENT) امروز فعال نیست (پایین‌تر pickResponseStrategy
+        // همیشه RULE_BASED برمی‌گرداند)، ولی برای وقتی فعال شد باید سازگار بماند
+        let nextAppliedDiscount = ctx.appliedDiscount;
+        if (ctx.appliedDiscount) {
+          const discountPreview = await this.previewDiscount(
+            storeId,
+            mutation.cart,
+            ctx.appliedDiscount.code,
+          );
+          nextAppliedDiscount = discountPreview.valid
+            ? {
+                id: discountPreview.id,
+                code: discountPreview.code,
+                amountToman: discountPreview.amountToman,
+              }
+            : null;
+        }
+        const nextCtx = {
+          ...ctx,
+          cart: mutation.cart,
+          appliedDiscount: nextAppliedDiscount,
+        };
         await this.persistTransition(conversation, 'CART_REVIEW', nextCtx);
         ctx = nextCtx;
         mutationHappened = true;
         await this.resetClarifyAttempts(conversation);
-        const total = this.cartTotal(ctx.cart);
+        const rawTotal = this.cartTotal(ctx.cart);
+        const total = nextAppliedDiscount
+          ? rawTotal - nextAppliedDiscount.amountToman
+          : rawTotal;
         cartResult = { cart: ctx.cart, total };
         if (!remove) progressHappened = true;
         return {
@@ -1963,6 +1994,9 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
             unitPrice: i.unitPrice,
           })),
           total,
+          ...(nextAppliedDiscount
+            ? { appliedDiscountCode: nextAppliedDiscount.code }
+            : {}),
         };
       },
     });
@@ -1971,7 +2005,10 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       description: 'محتوای فعلی سبد مشتری را برمی‌گرداند',
       inputSchema: z.object({}),
       execute: () => {
-        const total = this.cartTotal(ctx.cart);
+        const rawTotal = this.cartTotal(ctx.cart);
+        const total = ctx.appliedDiscount
+          ? rawTotal - ctx.appliedDiscount.amountToman
+          : rawTotal;
         cartResult = { cart: ctx.cart, total };
         return {
           cart: ctx.cart.map((i) => ({
@@ -3449,15 +3486,44 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       if (!anyAdded) {
         return this.doClarify(conversation, fa.salesAgent.reorderOutOfStock);
       }
+      // فیدبک کاربر ۱۴۰۵/۰۷/۱۶ — همون باگ applyCartUpdate (appliedDiscount نادیده گرفته می‌شد)
+      let nextAppliedDiscount = ctx.appliedDiscount;
+      let discountNote = '';
+      if (ctx.appliedDiscount) {
+        const preview = await this.previewDiscount(
+          conversation.storeId,
+          cart,
+          ctx.appliedDiscount.code,
+        );
+        if (preview.valid) {
+          nextAppliedDiscount = {
+            id: preview.id,
+            code: preview.code,
+            amountToman: preview.amountToman,
+          };
+          discountNote = `\nکد تخفیف ${preview.code} هنوز روی این سبد فعاله — ${preview.amountToman} تومان تخفیف، جمع با تخفیف ${preview.newTotal} تومان.`;
+        } else {
+          nextAppliedDiscount = null;
+          discountNote = `\n${fa.salesAgent.discountRemovedAfterCartChange}`;
+        }
+      }
       const nextState: ConversationState = 'CART_REVIEW';
-      await this.persistTransition(conversation, nextState, { ...ctx, cart });
+      await this.persistTransition(conversation, nextState, {
+        ...ctx,
+        cart,
+        appliedDiscount: nextAppliedDiscount,
+      });
       await this.resetClarifyAttempts(conversation);
+      const rawTotal = this.cartTotal(cart);
+      const total = nextAppliedDiscount
+        ? rawTotal - nextAppliedDiscount.amountToman
+        : rawTotal;
       const uiBlock: UiBlock = {
         type: 'CART_SUMMARY',
         items: cart,
-        total: this.cartTotal(cart),
+        total,
       };
-      const facts = `سبد فعلی: ${cart.map((i) => `${i.name}${i.variantLabel ? ` (${i.variantLabel})` : ''} × ${i.qty}`).join('، ')} — جمع کل ${this.cartTotal(cart)} تومان`;
+      const facts = `سبد فعلی: ${cart.map((i) => `${i.name}${i.variantLabel ? ` (${i.variantLabel})` : ''} × ${i.qty}`).join('، ')} — جمع کل ${rawTotal} تومان${discountNote}`;
       const reply = await this.caption(facts, conversation);
       await this.logReply(conversation, reply, uiBlock, undefined, {
         intent: 'REORDER',
@@ -3977,22 +4043,53 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     }
     const cart = mutation.cart;
 
+    // فیدبک کاربر ۱۴۰۵/۰۷/۱۶ — قبلاً appliedDiscount این‌جا نادیده گرفته می‌شد: بعد از هر
+    // تغییر سبد (افزودن/حذف آیتم)، خلاصه همیشه جمع خام را نشان می‌داد و دوباره
+    // discountAppliedHint می‌پرسید، انگار هیچ کدی اعمال نشده — حتی اگر لحظاتی قبل کد تخفیف
+    // با موفقیت اعمال شده بود. حالا با سبد تازه دوباره اعتبارسنجی می‌شود (previewDiscount):
+    // اگر هنوز معتبر است مبلغ/جمع به‌روز می‌شود، اگر نه با پیام صریح حذف می‌شود.
+    let nextAppliedDiscount = ctx.appliedDiscount;
+    let discountNote = '';
+    if (ctx.appliedDiscount) {
+      const preview = await this.previewDiscount(
+        conversation.storeId,
+        cart,
+        ctx.appliedDiscount.code,
+      );
+      if (preview.valid) {
+        nextAppliedDiscount = {
+          id: preview.id,
+          code: preview.code,
+          amountToman: preview.amountToman,
+        };
+        discountNote = `\nکد تخفیف ${preview.code} هنوز روی این سبد فعاله — ${preview.amountToman} تومان تخفیف، جمع با تخفیف ${preview.newTotal} تومان.`;
+      } else {
+        nextAppliedDiscount = null;
+        discountNote = `\n${fa.salesAgent.discountRemovedAfterCartChange}`;
+      }
+    }
+
     const nextState: ConversationState = 'CART_REVIEW';
     // pendingVariantSelection همیشه اینجا پاک می‌شود — چه از مسیر واریانت رسیده باشیم چه نه
     await this.persistTransition(conversation, nextState, {
       ...ctx,
       cart,
       pendingVariantSelection: null,
+      appliedDiscount: nextAppliedDiscount,
     });
     await this.resetClarifyAttempts(conversation);
 
+    const rawTotal = this.cartTotal(cart);
+    const total = nextAppliedDiscount
+      ? rawTotal - nextAppliedDiscount.amountToman
+      : rawTotal;
     const uiBlock: UiBlock = {
       type: 'CART_SUMMARY',
       items: cart,
-      total: this.cartTotal(cart),
+      total,
     };
     const facts = cart.length
-      ? `سبد فعلی: ${cart.map((i) => `${i.name}${i.variantLabel ? ` (${i.variantLabel})` : ''} × ${i.qty}`).join('، ')} — جمع کل ${this.cartTotal(cart)} تومان\n${fa.salesAgent.discountAppliedHint}`
+      ? `سبد فعلی: ${cart.map((i) => `${i.name}${i.variantLabel ? ` (${i.variantLabel})` : ''} × ${i.qty}`).join('، ')} — جمع کل ${rawTotal} تومان${discountNote}${nextAppliedDiscount ? '' : `\n${fa.salesAgent.discountAppliedHint}`}`
       : fa.salesAgent.cartEmpty;
     const reply = await this.caption(facts, conversation);
     await this.logReply(conversation, reply, uiBlock, undefined, {
@@ -4008,13 +4105,19 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     conversation: ConversationWithStore,
     ctx: ConversationContext,
   ): Promise<EngineResult> {
+    // فیدبک کاربر ۱۴۰۵/۰۷/۱۶ — همون باگ applyCartUpdate؛ اینجا سبد تغییر نمی‌کند پس نیازی به
+    // اعتبارسنجی دوباره نیست، فقط appliedDiscount موجود باید در total/facts منعکس شود
+    const rawTotal = this.cartTotal(ctx.cart);
+    const total = ctx.appliedDiscount
+      ? rawTotal - ctx.appliedDiscount.amountToman
+      : rawTotal;
     const uiBlock: UiBlock = {
       type: 'CART_SUMMARY',
       items: ctx.cart,
-      total: this.cartTotal(ctx.cart),
+      total,
     };
     const facts = ctx.cart.length
-      ? `سبد فعلی: ${ctx.cart.map((i) => `${i.name}${i.variantLabel ? ` (${i.variantLabel})` : ''} × ${i.qty}`).join('، ')} — جمع کل ${this.cartTotal(ctx.cart)} تومان`
+      ? `سبد فعلی: ${ctx.cart.map((i) => `${i.name}${i.variantLabel ? ` (${i.variantLabel})` : ''} × ${i.qty}`).join('، ')} — جمع کل ${rawTotal} تومان${ctx.appliedDiscount ? `\nکد تخفیف ${ctx.appliedDiscount.code} فعاله — ${ctx.appliedDiscount.amountToman} تومان تخفیف، جمع با تخفیف ${total} تومان.` : ''}`
       : fa.salesAgent.cartEmpty;
     const reply = await this.caption(facts, conversation);
     await this.logReply(conversation, reply, uiBlock, undefined, {
@@ -4421,16 +4524,28 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       let discountAmount = 0;
       let discountCodeId: string | undefined;
       if (ctx.appliedDiscount) {
-        const affected = await this.prisma.$executeRaw`
-          UPDATE store_discount_codes
-          SET "redemptionCount" = "redemptionCount" + 1
-          WHERE id = ${ctx.appliedDiscount.id}
-            AND "isActive" = true
-            AND ("maxRedemptions" IS NULL OR "redemptionCount" < "maxRedemptions")
-        `;
-        if (affected > 0) {
-          discountAmount = ctx.appliedDiscount.amountToman;
-          discountCodeId = ctx.appliedDiscount.id;
+        // فیدبک کاربر ۱۴۰۵/۰۷/۱۶ — قبلاً اینجا کورکورانه به ctx.appliedDiscount.amountToman
+        // (محاسبه‌شده روی سبدِ لحظه‌ی اعمال کد) اعتماد می‌شد؛ اگر سبد بعداً تغییر کرده بود
+        // (محصول اضافه/حذف شد) ولی appliedDiscount در context دست‌نخورده مانده بود، مبلغ
+        // تخفیف می‌توانست با سبد نهایی واقعی هم‌خوان نباشد. دوباره روی سبد نهایی اعتبارسنجی
+        // می‌شود؛ فقط اگر هنوز معتبر است مصرف اتمیک انجام می‌شود
+        const preview = await this.previewDiscount(
+          conversation.storeId,
+          ctx.cart,
+          ctx.appliedDiscount.code,
+        );
+        if (preview.valid) {
+          const affected = await this.prisma.$executeRaw`
+            UPDATE store_discount_codes
+            SET "redemptionCount" = "redemptionCount" + 1
+            WHERE id = ${preview.id}
+              AND "isActive" = true
+              AND ("maxRedemptions" IS NULL OR "redemptionCount" < "maxRedemptions")
+          `;
+          if (affected > 0) {
+            discountAmount = preview.amountToman;
+            discountCodeId = preview.id;
+          }
         }
       }
       // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۲ — هزینه‌ی ارسال همین‌جا

@@ -1,7 +1,7 @@
-// docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۵.۲، ۱۸ فاز ۲ — نگاشت اسلاگ
-// انگلیسی لینک دمو (nivoai.ir/demo/seller/<slug>) به همان برچسب فارسی BUSINESS_CATEGORIES
-// (business-categories.ts). فقط ۱۳ دسته‌ی کالا (PRODUCT_SALES) — ۴ دسته‌ی خدماتی/نوبت‌دهی
-// (پزشکی، مشاوره، آرایشگاه، آموزش خصوصی) و «سایر» عمداً حذف شدند چون مدل دموی فعلی (کپی
+// docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۵.۲، ۱۸ فاز ۲، §۱۹.۵ — نگاشت
+// اسلاگ انگلیسی لینک دمو (nivoai.ir/demo/seller/<slug>) به همان برچسب فارسی BUSINESS_CATEGORIES
+// (business-categories.ts). ۱۶ دسته‌ی کالا/دیجیتال (PRODUCT_SALES) — ۴ دسته‌ی خدماتی/نوبت‌دهی
+// (پزشکی، مشاوره، آرایشگاه، آموزش خصوصی زنده) و «سایر» عمداً حذف شدند چون مدل دموی فعلی (کپی
 // محصول) برای businessType=APPOINTMENT_BOOKING که هنوز مدل داده‌اش ساخته نشده معنا ندارد.
 export const DEMO_CATEGORY_SLUGS = {
   clothing: 'پوشاک',
@@ -17,6 +17,9 @@ export const DEMO_CATEGORY_SLUGS = {
   'flowers-plants': 'گل و گیاه',
   handicrafts: 'صنایع‌دستی',
   pets: 'حیوانات خانگی',
+  'online-courses': 'دوره آموزشی و محصولات دیجیتال',
+  'carpets-antiques': 'فرش دستباف و عتیقه',
+  'repair-services': 'خدمات تعمیر',
 } as const;
 
 export type DemoCategorySlug = keyof typeof DEMO_CATEGORY_SLUGS;
