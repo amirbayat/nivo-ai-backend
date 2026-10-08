@@ -4,3 +4,7 @@ dist
 .env
 
 /generated/prisma
+
+# عکس/فیلم محصولات قالب دمو — نیازی به کامیت ندارند، چون از طریق admin/demo-products API
+# (ApiKeyGuard) مستقیم آپلود می‌شوند، نه از روی دیسک کانتینر پروداکشن
+prisma/seeds/demo-assets/

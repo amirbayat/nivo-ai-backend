@@ -1,9 +1,74 @@
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@prisma/client';
+import { Client as MinioClient } from 'minio';
+import * as crypto from 'crypto';
+import * as fs from 'fs';
+import * as path from 'path';
 import { generateShortCode } from '../../src/common/utils/generate-code';
+import type { ProductVideoItem } from '../../src/modules/store/product-video.types';
 
 const adapter = new PrismaPg({ connectionString: process.env['DATABASE_URL'] });
 const prisma = new PrismaClient({ adapter });
+
+// همون کانفیگ StorageService (src/storage/storage.service.ts) — این اسکریپت مستقل از Nest DI
+// اجرا می‌شود (docker compose exec ... ts-node)، پس یک کلاینت MinIO جدا ولی هم‌تنظیمات می‌سازد
+const minioBucket = process.env['MINIO_BUCKET'] ?? 'chat-images';
+const minio = new MinioClient({
+  endPoint: process.env['MINIO_ENDPOINT'] ?? 'localhost',
+  port: Number(process.env['MINIO_PORT'] ?? '9000'),
+  useSSL: (process.env['MINIO_USE_SSL'] ?? 'false') === 'true',
+  accessKey: process.env['MINIO_ACCESS_KEY'] ?? 'minioadmin',
+  secretKey: process.env['MINIO_SECRET_KEY'] ?? 'minioadmin',
+});
+
+// عکس‌های آماده‌شده از استوک آزاد (Pixabay) — docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md
+// بخش ۲۰؛ یک عکس به ازای هر محصول، به ترتیب همون آرایه‌ی products بالا، در
+// prisma/seeds/demo-assets/<slug>/<شماره‌ی ۱-پایه>.jpg — اگر فایلی برای یک محصول نبود،
+// آن محصول بدون عکس ساخته می‌شود (مسدودکننده نیست)
+async function uploadTemplateProductImage(
+  slug: string,
+  productIndex: number,
+): Promise<string | undefined> {
+  const filePath = path.join(
+    __dirname,
+    'demo-assets',
+    slug,
+    `${productIndex + 1}.jpg`,
+  );
+  if (!fs.existsSync(filePath)) return undefined;
+  const buffer = fs.readFileSync(filePath);
+  const key = `${crypto.randomUUID()}.jpg`;
+  await minio.putObject(minioBucket, key, buffer);
+  return key;
+}
+
+// فیلم‌های کوتاه (هم از Pixabay، زیر ۸۵ ثانیه — سقف واقعی بک‌اند ۹۰ ثانیه است، حاشیه‌ی امن).
+// مدت دقیق فایل را اسکریپت دانلود همون لحظه از پاسخ Pixabay گرفته و کنار فایل در یک
+// sidecar متنی (<n>.video-duration.txt) نوشته — اینجا دوباره نیازی به probe کردن ویدیو نیست
+async function uploadTemplateProductVideo(
+  slug: string,
+  productIndex: number,
+): Promise<ProductVideoItem | undefined> {
+  const videoPath = path.join(
+    __dirname,
+    'demo-assets',
+    slug,
+    `${productIndex + 1}.mp4`,
+  );
+  const durationPath = path.join(
+    __dirname,
+    'demo-assets',
+    slug,
+    `${productIndex + 1}.video-duration.txt`,
+  );
+  if (!fs.existsSync(videoPath) || !fs.existsSync(durationPath))
+    return undefined;
+  const buffer = fs.readFileSync(videoPath);
+  const durationSec = Number(fs.readFileSync(durationPath, 'utf8').trim());
+  const key = `${crypto.randomUUID()}.mp4`;
+  await minio.putObject(minioBucket, key, buffer);
+  return { key, durationSec };
+}
 
 async function generateUniqueReferralCode(): Promise<string> {
   for (let attempt = 0; ; attempt++) {
@@ -548,7 +613,8 @@ const TEMPLATES: TemplateStore[] = [
         name: 'هزینه بازدید و عیب‌یابی موبایل',
         basePrice: 150000,
         stock: 999,
-        description: 'بازدید حضوری/اکسپرس + تشخیص ایراد، قابل‌کسر از هزینه‌ی تعمیر',
+        description:
+          'بازدید حضوری/اکسپرس + تشخیص ایراد، قابل‌کسر از هزینه‌ی تعمیر',
       },
       {
         name: 'تعویض باتری گوشی (قطعه اورجینال)',
@@ -597,27 +663,47 @@ async function main() {
       continue;
     }
 
-    const store = await prisma.store.create({
-      data: {
-        sellerId: owner.id,
-        slug: tpl.slug,
-        name: tpl.name,
-        category: tpl.category,
-        bankCardNumber: PLACEHOLDER_CARD,
-        bankOwnerName: PLACEHOLDER_OWNER_NAME,
-        brandIntro: tpl.brandIntro,
-        isDemoTemplate: true,
-      },
-    });
+    // آپلود عکس‌ها قبل از هر نوشتن روی DB انجام می‌شود (نه بعد از store.create) — وگرنه یک
+    // خطای گذرا در MinIO وسط حلقه، فروشگاهی با صفر محصول باقی می‌گذارد که چک «skip (already
+    // exists)» بالا دیگر هیچ‌وقت کامل نمی‌کندش (این دقیقاً هنگام تست همین تغییر رخ داد — پیش
+    // از این فیکس). علاوه بر این، store.create و product.createMany داخل یک تراکنش هستند تا
+    // اگر createMany به هر دلیلی شکست بخورد، store هم rollback شود، نه اینکه یتیم بماند
+    const imageKeys: (string | undefined)[] = [];
+    const videoItems: (ProductVideoItem | undefined)[] = [];
+    for (let i = 0; i < tpl.products.length; i++) {
+      imageKeys.push(await uploadTemplateProductImage(tpl.slug, i));
+      videoItems.push(await uploadTemplateProductVideo(tpl.slug, i));
+    }
 
-    await prisma.product.createMany({
-      data: tpl.products.map((p) => ({
-        storeId: store.id,
-        name: p.name,
-        basePrice: p.basePrice,
-        stock: p.stock,
-        description: p.description,
-      })),
+    await prisma.$transaction(async (tx) => {
+      const store = await tx.store.create({
+        data: {
+          sellerId: owner.id,
+          slug: tpl.slug,
+          name: tpl.name,
+          category: tpl.category,
+          bankCardNumber: PLACEHOLDER_CARD,
+          bankOwnerName: PLACEHOLDER_OWNER_NAME,
+          brandIntro: tpl.brandIntro,
+          isDemoTemplate: true,
+        },
+      });
+
+      await tx.product.createMany({
+        data: tpl.products.map((p, i) => {
+          const imageKey = imageKeys[i];
+          const videoItem = videoItems[i];
+          return {
+            storeId: store.id,
+            name: p.name,
+            basePrice: p.basePrice,
+            stock: p.stock,
+            description: p.description,
+            images: imageKey ? [imageKey] : [],
+            videos: videoItem ? [videoItem] : [],
+          };
+        }),
+      });
     });
 
     console.log(`created: ${tpl.slug} (+${tpl.products.length} products)`);

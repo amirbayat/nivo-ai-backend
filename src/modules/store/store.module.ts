@@ -8,6 +8,7 @@ import { AsrModule } from '../../common/services/asr.module';
 import { MediaTranscodeModule } from '../../common/services/media-transcode.module';
 import { MarketPricesModule } from '../market-prices/market-prices.module';
 import { StoreController } from './store.controller';
+import { DemoProductsAdminController } from './demo-products-admin.controller';
 import { StoreService } from './store.service';
 import { StoreKbService } from './store-kb.service';
 import { StoreCreditService } from './store-credit.service';
@@ -41,7 +42,7 @@ import { ContentChangeLogService } from './content-change-log.service';
     MediaTranscodeModule,
     MarketPricesModule,
   ],
-  controllers: [StoreController],
+  controllers: [StoreController, DemoProductsAdminController],
   providers: [
     StoreService,
     StoreKbService,

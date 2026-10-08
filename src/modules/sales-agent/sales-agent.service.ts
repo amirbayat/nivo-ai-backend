@@ -107,6 +107,9 @@ export class SalesAgentService {
       storeId: store.id,
       storeName: store.name,
       storeLogoKey: store.logoImageKey,
+      // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md — فرانت با این فلگ نوار دمو
+      // را روی صفحه‌ی چت نشان می‌دهد؛ قبلاً این صفحه اصلاً نمی‌دانست فروشگاه دموست یا نه
+      isDemo: store.isDemo,
       responseStrategy: customer.salesConversations[0].responseStrategy,
       ...(initial
         ? {
@@ -157,6 +160,7 @@ export class SalesAgentService {
       storeId: conversation.storeId,
       storeName: conversation.store.name,
       storeLogoKey: conversation.store.logoImageKey,
+      isDemo: conversation.store.isDemo,
       responseStrategy: fresh.responseStrategy,
       ...(initial
         ? {
@@ -740,6 +744,7 @@ export class SalesAgentService {
       storeId: conversation.storeId,
       storeName: conversation.store.name,
       storeLogoKey: conversation.store.logoImageKey,
+      isDemo: conversation.store.isDemo,
       responseStrategy: conversation.responseStrategy,
       events,
     };

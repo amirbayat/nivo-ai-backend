@@ -1070,6 +1070,102 @@ export class StoreService {
     }
   }
 
+  // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۲۰.۳ — روی Darkube هیچ
+  // shell/ترمینالی داخل کانتینر بک‌اند پروداکشن در دسترس نیست، پس تنها راه اتصال عکس/فیلم به
+  // محصولات قالب دمو از بیرون همین سه متد (پشت ApiKeyGuard در DemoProductsAdminController)
+  // است. عمداً به‌جای sellerId، store.isDemoTemplate چک می‌شود — حتی با لو رفتن کلید، محصول
+  // واقعی یک فروشنده دست‌نخورده می‌ماند (این متد هرگز چیزی جز فروشگاه‌های قالب را برنمی‌گرداند)
+  private async getDemoTemplateProduct(productId: string) {
+    const product = await this.prisma.product.findUnique({
+      where: { id: productId },
+      include: { store: true },
+    });
+    if (!product || !product.store.isDemoTemplate) {
+      throw new NotFoundException(fa.store.productNotFound);
+    }
+    return product;
+  }
+
+  async listDemoTemplateProducts() {
+    return this.prisma.product.findMany({
+      where: { store: { isDemoTemplate: true } },
+      select: {
+        id: true,
+        name: true,
+        images: true,
+        videos: true,
+        store: { select: { slug: true } },
+      },
+      orderBy: [{ store: { slug: 'asc' } }, { createdAt: 'asc' }],
+    });
+  }
+
+  // همون اعتبارسنجی addProductImages بالا (سقف ۴ تا، فقط image/*، حداکثر ۵ مگابایت — سقف
+  // واقعی اینترسپتور کنترلر)، فقط چک مالکیت فرق دارد
+  async addDemoProductImage(productId: string, file: Express.Multer.File) {
+    const product = await this.getDemoTemplateProduct(productId);
+    if (product.images.length + 1 > StoreService.MAX_PRODUCT_IMAGES) {
+      throw new BadRequestException(fa.store.tooManyImages);
+    }
+    if (!file.mimetype.startsWith('image/')) {
+      throw new BadRequestException(fa.store.imageOnly);
+    }
+    const ext = file.mimetype.split('/')[1]?.replace('jpeg', 'jpg') ?? 'jpg';
+    const key = await this.storage.uploadImage(file.buffer, ext);
+    return this.prisma.product.update({
+      where: { id: productId },
+      data: { images: { push: key } },
+    });
+  }
+
+  // همون اعتبارسنجی/نرمال‌سازی uploadProductVideo بالا (mp4/mov با magic bytes، سقف ۴ تا،
+  // حداکثر ۵۰ مگابایت، حداکثر ۹۰ ثانیه)، فقط چک مالکیت فرق دارد
+  async addDemoProductVideo(productId: string, file: Express.Multer.File) {
+    const product = await this.getDemoTemplateProduct(productId);
+    const existingVideos = parseProductVideos(product.videos);
+    if (existingVideos.length >= StoreService.MAX_PRODUCT_VIDEOS) {
+      throw new BadRequestException(fa.store.tooManyVideos);
+    }
+    if (file.size > StoreService.MAX_PRODUCT_VIDEO_BYTES) {
+      throw new BadRequestException(fa.store.videoTooLarge);
+    }
+    const ext = StoreService.PRODUCT_VIDEO_MIME_EXT[file.mimetype];
+    if (!ext || !this.matchesVideoMagicBytes(file.buffer)) {
+      throw new BadRequestException(fa.store.videoOnly);
+    }
+
+    let storeBuffer = file.buffer;
+    let storeExt = ext;
+    try {
+      const normalized = await this.mediaTranscode.normalizeVideoForProviders(
+        file.buffer,
+        ext,
+      );
+      storeBuffer = normalized.buffer;
+      storeExt = normalized.ext;
+    } catch {
+      throw new BadRequestException(fa.store.videoTranscodeFailed);
+    }
+
+    const durationSec = await this.mediaTranscode.getVideoDuration(
+      storeBuffer,
+      storeExt,
+    );
+    if (durationSec > StoreService.MAX_PRODUCT_VIDEO_DURATION_SEC) {
+      throw new BadRequestException(fa.store.videoTooLong);
+    }
+
+    const key = await this.storage.uploadImage(storeBuffer, storeExt);
+    const videos: ProductVideoItem[] = [
+      ...existingVideos,
+      { key, durationSec: Math.round(durationSec) },
+    ];
+    return this.prisma.product.update({
+      where: { id: productId },
+      data: { videos },
+    });
+  }
+
   // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۴ — عکس پروفایل فروشگاه؛ همون الگوی
   // addProductImages بالا، تک‌فیلد نه آرایه (عکس قبلی، اگر بود، جایگزین می‌شود)
   async uploadStoreLogo(
