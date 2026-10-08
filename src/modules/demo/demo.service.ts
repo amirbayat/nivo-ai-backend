@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { randomBytes } from 'crypto';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RedisService } from '../../redis/redis.service';
 import { fa } from '../../i18n/fa';
@@ -82,6 +83,7 @@ export class DemoService {
         stock: p.stock,
         description: p.description,
         images: p.images,
+        videos: p.videos as Prisma.InputJsonValue,
       })),
     });
 
