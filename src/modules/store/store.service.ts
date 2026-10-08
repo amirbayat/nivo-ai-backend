@@ -1371,7 +1371,12 @@ export class StoreService {
         data: { status: 'APPROVED', approvedAt: new Date() },
       });
     });
-    await this.requestReviewFollowUp(order);
+    // docs/PRD-order-status-chat-tool-and-fulfillment-delay-reviews.md بخش ۲.۲ — برای
+    // سفارش‌های تحویل‌زمان‌بر (عکس/ویدیوی سفارشی و مشابه)، درخواست نظر به لحظه‌ی «ارسال شد»
+    // موکول می‌شود (پایین در shipOrder)، نه این‌جا که محصول هنوز آماده نشده
+    if (!order.hasFulfillmentDelay) {
+      await this.requestReviewFollowUp(order);
+    }
     return approved;
   }
 
@@ -1510,6 +1515,12 @@ export class StoreService {
       data: { status: 'SHIPPED', shippedAt: new Date() },
     });
     await this.notifyBuyerOfShipment(order);
+    // docs/PRD-order-status-chat-tool-and-fulfillment-delay-reviews.md بخش ۲.۲ — برای
+    // سفارش‌های تحویل‌زمان‌بر، درخواست نظر در approveOrder عمداً نادیده گرفته شده بود؛ اولین
+    // باری که واقعاً باید فرستاده شود همین لحظه است (بعد از پیام «ارسال/آماده شد» بالا)
+    if (order.hasFulfillmentDelay) {
+      await this.requestReviewFollowUp(order);
+    }
     return shipped;
   }
 

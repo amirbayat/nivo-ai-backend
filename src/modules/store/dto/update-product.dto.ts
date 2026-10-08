@@ -103,4 +103,11 @@ export class UpdateProductDto {
   @IsNumber()
   @Min(0, { message: fa.validation.numberPositive })
   goldProfitPercent?: number | null;
+
+  // docs/PRD-order-status-chat-tool-and-fulfillment-delay-reviews.md بخش ۲.۱ — این محصول
+  // آماده‌سازی/تحویل زمان‌بر دارد (مثلاً عکاسی/فیلم‌برداری سفارشی)؛ درخواست نظر پس از خرید
+  // برای سفارش‌های حاوی این محصول به لحظه‌ی «ارسال شد» موکول می‌شود، نه تایید سفارش
+  @IsOptional()
+  @IsBoolean()
+  hasFulfillmentDelay?: boolean;
 }

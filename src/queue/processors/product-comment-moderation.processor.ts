@@ -48,7 +48,10 @@ export class ProductCommentModerationProcessor {
 واقعاً درباره‌ی محصول/فروشگاه است (isOnTopic)؟ confidence بین ۰ تا ۱ میزان اطمینانت به تشخیص
 isSpamOrAbusive را نشان بده. اگر مطمئن نیستی، confidence را پایین بگذار — تصمیم نهایی برای
 موارد نامطمئن با یک ادمین انسانی است.`,
-        prompt: comment.text,
+        // docs/PRD-order-status-chat-tool-and-fulfillment-delay-reviews.md بخش ۳.۲ — text حالا
+        // nullable است، ولی این صف فقط برای نظرات بدون رسانه enqueue می‌شود (CommentsService.
+        // submitComment)، یعنی عملاً همیشه پر است؛ fallback فقط برای رضایت TypeScript
+        prompt: comment.text ?? '',
       });
 
       const autoReject =

@@ -2333,6 +2333,11 @@ model Product {
   // نمی‌شود)؛ lazy-generate می‌شود (اولین باری که فروشنده لینک تلگرام را می‌خواهد)، نه در
   // لحظه‌ی ساخت محصول — محصولات قدیمی‌تر هم همین‌طور پوشش داده می‌شوند
   telegramShortCode           String?  @unique
+  // docs/PRD-order-status-chat-tool-and-fulfillment-delay-reviews.md بخش ۲ — پیش‌فرض false
+  // یعنی تحویل فوری/همون سفارش است (رفتار امروز، دست‌نخورده). true برای محصولاتی که
+  // آماده‌سازی/تولید زمان‌بر دارند (مثلاً عکاسی/فیلم‌برداری سفارشی) — درخواست نظر پس از خرید
+  // برای سفارش‌های حاوی این محصول به‌جای لحظه‌ی تایید سفارش، به لحظه‌ی «ارسال شد» موکول می‌شود
+  hasFulfillmentDelay         Boolean  @default(false)
 
   kbEntries StoreKbEntry[]
 
@@ -2941,12 +2946,20 @@ model Order {
   // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۱۳.۲ — ست می‌شود در
   // shipOrder (status=APPROVED → SHIPPED)؛ نال یعنی هنوز ارسال نشده
   shippedAt                   DateTime?
+  // docs/PRD-order-status-chat-tool-and-fulfillment-delay-reviews.md بخش ۲.۱ — کپی‌شده از
+  // Product.hasFulfillmentDelay آیتم‌های سبد، لحظه‌ی ثبت سفارش (هم‌الگوی requiresShipping در
+  // doCreateOrder)؛ true یعنی حداقل یکی از آیتم‌ها تحویل زمان‌بر دارد — approveOrder/shipOrder
+  // و PostPurchaseFollowUpService بر اساس همین تصمیم می‌گیرند کِی درخواست نظر بفرستند
+  hasFulfillmentDelay          Boolean            @default(false)
   createdAt                   DateTime           @default(now())
   updatedAt                   DateTime           @updatedAt
 
   @@index([storeId])
   @@index([status, satisfactionFollowUpSentAt])
   @@index([status, mediaReviewFollowUpSentAt])
+  // docs/PRD-order-status-chat-tool-and-fulfillment-delay-reviews.md بخش ۲.۲ — کوئری دوشاخه‌ی
+  // سفارش‌های hasFulfillmentDelay=true که منتظر SHIPPED هستند (نه APPROVED)
+  @@index([status, hasFulfillmentDelay, shippedAt])
   // docs/PRD-seller-growth-tools-and-marketplace-trust.md بخش ۱.۱ — کوئری تجمیعی داشبورد
   // فروش (بازه‌ی تاریخ به‌ازای فروشگاه)؛ دو ایندکس بالا برای این کوئری خاص بهینه نیستند
   @@index([storeId, createdAt])
@@ -2973,7 +2986,10 @@ model ProductComment {
   product      Product?      @relation(fields: [productId], references: [id], onDelete: SetNull)
   customerId   String
   customer     Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  text         String        @db.Text
+  // docs/PRD-order-status-chat-tool-and-fulfillment-delay-reviews.md بخش ۳.۲ — قبلاً اجباری؛
+  // نظر فقط-رسانه (فقط عکس/صدا/ویدیو، بدون کپشن تایپی) هم باید قابل‌ثبت باشد. گارد «حداقل
+  // یکی از text/imageKey/videoKey/audioKey باید پر باشد» در CommentsService.submitComment است
+  text         String?       @db.Text
   rating       Int? // ۱ تا ۵، اختیاری — سؤال باز §۱۱ سند: فعلاً متن آزاد کافی است، رتبه اختیاری می‌ماند
   // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۱۴.۲ — رسانه‌ی اختیاری نظر؛
   // طبق کانونشن <چیزی>Key موجود (فقط کلید MinIO). وجود هرکدام یعنی این نظر پیش‌فیلتر AI را

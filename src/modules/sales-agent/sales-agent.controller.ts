@@ -146,6 +146,24 @@ export class SalesAgentController {
     );
   }
 
+  // docs/PRD-order-status-chat-tool-and-fulfillment-delay-reviews.md بخش ۳.۱ — ویدیویی که
+  // خریدار در حالت «صحبت با فروشنده» یا در لحظه‌ی awaitingReview می‌فرستد؛ هم‌الگوی image بالا
+  @Post('chat/:conversationId/video')
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: 20 * 1024 * 1024 } }),
+  )
+  submitVideoMessage(
+    @Param('conversationId') conversationId: string,
+    @Headers('x-session-token') sessionToken: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    return this.salesAgentService.submitVideoMessage(
+      conversationId,
+      sessionToken,
+      file,
+    );
+  }
+
   // docs/PRD-buyer-orders-page-and-direct-order.md بخش ۲.۲ — صفحه‌ی مستقل «سفارش‌های من»،
   // خارج از AI/engine
   @Get('chat/:conversationId/orders')

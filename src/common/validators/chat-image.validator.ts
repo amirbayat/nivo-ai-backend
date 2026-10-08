@@ -114,6 +114,11 @@ const EXT_MIME_TYPES: Record<string, string> = {
   jpeg: 'image/jpeg',
   gif: 'image/gif',
   webp: 'image/webp',
+  // docs/PRD-order-status-chat-tool-and-fulfillment-delay-reviews.md بخش ۳.۱ — ویدیوی چت
+  // (submitVideoMessage) هم از همین mimeTypeForExt برای سرو درست Content-Type استفاده می‌کند
+  mp4: 'video/mp4',
+  mov: 'video/quicktime',
+  webm: 'video/webm',
 };
 
 // همون فرمت‌های مجاز بالا (DATA_URL_RE) — برای ست کردن Content-Type درست وقتی عکس از

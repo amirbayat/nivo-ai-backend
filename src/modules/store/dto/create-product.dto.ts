@@ -86,4 +86,11 @@ export class CreateProductDto {
   @IsNumber()
   @Min(0, { message: fa.validation.numberPositive })
   goldProfitPercent?: number;
+
+  // docs/PRD-order-status-chat-tool-and-fulfillment-delay-reviews.md بخش ۲.۱ — فرم مشترک
+  // ایجاد/ویرایش همین فیلد را هم می‌فرستد، باید اینجا هم whitelist باشد (عیناً دلیل
+  // persuasionTechniquesEnabled بالا)
+  @IsOptional()
+  @IsBoolean()
+  hasFulfillmentDelay?: boolean;
 }

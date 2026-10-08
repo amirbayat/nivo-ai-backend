@@ -286,10 +286,11 @@ export class SalesAgentService {
     return this.attachVoicePending(conversationId, result);
   }
 
-  // خریدار - فقط وقتی مکالمه muted است (صحبت مستقیم با فروشنده، مثل HANDOFF_HUMAN/REJECTED)
-  // می‌تواند عکس بفرستد؛ موتور مکالمه‌ی رباتی اصلاً برای عکسِ غیر-رسید طراحی نشده، پس دقیقاً
-  // همان مسیر CUSTOMER_MESSAGE متنیِ muted در sendMessage بالا را تکرار می‌کنیم، فقط با imageKey
-  // به‌جای text — فروشنده در تب «نیاز به توجه» می‌بیندش
+  // خریدار - وقتی مکالمه muted است (صحبت مستقیم با فروشنده، مثل HANDOFF_HUMAN/REJECTED) یا
+  // منتظر نظر است (awaitingReview — docs/PRD-order-status-chat-tool-and-fulfillment-delay-reviews.md
+  // بخش ۳.۱) می‌تواند عکس بفرستد؛ موتور مکالمه‌ی رباتی اصلاً برای عکسِ غیر-رسید طراحی نشده. حالت
+  // اول دقیقاً همان مسیر CUSTOMER_MESSAGE متنیِ muted در sendMessage بالا را تکرار می‌کند؛ حالت
+  // دوم مستقیم به یک ProductComment تبدیل می‌شود
   async submitImageMessage(
     conversationId: string,
     sessionToken: string,
@@ -300,7 +301,10 @@ export class SalesAgentService {
       throw new BadRequestException(fa.errors.validation);
 
     const conversation = await this.loadOwned(conversationId, sessionToken);
-    if (!conversation.isMutedForHuman) {
+    const awaitingReview = (
+      conversation.contextData as { awaitingReview?: boolean } | null
+    )?.awaitingReview;
+    if (!conversation.isMutedForHuman && !awaitingReview) {
       throw new BadRequestException(fa.errors.validation);
     }
 
@@ -310,6 +314,14 @@ export class SalesAgentService {
       ext,
       conversation.id,
     );
+
+    if (awaitingReview) {
+      const result = await this.engine.submitReviewMedia(conversation, {
+        imageKey,
+      });
+      return this.attachVoicePending(conversationId, result);
+    }
+
     const reattachedToOrder = await reattachReceiptIfOrderOpen(
       this.prisma,
       conversation.id,
@@ -323,6 +335,53 @@ export class SalesAgentService {
           imageKey,
           ...(reattachedToOrder ? { reattachedToOrder } : {}),
         },
+      },
+    });
+    return { reply: '', uiBlocks: [], state: conversation.currentState };
+  }
+
+  // docs/PRD-order-status-chat-tool-and-fulfillment-delay-reviews.md بخش ۳.۱ — هم‌الگوی
+  // submitImageMessage بالا، برای ویدیو؛ قبلاً هیچ endpointـی برای ویدیوی مسیر چت نبود (فقط
+  // مدال مستقل نظرات فایل‌پیکر ویدیو داشت). سقف حجم همان SalesAgentService.COMMENT_MEDIA_MAX_BYTES.video
+  async submitVideoMessage(
+    conversationId: string,
+    sessionToken: string,
+    file: Express.Multer.File | undefined,
+  ) {
+    if (!file) throw new BadRequestException(fa.errors.validation);
+    if (!file.mimetype.startsWith('video/'))
+      throw new BadRequestException(fa.errors.validation);
+    if (file.size > SalesAgentService.COMMENT_MEDIA_MAX_BYTES.video) {
+      throw new BadRequestException(fa.errors.validation);
+    }
+
+    const conversation = await this.loadOwned(conversationId, sessionToken);
+    const awaitingReview = (
+      conversation.contextData as { awaitingReview?: boolean } | null
+    )?.awaitingReview;
+    if (!conversation.isMutedForHuman && !awaitingReview) {
+      throw new BadRequestException(fa.errors.validation);
+    }
+
+    const ext = file.mimetype.split('/')[1] ?? 'mp4';
+    const videoKey = await this.storage.uploadImage(
+      file.buffer,
+      ext,
+      conversation.id,
+    );
+
+    if (awaitingReview) {
+      const result = await this.engine.submitReviewMedia(conversation, {
+        videoKey,
+      });
+      return this.attachVoicePending(conversationId, result);
+    }
+
+    await this.prisma.conversationEvent.create({
+      data: {
+        conversationId: conversation.id,
+        type: 'CUSTOMER_MESSAGE',
+        payload: { videoKey },
       },
     });
     return { reply: '', uiBlocks: [], state: conversation.currentState };
@@ -533,15 +592,31 @@ export class SalesAgentService {
   private async attachVoicePending(
     conversationId: string,
     result: EngineResult,
-  ): Promise<EngineResult & { voiceEventId?: string }> {
-    const latest = await this.prisma.conversationEvent.findFirst({
-      where: { conversationId, type: 'AGENT_REPLY' },
-      orderBy: { createdAt: 'desc' },
-      select: { id: true, payload: true },
-    });
+  ): Promise<EngineResult & { voiceEventId?: string; awaitingReview: boolean }> {
+    const [latest, conversation] = await Promise.all([
+      this.prisma.conversationEvent.findFirst({
+        where: { conversationId, type: 'AGENT_REPLY' },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true, payload: true },
+      }),
+      this.prisma.salesConversation.findUnique({
+        where: { id: conversationId },
+        select: { contextData: true },
+      }),
+    ]);
     const pending = (latest?.payload as { voicePending?: boolean })
       ?.voicePending;
-    return pending ? { ...result, voiceEventId: latest!.id } : result;
+    // docs/PRD-order-status-chat-tool-and-fulfillment-delay-reviews.md بخش ۳.۱ — فرانت از
+    // همین پاسخ‌ها (sendMessage/submitImageMessage/submitVoiceMessage/submitVideoMessage) هم
+    // باید بفهمد الان منتظر نظر است یا نه، نه فقط از GET getConversation
+    const awaitingReview = !!(
+      conversation?.contextData as { awaitingReview?: boolean } | null
+    )?.awaitingReview;
+    return {
+      ...result,
+      ...(pending ? { voiceEventId: latest!.id } : {}),
+      awaitingReview,
+    };
   }
 
   // وویس ورودی مشتری (بخش ۲.۲) — همان الگوی extractAudio→ASR که
@@ -628,6 +703,28 @@ export class SalesAgentService {
       };
     }
 
+    // docs/PRD-order-status-chat-tool-and-fulfillment-delay-reviews.md بخش ۳.۱/۳.۳ — وقتی
+    // مکالمه منتظر نظر است، برخلاف مسیر عادی (زیر)، خودِ فایل صوت هم آپلود و با متن رونویسی‌شده
+    // روی یک ProductComment ذخیره می‌شود (هم فایل هم متن — نه فقط متن مثل قبل). برای پیام صوتی
+    // عادی به ربات فروش (awaitingReview نبود) ذخیره‌ی صوت خام لازم نیست، همان رفتار قبلی می‌ماند
+    const awaitingReview = (
+      conversation.contextData as { awaitingReview?: boolean } | null
+    )?.awaitingReview;
+    if (awaitingReview) {
+      const audioExt = file.originalname.split('.').pop() || 'webm';
+      const audioKey = await this.storage.uploadImage(
+        file.buffer,
+        audioExt,
+        conversation.id,
+      );
+      const result = await this.engine.submitReviewMedia(conversation, {
+        text: transcriptText,
+        audioKey,
+      });
+      const withVoice = await this.attachVoicePending(conversationId, result);
+      return { ...withVoice, transcript: transcriptText };
+    }
+
     const result = await this.engine.handleMessage(
       conversation,
       transcriptText,
@@ -676,9 +773,12 @@ export class SalesAgentService {
       where: { conversationId, type: 'CUSTOMER_MESSAGE' },
       select: { payload: true },
     });
-    const found = events.some(
-      (e) => (e.payload as { imageKey?: string })?.imageKey === key,
-    );
+    // docs/PRD-order-status-chat-tool-and-fulfillment-delay-reviews.md بخش ۳.۱ — ویدیوی چت
+    // (submitVideoMessage، فقط در حالت isMutedForHuman لاگ می‌شود) هم از همین endpoint سرو می‌شود
+    const found = events.some((e) => {
+      const payload = e.payload as { imageKey?: string; videoKey?: string };
+      return payload?.imageKey === key || payload?.videoKey === key;
+    });
     if (!found) throw new NotFoundException(fa.salesAgent.conversationNotFound);
     const buffer = await this.storage.downloadImage(key);
     const ext = key.split('.').pop() ?? '';
@@ -739,6 +839,11 @@ export class SalesAgentService {
       orderBy: { createdAt: 'asc' },
       take: 50,
     });
+    // docs/PRD-order-status-chat-tool-and-fulfillment-delay-reviews.md بخش ۳.۱ — فرانت باید
+    // بداند الان منتظر نظر است یا نه تا دکمه‌های پیوست عکس/ویدیو را نشان بدهد
+    const awaitingReview = (
+      conversation.contextData as { awaitingReview?: boolean } | null
+    )?.awaitingReview;
     return {
       state: conversation.currentState,
       storeId: conversation.storeId,
@@ -746,6 +851,7 @@ export class SalesAgentService {
       storeLogoKey: conversation.store.logoImageKey,
       isDemo: conversation.store.isDemo,
       responseStrategy: conversation.responseStrategy,
+      awaitingReview: !!awaitingReview,
       events,
     };
   }

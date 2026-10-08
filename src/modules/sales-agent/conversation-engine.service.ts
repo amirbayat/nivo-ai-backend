@@ -1574,9 +1574,13 @@ ${
     : `- ثبت نهایی سفارش فقط با create_order انجام می‌شود، و فقط وقتی مشتری صریحاً تایید خرید کرده
   (نه صرفاً علاقه نشان داده).`
 }
-- اگر مشتری مشکل پرداخت یا سوال پس از خرید (مثل سفارش قبلاً ثبت‌شده) دارد که با ابزارهای بالا
-  قابل‌حل نیست، یا صریح خواست با یک آدم/پشتیبان صحبت کند، request_human_handoff را صدا بزن و
-  دیگر respond_to_customer را صدا نزن — مکالمه همان‌جا تمام می‌شود.
+- اگر مشتری درباره‌ی وضعیت سفارشی که قبلاً ثبت کرده سؤال کرد (مثل «سفارشم کجاست؟»/«سفارشم چی
+  شد؟»)، همیشه اول check_order_status را صدا بزن و همان جواب را بده — فقط اگر سفارشی پیدا نشد یا
+  سؤال واقعاً چیز دیگری بود (شکایت، درخواست تغییر/لغو که ابزاری برایش نداری)، request_human_handoff
+  را صدا بزن.
+- اگر مشتری مشکل پرداخت یا سوال پس از خرید دیگری دارد که با ابزارهای بالا قابل‌حل نیست، یا صریح
+  خواست با یک آدم/پشتیبان صحبت کند، request_human_handoff را صدا بزن و دیگر respond_to_customer
+  را صدا نزن — مکالمه همان‌جا تمام می‌شود.
 - اگر مشتری قبلاً محصولی را دیده (طبق سبد/تاریخچه/آخرین محصولات مطرح‌شده بالا) و فقط سوال عمومی
   پرسید، به‌جای جست‌وجوی دوباره روی همان محصول تمرکز کن.
 - اگر مشتری صریح عکس بیشتر خواست، از show_product_photos استفاده کن.
@@ -2120,6 +2124,41 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       },
     });
 
+    // docs/PRD-order-status-chat-tool-and-fulfillment-delay-reviews.md بخش ۱ — قبلاً هیچ
+    // ابزاری برای این نبود؛ سیستم‌پرامپت صریحاً سؤال پس از خرید را به request_human_handoff
+    // می‌سپرد. Order.conversationId یک‌به‌یک به همین مکالمه وصل است (آخرین/تنها سفارش)
+    const checkOrderStatusTool = tool({
+      description:
+        'آخرین وضعیت سفارشِ همین مکالمه را برمی‌گرداند (ثبت رسید/تاییدشده/آماده‌سازی/ارسال‌شده/رد شده). ' +
+        'همیشه قبل از request_human_handoff برای سؤال‌هایی مثل «سفارشم کجاست؟»/«وضعیت سفارش» این را صدا بزن.',
+      inputSchema: z.object({}),
+      execute: async () => {
+        const order = await this.prisma.order.findFirst({
+          where: { conversationId: conversation.id },
+          orderBy: { createdAt: 'desc' },
+        });
+        if (!order) return { found: false };
+        const statusLabel: Record<string, string> = {
+          PENDING_PAYMENT: 'در انتظار پرداخت',
+          RECEIPT_SUBMITTED: 'رسید ارسال‌شده، در انتظار تایید فروشنده',
+          APPROVED: order.hasFulfillmentDelay
+            ? 'تاییدشده، در حال آماده‌سازی'
+            : 'تاییدشده',
+          REJECTED: 'رسید رد شده',
+          SHIPPED: 'ارسال/آماده شده',
+        };
+        return {
+          found: true,
+          status: order.status,
+          statusLabel: statusLabel[order.status] ?? order.status,
+          createdAt: order.createdAt,
+          shippedAt: order.shippedAt,
+          stillInProduction:
+            order.hasFulfillmentDelay && order.status === 'APPROVED',
+        };
+      },
+    });
+
     const answerFaqTool = tool({
       description:
         'جواب واقعی یک سؤال (باکس دانش فروشگاه / توضیح محصولات اخیر / پروفایل فروشگاه) را جست‌وجو می‌کند',
@@ -2294,6 +2333,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
             ? { capture_lead: captureLeadTool }
             : { create_order: createOrderTool }),
           cancel_order: cancelOrderTool,
+          check_order_status: checkOrderStatusTool,
           answer_faq: answerFaqTool,
           request_human_handoff: requestHumanHandoffTool,
           show_product_photos: showProductPhotosTool,
@@ -2635,7 +2675,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       } | null
     )?.awaitingReview;
     if (conversation.currentState === 'COMPLETED' && awaitingReview) {
-      return this.doSubmitComment(conversation, text);
+      return this.doSubmitComment(conversation, { text });
     }
 
     // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۳ — فالوآپ رضایت (چند روز بعد، صف
@@ -2875,9 +2915,19 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
   // docs/PRD-customer-comments-and-discounts.md بخش الف/۳ — همان متن آزاد مشتری، بدون هیچ NLU،
   // مستقیم یک ProductComment (PENDING) می‌شود؛ awaitingReview پاک می‌شود تا پیام بعدی دوباره
   // نظر تلقی نشود
+  // docs/PRD-order-status-chat-tool-and-fulfillment-delay-reviews.md بخش ۳.۱ — قبلاً فقط
+  // امضای `text: string` داشت (فقط پیام تایپی). حالا هر کانال ورودی (submitImageMessage،
+  // submitVoiceMessage، submitVideoMessage) هم وقتی awaitingReview ست باشد مستقیم همین متد را
+  // با کلید رسانه‌ی خودش صدا می‌زند — حداقل یکی از چهار فیلد باید پر باشد (گارد واقعی در
+  // CommentsService.submitComment)
   private async doSubmitComment(
     conversation: ConversationWithStore,
-    text: string,
+    input: {
+      text?: string;
+      imageKey?: string;
+      videoKey?: string;
+      audioKey?: string;
+    },
   ): Promise<EngineResult> {
     const existingContext = (conversation.contextData ??
       {}) as Prisma.JsonObject & {
@@ -2889,7 +2939,10 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       storeId: conversation.storeId,
       customerId: conversation.customerId,
       productId,
-      text,
+      text: input.text,
+      imageKey: input.imageKey,
+      videoKey: input.videoKey,
+      audioKey: input.audioKey,
     });
 
     const { awaitingReview, awaitingReviewProductId, ...rest } =
@@ -2904,6 +2957,22 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     const reply = fa.salesAgent.reviewThanks;
     await this.logReply(conversation, reply, { type: 'NONE' });
     return { reply, uiBlocks: [], state: conversation.currentState };
+  }
+
+  // docs/PRD-order-status-chat-tool-and-fulfillment-delay-reviews.md بخش ۳.۱ — ورودی عمومی
+  // برای sales-agent.service.ts (submitImageMessage/submitVoiceMessage/submitVideoMessage)
+  // وقتی خودشان از قبل چک کرده‌اند conversation.contextData.awaitingReview ست است؛ doSubmitComment
+  // بالا خصوصی می‌ماند (فقط برای مسیر متنی handleMessage)
+  async submitReviewMedia(
+    conversation: ConversationWithStore,
+    input: {
+      text?: string;
+      imageKey?: string;
+      videoKey?: string;
+      audioKey?: string;
+    },
+  ): Promise<EngineResult> {
+    return this.doSubmitComment(conversation, input);
   }
 
   // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۳ — طبقه‌بندی جواب مشتری به فالوآپ رضایت.
@@ -4516,6 +4585,17 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     let ownerName: string;
     if (!order) {
       const cartTotal = this.cartTotal(ctx.cart);
+      // docs/PRD-order-status-chat-tool-and-fulfillment-delay-reviews.md بخش ۲.۱ — هم‌الگوی
+      // کپی‌شدن requiresShipping در doCreateOrder؛ اگر حداقل یکی از محصولات سفارش تحویل
+      // زمان‌بر دارد، کل سفارش hasFulfillmentDelay می‌شود (approveOrder/shipOrder و
+      // PostPurchaseFollowUpService بر اساس همین تصمیم می‌گیرند کِی درخواست نظر بفرستند)
+      const delayProducts = await this.prisma.product.findMany({
+        where: { id: { in: ctx.cart.map((item) => item.productId) } },
+        select: { hasFulfillmentDelay: true },
+      });
+      const hasFulfillmentDelay = delayProducts.some(
+        (p) => p.hasFulfillmentDelay,
+      );
       // docs/PRD-customer-comments-and-discounts.md بخش ۹ — مصرف واقعی کد تخفیف همین‌جا،
       // نه در doApplyDiscount (پیش‌نمایش)؛ UPDATE شرطی خام (نه updateMany) چون شرط سقف
       // (redemptionCount < maxRedemptions) مقایسه‌ی دو ستون همین ردیف است — چیزی که فیلتر
@@ -4564,6 +4644,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           totalAmount: total,
           bankCardId: card.id,
           discountCodeId,
+          hasFulfillmentDelay,
           ...(addressSnapshot
             ? {
                 recipientName: addressSnapshot.recipientName,

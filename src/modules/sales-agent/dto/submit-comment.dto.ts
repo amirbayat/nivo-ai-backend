@@ -16,10 +16,14 @@ export class SubmitCommentDto {
   @IsUUID()
   productId?: string;
 
+  // docs/PRD-order-status-chat-tool-and-fulfillment-delay-reviews.md بخش ۳.۲ — قبلاً اجباری؛
+  // نظر فقط-رسانه (بدون کپشن تایپی) هم باید قابل‌ثبت باشد. گارد «حداقل یکی از text/imageKey/
+  // videoKey/audioKey باید پر باشد» در CommentsService.submitComment است
+  @IsOptional()
   @IsString()
   @MinLength(1)
   @MaxLength(2000)
-  text: string;
+  text?: string;
 
   @IsOptional()
   @IsInt()

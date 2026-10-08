@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
 import type { Queue } from 'bull';
 import type { CommentStatus } from '@prisma/client';
@@ -19,16 +23,22 @@ export class CommentsService {
 
   // از conversation-engine.service.ts's doSubmitComment صدا زده می‌شود — بعد از سفارش تاییدشده،
   // اولین پیام آزاد مشتری در پاسخ به پیگیری «راضی بودی؟» همین متن می‌شود
+  // docs/PRD-order-status-chat-tool-and-fulfillment-delay-reviews.md بخش ۳.۲ — text قبلاً
+  // اجباری بود؛ نظر فقط-رسانه (مثلاً فقط یک ویس، بدون کپشن تایپی) هم باید ثبت شود، پس حالا
+  // اختیاری است و فقط گارد زیر (حداقل یکی از چهار فیلد) اجرا می‌شود
   async submitComment(input: {
     storeId: string;
     customerId: string;
     productId: string | null;
-    text: string;
+    text?: string;
     rating?: number;
     imageKey?: string;
     videoKey?: string;
     audioKey?: string;
   }): Promise<void> {
+    if (!input.text && !input.imageKey && !input.videoKey && !input.audioKey) {
+      throw new BadRequestException(fa.errors.validation);
+    }
     const comment = await this.prisma.productComment.create({
       data: {
         storeId: input.storeId,
