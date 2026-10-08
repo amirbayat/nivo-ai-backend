@@ -2806,6 +2806,9 @@ enum CreditUsageKind {
   // (ownerNotes) با gpt-6.1-sol ثابت؛ جدا از PRODUCT_ENRICHMENT چون دامنه‌اش کل
   // فروشگاه/محصول است، نه enrichment یک محصول خاص
   NOTES_ANALYSIS
+  // docs/PRD-seller-guide-assistant-modal.md بخش ۳.۲/۳.۴ — خودِ مکالمه‌ی زنده‌ی چندمرحله‌ای
+  // راهنما (pool پنج‌تایی خریدار)؛ ASR/VOICE_TTS داخل همین گفتگو از مقادیر موجود استفاده می‌کنند
+  GUIDE_ASSISTANT
 }
 
 // docs/PRD-seller-guide-assistant-modal.md بخش ۱.۳ — لاگ تغییرات محتوا: فروشنده کی چه

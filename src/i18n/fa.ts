@@ -168,6 +168,11 @@ export const fa = {
       'اعتبار فروشگاه برای تحلیل یادداشت کافی نیست — از بخش «اعتبار هوش مصنوعی» شارژ کن',
     notesAnalysisTextRequired:
       'یا متنی برای ثبت بفرست یا قبلاً یادداشتی داشته باش تا بتوان دوباره تحلیلش کرد',
+    // docs/PRD-seller-guide-assistant-modal.md بخش ۳.۴ — چت زنده‌ی راهنما، پخش صوتی پاسخ
+    insufficientCreditForGuideAssistant:
+      'اعتبار فروشگاه برای ادامه‌ی این گفتگو کافی نیست — از بخش «اعتبار هوش مصنوعی» شارژ کن',
+    guideAssistantVoiceFailed:
+      'ساخت پاسخ صوتی موفق نشد — دوباره تلاش کن یا متن را بخوان',
     // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۹ (رصد رقبا)
     brandIntroTextRequired: 'لطفاً چند جمله درباره‌ی برند/فروشگاهت بنویس',
     // docs/PRD-ai-assisted-business-setup.md — تشخیص نوع کسب‌وکار/دسته‌بندی از روی توضیح آزاد
