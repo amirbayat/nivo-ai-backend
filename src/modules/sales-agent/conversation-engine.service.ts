@@ -5808,11 +5808,18 @@ answered=false بده (به‌جای حدس‌زدن).`,
       | 'VOICE_VARIANT_OFF'
       | 'CONSECUTIVE_CAP'
       | 'STORE_NO_CREDIT_CAP'
+      | 'STORE_VOICE_DISABLED'
       | undefined;
     if (text.length > VOICE_MIN_REPLY_CHARS) {
-      // docs/PRD-sales-agent-voice.md بخش ۶.۱ — گروه OFF باید واقعاً هیچ وویسی نبیند، نه
-      // فقط اینکه پخش نشود؛ پس قبل از reserveVoiceSlot چک می‌شود (سهمیه‌ی مکالمه هم دست‌نخورده می‌ماند)
-      if (conversation.voiceVariant === 'OFF') {
+      // فیدبک کاربر ۱۴۰۵/۰۷/۱۸ — سوئیچ فروشنده (Store.voiceRepliesEnabled، دیفالت خاموش) قبل
+      // از همه‌ی چک‌های دیگر؛ هزینه‌ی واقعی هر وویس بالاست، پس خودِ فروشنده باید صریحاً روشنش کند
+      if (!conversation.store.voiceRepliesEnabled) {
+        voiceReason = 'STORE_VOICE_DISABLED';
+      } else if (
+        // docs/PRD-sales-agent-voice.md بخش ۶.۱ — گروه OFF باید واقعاً هیچ وویسی نبیند، نه
+        // فقط اینکه پخش نشود؛ پس قبل از reserveVoiceSlot چک می‌شود (سهمیه‌ی مکالمه هم دست‌نخورده می‌ماند)
+        conversation.voiceVariant === 'OFF'
+      ) {
         voiceReason = 'VOICE_VARIANT_OFF';
       } else if (
         conversation.consecutiveVoiceReplyCount >= VOICE_MAX_CONSECUTIVE

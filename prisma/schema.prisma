@@ -2167,6 +2167,11 @@ model Store {
   // متقاعدسازی (Cialdini) در FULL_AGENT؛ هم‌خانواده‌ی دو سوئیچ بالا. effective یک محصول =
   // این AND Product.persuasionTechniquesEnabled خودش
   persuasionTechniquesEnabled   Boolean           @default(true)
+  // فیدبک کاربر ۱۴۰۵/۰۷/۱۸ — هر وویس ۱۰۰۰-۲۰۰۰ تومان هزینه‌ی واقعی دارد (sales-agent-voice.processor.ts
+  // کرایت واقعی Kie.ai)؛ کاربر صریحاً خواست فروشنده خودش روشن/خاموش کند، دیفالت اولیه خاموش
+  // (برخلاف pickVoiceVariant() در model-variants.ts که فعلاً همیشه 'ON' برمی‌گرداند — این سوئیچ
+  // جدید قبل از آن چک می‌شود و در صورت false کلاً وویس را رد می‌کند، conversation-engine.service.ts logReply)
+  voiceRepliesEnabled           Boolean           @default(false)
   // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۴ — عکس پروفایل فروشگاه؛ همون الگوی
   // Product.images (کلید MinIO، نه URL مستقیم) — در چت وب بالای هدر و در پیام /start تلگرام
   // نمایش داده می‌شود. برخلاف images محصول، تک‌فیلد است نه آرایه (یک فروشگاه یک لوگو دارد)

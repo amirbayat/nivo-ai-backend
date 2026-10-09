@@ -60,6 +60,12 @@ export class UpdateStoreDto {
   @IsBoolean()
   persuasionTechniquesEnabled?: boolean;
 
+  // فیدبک کاربر ۱۴۰۵/۰۷/۱۸ — سوئیچ خاموش/روشن وویس ربات؛ دیفالت اولیه خاموش (هر وویس
+  // ۱۰۰۰-۲۰۰۰ تومان هزینه‌ی واقعی دارد)
+  @IsOptional()
+  @IsBoolean()
+  voiceRepliesEnabled?: boolean;
+
   // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۱ — false یعنی فروش حضوری/
   // دیجیتال (کلاً ADDRESS_COLLECTION رد می‌شود)
   @IsOptional()
