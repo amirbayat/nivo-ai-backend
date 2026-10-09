@@ -1259,7 +1259,7 @@ export class AdminService {
     if (conversations.length === 0) return { items: [], total, page };
 
     const conversationIds = conversations.map((c) => c.id);
-    const [lastMessages, agentReplies, stuckConversationIds] =
+    const [lastMessages, agentReplies, stuckConversationIds, costByConversation] =
       await Promise.all([
         this.prisma.conversationEvent.findMany({
           where: {
@@ -1278,7 +1278,20 @@ export class AdminService {
           select: { conversationId: true, payload: true },
         }),
         getStuckConversationIds(this.prisma, conversationIds),
+        // برای نمایش ستون «هزینه» روی لیست مکالمات — جمع CreditUsageEvent.costToman
+        // (شامل وویس هم می‌شود، نه فقط TEXT_REPLY)
+        this.prisma.creditUsageEvent.groupBy({
+          by: ['conversationId'],
+          where: { conversationId: { in: conversationIds } },
+          _sum: { costToman: true },
+        }),
       ]);
+    const totalCostByConversation = new Map(
+      costByConversation.map((row) => [
+        row.conversationId,
+        row._sum.costToman ?? 0,
+      ]),
+    );
 
     const lastMessageByConversation = new Map(
       lastMessages.map((e) => [e.conversationId, e]),
@@ -1306,6 +1319,7 @@ export class AdminService {
         channel: c.customer.channel,
         currentState: c.currentState,
         abVariant: c.abVariant,
+        totalCostToman: totalCostByConversation.get(c.id) ?? 0,
         lastMessagePreview: lastMessagePayload?.text ?? '',
         lastMessageAt: lastMessage?.createdAt ?? null,
         failedTurnCount: failedCountByConversation.get(c.id) ?? 0,
@@ -1406,6 +1420,26 @@ export class AdminService {
           last.classificationTrace = payload;
         } else if (last?.agentReply) {
           last.trace = payload;
+        }
+      }
+    }
+
+    // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۶.۷ — هزینه‌ی هر پیام در
+    // CreditUsageEvent جداگانه لاگ می‌شود (نه در خودِ AI_TRACE)؛ چون هر دو به‌ترتیب و در همان
+    // جریان پردازش یک پیام نوشته می‌شوند، با تطبیق ترتیبی (نه زمانی دقیق) به trace می‌چسبانیم —
+    // هر trace واقعی (نه parseIntent) دقیقاً با یک رویداد TEXT_REPLY مطابقت دارد
+    const costEvents = await this.prisma.creditUsageEvent.findMany({
+      where: { conversationId, kind: 'TEXT_REPLY' },
+      orderBy: { createdAt: 'asc' },
+      select: { costToman: true },
+    });
+    let costIdx = 0;
+    for (const item of items) {
+      if (item.trace) {
+        const cost = costEvents[costIdx];
+        if (cost) {
+          item.trace.costToman = cost.costToman;
+          costIdx++;
         }
       }
     }

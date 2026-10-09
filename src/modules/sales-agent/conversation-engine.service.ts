@@ -5567,7 +5567,7 @@ answered=false بده (به‌جای حدس‌زدن).`,
             ? fa.salesAgent.handoffToHuman
             : fa.salesAgent.handoffToHumanOutOfHours;
     await this.logReply(conversation, reply, { type: 'NONE' });
-    await this.notifySellerOfHandoff(conversation);
+    await this.notifySellerOfHandoff(conversation, reason);
     return { reply, uiBlocks: [], state: nextState };
   }
 
@@ -5637,9 +5637,25 @@ answered=false بده (به‌جای حدس‌زدن).`,
   // مستقیم پوش می‌شود؛ اگر نه، بی‌صدا رد می‌شود (فروشنده فقط از پنل «نیاز به توجه» می‌بیند)
   private async notifySellerOfHandoff(
     conversation: ConversationWithStore,
+    reason:
+      | 'CUSTOMER_REQUESTED'
+      | 'AGENT_STUCK'
+      | 'BILLING_BLOCKED'
+      | 'SUPPORT_NEEDED',
   ): Promise<void> {
     const chatId = conversation.store.sellerBotChatId;
     if (!chatId) return;
+
+    // فیدبک کاربر ۱۴۰۵/۰۷/۱۷ — قبلاً این نوتیف برای همه‌ی دلایل handoff یکسان بود، یعنی فروشنده
+    // وقتی اعتبارش تموم می‌شد هیچ سیگنال مشخصی نمی‌گرفت و فکر می‌کرد فقط یک سوال سخت بوده
+    if (reason === 'BILLING_BLOCKED') {
+      await this.sellerBotApi.sendText(
+        chatId,
+        fa.telegram.billingBlockedNotification,
+      );
+      return;
+    }
+
     const lastCustomerMessage = await this.prisma.conversationEvent.findFirst({
       where: { conversationId: conversation.id, type: 'CUSTOMER_MESSAGE' },
       orderBy: { createdAt: 'desc' },

@@ -47,17 +47,11 @@ export class CreditService {
   // فقط یک‌بار، لحظه‌ی ساخت مکالمه (startChat وب / handleStart تلگرام) صدا زده می‌شود —
   // نتیجه روی SalesConversation.billingMode می‌ماند و تا آخر عمر مکالمه دوباره چک نمی‌شود
   // (docs/PRD-seller-credit-billing.md — تصمیم معماری «gate یک‌بار در شروع مکالمه»)
+  //
+  // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۶.۷ (اصلاح ۱۴۰۵/۰۷/۱۷) — سهمیه‌ی
+  // رایگان روزانه (FREE_DAILY_QUOTA) حذف شد؛ دیگر هرگز 'FREE' برنمی‌گرداند. هر مکالمه از همان
+  // پیام اول از اعتبار آزمایشی/واقعی فروشگاه کم می‌شود.
   async decideBillingMode(storeId: string): Promise<BillingMode> {
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    const [freeDailyQuota, newCustomersToday] = await Promise.all([
-      this.getFreeDailyQuota(),
-      this.prisma.customer.count({
-        where: { storeId, createdAt: { gte: todayStart } },
-      }),
-    ]);
-    if (newCustomersToday < freeDailyQuota) return 'FREE';
-
     // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۶.۴ — PAID یعنی بودجه‌ی
     // آزمایشی هنوز فعال است (trialEndsAt نگذشته و مانده‌اش مثبت است) یا اعتبار واقعی دارد
     const store = await this.prisma.store.findUnique({

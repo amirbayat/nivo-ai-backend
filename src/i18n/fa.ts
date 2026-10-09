@@ -493,6 +493,10 @@ export const fa = {
     handoffNotification: (customerText: string) =>
       `🔔 یک مشتری نیاز به پاسخ شما داره:\n\n«${customerText}»`,
     handoffReplyButton: '💬 پاسخ بده',
+    // فیدبک کاربر ۱۴۰۵/۰۷/۱۷ — برخلاف handoffNotification بالا، این پیام مشخص می‌کند دلیل
+    // ارجاع چیست (نه یک سوال سخت، بلکه تمام‌شدن اعتبار) تا فروشنده بداند باید اعتبار بخرد
+    billingBlockedNotification:
+      '⚠️ اعتبار فروشگاهت تموم شده و ایجنت فروش دیگه نمی‌تونه به خریدارهای جدید جواب بده — مکالمه‌های جدید مستقیم به خودت ارجاع می‌شن. برای فعال‌شدن دوباره‌ی ایجنت، وارد پنل فروشنده شو و اعتبار بخر.',
     // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۱۶
     leadCaptureNotification: (phone: string, name?: string | null) =>
       `📝 یک لید جدید ثبت شد:\n👤 ${name ?? '—'}\n📞 ${phone}`,

@@ -10,6 +10,56 @@ import { DateRange } from '../usage-analytics/usage-analytics.service';
 export class AdminStoreCreditService {
   constructor(private readonly prisma: PrismaService) {}
 
+  // فیدبک کاربر ۱۴۰۵/۰۷/۱۷ — «لاگ تجمیعی» روی ادمین: جمع کل (نه فقط صفحه‌ی فعلی ۲۰تایی)
+  // درآمد بسته‌ها در مقابل COGS واقعی AI، برای جواب به «چقدر سوده؟» بدون جمع دستی ردیف‌ها
+  async getSummary(params: { range: DateRange }) {
+    const [balances, usage] = await Promise.all([
+      this.prisma.store.aggregate({
+        _sum: { creditBalanceToman: true, trialCreditRemainingToman: true },
+        _count: { id: true },
+      }),
+      this.prisma.creditUsageEvent.groupBy({
+        by: ['kind', 'isFreeQuota'],
+        where: { createdAt: { gte: params.range.from, lte: params.range.to } },
+        _sum: { costToman: true },
+        _count: { id: true },
+      }),
+    ]);
+
+    let totalPurchasedToman = 0;
+    let totalAiCostToman = 0;
+    let totalChargedToman = 0;
+    let freeQuotaEventsCount = 0;
+    let paidEventsCount = 0;
+    for (const row of usage) {
+      const sum = row._sum.costToman ?? 0;
+      const count = row._count.id;
+      if (row.kind === 'TOPUP') {
+        totalPurchasedToman += sum;
+        continue;
+      }
+      totalAiCostToman += sum;
+      if (row.isFreeQuota) {
+        freeQuotaEventsCount += count;
+      } else {
+        totalChargedToman += sum;
+        paidEventsCount += count;
+      }
+    }
+
+    return {
+      storeCount: balances._count.id,
+      totalCreditBalanceToman: balances._sum.creditBalanceToman ?? 0,
+      totalTrialCreditRemainingToman:
+        balances._sum.trialCreditRemainingToman ?? 0,
+      totalPurchasedToman,
+      totalAiCostToman,
+      totalChargedToman,
+      freeQuotaEventsCount,
+      paidEventsCount,
+    };
+  }
+
   async getStores(params: {
     search?: string;
     range: DateRange;

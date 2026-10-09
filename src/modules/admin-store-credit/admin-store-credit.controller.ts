@@ -20,6 +20,11 @@ import { AdminStoreCreditService } from './admin-store-credit.service';
 export class AdminStoreCreditController {
   constructor(private readonly service: AdminStoreCreditService) {}
 
+  @Get('summary')
+  getSummary(@Query('from') from?: string, @Query('to') to?: string) {
+    return this.service.getSummary({ range: parseDateRange(from, to) });
+  }
+
   @Get()
   getStores(
     @Query('search') search?: string,
