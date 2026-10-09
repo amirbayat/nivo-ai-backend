@@ -1382,6 +1382,8 @@ export class AdminService {
       id: string;
       createdAt: Date;
       customerMessage?: string;
+      // فیدبک کاربر ۱۴۰۵/۰۷/۱۸ — هزینه‌ی ASR این پیام صوتی مشخص (اگر از وویس بوده)
+      asrCostToman?: number;
       agentReply?: {
         text: string;
         flag?: string;
@@ -1389,6 +1391,8 @@ export class AdminService {
         // این فیلد روی AGENT_REPLY خودش نشسته که همیشه برای هر پاسخی ساخته می‌شود؛ پس
         // برای پاسخ‌های قانون‌محور ثابت (فاکتور/سبد/handoff/...) هم وویس قابل دیدن است
         voice?: { generated: boolean; reason?: string };
+        // فیدبک کاربر ۱۴۰۵/۰۷/۱۸ — هزینه‌ی VOICE_TTS این پاسخ مشخص (اگر وویس ساخته شده)
+        voiceCostToman?: number;
       };
       trace?: Record<string, unknown>;
       // docs/PRD-buyer-purchase-intent-taxonomy.md بخش ۴.۲ — trace سطح classification
@@ -1448,6 +1452,40 @@ export class AdminService {
         if (cost) {
           item.trace.chargedToman = cost.chargedToman;
           costIdx++;
+        }
+      }
+    }
+
+    // فیدبک کاربر ۱۴۰۵/۰۷/۱۸ — هزینه‌ی وویس (VOICE_TTS) و تبدیل صدا به متن (ASR) هم باید
+    // «به تفکیک» توی همین لاگ دیده شوند، نه فقط TEXT_REPLY. تطبیق دقیقاً مثل بالا ترتیبی است
+    // (نه زمانی دقیق): هر پیام صوتی مشتری دقیقاً یک رویداد ASR دارد، هر پاسخ صوتی ربات دقیقاً
+    // یک رویداد VOICE_TTS — پس با همان ترتیب ساخته‌شدن zip می‌شوند
+    const [asrEvents, voiceEvents] = await Promise.all([
+      this.prisma.creditUsageEvent.findMany({
+        where: { conversationId, kind: 'ASR' },
+        orderBy: { createdAt: 'asc' },
+        select: { chargedToman: true },
+      }),
+      this.prisma.creditUsageEvent.findMany({
+        where: { conversationId, kind: 'VOICE_TTS' },
+        orderBy: { createdAt: 'asc' },
+        select: { chargedToman: true },
+      }),
+    ]);
+    let asrIdx = 0;
+    let voiceIdx = 0;
+    for (const item of items) {
+      if (item.customerMessage !== undefined) {
+        const cost = asrEvents[asrIdx];
+        if (cost) {
+          item.asrCostToman = cost.chargedToman;
+          asrIdx++;
+        }
+      } else if (item.agentReply?.voice?.generated) {
+        const cost = voiceEvents[voiceIdx];
+        if (cost) {
+          item.agentReply.voiceCostToman = cost.chargedToman;
+          voiceIdx++;
         }
       }
     }

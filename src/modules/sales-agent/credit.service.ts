@@ -128,6 +128,35 @@ export class CreditService {
     });
   }
 
+  // فیدبک کاربر ۱۴۰۵/۰۷/۱۸ — مصرف ASR (تبدیل صدای مشتری به متن، sales-agent.service.ts
+  // submitVoiceMessage و telegram.service.ts handleVoice) قبلاً اصلاً لاگ/کسر نمی‌شد با وجود
+  // اینکه transcript.costUsd واقعی از OpenRouter برمی‌گشت — enum از قبل مقدار ASR را داشت
+  // ولی هیچ کد وصل‌کننده‌ای نوشته نشده بود. الگو دقیقاً مثل logVoiceUsage (هزینه‌ی دلاری flat)
+  async logAsrUsage(params: {
+    storeId: string;
+    customerId: string | null;
+    conversationId: string;
+    billingMode: BillingMode;
+    model: string;
+    usdCost: number;
+  }): Promise<void> {
+    if (params.billingMode === 'BLOCKED') return;
+    if (params.usdCost <= 0) return;
+    const { costToman, costUsdMicros } = await this.pricing.calcFlatCostToman(
+      params.usdCost,
+    );
+    await this.logUsage({
+      storeId: params.storeId,
+      customerId: params.customerId,
+      conversationId: params.conversationId,
+      model: params.model,
+      kind: 'ASR',
+      costToman,
+      isFreeQuota: params.billingMode === 'FREE',
+      costUsdMicros,
+    });
+  }
+
   private async logUsage(params: {
     storeId: string;
     customerId: string | null;

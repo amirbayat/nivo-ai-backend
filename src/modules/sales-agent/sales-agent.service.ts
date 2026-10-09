@@ -418,6 +418,9 @@ export class SalesAgentService {
         status: o.status,
         distinctProductId:
           distinctProductIds.length === 1 ? distinctProductIds[0] : null,
+        // فیدبک کاربر ۱۴۰۵/۰۷/۱۸ — کلیک روی سفارش باید گفتگوی خودِ همان سفارش را (فقط‌خواندنی)
+        // باز کند؛ هر سفارش دقیقاً یک conversation مجزا دارد (Order.conversationId یکتاست)
+        conversationId: o.conversationId,
       };
     });
   }
@@ -682,6 +685,15 @@ export class SalesAgentService {
       this.logger.log(
         `submitVoiceMessage conversation=${conversationId} transcribed model=${transcript.modelUsed} text="${transcriptText.slice(0, 200)}"`,
       );
+      // فیدبک کاربر ۱۴۰۵/۰۷/۱۸ — هزینه‌ی واقعی ASR (قبلاً هیچ‌جا لاگ/کسر نمی‌شد)
+      await this.creditService.logAsrUsage({
+        storeId: conversation.storeId,
+        customerId: conversation.customerId,
+        conversationId: conversation.id,
+        billingMode: conversation.billingMode,
+        model: transcript.modelUsed,
+        usdCost: transcript.costUsd,
+      });
     } catch (err) {
       this.logger.error(
         `submitVoiceMessage failed (conversation=${conversationId}): ${

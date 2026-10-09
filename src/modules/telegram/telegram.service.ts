@@ -852,6 +852,15 @@ export class TelegramService {
         this.logger.log(
           `handleVoice conversation=${conversation.id} transcribed model=${transcript.modelUsed} text="${transcript.text.slice(0, 200)}"`,
         );
+        // فیدبک کاربر ۱۴۰۵/۰۷/۱۸ — هزینه‌ی واقعی ASR (قبلاً هیچ‌جا لاگ/کسر نمی‌شد)
+        await this.creditService.logAsrUsage({
+          storeId: conversation.storeId,
+          customerId: conversation.customerId,
+          conversationId: conversation.id,
+          billingMode: conversation.billingMode,
+          model: transcript.modelUsed,
+          usdCost: transcript.costUsd,
+        });
         if (!transcript.text.trim()) {
           await this.sendText(chatId, fa.telegram.voiceNotUnderstood);
           return;
