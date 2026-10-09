@@ -1259,37 +1259,42 @@ export class AdminService {
     if (conversations.length === 0) return { items: [], total, page };
 
     const conversationIds = conversations.map((c) => c.id);
-    const [lastMessages, agentReplies, stuckConversationIds, costByConversation] =
-      await Promise.all([
-        this.prisma.conversationEvent.findMany({
-          where: {
-            conversationId: { in: conversationIds },
-            type: { in: ['CUSTOMER_MESSAGE', 'AGENT_REPLY'] },
-          },
-          orderBy: [{ conversationId: 'asc' }, { createdAt: 'desc' }],
-          distinct: ['conversationId'],
-          select: { conversationId: true, payload: true, createdAt: true },
-        }),
-        this.prisma.conversationEvent.findMany({
-          where: {
-            conversationId: { in: conversationIds },
-            type: 'AGENT_REPLY',
-          },
-          select: { conversationId: true, payload: true },
-        }),
-        getStuckConversationIds(this.prisma, conversationIds),
-        // برای نمایش ستون «هزینه» روی لیست مکالمات — جمع CreditUsageEvent.costToman
-        // (شامل وویس هم می‌شود، نه فقط TEXT_REPLY)
-        this.prisma.creditUsageEvent.groupBy({
-          by: ['conversationId'],
-          where: { conversationId: { in: conversationIds } },
-          _sum: { costToman: true },
-        }),
-      ]);
-    const totalCostByConversation = new Map(
+    const [
+      lastMessages,
+      agentReplies,
+      stuckConversationIds,
+      costByConversation,
+    ] = await Promise.all([
+      this.prisma.conversationEvent.findMany({
+        where: {
+          conversationId: { in: conversationIds },
+          type: { in: ['CUSTOMER_MESSAGE', 'AGENT_REPLY'] },
+        },
+        orderBy: [{ conversationId: 'asc' }, { createdAt: 'desc' }],
+        distinct: ['conversationId'],
+        select: { conversationId: true, payload: true, createdAt: true },
+      }),
+      this.prisma.conversationEvent.findMany({
+        where: {
+          conversationId: { in: conversationIds },
+          type: 'AGENT_REPLY',
+        },
+        select: { conversationId: true, payload: true },
+      }),
+      getStuckConversationIds(this.prisma, conversationIds),
+      // برای نمایش ستون «هزینه» روی لیست مکالمات — جمع CreditUsageEvent.chargedToman (شامل
+      // وویس هم می‌شود، نه فقط TEXT_REPLY)؛ فیدبک کاربر ۱۴۰۵/۰۷/۱۷ — این مبلغ واقعاً
+      // کسرشده را نشان می‌دهد (بعد از buyerCostMarkup)، نه COGS خام
+      this.prisma.creditUsageEvent.groupBy({
+        by: ['conversationId'],
+        where: { conversationId: { in: conversationIds } },
+        _sum: { chargedToman: true },
+      }),
+    ]);
+    const totalChargedByConversation = new Map(
       costByConversation.map((row) => [
         row.conversationId,
-        row._sum.costToman ?? 0,
+        row._sum.chargedToman ?? 0,
       ]),
     );
 
@@ -1319,7 +1324,7 @@ export class AdminService {
         channel: c.customer.channel,
         currentState: c.currentState,
         abVariant: c.abVariant,
-        totalCostToman: totalCostByConversation.get(c.id) ?? 0,
+        totalChargedToman: totalChargedByConversation.get(c.id) ?? 0,
         lastMessagePreview: lastMessagePayload?.text ?? '',
         lastMessageAt: lastMessage?.createdAt ?? null,
         failedTurnCount: failedCountByConversation.get(c.id) ?? 0,
@@ -1428,17 +1433,19 @@ export class AdminService {
     // CreditUsageEvent جداگانه لاگ می‌شود (نه در خودِ AI_TRACE)؛ چون هر دو به‌ترتیب و در همان
     // جریان پردازش یک پیام نوشته می‌شوند، با تطبیق ترتیبی (نه زمانی دقیق) به trace می‌چسبانیم —
     // هر trace واقعی (نه parseIntent) دقیقاً با یک رویداد TEXT_REPLY مطابقت دارد
+    // فیدبک کاربر ۱۴۰۵/۰۷/۱۷ — chargedToman (بعد از buyerCostMarkup) نشان داده می‌شود، نه
+    // costToman خام، چون این عدد باید دقیقاً همان مبلغی باشد که از اعتبار فروشگاه کم شده
     const costEvents = await this.prisma.creditUsageEvent.findMany({
       where: { conversationId, kind: 'TEXT_REPLY' },
       orderBy: { createdAt: 'asc' },
-      select: { costToman: true },
+      select: { chargedToman: true },
     });
     let costIdx = 0;
     for (const item of items) {
       if (item.trace) {
         const cost = costEvents[costIdx];
         if (cost) {
-          item.trace.costToman = cost.costToman;
+          item.trace.chargedToman = cost.chargedToman;
           costIdx++;
         }
       }

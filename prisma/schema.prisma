@@ -582,6 +582,16 @@ model SalesAgentGlobalConfig {
   freeDailyQuota    Int      @default(10)
   trialDurationDays Int      @default(14)
   trialCreditToman  Int      @default(300000)
+  // فیدبک کاربر ۱۴۰۵/۰۷/۱۷ — هزینه‌ی خام AI (COGS) قبل از کسر از اعتبار فروشگاه در این ضریب
+  // ضرب می‌شود. buyerCostMarkup روی مصرف خریدار (TEXT_REPLY/VOICE_TTS در credit.service.ts)،
+  // sellerCostMarkup روی مصرف خودِ فروشنده در پنل (PRODUCT_ENRICHMENT/NOTES_ANALYSIS/
+  // GUIDE_ASSISTANT). اعتبار آزمایشی ۳۰۰هزارتومانی (trialCreditToman بالا) خودش دست‌نخورده
+  // می‌ماند — این ضرایب فقط روی نرخ مصرف از آن بودجه اثر می‌گذارند، نه روی مبلغ گرنت.
+  buyerCostMarkup   Float    @default(2)
+  sellerCostMarkup  Float    @default(1.5)
+  // فیدبک کاربر ۱۴۰۵/۰۷/۱۷ — صرفاً برای برآورد نمایشی «حدود N چت» روی کارت‌های خرید اعتبار
+  // (SellerCreditPage.tsx)؛ در محاسبه‌ی واقعی کسر اعتبار استفاده نمی‌شود
+  avgCostPerChatToman Int    @default(10000)
   updatedAt         DateTime @updatedAt
 
   @@map("sales_agent_global_config")
@@ -2778,7 +2788,11 @@ model CreditUsageEvent {
   conversation   SalesConversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
   model          String
   kind           CreditUsageKind
-  costToman      Int // مصرف = مقدار مثبت که از balance کم می‌شود؛ TOPUP هم مقدار مثبتی است که اضافه می‌شود
+  costToman      Int // هزینه‌ی خام AI (COGS)، بدون ضریب — برای TOPUP: مبلغ شارژشده
+  // فیدبک کاربر ۱۴۰۵/۰۷/۱۷ — مبلغی که واقعاً از اعتبار فروشگاه کم شده (costToman × buyerCostMarkup
+  // یا sellerCostMarkup، بسته به منبع مصرف). برای TOPUP همیشه برابر costToman (بدون ضریب، چون
+  // شارژ است نه هزینه). پیش از این فیدبک صفر بود (فیلد قدیمی)
+  chargedToman   Int                @default(0)
   isFreeQuota    Boolean            @default(false) // true یعنی جزو سهمیه‌ی رایگان بوده، balance کم نشده
   // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۷.۱ — داده‌ی واقعی توکن/هزینه‌ی
   // دلاری هر مصرف، برای جایگزینی تخمین هزینه‌ی هر «چت» با عدد اندازه‌گیری‌شده‌ی واقعی

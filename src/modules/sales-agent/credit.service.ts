@@ -140,6 +140,14 @@ export class CreditService {
     tokensOutput?: number;
     costUsdMicros?: number;
   }): Promise<void> {
+    // فیدبک کاربر ۱۴۰۵/۰۷/۱۷ — مصرف خریدار (TEXT_REPLY/VOICE_TTS، تنها دو kind ای که از این
+    // متد عبور می‌کنند) با buyerCostMarkup ضرب می‌شود قبل از کسر از اعتبار؛ costToman خام
+    // (COGS) بدون تغییر لاگ می‌شود تا حسابداری ادمین (StoresPage) همچنان COGS واقعی را ببیند.
+    // گرنت اولیه‌ی ۳۰۰هزارتومانی (grantTrialIfFirstChat) دست‌نخورده می‌ماند — این ضریب فقط
+    // روی نرخ مصرف از آن بودجه اثر می‌گذارد.
+    const config = await getSalesAgentGlobalConfig(this.prisma);
+    const chargedToman = Math.ceil(params.costToman * config.buyerCostMarkup);
+
     await this.prisma.creditUsageEvent.create({
       data: {
         storeId: params.storeId,
@@ -148,6 +156,7 @@ export class CreditService {
         model: params.model,
         kind: params.kind,
         costToman: params.costToman,
+        chargedToman,
         isFreeQuota: params.isFreeQuota,
         tokensInput: params.tokensInput ?? 0,
         tokensOutput: params.tokensOutput ?? 0,
@@ -170,8 +179,8 @@ export class CreditService {
       await this.prisma.store.update({
         where: { id: params.storeId },
         data: trialActive
-          ? { trialCreditRemainingToman: { decrement: params.costToman } }
-          : { creditBalanceToman: { decrement: params.costToman } },
+          ? { trialCreditRemainingToman: { decrement: chargedToman } }
+          : { creditBalanceToman: { decrement: chargedToman } },
       });
     }
   }

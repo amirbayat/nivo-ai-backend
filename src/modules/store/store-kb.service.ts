@@ -35,6 +35,7 @@ import {
   AnalyzeOwnerNotesDto,
   NotesAnalysisEntityType,
 } from './dto/analyze-owner-notes.dto';
+import { getSalesAgentGlobalConfig } from '../sales-agent/sales-agent-global-config.util';
 
 // docs/PRD-seller-knowledge-base.md بخش ۲.۳ — دقیقاً همان shape که chat.service.ts's
 // OPENROUTER_WEB_SEARCH_TOOLS استفاده می‌کند (کپی محلی، نه import — آن فایل چیزی export نمی‌کند
@@ -278,11 +279,15 @@ JSON را برگردان، بدون توضیح یا markdown fence.`,
   }
 
   // همون الگوی credit.service.ts's logUsage — اول از بودجه‌ی آزمایشی کم می‌شود (اگر فعال/مثبت)،
-  // وگرنه از اعتبار واقعی فروشگاه
+  // وگرنه از اعتبار واقعی فروشگاه. فیدبک کاربر ۱۴۰۵/۰۷/۱۷ — این مصرفِ خودِ فروشنده (نه
+  // خریدار) است، پس با sellerCostMarkup ضرب می‌شود؛ costToman خام (COGS) را caller جدا در
+  // creditUsageEvent.create لاگ می‌کند، اینجا فقط مبلغ واقعاً کسرشده را برمی‌گردانیم
   private async decrementStoreCredit(
     storeId: string,
     costToman: number,
-  ): Promise<void> {
+  ): Promise<number> {
+    const config = await getSalesAgentGlobalConfig(this.prisma);
+    const chargedToman = Math.ceil(costToman * config.sellerCostMarkup);
     const store = await this.prisma.store.findUnique({
       where: { id: storeId },
       select: { trialEndsAt: true, trialCreditRemainingToman: true },
@@ -294,9 +299,10 @@ JSON را برگردان، بدون توضیح یا markdown fence.`,
     await this.prisma.store.update({
       where: { id: storeId },
       data: trialActive
-        ? { trialCreditRemainingToman: { decrement: costToman } }
-        : { creditBalanceToman: { decrement: costToman } },
+        ? { trialCreditRemainingToman: { decrement: chargedToman } }
+        : { creditBalanceToman: { decrement: chargedToman } },
     });
+    return chargedToman;
   }
 
   // ابزار داخلی فروشنده روی فرم محصول (میکروفون کنار توضیحات) — فیدبک کاربر ۱۴۰۵/۰۷/۰۱.
@@ -692,16 +698,20 @@ sourceNote را خالی بگذار. پاسخ را فقط به‌صورت یک �
           usage.outputTokens ?? 0,
           model,
         );
+        const chargedToman = await this.decrementStoreCredit(
+          storeId,
+          costToman,
+        );
         await this.prisma.creditUsageEvent.create({
           data: {
             storeId,
             model,
             kind: 'PRODUCT_ENRICHMENT',
             costToman,
+            chargedToman,
             isFreeQuota: false,
           },
         });
-        await this.decrementStoreCredit(storeId, costToman);
 
         const savedCanonical = staleCanonical
           ? await this.prisma.canonicalProduct.update({
@@ -815,16 +825,17 @@ sourceNote را خالی بگذار. پاسخ را فقط به‌صورت یک �
         usage.outputTokens ?? 0,
         model,
       );
+      const chargedToman = await this.decrementStoreCredit(storeId, costToman);
       await this.prisma.creditUsageEvent.create({
         data: {
           storeId,
           model,
           kind: 'PRODUCT_ENRICHMENT',
           costToman,
+          chargedToman,
           isFreeQuota: false,
         },
       });
-      await this.decrementStoreCredit(storeId, costToman);
 
       return {
         suggestedName:
@@ -898,16 +909,17 @@ sourceNote را خالی بگذار. پاسخ را فقط به‌صورت یک �
         usage.outputTokens ?? 0,
         model,
       );
+      const chargedToman = await this.decrementStoreCredit(storeId, costToman);
       await this.prisma.creditUsageEvent.create({
         data: {
           storeId,
           model,
           kind: 'PRODUCT_ENRICHMENT',
           costToman,
+          chargedToman,
           isFreeQuota: false,
         },
       });
-      await this.decrementStoreCredit(storeId, costToman);
 
       return {
         competitors: rawObject.competitors.slice(0, 3).map((c) => ({
@@ -1041,7 +1053,7 @@ MEDIUM بگذار، نه HIGH. businessTypeReason/categoryReason باید خیل
     if (!product || product.storeId !== storeId) {
       throw new NotFoundException(fa.store.productNotFound);
     }
-    const trimmed = rawText.trim().slice(0, 4000);
+    const trimmed = rawText.trim().slice(0, 10000);
     if (!trimmed) {
       throw new BadRequestException(fa.store.productNotesRequired);
     }
@@ -1375,16 +1387,17 @@ ${updatedNotes}`,
       usage.outputTokens ?? 0,
       model,
     );
+    const chargedToman = await this.decrementStoreCredit(storeId, costToman);
     await this.prisma.creditUsageEvent.create({
       data: {
         storeId,
         model,
         kind: 'NOTES_ANALYSIS',
         costToman,
+        chargedToman,
         isFreeQuota: false,
       },
     });
-    await this.decrementStoreCredit(storeId, costToman);
   }
 
   // docs/PRD-bulk-product-import-from-document.md — فروشنده یک متن بلند/فایل (PDF/Word) یا

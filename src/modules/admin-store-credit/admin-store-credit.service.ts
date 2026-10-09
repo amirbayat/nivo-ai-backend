@@ -21,7 +21,7 @@ export class AdminStoreCreditService {
       this.prisma.creditUsageEvent.groupBy({
         by: ['kind', 'isFreeQuota'],
         where: { createdAt: { gte: params.range.from, lte: params.range.to } },
-        _sum: { costToman: true },
+        _sum: { costToman: true, chargedToman: true },
         _count: { id: true },
       }),
     ]);
@@ -32,17 +32,20 @@ export class AdminStoreCreditService {
     let freeQuotaEventsCount = 0;
     let paidEventsCount = 0;
     for (const row of usage) {
-      const sum = row._sum.costToman ?? 0;
+      const cogs = row._sum.costToman ?? 0;
+      // فیدبک کاربر ۱۴۰۵/۰۷/۱۷ — بعد از اضافه‌شدن buyerCostMarkup/sellerCostMarkup، مبلغ
+      // واقعاً کسرشده (chargedToman) دیگر با COGS خام (costToman) یکی نیست
+      const charged = row._sum.chargedToman ?? 0;
       const count = row._count.id;
       if (row.kind === 'TOPUP') {
-        totalPurchasedToman += sum;
+        totalPurchasedToman += cogs;
         continue;
       }
-      totalAiCostToman += sum;
+      totalAiCostToman += cogs;
       if (row.isFreeQuota) {
         freeQuotaEventsCount += count;
       } else {
-        totalChargedToman += sum;
+        totalChargedToman += charged;
         paidEventsCount += count;
       }
     }
@@ -111,7 +114,7 @@ export class AdminStoreCreditService {
             storeId: { in: storeIds },
             createdAt: { gte: params.range.from, lte: params.range.to },
           },
-          _sum: { costToman: true },
+          _sum: { costToman: true, chargedToman: true },
           _count: { id: true },
         })
       : [];
@@ -127,26 +130,27 @@ export class AdminStoreCreditService {
       const rows = byStore.get(store.id) ?? [];
       const costByKind: Partial<Record<CreditUsageKind, number>> = {};
       let totalPurchasedToman = 0;
-      // هزینه‌ی واقعی AI (شامل سهمیه‌ی رایگان) در برابر مبلغی که واقعاً از اعتبار کم شده —
-      // بخش ۱ سند، دو عدد متفاوت و هر دو معنادار
+      // هزینه‌ی واقعی AI (COGS خام، شامل سهمیه‌ی رایگان) در برابر مبلغی که واقعاً از اعتبار کم
+      // شده (بعد از buyerCostMarkup/sellerCostMarkup) — دو عدد متفاوت و هر دو معنادار
       let totalAiCostToman = 0;
       let totalChargedToman = 0;
       let freeQuotaEventsCount = 0;
       let paidEventsCount = 0;
 
       for (const row of rows) {
-        const sum = row._sum.costToman ?? 0;
+        const cogs = row._sum.costToman ?? 0;
+        const charged = row._sum.chargedToman ?? 0;
         const count = row._count.id;
         if (row.kind === 'TOPUP') {
-          totalPurchasedToman += sum;
+          totalPurchasedToman += cogs;
           continue;
         }
-        totalAiCostToman += sum;
-        costByKind[row.kind] = (costByKind[row.kind] ?? 0) + sum;
+        totalAiCostToman += cogs;
+        costByKind[row.kind] = (costByKind[row.kind] ?? 0) + cogs;
         if (row.isFreeQuota) {
           freeQuotaEventsCount += count;
         } else {
-          totalChargedToman += sum;
+          totalChargedToman += charged;
           paidEventsCount += count;
         }
       }
@@ -211,6 +215,7 @@ export class AdminStoreCreditService {
           model: true,
           kind: true,
           costToman: true,
+          chargedToman: true,
           isFreeQuota: true,
           tokensInput: true,
           tokensOutput: true,

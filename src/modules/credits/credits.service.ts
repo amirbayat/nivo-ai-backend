@@ -10,6 +10,7 @@ import { PaymentsService } from '../payments/payments.service';
 import { PurchaseCreditPackageDto } from './dto/purchase-credit-package.dto';
 import { ConfirmBazaarPurchaseDto } from './dto/confirm-bazaar-purchase.dto';
 import { fa } from '../../i18n/fa';
+import { getSalesAgentGlobalConfig } from '../sales-agent/sales-agent-global-config.util';
 
 // «نیوو» یک ارز/جدول جدید نیست — واحد نمایشی روی همان Wallet.balanceToman موجود است
 // (docs/PRD-discovery-and-credits.md بخش ۳). این سرویس فقط لایه‌ی نازک تبدیل/نمایش +
@@ -50,7 +51,9 @@ export class CreditsService {
   // StoreCreditService.listPackages) بسته‌های مخصوص همان فروشگاه هم کنار بسته‌های عمومی
   // دیده می‌شوند؛ بدون آن (مسیر عمومی credits-public.controller.ts) فقط بسته‌های عمومی.
   async listPackages(scope: CreditPackageScope = 'GENERAL', storeId?: string) {
-    const [config, packages] = await Promise.all([
+    // فیدبک کاربر ۱۴۰۵/۰۷/۱۷ — فقط برای STORE_AI_CREDIT معنا دارد؛ برای GENERAL (نیوو اصلی)
+    // بی‌ربط است («چت با مشتری» یک مفهوم مخصوص ایجنت فروش است)
+    const [config, packages, salesAgentConfig] = await Promise.all([
       this.getConfig(),
       this.prisma.creditPackage.findMany({
         // توجه: فیلتر Prisma's `{in: [storeId, null]}` روی ستون nullable مقدار null را match
@@ -64,19 +67,31 @@ export class CreditsService {
         },
         orderBy: { sortOrder: 'asc' },
       }),
+      scope === 'STORE_AI_CREDIT'
+        ? getSalesAgentGlobalConfig(this.prisma)
+        : null,
     ]);
-    return packages.map((p) => ({
-      ...p,
-      priceToman: this.computePackagePrice(
-        p.credits,
-        p.discountPercent,
-        config,
-      ),
+    return packages.map((p) => {
       // docs/PRD-seller-credit-billing.md بخش ۷ — مبلغی که واقعاً به بالانس شارژ می‌شود
       // (credits × tomanPerCredit، بدون تخفیف) — برای STORE_AI_CREDIT مصرف‌کننده‌ی این فیلد
       // است تا وقتی discountPercent>0 است تفاوت «قیمت پرداختی» و «اعتبار دریافتی» را نشان دهد
-      creditToman: p.credits * config.tomanPerCredit,
-    }));
+      const creditToman = p.credits * config.tomanPerCredit;
+      return {
+        ...p,
+        priceToman: this.computePackagePrice(
+          p.credits,
+          p.discountPercent,
+          config,
+        ),
+        creditToman,
+        ...(salesAgentConfig && {
+          // صرفاً برآورد نمایشی («حدود N چت با مشتری») — در کسر واقعی اعتبار استفاده نمی‌شود
+          estimatedChats: Math.round(
+            creditToman / salesAgentConfig.avgCostPerChatToman,
+          ),
+        }),
+      };
+    });
   }
 
   // برای کارت «مبلغ دلخواه» — همون فرمول computePackagePrice زیر رو با discountPercent بسته‌ی

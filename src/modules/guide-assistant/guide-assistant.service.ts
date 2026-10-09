@@ -11,6 +11,7 @@ import { pickVariant, resolveModel } from '../sales-agent/model-variants';
 import { NEUTRAL_VOICE } from '../sales-agent/voice-gender';
 import { fa } from '../../i18n/fa';
 import { GuideAssistantStreamDto, GuideAssistantTtsDto } from './dto/guide-assistant.dto';
+import { getSalesAgentGlobalConfig } from '../sales-agent/sales-agent-global-config.util';
 
 const MAX_USER_MESSAGES = 12;
 
@@ -50,10 +51,13 @@ export class GuideAssistantService {
     return store.creditBalanceToman > 0 || trialActive;
   }
 
+  // فیدبک کاربر ۱۴۰۵/۰۷/۱۷ — این مصرفِ خودِ فروشنده است، پس با sellerCostMarkup ضرب می‌شود
   private async decrementStoreCredit(
     storeId: string,
     costToman: number,
-  ): Promise<void> {
+  ): Promise<number> {
+    const config = await getSalesAgentGlobalConfig(this.prisma);
+    const chargedToman = Math.ceil(costToman * config.sellerCostMarkup);
     const store = await this.prisma.store.findUnique({
       where: { id: storeId },
       select: { trialEndsAt: true, trialCreditRemainingToman: true },
@@ -65,9 +69,10 @@ export class GuideAssistantService {
     await this.prisma.store.update({
       where: { id: storeId },
       data: trialActive
-        ? { trialCreditRemainingToman: { decrement: costToman } }
-        : { creditBalanceToman: { decrement: costToman } },
+        ? { trialCreditRemainingToman: { decrement: chargedToman } }
+        : { creditBalanceToman: { decrement: chargedToman } },
     });
+    return chargedToman;
   }
 
   // docs/PRD-seller-guide-assistant-modal.md بخش ۳.۳ — بدون پرسیست مکالمه (۲.۳)؛ هر درخواست کل
@@ -129,16 +134,17 @@ export class GuideAssistantService {
         usage.outputTokens ?? 0,
         modelId,
       );
+      const chargedToman = await this.decrementStoreCredit(storeId, costToman);
       await this.prisma.creditUsageEvent.create({
         data: {
           storeId,
           model: modelId,
           kind: 'GUIDE_ASSISTANT',
           costToman,
+          chargedToman,
           isFreeQuota: false,
         },
       });
-      await this.decrementStoreCredit(storeId, costToman);
 
       res.write('data: [DONE]\n\n');
     } catch (err) {
@@ -203,16 +209,17 @@ export class GuideAssistantService {
       const { costToman } = await this.pricing.calcFlatCostToman(
         creditsConsumed * KIE_USD_PER_CREDIT,
       );
+      const chargedToman = await this.decrementStoreCredit(storeId, costToman);
       await this.prisma.creditUsageEvent.create({
         data: {
           storeId,
           model: TTS_MODEL_SLUG,
           kind: 'VOICE_TTS',
           costToman,
+          chargedToman,
           isFreeQuota: false,
         },
       });
-      await this.decrementStoreCredit(storeId, costToman);
     }
 
     return mp3Buffer;
