@@ -326,6 +326,11 @@ export class AdminController {
     return this.adminService.updateSalesAgentGlobalConfig(dto);
   }
 
+  @Get('sales-agent/model-variants')
+  getSalesAgentModelVariants() {
+    return this.adminService.getSalesAgentModelVariants();
+  }
+
   // docs/PRD-admin-product-enrichment-review.md — لیست کراس-فروشگاه محصولات کم‌اطلاعات
   @Get('products/low-completeness')
   getLowCompletenessProducts(

@@ -34,6 +34,7 @@ import {
   getSalesAgentGlobalConfig,
   invalidateSalesAgentGlobalConfigCache,
 } from '../sales-agent/sales-agent-global-config.util';
+import { MODEL_VARIANTS } from '../sales-agent/model-variants';
 
 const MODEL_IMPORT_COLUMNS = [
   'name',
@@ -1798,6 +1799,15 @@ export class AdminService {
   // دوره‌ی آزمایشی؛ جدا از CreditConfig (ویجت نیوو/nivoai.ir)
   getSalesAgentGlobalConfigAdmin() {
     return getSalesAgentGlobalConfig(this.prisma);
+  }
+
+  // فیدبک کاربر ۱۴۰۵/۰۷/۱۷ — برای دراپ‌دان «فورس مدل» در SalesAgentConfigPage.tsx؛ کلید
+  // (نه خودِ slug) است که روی forcedModelVariant/abVariant ذخیره می‌شود (پایین model-variants.ts)
+  getSalesAgentModelVariants() {
+    return Object.entries(MODEL_VARIANTS).map(([key, modelId]) => ({
+      key,
+      modelId,
+    }));
   }
 
   async updateSalesAgentGlobalConfig(dto: UpdateSalesAgentGlobalConfigDto) {

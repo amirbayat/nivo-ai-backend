@@ -592,6 +592,12 @@ model SalesAgentGlobalConfig {
   // فیدبک کاربر ۱۴۰۵/۰۷/۱۷ — صرفاً برای برآورد نمایشی «حدود N چت» روی کارت‌های خرید اعتبار
   // (SellerCreditPage.tsx)؛ در محاسبه‌ی واقعی کسر اعتبار استفاده نمی‌شود
   avgCostPerChatToman Int    @default(10000)
+  // فیدبک کاربر ۱۴۰۵/۰۷/۱۷ — برای مقایسه‌ی دستی هزینه/کیفیت بین مدل‌ها. null = رفتار قبلی
+  // (pickVariant() در model-variants.ts یکی از MODEL_VARIANTS را رندوم انتخاب می‌کند). مقدار
+  // غیر-null باید یکی از کلیدهای MODEL_VARIANTS باشد و همان کلید را برای همه‌ی مکالمه‌های
+  // تازه (startChat/restartConversation در sales-agent.service.ts) فورس می‌کند — مکالمه‌های
+  // قدیمی که از قبل abVariant دارند دست‌نخورده می‌مانند.
+  forcedModelVariant String?
   updatedAt         DateTime @updatedAt
 
   @@map("sales_agent_global_config")

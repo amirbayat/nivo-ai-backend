@@ -20,9 +20,14 @@ export const MODEL_VARIANTS: Record<string, string> = {
   // پیش‌فرض جدید می‌افتند.
 };
 
-const VARIANT_KEYS = Object.keys(MODEL_VARIANTS);
+export const VARIANT_KEYS = Object.keys(MODEL_VARIANTS);
 
-export function pickVariant(): string {
+// فیدبک کاربر ۱۴۰۵/۰۷/۱۷ — forcedVariant از SalesAgentGlobalConfig.forcedModelVariant می‌آید
+// (پنل ادمین، صفحه‌ی «تنظیمات مارکت‌پلیس فروشندگان»)؛ برای مقایسه‌ی دستی هزینه/کیفیت یک مدل
+// مشخص را به‌جای pool تصادفی فورس می‌کند. کلید نامعتبر/حذف‌شده از pool بی‌صدا نادیده گرفته
+// می‌شود و رفتار قبلی (رندوم) ادامه پیدا می‌کند.
+export function pickVariant(forcedVariant?: string | null): string {
+  if (forcedVariant && MODEL_VARIANTS[forcedVariant]) return forcedVariant;
   return VARIANT_KEYS[Math.floor(Math.random() * VARIANT_KEYS.length)];
 }
 

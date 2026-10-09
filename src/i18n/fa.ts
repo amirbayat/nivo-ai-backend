@@ -9,6 +9,7 @@ export const fa = {
     numberPositive: 'مقدار باید صفر یا بیشتر باشد',
     mustBeArray: 'مقدار باید آرایه باشد',
     mustBeBoolean: 'مقدار باید درست یا غلط باشد',
+    invalidValue: 'مقدار وارد شده معتبر نیست',
   },
   auth: {
     otpSent: 'کد تأیید ارسال شد',

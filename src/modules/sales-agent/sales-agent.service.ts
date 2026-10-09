@@ -31,6 +31,7 @@ import {
   pickVoiceVariant,
   pickResponseStrategy,
 } from './model-variants';
+import { getSalesAgentGlobalConfig } from './sales-agent-global-config.util';
 import { buildAsrVocabHint } from './asr-vocab-hint';
 import { reattachReceiptIfOrderOpen } from './receipt-reattach.util';
 import { CommentsService } from '../comments/comments.service';
@@ -74,6 +75,7 @@ export class SalesAgentService {
     await this.creditService.grantTrialIfFirstChat(store.id);
     // docs/PRD-seller-credit-billing.md — یک‌بار همین‌جا تعیین می‌شود، تا آخر عمر مکالمه ثابت می‌ماند
     const billingMode = await this.creditService.decideBillingMode(store.id);
+    const globalConfig = await getSalesAgentGlobalConfig(this.prisma);
 
     const sessionToken = crypto.randomUUID();
     const customer = await this.prisma.customer.create({
@@ -83,7 +85,7 @@ export class SalesAgentService {
         salesConversations: {
           create: {
             storeId: store.id,
-            abVariant: pickVariant(),
+            abVariant: pickVariant(globalConfig.forcedModelVariant),
             voiceVariant: pickVoiceVariant(),
             responseStrategy: pickResponseStrategy(),
             billingMode,
@@ -130,6 +132,7 @@ export class SalesAgentService {
     const billingMode = await this.creditService.decideBillingMode(
       conversation.storeId,
     );
+    const globalConfig = await getSalesAgentGlobalConfig(this.prisma);
 
     const fresh = await this.prisma.$transaction(async (tx) => {
       await tx.salesConversation.update({
@@ -140,7 +143,7 @@ export class SalesAgentService {
         data: {
           storeId: conversation.storeId,
           customerId: conversation.customerId,
-          abVariant: pickVariant(),
+          abVariant: pickVariant(globalConfig.forcedModelVariant),
           voiceVariant: pickVoiceVariant(),
           responseStrategy: pickResponseStrategy(),
           billingMode,
