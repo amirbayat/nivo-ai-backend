@@ -1141,9 +1141,17 @@ export class ChatService {
       const result = streamText({
         model: this.buildProvider(
           apiKey,
-          useWebSearch
-            ? { tools: OPENROUTER_WEB_SEARCH_TOOLS, max_tool_calls: 5 }
-            : undefined,
+          {
+            // session_id ثابت به‌ازای همین مکالمه — کلید sticky routing/cache صریح OpenRouter
+            // (docs prompt-caching: بدون این، کلید پیش‌فرض از هش اولین پیام system+user مشتق
+            // می‌شود که بین چت‌های مختلف می‌تواند برخورد کند). با این، هر پیام بعدی همین چت به
+            // همان provider endpoint/cache شاردِ قبلی می‌رود؛ بین مکالمه‌های مختلف تداخلی ندارد و
+            // عمر کش هم خودِ OpenRouter/provider مدیریت می‌کند (کوتاه، چند دقیقه بی‌فعالیتی).
+            session_id: conversationId,
+            ...(useWebSearch
+              ? { tools: OPENROUTER_WEB_SEARCH_TOOLS, max_tool_calls: 5 }
+              : {}),
+          },
           extraUserContentParts,
         )(modelId),
         system: systemParts.join('\n\n') || undefined,
