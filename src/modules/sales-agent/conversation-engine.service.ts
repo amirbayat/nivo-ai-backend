@@ -9,7 +9,12 @@ import {
   type UserModelMessage,
 } from 'ai';
 import { z } from 'zod';
-import type { ConversationState, Order, Prisma } from '@prisma/client';
+import type {
+  ConversationState,
+  Order,
+  OrderPaymentMethod,
+  Prisma,
+} from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
 import { mimeTypeForExt } from '../../common/validators/chat-image.validator';
@@ -47,6 +52,7 @@ import {
   intentClassificationSchema,
 } from './intent-classification.schema';
 import type {
+  AddressSnapshot,
   AiTraceData,
   BuyerNeedTag,
   CartItem,
@@ -63,18 +69,6 @@ import type {
 export type ConversationWithStore = Prisma.SalesConversationGetPayload<{
   include: { store: true };
 }>;
-
-// docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۱/۲ — snapshot آدرس+هزینه‌ی ارسال
-// که روی Order می‌نشیند (executeCreateOrder/finalizeOrder مصرفش می‌کنند)
-type AddressSnapshot = {
-  recipientName: string;
-  recipientPhone: string;
-  province: string;
-  address: string;
-  postalCode: string | null;
-  addressId: string | null;
-  shippingCostToman: number;
-};
 
 type ProductLike = {
   id: string;
@@ -457,6 +451,10 @@ export class ConversationEngineService {
       addressStep: raw?.addressStep,
       pendingAddress: raw?.pendingAddress ?? null,
       pendingVariantSelection: raw?.pendingVariantSelection ?? null,
+      // docs/PRD-buyer-payment-method-card-or-snapppay-link.md — اگر اینجا whitelist نشود،
+      // بعد از persistTransition دوباره raw از DB خوانده می‌شود و این فیلد همیشه undefined
+      // برمی‌گردد (هم‌الگوی pendingAddress بالا)
+      pendingOrderAddressSnapshot: raw?.pendingOrderAddressSnapshot ?? null,
     };
   }
 
@@ -2127,9 +2125,13 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         }
         mutationHappened = true;
         progressHappened = true;
+        // docs/PRD-buyer-payment-method-card-or-snapppay-link.md — این مسیر (FULL_AGENT
+        // tool-calling) فعلاً هرگز با روش انتخابی صدا زده نمی‌شود (پیش‌فرض CARD_TO_CARD همیشه
+        // اعمال می‌شود، چون pickResponseStrategy هنوز همیشه RULE_BASED برمی‌گرداند)، پس
+        // cardNumber/ownerName همیشه ست‌اند
         orderResult = {
-          cardNumber: created.cardNumber,
-          ownerName: created.ownerName,
+          cardNumber: created.cardNumber!,
+          ownerName: created.ownerName!,
           amount: created.order.totalAmount,
         };
         return {
@@ -2760,6 +2762,42 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
 
     if (this.billingBlocked(conversation)) {
       return this.transitionToHandoff(conversation, 'BILLING_BLOCKED');
+    }
+
+    // docs/PRD-buyer-payment-method-card-or-snapppay-link.md بخش ۳ — لینک اسنپ‌پی ثابت است
+    // و callback ندارد، پس کد رهگیری تنها از متن آزاد خریدار قابل‌دریافت است. عمداً روی
+    // AWAITING_PAYMENT/AWAITING_SELLER_APPROVAL هر دو چک می‌شود (نه فقط اولی) چون ترتیب
+    // ارسال اسکرین‌شات/کد رهگیری توسط خریدار تضمین‌شده نیست (ممکن است عکس را زودتر بفرستد)
+    if (
+      conversation.currentState === 'AWAITING_PAYMENT' ||
+      conversation.currentState === 'AWAITING_SELLER_APPROVAL'
+    ) {
+      const pendingOrder = await this.prisma.order.findUnique({
+        where: { conversationId: conversation.id },
+      });
+      if (
+        pendingOrder?.paymentMethod === 'SNAPPPAY' &&
+        !pendingOrder.snapppayTrackingCode &&
+        (pendingOrder.status === 'PENDING_PAYMENT' ||
+          pendingOrder.status === 'RECEIPT_SUBMITTED')
+      ) {
+        return this.handleSnapppayTrackingCodeInput(
+          conversation,
+          pendingOrder,
+          text,
+        );
+      }
+    }
+
+    // docs/PRD-buyer-payment-method-card-or-snapppay-link.md — عیناً همان الگوی
+    // ADDRESS_COLLECTION پایین: پیام آزاد حین PAYMENT_METHOD_SELECTION هیچ‌وقت از parseIntent
+    // رد نمی‌شود، چون «کارت» یا «اسنپ» برای مدل intent عمومی چیزی برای classify کردن ندارد
+    if (conversation.currentState === 'PAYMENT_METHOD_SELECTION') {
+      return this.handlePaymentMethodSelectionInput(
+        conversation,
+        this.getContext(conversation),
+        text,
+      );
     }
 
     // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۱ — دقیقاً همان الگوی
@@ -3393,6 +3431,22 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         return this.doClarify(conversation, fa.salesAgent.nothingToConfirm);
       }
       return this.resolveVariantSelectionValue(conversation, ctx, action.value);
+    }
+
+    // docs/PRD-buyer-payment-method-card-or-snapppay-link.md — جواب دکمه‌ی PAYMENT_METHOD_PROMPT؛
+    // addressSnapshot (اگر بوده) قبلاً در pendingOrderAddressSnapshot نگه داشته شده بود
+    if (action.type === 'SELECT_PAYMENT_METHOD') {
+      if (
+        conversation.currentState !== 'PAYMENT_METHOD_SELECTION' ||
+        !action.paymentMethod
+      ) {
+        return this.doClarify(conversation, fa.salesAgent.nothingToConfirm);
+      }
+      return this.applyChosenPaymentMethod(
+        conversation,
+        ctx,
+        action.paymentMethod,
+      );
     }
 
     // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۱ + docs/PRD-buyer-saved-addresses.md
@@ -4638,9 +4692,20 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     conversation: ConversationWithStore,
     ctx: ConversationContext,
     addressSnapshot?: AddressSnapshot,
+    // docs/PRD-buyer-payment-method-card-or-snapppay-link.md — فقط وقتی سفارش تازه ساخته
+    // می‌شود استفاده می‌شود (پایین‌تر)؛ برای سفارش از قبل موجود، paymentMethod خودِ آن ردیف
+    // معتبر است، نه این پارامتر (idempotent reload نباید روش را عوض کند)
+    paymentMethod: OrderPaymentMethod = 'CARD_TO_CARD',
   ): Promise<
     | { empty: true }
-    | { empty: false; order: Order; cardNumber: string; ownerName: string }
+    | {
+        empty: false;
+        order: Order;
+        paymentMethod: OrderPaymentMethod;
+        cardNumber?: string;
+        ownerName?: string;
+        snapppayLink?: string;
+      }
   > {
     if (ctx.cart.length === 0) {
       return { empty: true };
@@ -4650,8 +4715,9 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     let order = await this.prisma.order.findUnique({
       where: { conversationId: conversation.id },
     });
-    let cardNumber: string;
-    let ownerName: string;
+    let cardNumber: string | undefined;
+    let ownerName: string | undefined;
+    let snapppayLink: string | undefined;
     if (!order) {
       const cartTotal = this.cartTotal(ctx.cart);
       // docs/PRD-order-status-chat-tool-and-fulfillment-delay-reviews.md بخش ۲.۱ — هم‌الگوی
@@ -4702,16 +4768,20 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       // فقط برای شفافیت/نمایش
       const total =
         cartTotal - discountAmount + (addressSnapshot?.shippingCostToman ?? 0);
-      // docs/PRD-seller-multi-bank-card-rotation.md بخش ۲ — انتخاب دقیقاً همین لحظه، یک‌بار،
-      // و روی خودِ سفارش پرسیست می‌شود (بازخوانی بعدی همین سفارش دوباره انتخاب نمی‌کند)
-      const card = await this.cardSelector.selectCard(conversation.storeId);
+      // docs/PRD-buyer-payment-method-card-or-snapppay-link.md — انتخاب کارت فقط برای
+      // CARD_TO_CARD معنا دارد؛ مسیر SNAPPPAY هیچ bankCardId‌ای ندارد (لینک ثابت فروشگاه است)
+      const card =
+        paymentMethod === 'CARD_TO_CARD'
+          ? await this.cardSelector.selectCard(conversation.storeId)
+          : null;
       order = await this.prisma.order.create({
         data: {
           storeId: conversation.storeId,
           conversationId: conversation.id,
           items: ctx.cart,
           totalAmount: total,
-          bankCardId: card.id,
+          paymentMethod,
+          bankCardId: card?.id,
           discountCodeId,
           hasFulfillmentDelay,
           ...(addressSnapshot
@@ -4727,8 +4797,16 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
             : {}),
         },
       });
-      cardNumber = card.cardNumber;
-      ownerName = card.ownerName;
+      if (card) {
+        cardNumber = card.cardNumber;
+        ownerName = card.ownerName;
+      } else {
+        // بخش ۵ — لینک ثابت فروشگاه (در دسترس‌بودنش قبل از رسیدن به اینجا در finalizeOrder
+        // چک شده؛ هرگز نباید نال باشد، ولی دفاعی رشته‌ی خالی به‌جای کرش)
+        snapppayLink = conversation.store.snapppayPaymentLink ?? '';
+      }
+    } else if (order.paymentMethod === 'SNAPPPAY') {
+      snapppayLink = conversation.store.snapppayPaymentLink ?? '';
     } else if (order.bankCardId) {
       const card = await this.prisma.storeBankCard.findUnique({
         where: { id: order.bankCardId },
@@ -4746,7 +4824,14 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     const nextState: ConversationState = 'AWAITING_PAYMENT';
     await this.persistTransition(conversation, nextState, ctx, 'createOrder');
 
-    return { empty: false, order, cardNumber, ownerName };
+    return {
+      empty: false,
+      order,
+      paymentMethod: order.paymentMethod,
+      cardNumber,
+      ownerName,
+      snapppayLink,
+    };
   }
 
   // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۱ — فقط وقتی فروشگاه ارسال دارد
@@ -4764,33 +4849,144 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     return this.finalizeOrder(conversation, ctx);
   }
 
+  // docs/PRD-buyer-payment-method-card-or-snapppay-link.md — کارت‌به‌کارت تقریباً همیشه در
+  // دسترس است (فروشگاه ایرانی بدون آن اصلاً به این مرحله نمی‌رسد)؛ تنها شرط واقعی، فعال‌بودن
+  // لینک اسنپ‌پی فروشگاه است. وقتی هر دو در دسترس باشند، خریدار باید انتخاب کند
+  private snapppayAvailable(store: ConversationWithStore['store']): boolean {
+    return !!store.snapppayPaymentLink;
+  }
+
+  // docs/PRD-buyer-payment-method-card-or-snapppay-link.md — جواب PAYMENT_METHOD_SELECTION،
+  // چه از دکمه (handleAction's SELECT_PAYMENT_METHOD) چه از متن آزاد
+  // (handlePaymentMethodSelectionInput پایین) بیاید؛ addressSnapshot‌ای که قبلاً در ctx نگه
+  // داشته شده بود را بیرون می‌کشد و finalizeOrder را با روش قطعی‌شده صدا می‌زند
+  private async applyChosenPaymentMethod(
+    conversation: ConversationWithStore,
+    ctx: ConversationContext,
+    method: OrderPaymentMethod,
+  ): Promise<EngineResult> {
+    const addressSnapshot = ctx.pendingOrderAddressSnapshot ?? undefined;
+    return this.finalizeOrder(
+      conversation,
+      { ...ctx, pendingOrderAddressSnapshot: null },
+      addressSnapshot,
+      method,
+    );
+  }
+
+  // عیناً الگوی handleVariantSelectionInput/handleAddressInput — پیام آزاد حین
+  // PAYMENT_METHOD_SELECTION هم باید جواب بدهد، نه فقط کلیک دکمه (خیلی از خریدارها به‌جای
+  // زدن دکمه تایپ می‌کنند). تطبیق کلیدواژه‌ی ساده کافی است، نیازی به فراخوان AI نیست
+  private async handlePaymentMethodSelectionInput(
+    conversation: ConversationWithStore,
+    ctx: ConversationContext,
+    text: string,
+  ): Promise<EngineResult> {
+    const wantsSnapppay = /اسنپ|snap/i.test(text);
+    const wantsCard = /کارت|card/i.test(text);
+    if (wantsSnapppay === wantsCard) {
+      // یا هیچ‌کدام تشخیص داده نشد یا هر دو با هم — دوباره همان سوال با دکمه‌ها
+      const uiBlock: UiBlock = {
+        type: 'PAYMENT_METHOD_PROMPT',
+        options: ['CARD_TO_CARD', 'SNAPPPAY'],
+      };
+      const reply = fa.salesAgent.choosePaymentMethodPrompt;
+      await this.logReply(conversation, reply, uiBlock);
+      return {
+        reply,
+        uiBlocks: [uiBlock],
+        state: conversation.currentState,
+      };
+    }
+    return this.applyChosenPaymentMethod(
+      conversation,
+      ctx,
+      wantsSnapppay ? 'SNAPPPAY' : 'CARD_TO_CARD',
+    );
+  }
+
   // قبلاً تمام بدنه‌ی doCreateOrder همین بود؛ استخراج شد تا هم از مسیر بدون‌آدرس بالا هم از
-  // انتهای فلوی ADDRESS_COLLECTION (finalizeAddressOrder) صدا زده شود
+  // انتهای فلوی ADDRESS_COLLECTION (finalizeAddressOrder) صدا زده شود. forcedPaymentMethod
+  // فقط از handleAction's SELECT_PAYMENT_METHOD پاس داده می‌شود — یعنی خریدار قبلاً انتخاب
+  // کرده و دیگر نیازی به سوال نیست (docs/PRD-buyer-payment-method-card-or-snapppay-link.md)
   private async finalizeOrder(
     conversation: ConversationWithStore,
     ctx: ConversationContext,
     addressSnapshot?: AddressSnapshot,
+    forcedPaymentMethod?: OrderPaymentMethod,
   ): Promise<EngineResult> {
+    let paymentMethod = forcedPaymentMethod;
+    if (!paymentMethod) {
+      // executeCreateOrder پایین‌تر خودش idempotent است (اگر سفارش این مکالمه از قبل هست،
+      // دوباره نمی‌سازد)؛ ولی تصمیم «سوال بپرس یا نه» باید از همین الان هم idempotent باشد —
+      // وگرنه فراخوانی دوباره‌ی finalizeOrder برای یک مکالمه با سفارش از قبل موجود (مثلاً
+      // دوبار کلیک تایید آدرس) دوباره سوال روش پرداخت را می‌پرسد، درحالی‌که سفارش از قبل
+      // یک روش قطعی دارد
+      const existingOrder = await this.prisma.order.findUnique({
+        where: { conversationId: conversation.id },
+      });
+      if (existingOrder) {
+        paymentMethod = existingOrder.paymentMethod;
+      } else if (this.snapppayAvailable(conversation.store)) {
+        // هر دو روش فعال‌اند — عیناً الگوی ADDRESS_PROMPT CHOOSE_SAVED: خودِ Order هنوز ساخته
+        // نمی‌شود، snapshot آدرس تا جواب برسد در ctx می‌ماند
+        const nextCtx: ConversationContext = {
+          ...ctx,
+          pendingOrderAddressSnapshot: addressSnapshot ?? null,
+        };
+        await this.persistTransition(
+          conversation,
+          'PAYMENT_METHOD_SELECTION',
+          nextCtx,
+        );
+        const uiBlock: UiBlock = {
+          type: 'PAYMENT_METHOD_PROMPT',
+          options: ['CARD_TO_CARD', 'SNAPPPAY'],
+        };
+        const reply = fa.salesAgent.choosePaymentMethodPrompt;
+        await this.logReply(conversation, reply, uiBlock);
+        return {
+          reply,
+          uiBlocks: [uiBlock],
+          state: 'PAYMENT_METHOD_SELECTION',
+        };
+      }
+    }
+    paymentMethod = paymentMethod ?? 'CARD_TO_CARD';
+
     const created = await this.executeCreateOrder(
       conversation,
       ctx,
       addressSnapshot,
+      paymentMethod,
     );
     if (created.empty) {
       return this.doClarify(conversation, fa.salesAgent.cartEmpty);
     }
 
-    const uiBlock: UiBlock = {
-      type: 'PAYMENT_INSTRUCTIONS',
-      cardNumber: created.cardNumber,
-      ownerName: created.ownerName,
-      amount: created.order.totalAmount,
-    };
-    const facts = `سفارش ثبت شد. مبلغ قابل پرداخت ${created.order.totalAmount} تومان${
-      addressSnapshot?.shippingCostToman
-        ? ` (شامل ${addressSnapshot.shippingCostToman.toLocaleString('fa-IR')} تومان هزینه ارسال)`
-        : ''
-    } به شماره کارت ${created.cardNumber} به نام ${created.ownerName}. بعد از واریز، عکس رسید را بفرست.`;
+    const shippingLine = addressSnapshot?.shippingCostToman
+      ? ` (شامل ${addressSnapshot.shippingCostToman.toLocaleString('fa-IR')} تومان هزینه ارسال)`
+      : '';
+    const uiBlock: UiBlock =
+      created.paymentMethod === 'SNAPPPAY'
+        ? {
+            type: 'SNAPPPAY_PAYMENT_INSTRUCTIONS',
+            link: created.snapppayLink!,
+            amount: created.order.totalAmount,
+          }
+        : {
+            type: 'PAYMENT_INSTRUCTIONS',
+            cardNumber: created.cardNumber!,
+            ownerName: created.ownerName!,
+            amount: created.order.totalAmount,
+          };
+    // docs/PRD-buyer-payment-method-card-or-snapppay-link.md بخش ۳ — لینک اسنپ‌پی ثابت و
+    // بدون callback است؛ چون نیوو هیچ راه خودکاری برای تطبیق مقصد پرداخت ندارد، هم اسکرین‌شات
+    // هم کد رهگیری (که اسنپ‌پی خودش بعد از پرداخت به خریدار می‌دهد) الزامی است
+    const facts =
+      created.paymentMethod === 'SNAPPPAY'
+        ? `سفارش ثبت شد. مبلغ قابل پرداخت ${created.order.totalAmount} تومان${shippingLine} از طریق این لینک اسنپ‌پی: ${created.snapppayLink}. بعد از پرداخت، هم کد رهگیری‌ای که اسنپ‌پی نشان می‌دهد و هم اسکرین‌شات صفحه‌ی موفقیت پرداخت را بفرست.`
+        : `سفارش ثبت شد. مبلغ قابل پرداخت ${created.order.totalAmount} تومان${shippingLine} به شماره کارت ${created.cardNumber} به نام ${created.ownerName}. بعد از واریز، عکس رسید را بفرست.`;
     const reply = await this.caption(facts, conversation);
     await this.logReply(conversation, reply, uiBlock, undefined, {
       intent: 'CHECKOUT',
@@ -5122,6 +5318,54 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     return { cost: rule.enabled ? rule.cost : 0, covered: rule.enabled };
   }
 
+  // docs/PRD-buyer-payment-method-card-or-snapppay-link.md بخش ۳ — متن آزاد خریدار حین
+  // AWAITING_PAYMENT/AWAITING_SELLER_APPROVAL برای paymentMethod=SNAPPPAY، قبل از رسیدن کد
+  // رهگیری؛ handleMessage این مسیر را قبل از parseIntent صدا می‌زند (هم‌الگوی handleAddressInput)
+  private async handleSnapppayTrackingCodeInput(
+    conversation: ConversationWithStore,
+    order: Order,
+    text: string,
+  ): Promise<EngineResult> {
+    const code = toEnglishDigits(text).trim();
+    if (code.length < 3 || code.length > 100) {
+      const reply = fa.salesAgent.snapppayTrackingCodeInvalid;
+      await this.logReply(conversation, reply, { type: 'NONE' });
+      return {
+        reply,
+        uiBlocks: [{ type: 'NONE' }],
+        state: conversation.currentState,
+      };
+    }
+
+    await this.prisma.order.update({
+      where: { id: order.id },
+      data: { snapppayTrackingCode: code },
+    });
+
+    // کد رهگیری بعد از اسکرین‌شات رسیده — نوتیفیکیشن قبلی فروشنده (notifySellerOfReceipt)
+    // بدون این کد فرستاده شده بود؛ یک پیام متنی مکمل کافی است، نیازی به ارسال دوباره‌ی عکس نیست
+    if (
+      order.status === 'RECEIPT_SUBMITTED' &&
+      conversation.store.sellerBotChatId
+    ) {
+      await this.sellerBotApi.sendText(
+        conversation.store.sellerBotChatId,
+        fa.telegram.receiptSnapppayTrackingCodeFollowUp(order.id, code),
+      );
+    }
+
+    const reply =
+      order.status === 'RECEIPT_SUBMITTED'
+        ? fa.salesAgent.snapppayTrackingCodeReceivedAfterScreenshot
+        : fa.salesAgent.snapppayTrackingCodeReceivedAwaitingScreenshot;
+    await this.logReply(conversation, reply, { type: 'NONE' });
+    return {
+      reply,
+      uiBlocks: [{ type: 'NONE' }],
+      state: conversation.currentState,
+    };
+  }
+
   async handleReceiptUpload(
     conversation: ConversationWithStore,
     receiptImageKey: string,
@@ -5164,6 +5408,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       buffer,
       receiptImageKey,
       order.totalAmount,
+      order.paymentMethod,
     );
     if (verification) {
       await this.prisma.order.update({
@@ -5186,23 +5431,28 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
 
   // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۴ گزینه A — فقط کمک به تصمیم
   // فروشنده (تایید نهایی همچنان دست خودش است)؛ شکست استخراج (عکس بی‌کیفیت/OCR نامشخص) فلو را
-  // مسدود نمی‌کند، فقط هیچ خطی به نوتیفیکیشن اضافه نمی‌شود (سکوت امن‌تر از حدس غلط)
+  // مسدود نمی‌کند، فقط هیچ خطی به نوتیفیکیشن اضافه نمی‌شود (سکوت امن‌تر از حدس غلط).
+  // docs/PRD-buyer-payment-method-card-or-snapppay-link.md — برای SNAPPPAY همان تابع با یک
+  // پرامپت vision متفاوت استفاده می‌شود (اسکرین‌شات موفقیت اسنپ‌پی، نه رسید بانکی)؛ این مسیر
+  // فقط مبلغ را چک می‌کند، نه مقصد پرداخت (ریسکی که در همان PRD صریح پرچم شده)
   private async verifyReceiptAmount(
     buffer: Buffer,
     receiptImageKey: string,
     expectedAmountToman: number,
+    paymentMethod: OrderPaymentMethod = 'CARD_TO_CARD',
   ): Promise<{ extractedAmountToman: number; match: boolean } | null> {
     try {
       const ext = receiptImageKey.split('.').pop() ?? 'jpg';
       const dataUrl = `data:${mimeTypeForExt(ext)};base64,${buffer.toString('base64')}`;
+      const promptText =
+        paymentMethod === 'SNAPPPAY'
+          ? 'این تصویر باید اسکرین‌شات صفحه‌ی موفقیت پرداخت اپلیکیشن/وب اسنپ‌پی (Snapp Pay) باشد. مبلغ پرداخت‌شده را به تومان استخراج کن (اگر به ریال نوشته شده، بر ۱۰ تقسیم کن). اگر این تصویر اصلاً شبیه صفحه‌ی موفقیت اسنپ‌پی نیست یا مبلغ قابل‌تشخیص نیست، found را false بگذار و amountToman را null بگذار.'
+          : 'این تصویر یک رسید انتقال وجه بانکی ایرانی (کارت‌به‌کارت/پایا/ساتنا) است. مبلغ واریزشده را به تومان استخراج کن (اگر مبلغ روی رسید به ریال نوشته شده، آن را بر ۱۰ تقسیم کن تا به تومان تبدیل شود). اگر مبلغ به‌هیچ‌وجه قابل‌تشخیص نیست، found را false بگذار و amountToman را null بگذار.';
       const visionMessage: UserModelMessage = {
         role: 'user',
         content: [
           { type: 'image', image: dataUrl },
-          {
-            type: 'text',
-            text: 'این تصویر یک رسید انتقال وجه بانکی ایرانی (کارت‌به‌کارت/پایا/ساتنا) است. مبلغ واریزشده را به تومان استخراج کن (اگر مبلغ روی رسید به ریال نوشته شده، آن را بر ۱۰ تقسیم کن تا به تومان تبدیل شود). اگر مبلغ به‌هیچ‌وجه قابل‌تشخیص نیست، found را false بگذار و amountToman را null بگذار.',
-          },
+          { type: 'text', text: promptText },
         ],
       };
       const { object } = await generateObject({
@@ -5267,12 +5517,25 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
             .join('، '),
         )
       : '';
+    // docs/PRD-buyer-payment-method-card-or-snapppay-link.md بخش ۳/۴ — چون لینک اسنپ‌پی
+    // ثابت/بدون callback است، نیوو مقصد پرداخت را تایید نمی‌کند؛ کد رهگیری (اگر تا این لحظه
+    // رسیده باشد) تنها چیزی است که فروشنده می‌تواند در پنل پذیرندگی خودش کراس‌چک کند
+    const snapppayLine =
+      order?.paymentMethod === 'SNAPPPAY'
+        ? `\n${
+            order.snapppayTrackingCode
+              ? fa.telegram.receiptSnapppayTrackingCode(
+                  order.snapppayTrackingCode,
+                )
+              : fa.telegram.receiptSnapppayTrackingCodeMissing
+          }`
+        : '';
     await this.sellerBotApi.sendPhotoBuffer(
       chatId,
       buffer,
       `receipt.${ext}`,
       mimeTypeForExt(ext),
-      `${fa.telegram.receiptNotificationCaption}${recipientLine}${verificationLine}`,
+      `${fa.telegram.receiptNotificationCaption}${recipientLine}${verificationLine}${snapppayLine}`,
       {
         inline_keyboard: [
           [

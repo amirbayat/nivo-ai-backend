@@ -1,5 +1,6 @@
 import type { ProductVideoItem } from '../store/product-video.types';
 import type { ProductSpecItem } from '../store/product-specs.types';
+import type { OrderPaymentMethod } from '@prisma/client';
 
 // docs/PRD-panels-and-buyer-ux-design.md بخش ۳.۲ — گام ۱. docs/PRD-product-display-focus-and-variations.md
 // §۴ (فاز ۱) — variantId/variantLabel اختیاری‌اند: محصول بدون واریانت (اکثریت) این دو را
@@ -24,6 +25,20 @@ export type PendingVariantSelection = {
   qty: number;
   selectedValues: Record<string, string>;
   mode: 'DIMENSION' | 'ALTERNATIVES';
+};
+
+// docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۱/۲ — snapshot آدرس+هزینه‌ی ارسال
+// که روی Order می‌نشیند (executeCreateOrder/finalizeOrder در conversation-engine.service.ts
+// مصرفش می‌کنند). این‌جا export می‌شود (نه محلی در آن فایل) چون
+// ConversationContext.pendingOrderAddressSnapshot پایین هم به همین شکل نیاز دارد
+export type AddressSnapshot = {
+  recipientName: string;
+  recipientPhone: string;
+  province: string;
+  address: string;
+  postalCode: string | null;
+  addressId: string | null;
+  shippingCostToman: number;
 };
 
 export type ConversationContext = {
@@ -70,6 +85,11 @@ export type ConversationContext = {
   // آزاد را به‌جای parseIntent مستقیم به handleVariantSelectionInput می‌دهد (عیناً الگوی
   // addressStep بالا)؛ با افزودن موفق به سبد یا لغو، null می‌شود
   pendingVariantSelection?: PendingVariantSelection | null;
+  // docs/PRD-buyer-payment-method-card-or-snapppay-link.md — وقتی فروشگاه هم کارت‌به‌کارت هم
+  // لینک اسنپ‌پی فعال دارد، قبل از ساخت واقعی Order از خریدار می‌پرسیم کدام را می‌خواهد؛ این
+  // snapshot (اگر فروشگاه ارسال داشت) تا جواب برسد همین‌جا نگه داشته می‌شود — عیناً الگوی
+  // pendingAddress بالا. null یعنی هیچ آدرسی در کار نبوده (فروش حضوری/دیجیتال)
+  pendingOrderAddressSnapshot?: AddressSnapshot | null;
 };
 
 export type UiBlock =
@@ -111,6 +131,13 @@ export type UiBlock =
       ownerName: string;
       amount: number;
     }
+  // docs/PRD-buyer-payment-method-card-or-snapppay-link.md — بلاک جدا از PAYMENT_INSTRUCTIONS
+  // بالا (نه یک mode روی همان)، چون رندر کاملاً فرق دارد (لینک قابل‌کلیک، نه شماره‌کارت) و
+  // مصرف‌کننده‌های فعلی PAYMENT_INSTRUCTIONS نباید نگران فیلدهای جدید باشند
+  | { type: 'SNAPPPAY_PAYMENT_INSTRUCTIONS'; link: string; amount: number }
+  // همان سند — فقط وقتی فروشگاه هم کارت‌به‌کارت هم لینک اسنپ‌پی فعال دارد نشان داده می‌شود؛
+  // options همیشه هر دو مقدار را دارد (این بلاک اصلاً ساخته نمی‌شود مگر هر دو فعال باشند)
+  | { type: 'PAYMENT_METHOD_PROMPT'; options: OrderPaymentMethod[] }
   | { type: 'ORDER_STATUS'; orderId: string; status: string }
   // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۱ + docs/PRD-buyer-saved-addresses.md —
   // یک نوع بلاک با سه حالت (نه سه نوع جدا) تا سطح UiBlock شلوغ نشود؛ هر حالت فقط فیلدهای
@@ -281,7 +308,10 @@ export type SalesAction = {
     | 'REORDER'
     // docs/PRD-product-display-focus-and-variations.md §۴.۲ — جواب چیپ VARIANT_PROMPT؛ فقط
     // وقتی ctx.pendingVariantSelection واقعاً موجود است معنا دارد (handleAction چک می‌کند)
-    | 'SELECT_VARIANT_VALUE';
+    | 'SELECT_VARIANT_VALUE'
+    // docs/PRD-buyer-payment-method-card-or-snapppay-link.md — جواب دکمه‌ی PAYMENT_METHOD_PROMPT؛
+    // فقط وقتی conversation.currentState واقعاً PAYMENT_METHOD_SELECTION است معنا دارد
+    | 'SELECT_PAYMENT_METHOD';
   productId?: string; // ADD_TO_CART, TOGGLE_SAVE_PRODUCT
   qty?: number;
   addressId?: string;
@@ -291,6 +321,7 @@ export type SalesAction = {
   // فقط SELECT_VARIANT_VALUE — در mode=DIMENSION یک ProductOptionValue.value، در mode=ALTERNATIVES
   // یک ProductVariant.id
   value?: string;
+  paymentMethod?: OrderPaymentMethod; // فقط SELECT_PAYMENT_METHOD
 };
 
 // docs/PRD-sales-agent-voice.md بخش ۱ — payload صف sales-agent-voice؛ در conversation-engine

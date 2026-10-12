@@ -157,6 +157,10 @@ export const fa = {
     reviewMediaNotFound: 'این رسانه یافت نشد',
     bankCardNotFound: 'این کارت بانکی یافت نشد',
     lastActiveBankCard: 'حداقل یک کارت بانکی باید فعال بماند',
+    // docs/PRD-buyer-payment-method-card-or-snapppay-link.md بخش ۵ — جلوگیری از وارد کردن
+    // لینک اشتباه/غیرمرتبط؛ فقط دامنه‌ی رسمی اسنپ‌پی یا کوتاه‌کننده‌ی رسمی‌شان پذیرفته می‌شود
+    invalidSnapppayLink:
+      'این لینک معتبر نیست — باید با https://snapppay.ir/ یا https://l.snpy.ir/ شروع شود',
     urlNotReadable:
       'نتونستیم این لینک رو بخونیم — لطفاً اطلاعات محصول رو دستی وارد کن',
     insufficientCreditForWebSearch:
@@ -336,6 +340,16 @@ export const fa = {
     // بیشتر خواسته و محصول پیدا شد (نه caption تولیدی، چون خودِ عکس‌ها پیام اصلی‌اند)
     photosCaption: (productName: string) => `عکس‌های ${productName} 📸`,
     receiptReceived: 'رسید دریافت شد و برای فروشنده ارسال شد — منتظر تایید باش',
+    // docs/PRD-buyer-payment-method-card-or-snapppay-link.md — پیام ثابت دکمه‌ی
+    // PAYMENT_METHOD_PROMPT؛ هم‌الگوی addressChooseSavedPrompt پایین (caption تولیدی ندارد)
+    choosePaymentMethodPrompt:
+      'برای پرداخت، کارت‌به‌کارت راحت‌تره یا اسنپ‌پی (پرداخت ۴ قسطه)؟',
+    snapppayTrackingCodeInvalid:
+      'این متن شبیه کد رهگیری اسنپ‌پی نیست — لطفاً کد رهگیری‌ای که بعد از پرداخت نشون داده شد رو دوباره بفرست',
+    snapppayTrackingCodeReceivedAwaitingScreenshot:
+      'کد رهگیری ثبت شد ✅ یک اسکرین‌شات هم از صفحه‌ی موفقیت پرداخت اسنپ‌پی بفرست تا برای فروشنده ارسال بشه',
+    snapppayTrackingCodeReceivedAfterScreenshot:
+      'کد رهگیری ثبت شد و برای فروشنده ارسال شد — منتظر تایید باش',
     faqStub: 'این سؤال رو یادداشت کردم، به‌زودی جواب می‌دم',
     handoffToHuman: 'الان شما رو به یکی از همکارها وصل می‌کنم',
     // docs/PRD-product-strategy-and-roadmap.md بخش ۳.۲ — وقتی Store.workingHoursStart/End
@@ -513,6 +527,15 @@ export const fa = {
       `✅ مبلغ رسید (${amountToman.toLocaleString('fa-IR')} تومان) با مبلغ سفارش مطابقت دارد.`,
     receiptAmountMismatch: (extractedToman: number, expectedToman: number) =>
       `⚠️ مبلغ خوانده‌شده از رسید (${extractedToman.toLocaleString('fa-IR')} تومان) با مبلغ سفارش (${expectedToman.toLocaleString('fa-IR')} تومان) یکی نیست — قبل از تایید دوباره چک کن.`,
+    // docs/PRD-buyer-payment-method-card-or-snapppay-link.md بخش ۳/۴ — لینک اسنپ‌پی ثابت است
+    // و نیوو مقصد پرداخت را تایید نمی‌کند؛ کد رهگیری تنها چیزی است که فروشنده می‌تواند در پنل
+    // پذیرندگی خودش («نمایش سفارش‌های اخیر») کراس‌چک کند
+    receiptSnapppayTrackingCode: (code: string) =>
+      `🔗 پرداخت با اسنپ‌پی — کد رهگیری: ${code}\n⚠️ این مبلغ فقط از روی اسکرین‌شات تخمین زده شده؛ لطفاً این کد رهگیری رو در پنل پذیرندگی اسنپ‌پی خودت چک کن.`,
+    receiptSnapppayTrackingCodeMissing:
+      '⚠️ پرداخت با اسنپ‌پی — خریدار هنوز کد رهگیری رو نفرستاده. قبل از تایید، از خریدار کد رهگیری رو بخواه و در پنل اسنپ‌پی‌ات چک کن.',
+    receiptSnapppayTrackingCodeFollowUp: (orderId: string, code: string) =>
+      `🔗 کد رهگیری اسنپ‌پی سفارش رسیده (${orderId}): ${code}\nلطفاً در پنل پذیرندگی اسنپ‌پی خودت چک کن.`,
     receiptApproveButton: '✅ تایید',
     receiptRejectButton: '❌ رد',
     orderApprovedFromTelegram: 'سفارش تایید شد ✅',

@@ -107,4 +107,14 @@ export class UpdateStoreDto {
   @Min(0)
   @Max(100)
   goldVatPercent?: number;
+
+  // docs/PRD-buyer-payment-method-card-or-snapppay-link.md بخش ۵ — نال/خالی یعنی این روش
+  // پرداخت غیرفعال است؛ فقط دامنه‌ی رسمی اسنپ‌پی یا کوتاه‌کننده‌ی رسمی‌شان پذیرفته می‌شود
+  @IsOptional()
+  @IsString()
+  @MaxLength(500, { message: fa.validation.stringTooLong })
+  @Matches(/^https:\/\/(snapppay\.ir|l\.snpy\.ir)\//, {
+    message: fa.store.invalidSnapppayLink,
+  })
+  snapppayPaymentLink?: string;
 }

@@ -653,6 +653,11 @@ export class TelegramService {
     // برای callback_data (عیناً همون فرض pv: برای اسم استان)
     else if (data.startsWith('vv:'))
       action = { type: 'SELECT_VARIANT_VALUE', value: data.slice(3) };
+    // docs/PRD-buyer-payment-method-card-or-snapppay-link.md — جواب دکمه‌ی PAYMENT_METHOD_PROMPT
+    else if (data === 'pm:CARD_TO_CARD')
+      action = { type: 'SELECT_PAYMENT_METHOD', paymentMethod: 'CARD_TO_CARD' };
+    else if (data === 'pm:SNAPPPAY')
+      action = { type: 'SELECT_PAYMENT_METHOD', paymentMethod: 'SNAPPPAY' };
     if (!action) return;
 
     if (conversation.isMutedForHuman) return;
@@ -1426,6 +1431,25 @@ export class TelegramService {
       case 'PAYMENT_INSTRUCTIONS': {
         const text = `شماره کارت: ${block.cardNumber}\nبه نام: ${block.ownerName}\nمبلغ: ${block.amount.toLocaleString('fa-IR')} تومان\n\nلطفاً عکس رسید رو همینجا بفرست`;
         await this.sendText(chatId, text);
+        return;
+      }
+      // docs/PRD-buyer-payment-method-card-or-snapppay-link.md — لینک ثابت فروشگاه؛ هم کد
+      // رهگیری هم اسکرین‌شات به‌صورت پیام/عکس آزاد همین‌جا در تلگرام فرستاده می‌شوند (همان
+      // handleMessage/handleReceiptUpload عمومی، بدون مسیر جدا برای تلگرام)
+      case 'SNAPPPAY_PAYMENT_INSTRUCTIONS': {
+        const text = `پرداخت با اسنپ‌پی: ${block.link}\nمبلغ: ${block.amount.toLocaleString('fa-IR')} تومان\n\nبعد از پرداخت، هم کد رهگیری و هم عکس صفحه‌ی موفقیت رو همینجا بفرست`;
+        await this.sendText(chatId, text);
+        return;
+      }
+      case 'PAYMENT_METHOD_PROMPT': {
+        await this.sendText(chatId, fa.salesAgent.choosePaymentMethodPrompt, {
+          inline_keyboard: [
+            [
+              { text: 'کارت‌به‌کارت', callback_data: 'pm:CARD_TO_CARD' },
+              { text: 'اسنپ‌پی (۴ قسطه)', callback_data: 'pm:SNAPPPAY' },
+            ],
+          ],
+        });
         return;
       }
       case 'ORDER_STATUS':
