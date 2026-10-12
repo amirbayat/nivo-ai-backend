@@ -5928,9 +5928,14 @@ answered=false بده (به‌جای حدس‌زدن).`,
       'capture_lead',
     );
     const reply = fa.salesAgent.leadCaptured;
-    await this.logReply(conversation, reply, { type: 'NONE' });
+    // فیدبک کاربر ۱۴۰۵/۰۷/۲۰ — اگر فروشگاه لینک وبسایت ثبت کرده، بعد از جمع‌آوری لید دکمه‌ی
+    // «مشاهده وبسایت» را هم نشان بده؛ فروشگاه بدون websiteUrl همان رفتار قبلی (بدون بلاک) را دارد
+    const uiBlock: UiBlock = conversation.store.websiteUrl
+      ? { type: 'VISIT_WEBSITE', url: conversation.store.websiteUrl }
+      : { type: 'NONE' };
+    await this.logReply(conversation, reply, uiBlock);
     await this.notifySellerOfLeadCapture(conversation, args.phone, args.name);
-    return { reply, uiBlocks: [], state: nextState };
+    return { reply, uiBlocks: uiBlock.type === 'NONE' ? [] : [uiBlock], state: nextState };
   }
 
   // docs/PRD-product-strategy-and-roadmap.md بخش ۳.۲ — وقتی هر دو فیلد ست نشده، یعنی
