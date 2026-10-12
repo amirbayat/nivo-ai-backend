@@ -73,6 +73,24 @@ const MAX_SUGGESTED_QUESTIONS = 6;
 const MAX_QUESTION_CHARS = 200;
 const MAX_SOURCE_NOTE_CHARS = 300;
 
+// docs/PRD-seller-knowledge-box-redesign.md بخش ۵.۵ — همان دلیل بالا (schema عمداً بدون
+// .max() تا AI_NoObjectGeneratedError نخورد)، منتها اینجا سقف واقعی ذخیره‌سازی هم‌راستا با
+// CreateKbEntryDto (۵۰۰/۵۰۰۰ کاراکتر) است؛ بدون این clamp، یک کاندید از سند بلند می‌تواند با
+// جواب طولانی‌تر از سقف DTO برگردد و «اعمال» (که دیگر inline-editable نیست، بخش ۵.۳) با خطای
+// ۴۰۰ سرور مواجه شود بدون راهی برای کوتاه‌کردن در همان لحظه.
+const MAX_KB_CANDIDATE_QUESTION_CHARS = 500;
+const MAX_KB_CANDIDATE_ANSWER_CHARS = 5000;
+
+function clampKbCandidates(candidates: KbCandidateEntry[]): KbCandidateEntry[] {
+  return candidates
+    .map((c) => ({
+      kind: c.kind,
+      question: c.question.trim().slice(0, MAX_KB_CANDIDATE_QUESTION_CHARS),
+      answer: c.answer.trim().slice(0, MAX_KB_CANDIDATE_ANSWER_CHARS),
+    }))
+    .filter((c) => c.question && c.answer);
+}
+
 function clampEnrichmentOutput<
   T extends {
     suggestedDescription: string;
@@ -163,6 +181,14 @@ export interface KbCandidateEntry {
   kind: StoreKbKind;
   question: string;
   answer: string;
+}
+
+// docs/PRD-seller-knowledge-box-redesign.md بخش ۵.۲ — extractChatFileText از قبل خودش
+// truncated را حساب می‌کند (chat-file-extraction.util.ts)؛ اینجا همان سیگنال تا فرانت راه
+// پیدا می‌کند تا به‌جای برش بی‌صدا یک هشدار صریح نشان دهد.
+export interface KbExtractResult {
+  candidates: KbCandidateEntry[];
+  truncated: boolean;
 }
 
 // فیدبک کاربر ۱۴۰۵/۰۷/۱۵ — همان شکلی که generateProductOptionsFromText برمی‌گرداند (§۴.۱.۱)،
@@ -371,7 +397,12 @@ JSON را برگردان، بدون توضیح یا markdown fence.`,
 
   async create(sellerId: string, storeId: string, input: StoreKbEntryInput) {
     await this.storeService.getOwned(sellerId, storeId);
-    const embedded = await this.computeEmbedding(input.question);
+    // docs/PRD-seller-knowledge-box-redesign.md بخش ۵.۱۰ — قبلاً فقط question embed می‌شد؛
+    // برای این‌که محتوای یک entry غیر-FAQ (پاراگراف توضیحات زیر یک عنوان کوتاه) هم در جست‌وجوی
+    // retrieveRelevant اثر بگذارد، answer هم به متن embed شده اضافه می‌شود.
+    const embedded = await this.computeEmbedding(
+      `${input.question}\n${input.answer}`,
+    );
     const entry = await this.prisma.storeKbEntry.create({
       data: {
         storeId,
@@ -420,8 +451,14 @@ JSON را برگردان، بدون توضیح یا markdown fence.`,
     const before = await this.getOwnedEntry(sellerId, storeId, id);
     const { source, ...rest } = input;
     const data: Record<string, unknown> = { ...rest };
-    if (input.question !== undefined) {
-      const embedded = await this.computeEmbedding(input.question);
+    // question یا answer، هرکدام عوض شود، embedding باید دوباره حساب شود (بخش ۵.۱۰ — هر دو
+    // در متن embed می‌شوند، نه فقط question)
+    if (input.question !== undefined || input.answer !== undefined) {
+      const finalQuestion = input.question ?? before.question;
+      const finalAnswer = input.answer ?? before.answer;
+      const embedded = await this.computeEmbedding(
+        `${finalQuestion}\n${finalAnswer}`,
+      );
       if (embedded) {
         data.embedding = embedded;
         data.embeddingModel = EMBEDDING_MODEL;
@@ -518,13 +555,17 @@ JSON را برگردان، بدون توضیح یا markdown fence.`,
 - POLICY: شرایط مرجوعی/ارسال/گارانتی
 - PRODUCT_INFO: نکته‌ی مربوط به یک محصول خاص
 - GENERAL: هرچیز دیگر (معرفی برند، ساعت پاسخ‌گویی، ...)
-فقط از متن واقعی استخراج کن، چیزی اضافه نکن. اگر متن هیچ نکته‌ی قابل‌استفاده‌ای نداشت،
-آرایه‌ی خالی برگردان.`,
+اگر بخشی از متن ذاتاً سؤال/جواب نیست (مثلاً یک پاراگراف معرفی برند یا فلسفه‌ی فروشگاه)، آن را
+GENERAL بگذار با یک عنوان کوتاه و همان پاراگراف (تمیزشده، نه خلاصه‌ی اجباری) به‌عنوان answer —
+هرگز برای جا‌دادنش در قالب Q&A یک سؤال مصنوعی نساز. جواب هر مورد باید کوتاه و مناسب چت باشد
+(چند جمله، نه یک مقاله) چون این متن مستقیم در پاسخ ربات به مشتری بازنویسی می‌شود. فقط از متن
+واقعی استخراج کن، چیزی اضافه نکن. اگر متن هیچ نکته‌ی قابل‌استفاده‌ای نداشت، آرایه‌ی خالی
+برگردان.`,
       prompt: text,
       experimental_repairText: this.repairStructuredOutput(),
     });
 
-    return object.candidates;
+    return clampKbCandidates(object.candidates);
   }
 
   // فایل آپلودی را به چند KB entry کاندید می‌شکند — فروشنده باید قبل از ذخیره‌ی هرکدام
@@ -535,7 +576,7 @@ JSON را برگردان، بدون توضیح یا markdown fence.`,
     sellerId: string,
     storeId: string,
     file: { buffer: Buffer; originalname: string },
-  ): Promise<KbCandidateEntry[]> {
+  ): Promise<KbExtractResult> {
     await this.storeService.getOwned(sellerId, storeId);
 
     const ext = (file.originalname.split('.').pop() || '').toLowerCase();
@@ -552,14 +593,26 @@ JSON را برگردان، بدون توضیح یا markdown fence.`,
         VOICE_MESSAGE_ASR_CHAIN,
         false,
       );
-      return this.extractKbCandidatesFromText(transcript.text);
+      const truncated = transcript.text.length > MAX_EXTRACTED_CHARS;
+      const text = truncated
+        ? transcript.text.slice(0, MAX_EXTRACTED_CHARS)
+        : transcript.text;
+      return {
+        candidates: await this.extractKbCandidatesFromText(text),
+        truncated,
+      };
     }
 
     const parsed = parseUploadedKbFile(file.buffer, file.originalname);
     if (!parsed) throw new NotFoundException(fa.storeKb.invalidFile);
 
+    // extractChatFileText خودش truncated را حساب می‌کند (chat-file-extraction.util.ts) — بخش
+    // ۵.۲ این سند همین سیگنال را تا فرانت می‌برد
     const extracted = await extractChatFileText(parsed, MAX_EXTRACTED_CHARS);
-    return this.extractKbCandidatesFromText(extracted.text);
+    return {
+      candidates: await this.extractKbCandidatesFromText(extracted.text),
+      truncated: extracted.truncated,
+    };
   }
 
   // همان استخراج بالا برای متن مستقیم پیست‌شده (بدون فایل)
@@ -567,11 +620,16 @@ JSON را برگردان، بدون توضیح یا markdown fence.`,
     sellerId: string,
     storeId: string,
     rawText: string,
-  ): Promise<KbCandidateEntry[]> {
+  ): Promise<KbExtractResult> {
     await this.storeService.getOwned(sellerId, storeId);
-    const trimmed = rawText.trim().slice(0, MAX_EXTRACTED_CHARS);
+    const trimmed = rawText.trim();
     if (!trimmed) throw new BadRequestException(fa.storeKb.textRequired);
-    return this.extractKbCandidatesFromText(trimmed);
+    const truncated = trimmed.length > MAX_EXTRACTED_CHARS;
+    const sliced = truncated ? trimmed.slice(0, MAX_EXTRACTED_CHARS) : trimmed;
+    return {
+      candidates: await this.extractKbCandidatesFromText(sliced),
+      truncated,
+    };
   }
 
   // دستیار تکمیل محصول با AI (بخش ۲ سند) — مدل هرگز چیزی درباره‌ی قیمت/موجودی واقعی حدس
