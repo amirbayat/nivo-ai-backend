@@ -3899,6 +3899,17 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       products = products.filter((p) => p.id !== excludeProductId);
     }
     if (products.length === 0) {
+      // فیدبک کاربر ۱۴۰۵/۰۷/۲۰ — فروشگاه‌های leadCaptureOnly عمداً هیچ محصولی ثبت نمی‌کنند
+      // (docs برای همین هدفشان brandIntro/باکس دانش است)؛ پاسخ ثابت «محصولی ثبت نشده» اینجا
+      // گمراه‌کننده است، پس به همان مسیر doFaq (که brandIntro و باکس دانش را می‌خواند) ارجاع
+      // می‌دهیم. بدون customerMessage (مثلاً startBrowse) چیزی برای جستجو نیست، رفتار قبلی می‌ماند
+      if (conversation.store.leadCaptureOnly && customerMessage) {
+        return this.doFaq(
+          conversation,
+          customerMessage,
+          this.getContext(conversation),
+        );
+      }
       return this.doClarify(conversation, fa.salesAgent.noProductsFound);
     }
 
