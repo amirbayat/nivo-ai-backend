@@ -170,6 +170,15 @@ export class StoreService {
   async update(sellerId: string, storeId: string, dto: UpdateStoreDto) {
     const before = await this.getOwned(sellerId, storeId);
     const { source, ...data } = dto;
+    // docs/PRD-leadgen-store-rich-brand-intro.md — فروشگاه‌های leadCaptureOnly کاتالوگ ندارند،
+    // پس برندینترو تنها جای همیشه-حاضر برای یک اسکریپت فروش واقعی است؛ برای بقیه‌ی فروشگاه‌ها
+    // همان سقف قبلی (۳۰۰) می‌ماند تا هزینه‌ی توکن هر نوبت برای اکثریت فروشگاه‌ها بالا نرود
+    if (data.brandIntro !== undefined) {
+      const maxLen = before.leadCaptureOnly ? 2000 : 300;
+      if (data.brandIntro.length > maxLen) {
+        throw new BadRequestException(fa.validation.stringTooLong);
+      }
+    }
     const updated = await this.prisma.store.update({
       where: { id: storeId },
       data,

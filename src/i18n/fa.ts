@@ -374,6 +374,9 @@ export const fa = {
     // در کار نیست و نباید چیزی شبیه آن القا شود
     leadCaptured:
       'ممنون! شماره‌تون رو یادداشت کردم، به‌زودی خودم باهاتون تماس می‌گیرم 🙏',
+    // فیدبک کاربر ۱۴۰۵/۰۷/۲۰ — وقتی فروشگاه لینک وبسایت دارد و مسیر تبدیل خودِ لینک است (نه
+    // شماره تماس)، دیگر نباید ادعای «بهت زنگ می‌زنم» کرد؛ دکمه‌ی VISIT_WEBSITE زیر همین پیام می‌آید
+    leadCapturedWithLink: 'عالی! از دکمه‌ی زیر می‌تونی ثبت‌نام کنی و اعتبار هدیه‌ت رو بگیری 🎁',
     // docs/PRD-buyer-abuse-rate-limit.md — فقط یک‌بار (لحظه‌ی قفل‌شدن) نشان داده می‌شود، بعدش سکوت کامل
     abuseLocked: 'یکم آروم‌تر 🙏 لطفاً چند دقیقه صبر کن و دوباره پیام بده',
     // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۲.۵ — سقف پیام هر سشن دمو
@@ -519,8 +522,8 @@ export const fa = {
     billingBlockedNotification:
       '⚠️ اعتبار فروشگاهت تموم شده و ایجنت فروش دیگه نمی‌تونه به خریدارهای جدید جواب بده — مکالمه‌های جدید مستقیم به خودت ارجاع می‌شن. برای فعال‌شدن دوباره‌ی ایجنت، وارد پنل فروشنده شو و اعتبار بخر.',
     // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۱۶
-    leadCaptureNotification: (phone: string, name?: string | null) =>
-      `📝 یک لید جدید ثبت شد:\n👤 ${name ?? '—'}\n📞 ${phone}`,
+    leadCaptureNotification: (phone?: string | null, name?: string | null) =>
+      `📝 یک لید جدید ثبت شد:\n👤 ${name ?? '—'}\n📞 ${phone ?? '—'}`,
     receiptNotificationCaption: '🧾 رسید جدید برای بررسی رسید.',
     // فیدبک کاربر — فروشنده قبل از تایید/رد، آدرس و مشخصات گیرنده رو نمی‌دید؛ فقط وقتی
     // Store.requiresShipping بوده و این فیلدها روی سفارش ست شده‌اند نمایش داده می‌شود

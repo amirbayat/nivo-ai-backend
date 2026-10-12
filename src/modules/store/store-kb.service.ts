@@ -1010,16 +1010,34 @@ sourceNote را خالی بگذار. پاسخ را فقط به‌صورت یک �
     storeId: string,
     rawText: string,
   ) {
-    await this.storeService.getOwned(sellerId, storeId);
+    const store = await this.storeService.getOwned(sellerId, storeId);
     const trimmed = rawText.trim().slice(0, 2000);
     if (!trimmed) {
       throw new BadRequestException(fa.store.brandIntroTextRequired);
     }
 
+    // docs/PRD-leadgen-store-rich-brand-intro.md — فروشگاه‌های leadCaptureOnly کاتالوگ ندارند،
+    // پس برندینترو باید یک اسکریپت فروش واقعی باشد (مشکل رایج هر نوع مشتری + ویژگی‌ها + مشوق
+    // ثبت‌نام)، نه یک جمله‌ی هویتی کوتاه؛ سقف ذخیره هم طبق همان منطق در StoreService.update
+    // (۲۰۰۰ به‌جای ۳۰۰) تعیین می‌شود
     const { object } = await generateObject({
       model: this.provider('openai/gpt-5.4-mini'),
       schema: z.object({ brandIntro: z.string() }),
-      system: `تو دستیار یک فروشنده‌ی فروشگاه آنلاین ایرانی هستی. متن خام زیر که فروشنده درباره‌ی
+      system: store.leadCaptureOnly
+        ? `تو دستیار یک فروشنده‌ای هستی که محصولش را از طریق یک ربات چت (بدون کاتالوگ فروش) معرفی
+می‌کند و هدفش جمع‌آوری لید است، نه فروش مستقیم. متن خام زیر که فروشنده درباره‌ی کسب‌وکارش نوشته را
+به یک اسکریپت فروش ساخت‌یافته (فارسی) تبدیل کن که دقیقاً شامل این بخش‌ها باشد، هرکدام چندخط کوتاه،
+نه پاراگراف بلند:
+۱) یک جمله‌ی هویتی (چیه، برای کی).
+۲) ۲ تا ۳ نوع مشتری رایج و یک مشکل مشخص و ملموس که هرکدام معمولاً دارند (نه کلی‌گویی).
+۳) ۴ تا ۵ ویژگی واقعی، هرکدام یک خط جدا که با یک ایموجی کوتاه شروع می‌شود (هرگز از ستاره یا
+   مارک‌داون استفاده نکن، چون متن خام نمایش داده می‌شود).
+۴) یک خط درباره‌ی مشوق ثبت‌نام (اگر فروشنده چیزی مثل اعتبار هدیه/تخفیف ذکر کرده)، بدون عدد/درصد
+   ساختگی اگر خودِ فروشنده عددی نگفته.
+۵) یک خط راهنمای لحن (دوستانه/مشاوره‌ای، نه فروشنده‌ی فشاری).
+فقط از همان اطلاعاتی که فروشنده داده استفاده کن، چیزی اختراع نکن. پاسخ را فقط به‌صورت یک شیء JSON
+معتبر برگردان.`
+        : `تو دستیار یک فروشنده‌ی فروشگاه آنلاین ایرانی هستی. متن خام زیر که فروشنده درباره‌ی
 برند/فروشگاهش نوشته را به یک معرفی کوتاه و حرفه‌ای (فارسی، ۱ تا ۳ جمله، لحن صمیمی ولی قابل‌اعتماد)
 تبدیل کن. فقط از همان اطلاعاتی که فروشنده داده استفاده کن، چیزی اختراع نکن. پاسخ را فقط به‌صورت
 یک شیء JSON معتبر برگردان.`,
@@ -1027,7 +1045,8 @@ sourceNote را خالی بگذار. پاسخ را فقط به‌صورت یک �
       experimental_repairText: this.repairStructuredOutput(),
     });
 
-    return { suggestedBrandIntro: object.brandIntro.trim().slice(0, 300) };
+    const maxLen = store.leadCaptureOnly ? 2000 : 300;
+    return { suggestedBrandIntro: object.brandIntro.trim().slice(0, maxLen) };
   }
 
   // docs/PRD-ai-assisted-business-setup.md — قدم ۱ ویزارد ثبت‌نام (قبل از ساخت فروشگاه، بدون
@@ -1328,8 +1347,15 @@ stock را null بگذار (حدس نزن). اگر برای چیزی مجبور 
         system: `تو دستیار تحلیل یادداشت فروشنده‌ی یک فروشگاه آنلاین ایرانی هستی. یادداشت خام
 زیر شامل هرچیزی است که فروشنده تا امروز درباره‌ی فروشگاهش نوشته (ممکن است از قبل جواب‌هایی که
 از ChatGPT گرفته هم داخلش باشد). کارت:
-۱. اگر متن شامل معرفی/داستان برند بود، یک brandIntroSuggestion کوتاه (۱-۳ جمله فارسی) بنویس؛
-وگرنه null.
+۱. اگر متن شامل معرفی/داستان برند بود، یک brandIntroSuggestion بنویس؛ وگرنه null. ${
+          store.leadCaptureOnly
+            ? `این فروشگاه کاتالوگ فروش ندارد و هدفش فقط جمع‌آوری لید از طریق چت است، پس
+brandIntroSuggestion باید یک اسکریپت فروش ساخت‌یافته (فارسی) باشد، نه یک جمله‌ی کوتاه: هویت در
+یک جمله، ۲-۳ نوع مشتری رایج با مشکل مشخص هرکدام، ۴-۵ ویژگی واقعی هرکدام در یک خط جدا با یک
+ایموجی کوتاه (هرگز ستاره/مارک‌داون، چون متن خام نمایش داده می‌شود)، یک خط مشوق ثبت‌نام (اگر در
+متن فروشنده آمده)، یک خط راهنمای لحن.`
+            : 'یک معرفی کوتاه (۱-۳ جمله فارسی) کافی است.'
+        }
 ۲. اگر متن شامل جزئیات ارسال (زمان/هزینه/نحوه) بود، یک shippingInfoSuggestion بنویس؛ وگرنه null.
 ۲ب. اگر متن هزینه‌ی ارسال را به تفکیک شهر/استان مشخص کرد (مثلاً «تهران رایگان، اصفهان ۱۰۰
 هزار تومان»)، همین را علاوه بر shippingInfoSuggestion، ساخت‌یافته هم در shippingRuleSuggestions
@@ -1377,7 +1403,9 @@ ${updatedNotes}`,
       return {
         ownerNotes: updatedNotes,
         brandIntroSuggestion:
-          object.brandIntroSuggestion?.trim().slice(0, 300) || null,
+          object.brandIntroSuggestion
+            ?.trim()
+            .slice(0, store.leadCaptureOnly ? 2000 : 300) || null,
         shippingInfoSuggestion:
           object.shippingInfoSuggestion?.trim().slice(0, 1000) || null,
         returnPolicySuggestion:
