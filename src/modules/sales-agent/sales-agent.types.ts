@@ -381,4 +381,7 @@ export type AiTraceData = {
   // docs/PRD-full-agent-engineering-review.md بخش ۴/۱۱ — اعداد+«تومان» در متن نهایی که با هیچ
   // قیمت/مبلغ واقعی این نوبت مطابقت نداشتند؛ فقط لاگ است، هرگز رفتار/پاسخ را عوض نمی‌کند
   suspiciousPriceClaims?: number[];
+  // فیدبک کاربر ۱۴۰۵/۰۷/۲۰ — فقط فروشگاه‌های leadCaptureOnly، خوداظهاری مدل هر نوبت (نگاه کن
+  // به enum LeadFunnelStage در schema.prisma)
+  leadFunnelStage?: string;
 };

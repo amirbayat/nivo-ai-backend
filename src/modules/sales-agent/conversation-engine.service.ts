@@ -11,6 +11,7 @@ import {
 import { z } from 'zod';
 import type {
   ConversationState,
+  LeadFunnelStage,
   Order,
   OrderPaymentMethod,
   Prisma,
@@ -2331,50 +2332,70 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     // همیشه اجباری بمانند ولی PERSUASION_INSTRUCTION (تعریف ۶ اصل) اصلاً در پرامپت نیست، مدل
     // مجبور به حدس‌زدن کورکورانه می‌شود و برچسب‌های غلط/بی‌ربط (مثلاً AUTHORITY بدون هیچ ادعای
     // واقعی) می‌سازد — پس وقتی خاموش است، این فیلدها اصلاً در schema نیستند، نه فقط optional
+    const respondBaseShape = {
+      text: z
+        .string()
+        .describe('متن فارسی کوتاه (حداکثر ۲-۳ جمله) برای مشتری'),
+      relevantProductIds: z
+        .array(z.string())
+        .describe(
+          'شناسه‌ی محصول(های) واقعاً مرتبط برای نمایش کارت — اگر موضوعی ندارد خالی بگذار',
+        ),
+    };
+    // برای لاگ ادمین؛ خوداظهاری خودِ مدل، نه چیزی که سرور بتواند مستقل از متن تشخیص دهد
+    const persuasionShape = {
+      persuasionTechniquesUsed: z
+        .array(
+          z.enum([
+            'COMMITMENT_CONSISTENCY',
+            'SOCIAL_PROOF',
+            'AUTHORITY',
+            'LIKING',
+            'RECIPROCITY',
+            'SCARCITY',
+          ]),
+        )
+        .describe(
+          'کدام‌یک از ۶ اصل متقاعدسازی را واقعاً در همین متن استفاده کردی — اگر هیچ‌کدام، خالی بگذار',
+        ),
+      usedGeneralKnowledge: z
+        .boolean()
+        .describe(
+          'آیا در همین متن از دانش عمومی خودت (نه facts فروشگاه) درباره‌ی محبوبیت/شناخته‌شده‌بودن یک محصول استفاده کردی',
+        ),
+    };
+    // فیدبک کاربر ۱۴۰۵/۰۷/۲۰ — خوداظهاری قیف لید، فقط برای فروشگاه‌های leadCaptureOnly؛
+    // LEAD_CAPTURED عمداً اینجا نیست چون آن را فقط سرور، هم‌زمان با اجرای واقعی capture_lead،
+    // ست می‌کند (همون الگوی progressHappened/openQuestionStreak پایین‌تر: پیشرفت سرور-محور،
+    // نه خوداظهاری مدل) — نگاه کن به schema.prisma برای توضیح کامل هر مقدار
+    const leadFunnelStageShape = {
+      leadFunnelStage: z
+        .enum([
+          'NEW',
+          'DISCOVERING_NEED',
+          'PITCHED',
+          'OBJECTION_RAISED',
+          'READY_TO_CAPTURE',
+          'NOT_RELEVANT',
+        ])
+        .describe(
+          'مرحله‌ی فعلی مخاطب در قیف جذب لید، بعد از همین پاسخ: NEW=هنوز نیازش معلوم نشده، ' +
+            'DISCOVERING_NEED=داری نوع کسب‌وکار/دردسرش را می‌پرسی، PITCHED=راه‌حل مشخص نیوو را ' +
+            'معرفی کردی، OBJECTION_RAISED=تردید/اعتراض مطرح کرد، READY_TO_CAPTURE=علاقه‌ی روشن ' +
+            'نشان داد و داری شماره می‌گیری، NOT_RELEVANT=پیامش کلاً بی‌ربط به کسب‌وکار نیوو بود',
+        ),
+    };
     const respondToCustomer = tool({
       description:
         'پاسخ نهایی به مشتری را اعلام می‌کند — دقیقاً یک‌بار، به‌عنوان آخرین قدم (مگر وقتی request_human_handoff زده‌ای)',
-      inputSchema: storePersuasionEnabled
-        ? z.object({
-            text: z
-              .string()
-              .describe('متن فارسی کوتاه (حداکثر ۲-۳ جمله) برای مشتری'),
-            relevantProductIds: z
-              .array(z.string())
-              .describe(
-                'شناسه‌ی محصول(های) واقعاً مرتبط برای نمایش کارت — اگر موضوعی ندارد خالی بگذار',
-              ),
-            // برای لاگ ادمین؛ خوداظهاری خودِ مدل، نه چیزی که سرور بتواند مستقل از متن تشخیص دهد
-            persuasionTechniquesUsed: z
-              .array(
-                z.enum([
-                  'COMMITMENT_CONSISTENCY',
-                  'SOCIAL_PROOF',
-                  'AUTHORITY',
-                  'LIKING',
-                  'RECIPROCITY',
-                  'SCARCITY',
-                ]),
-              )
-              .describe(
-                'کدام‌یک از ۶ اصل متقاعدسازی را واقعاً در همین متن استفاده کردی — اگر هیچ‌کدام، خالی بگذار',
-              ),
-            usedGeneralKnowledge: z
-              .boolean()
-              .describe(
-                'آیا در همین متن از دانش عمومی خودت (نه facts فروشگاه) درباره‌ی محبوبیت/شناخته‌شده‌بودن یک محصول استفاده کردی',
-              ),
-          })
-        : z.object({
-            text: z
-              .string()
-              .describe('متن فارسی کوتاه (حداکثر ۲-۳ جمله) برای مشتری'),
-            relevantProductIds: z
-              .array(z.string())
-              .describe(
-                'شناسه‌ی محصول(های) واقعاً مرتبط برای نمایش کارت — اگر موضوعی ندارد خالی بگذار',
-              ),
-          }),
+      inputSchema:
+        storePersuasionEnabled && conversation.store.leadCaptureOnly
+          ? z.object({ ...respondBaseShape, ...persuasionShape, ...leadFunnelStageShape })
+          : storePersuasionEnabled
+            ? z.object({ ...respondBaseShape, ...persuasionShape })
+            : conversation.store.leadCaptureOnly
+              ? z.object({ ...respondBaseShape, ...leadFunnelStageShape })
+              : z.object({ ...respondBaseShape }),
     });
 
     // docs/PRD-full-agent-engineering-review.md بخش ۵ — قبلاً factsOrPrompt لاگ‌شده در AI_TRACE
@@ -2473,6 +2494,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
             relevantProductIds: string[];
             persuasionTechniquesUsed?: PersuasionTechnique[];
             usedGeneralKnowledge?: boolean;
+            leadFunnelStage?: Exclude<LeadFunnelStage, 'LEAD_CAPTURED'>;
           };
         }
       | undefined;
@@ -2577,6 +2599,9 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         ...(lastShownProducts.length
           ? { contextData: { ...ctx, lastShownProducts } }
           : {}),
+        ...(finalCall.input.leadFunnelStage
+          ? { leadFunnelStage: finalCall.input.leadFunnelStage }
+          : {}),
       },
     });
 
@@ -2590,6 +2615,9 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         : {}),
       ...(finalCall.input.usedGeneralKnowledge
         ? { usedGeneralKnowledge: true }
+        : {}),
+      ...(finalCall.input.leadFunnelStage
+        ? { leadFunnelStage: finalCall.input.leadFunnelStage }
         : {}),
       relevantProductIdsRaw: relevantProductIds,
       lastShownProducts,
@@ -5950,6 +5978,13 @@ answered=false بده (به‌جای حدس‌زدن).`,
       this.getContext(conversation),
       'capture_lead',
     );
+    // فیدبک کاربر ۱۴۰۵/۰۷/۲۰ — سرور-محور، نه خوداظهاری مدل (دقیقاً مثل progressHappened پایین‌تر
+    // در callFullAgentTurn)؛ مدل هیچ‌وقت نمی‌تواند خودش LEAD_CAPTURED را در respond_to_customer
+    // اعلام کند، فقط وقتی capture_lead واقعاً اجرا شده باشد اینجا ست می‌شود
+    await this.prisma.salesConversation.update({
+      where: { id: conversation.id },
+      data: { leadFunnelStage: 'LEAD_CAPTURED' },
+    });
     const reply = fa.salesAgent.leadCaptured;
     // فیدبک کاربر ۱۴۰۵/۰۷/۲۰ — اگر فروشگاه لینک وبسایت ثبت کرده، بعد از جمع‌آوری لید دکمه‌ی
     // «مشاهده وبسایت» را هم نشان بده؛ فروشگاه بدون websiteUrl همان رفتار قبلی (بدون بلاک) را دارد
