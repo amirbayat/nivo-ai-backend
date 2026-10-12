@@ -6,7 +6,11 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import type { OrderStatus, GoldWageType } from '@prisma/client';
+import type {
+  OrderStatus,
+  OrderPaymentMethod,
+  GoldWageType,
+} from '@prisma/client';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import * as XLSX from 'xlsx';
@@ -1591,22 +1595,28 @@ export class StoreService {
     const monthStart = new Date(todayStart);
     monthStart.setDate(monthStart.getDate() - 29);
 
-    const [approvedOrders, orderCountsByStatus] = await Promise.all([
-      this.prisma.order.findMany({
-        where: { storeId, status: 'APPROVED' },
-        select: {
-          totalAmount: true,
-          createdAt: true,
-          items: true,
-          conversation: { select: { customerId: true } },
-        },
-      }),
-      this.prisma.order.groupBy({
-        by: ['status'],
-        where: { storeId },
-        _count: { _all: true },
-      }),
-    ]);
+    const [approvedOrders, orderCountsByStatus, orderCountsByPaymentMethod] =
+      await Promise.all([
+        this.prisma.order.findMany({
+          where: { storeId, status: 'APPROVED' },
+          select: {
+            totalAmount: true,
+            createdAt: true,
+            items: true,
+            conversation: { select: { customerId: true } },
+          },
+        }),
+        this.prisma.order.groupBy({
+          by: ['status'],
+          where: { storeId },
+          _count: { _all: true },
+        }),
+        this.prisma.order.groupBy({
+          by: ['paymentMethod'],
+          where: { storeId },
+          _count: { _all: true },
+        }),
+      ]);
 
     const sumSince = (since: Date) =>
       approvedOrders
@@ -1670,11 +1680,20 @@ export class StoreService {
       countByStatus[row.status] = row._count._all;
     }
 
+    const countByPaymentMethod: Record<OrderPaymentMethod, number> = {
+      CARD_TO_CARD: 0,
+      SNAPPPAY: 0,
+    };
+    for (const row of orderCountsByPaymentMethod) {
+      countByPaymentMethod[row.paymentMethod] = row._count._all;
+    }
+
     return {
       revenueTodayToman: sumSince(todayStart),
       revenueWeekToman: sumSince(weekStart),
       revenueMonthToman: sumSince(monthStart),
       orderCountsByStatus: countByStatus,
+      orderCountsByPaymentMethod: countByPaymentMethod,
       dailyRevenueTrend,
       topProducts,
       uniqueCustomerCount,
@@ -1700,6 +1719,8 @@ export class StoreService {
           productNames,
           order.totalAmount.toLocaleString('fa-IR'),
           fa.store.csvOrderStatusLabels[order.status] ?? order.status,
+          fa.store.csvPaymentMethodLabels[order.paymentMethod] ??
+            order.paymentMethod,
           order.shippingProvince ?? '',
           order.shippingAddress ?? '',
           order.recipientName ?? '',

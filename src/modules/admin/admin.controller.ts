@@ -13,7 +13,11 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import type { ConversationState } from '@prisma/client';
+import type {
+  ConversationState,
+  OrderStatus,
+  OrderPaymentMethod,
+} from '@prisma/client';
 import { JwtGuard } from '../../common/guards/jwt.guard';
 import { AdminGuard } from '../../common/guards/admin.guard';
 import { AdminService } from './admin.service';
@@ -243,6 +247,39 @@ export class AdminController {
       from: from ? new Date(from) : undefined,
       to: to ? new Date(to) : undefined,
       page: page ? parseInt(page, 10) : undefined,
+    });
+  }
+
+  // docs/PRD-buyer-payment-method-card-or-snapppay-link.md بخش ۹.۲ — لیست سفارش‌های
+  // کراس-فروشگاه + فیلتر، برای نمایش کارت‌به‌کارت/اسنپ‌پی در پنل ادمین نیوو
+  @Get('orders')
+  getOrders(
+    @Query('storeId') storeId?: string,
+    @Query('paymentMethod') paymentMethod?: OrderPaymentMethod,
+    @Query('status') status?: OrderStatus,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('page') page?: string,
+  ) {
+    return this.adminService.getOrders({
+      storeId,
+      paymentMethod,
+      status,
+      from: from ? new Date(from) : undefined,
+      to: to ? new Date(to) : undefined,
+      page: page ? parseInt(page, 10) : undefined,
+    });
+  }
+
+  // همان بخش ۹.۲ — گزارش تعداد/مجموع مبلغ به تفکیک روش پرداخت
+  @Get('orders/payment-method-stats')
+  getOrderPaymentMethodStats(
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    return this.adminService.getOrderPaymentMethodStats({
+      from: from ? new Date(from) : undefined,
+      to: to ? new Date(to) : undefined,
     });
   }
 

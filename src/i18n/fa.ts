@@ -234,6 +234,7 @@ export const fa = {
       'محصولات',
       'مبلغ (تومان)',
       'وضعیت',
+      'روش پرداخت',
       'استان',
       'آدرس',
       'گیرنده',
@@ -244,6 +245,11 @@ export const fa = {
       RECEIPT_SUBMITTED: 'رسید ارسال‌شده',
       APPROVED: 'تاییدشده',
       REJECTED: 'ردشده',
+    } as Record<string, string>,
+    // docs/PRD-buyer-payment-method-card-or-snapppay-link.md بخش ۹.۱ — ستون جدید CSV
+    csvPaymentMethodLabels: {
+      CARD_TO_CARD: 'کارت‌به‌کارت',
+      SNAPPPAY: 'اسنپ‌پی',
     } as Record<string, string>,
     csvProductsHeader: [
       'نام محصول',

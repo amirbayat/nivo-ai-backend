@@ -5,7 +5,11 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { ConversationState } from '@prisma/client';
+import type {
+  ConversationState,
+  OrderStatus,
+  OrderPaymentMethod,
+} from '@prisma/client';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import * as XLSX from 'xlsx';
@@ -1336,6 +1340,106 @@ export class AdminService {
     });
 
     return { items, total, page };
+  }
+
+  // docs/PRD-buyer-payment-method-card-or-snapppay-link.md بخش ۹.۲ — لیست سفارش‌های
+  // کراس-فروشگاه برای ادمین نیوو (کدام سفارش کارت‌به‌کارت/اسنپ‌پی است)
+  async getOrders(params: {
+    storeId?: string;
+    paymentMethod?: OrderPaymentMethod;
+    status?: OrderStatus;
+    from?: Date;
+    to?: Date;
+    page?: number;
+  }) {
+    const page = params.page && params.page > 0 ? params.page : 1;
+    const pageSize = 20;
+    const where = {
+      ...(params.storeId ? { storeId: params.storeId } : {}),
+      ...(params.paymentMethod ? { paymentMethod: params.paymentMethod } : {}),
+      ...(params.status ? { status: params.status } : {}),
+      ...((params.from ?? params.to)
+        ? {
+            createdAt: {
+              ...(params.from ? { gte: params.from } : {}),
+              ...(params.to ? { lte: params.to } : {}),
+            },
+          }
+        : {}),
+    };
+
+    const [total, orders] = await Promise.all([
+      this.prisma.order.count({ where }),
+      this.prisma.order.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        select: {
+          id: true,
+          storeId: true,
+          status: true,
+          paymentMethod: true,
+          snapppayTrackingCode: true,
+          totalAmount: true,
+          recipientName: true,
+          recipientPhone: true,
+          createdAt: true,
+          store: { select: { name: true } },
+        },
+      }),
+    ]);
+
+    const items = orders.map((o) => ({
+      id: o.id,
+      storeId: o.storeId,
+      storeName: o.store.name,
+      status: o.status,
+      paymentMethod: o.paymentMethod,
+      snapppayTrackingCode: o.snapppayTrackingCode,
+      totalAmount: o.totalAmount,
+      recipientName: o.recipientName,
+      recipientPhone: o.recipientPhone,
+      createdAt: o.createdAt,
+    }));
+
+    return { items, total, page, pageSize };
+  }
+
+  // همان بخش ۹.۲ — «گزارش» تعداد/مجموع مبلغ به تفکیک روش پرداخت که کاربر خواسته بود
+  async getOrderPaymentMethodStats(params: { from?: Date; to?: Date }) {
+    const where = {
+      ...((params.from ?? params.to)
+        ? {
+            createdAt: {
+              ...(params.from ? { gte: params.from } : {}),
+              ...(params.to ? { lte: params.to } : {}),
+            },
+          }
+        : {}),
+    };
+
+    const rows = await this.prisma.order.groupBy({
+      by: ['paymentMethod'],
+      where,
+      _count: { _all: true },
+      _sum: { totalAmount: true },
+    });
+
+    const stats: Record<
+      OrderPaymentMethod,
+      { count: number; totalAmountToman: number }
+    > = {
+      CARD_TO_CARD: { count: 0, totalAmountToman: 0 },
+      SNAPPPAY: { count: 0, totalAmountToman: 0 },
+    };
+    for (const row of rows) {
+      stats[row.paymentMethod] = {
+        count: row._count._all,
+        totalAmountToman: row._sum.totalAmount ?? 0,
+      };
+    }
+    return stats;
   }
 
   // docs/PRD-seller-guide-assistant-modal.md بخش ۱.۳ — دیباگ/اعتمادسازی داخلی: فروشنده کی چه
