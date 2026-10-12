@@ -9,6 +9,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import type { OrderPaymentMethod } from '@prisma/client';
 import { IRAN_PROVINCES } from '../../../common/constants/iran-provinces';
 
 // دکمه‌های UiBlock به‌جای ساختن جمله‌ی فارسی (که دوباره از parseIntent رد می‌شد)، این
@@ -34,6 +35,8 @@ export class SalesActionDto {
     'REORDER',
     // docs/PRD-product-display-focus-and-variations.md §۴.۲ — جواب چیپ VARIANT_PROMPT
     'SELECT_VARIANT_VALUE',
+    // docs/PRD-buyer-payment-method-card-or-snapppay-link.md — انتخاب روش پرداخت
+    'SELECT_PAYMENT_METHOD',
   ])
   type:
     | 'ADD_TO_CART'
@@ -48,7 +51,8 @@ export class SalesActionDto {
     | 'VIEW_ORDERS'
     | 'TOGGLE_SAVE_PRODUCT'
     | 'REORDER'
-    | 'SELECT_VARIANT_VALUE';
+    | 'SELECT_VARIANT_VALUE'
+    | 'SELECT_PAYMENT_METHOD';
 
   @IsOptional()
   @IsString()
@@ -78,6 +82,11 @@ export class SalesActionDto {
   @IsString()
   @MaxLength(200)
   value?: string;
+
+  // فقط SELECT_PAYMENT_METHOD
+  @IsOptional()
+  @IsIn(['CARD_TO_CARD', 'SNAPPPAY'])
+  paymentMethod?: OrderPaymentMethod;
 }
 
 export class SendMessageDto {
