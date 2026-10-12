@@ -40,6 +40,7 @@ import { MarketPricesService } from '../market-prices/market-prices.service';
 import { CommentsService } from '../comments/comments.service';
 import {
   computeDisplayPrice,
+  describeGoldPricing,
   GoldPriceUnavailableError,
   GoldPricingNotConfiguredError,
 } from './product-pricing.util';
@@ -449,12 +450,24 @@ export class StoreService {
             } else throw err;
           }
         }
+        // docs/PRD-category-specific-product-pricing-and-attributes.md بخش ۸.۱ — فیدبک کاربر
+        // ۱۴۰۵/۰۷/۲۰: اجرت/کارمزد تا امروز حتی از این پاسخ عمومی هم حذف می‌شد، یعنی خریدار و
+        // ایجنت فروش هیچ‌وقت نمی‌توانستند آن را ببینند. درصدهای خام را عمداً برنمی‌گردانیم —
+        // همان خط فارسی آماده‌ی describeGoldPricing که در چت هم استفاده می‌شود، یکدست‌تر است
+        const goldPricingSummary =
+          pricingModel === 'WEIGHT_BASED_FORMULA'
+            ? describeGoldPricing(
+                { weightGrams, purityKarat, goldWageType, goldWageValue, goldProfitPercent },
+                store,
+              )
+            : null;
         return {
           ...publicFields,
           videos: parseProductVideos(p.videos),
           isWeightBasedPricing: pricingModel === 'WEIGHT_BASED_FORMULA',
           weightGrams,
           purityKarat,
+          goldPricingSummary,
           basePrice: displayPrice,
           priceUnavailable,
         };

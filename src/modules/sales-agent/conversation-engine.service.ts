@@ -21,6 +21,7 @@ import { CardSelectorService } from '../store/card-selector.service';
 import { MarketPricesService } from '../market-prices/market-prices.service';
 import {
   computeDisplayPrice,
+  describeGoldPricing,
   GoldPriceUnavailableError,
   GoldPricingNotConfiguredError,
 } from '../store/product-pricing.util';
@@ -91,6 +92,10 @@ type ProductLike = {
   goldWageType?: 'PERCENT' | 'FIXED_PER_GRAM' | null;
   goldWageValue?: number | null;
   goldProfitPercent?: number | null;
+  // docs/PRD-category-specific-product-pricing-and-attributes.md بخش ۸.۱ — resolveProductPrices
+  // این را هم‌زمان با basePrice پر می‌کند؛ خط فارسی آماده‌ی «وزن/عیار/اجرت/سود/مالیات»، برای
+  // تزریق به واقعیت‌های مدل و نمایش در کارت محصول، تا دیگر این داده‌ها بعد از محاسبه‌ی قیمت دور ریخته نشوند
+  goldPricingSummary?: string | null;
   images: string[];
   description?: string | null;
   // docs/PRD-product-video.md بخش ۴ — ستون Json خام (Prisma.JsonValue)، با parseProductVideos می‌خوانیم
@@ -148,6 +153,18 @@ function displayStock(product: ProductLike): number {
   return hasVariantOptions(product)
     ? aggregateVariantStock(product)
     : product.stock;
+}
+
+// docs/PRD-category-specific-product-pricing-and-attributes.md بخش ۸.۱ — goldPricingSummary
+// یک ستون واقعی دیتابیس نیست (برخلاف weightGrams/purityKarat)؛ resolveProductPrices آن را
+// in-place روی همان آبجکت Prisma می‌نشاند، اما تایپ استاتیک متغیر فراخوان‌کننده (مثل نتیجه‌ی
+// findMany خام) هیچ‌وقت این فیلد را نمی‌شناسد. این تابع یک خواندن type-safe فراهم می‌کند بدون
+// نیاز به cast پراکنده در همه‌جا — همان ترفند پارامتر optional روی ProductLike
+function goldPricingSummaryOf(product: {
+  id: string;
+  goldPricingSummary?: string | null;
+}): string | null {
+  return product.goldPricingSummary ?? null;
 }
 
 // آستانه‌ی handoff: بعد از این تعداد پیام پیاپی نامفهوم/بی‌نتیجه، مکالمه به انسان سپرده
@@ -259,6 +276,12 @@ type CompactProduct = {
   description?: string | null;
   // docs/PRD-product-video.md بخش ۴
   videos: ProductVideoItem[];
+  // docs/PRD-category-specific-product-pricing-and-attributes.md بخش ۸.۱ — فقط برای محصولات
+  // WEIGHT_BASED_FORMULA پر می‌شود، تا PRODUCT_CARD بتواند وزن/عیار/اجرت را نشان بدهد
+  weightGrams?: number | null;
+  purityKarat?: number | null;
+  isWeightBasedPricing?: boolean;
+  goldPricingSummary?: string | null;
 };
 
 // docs/PRD-sales-agent-persuasion-principles.md بخش ۳.۲/۳.۳/۳.۴ — ثابت در کد (نه تنظیم پنل)،
@@ -373,6 +396,16 @@ export class ConversationEngineService {
           null,
           store,
           goldItems,
+        );
+        product.goldPricingSummary = describeGoldPricing(
+          {
+            weightGrams: product.weightGrams ?? null,
+            purityKarat: product.purityKarat ?? null,
+            goldWageType: product.goldWageType,
+            goldWageValue: product.goldWageValue,
+            goldProfitPercent: product.goldProfitPercent,
+          },
+          store,
         );
         for (const v of product.variants ?? []) {
           v.priceOverride = computeDisplayPrice(
@@ -565,10 +598,12 @@ export class ConversationEngineService {
       description?: string | null;
       specs?: unknown;
       persuasionTechniquesEnabled: boolean;
+      // docs/PRD-category-specific-product-pricing-and-attributes.md بخش ۸.۱ — فقط محصولات طلا پر دارند
+      goldPricingSummary?: string | null;
     },
     storePersuasionEnabled: boolean,
   ): Promise<string> {
-    const base = `${product.name} (شناسه: ${product.id}, ${product.basePrice} تومان)${product.stock === 0 ? ' — فعلاً ناموجود' : ''}${product.description ? ` — توضیحات: ${truncateDescriptionForFacts(product.description)}` : ''}${formatSpecsForFacts(parseProductSpecs(product.specs))}`;
+    const base = `${product.name} (شناسه: ${product.id}, ${product.basePrice} تومان)${product.stock === 0 ? ' — فعلاً ناموجود' : ''}${product.goldPricingSummary ? ` — ${product.goldPricingSummary}` : ''}${product.description ? ` — توضیحات: ${truncateDescriptionForFacts(product.description)}` : ''}${formatSpecsForFacts(parseProductSpecs(product.specs))}`;
     const note = await this.buildPersuasionNote(
       storeId,
       product,
@@ -1702,6 +1737,10 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
             stock: p.stock,
             images: p.images,
             videos: p.videos,
+            weightGrams: p.weightGrams ?? null,
+            purityKarat: p.purityKarat ?? null,
+            isWeightBasedPricing: p.isWeightBasedPricing ?? false,
+            goldPricingSummary: p.goldPricingSummary ?? null,
           })),
         };
       }
@@ -1804,6 +1843,10 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           images: p.images,
           description: p.description,
           videos: parseProductVideos(p.videos),
+          weightGrams: p.weightGrams,
+          purityKarat: p.purityKarat,
+          isWeightBasedPricing: p.pricingModel === 'WEIGHT_BASED_FORMULA',
+          goldPricingSummary: goldPricingSummaryOf(p),
         },
       ]),
     );
@@ -1858,6 +1901,10 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
             images: p.images,
             description: p.description,
             videos: parseProductVideos(p.videos),
+            weightGrams: p.weightGrams,
+            purityKarat: p.purityKarat,
+            isWeightBasedPricing: p.pricingModel === 'WEIGHT_BASED_FORMULA',
+            goldPricingSummary: goldPricingSummaryOf(p),
           });
           toolFetchedProductIds.add(p.id);
         }
@@ -1870,6 +1917,9 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
             ? truncateDescriptionForFacts(p.description)
             : null,
           specs: parseProductSpecs(p.specs),
+          ...(goldPricingSummaryOf(p)
+            ? { goldPricing: goldPricingSummaryOf(p) }
+            : {}),
         }));
       },
     });
@@ -1894,6 +1944,10 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           images: product.images,
           description: product.description,
           videos: parseProductVideos(product.videos),
+          weightGrams: product.weightGrams,
+          purityKarat: product.purityKarat,
+          isWeightBasedPricing: product.pricingModel === 'WEIGHT_BASED_FORMULA',
+          goldPricingSummary: goldPricingSummaryOf(product),
         });
         toolFetchedProductIds.add(product.id);
         const persuasionNote = await this.buildPersuasionNote(
@@ -1910,6 +1964,9 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
             ? truncateDescriptionForFacts(product.description)
             : null,
           specs: parseProductSpecs(product.specs),
+          ...(goldPricingSummaryOf(product)
+            ? { goldPricing: goldPricingSummaryOf(product) }
+            : {}),
           ...(persuasionNote ? { persuasion: persuasionNote.trim() } : {}),
         };
       },
@@ -2232,6 +2289,10 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
             images: p.images,
             description: p.description,
             videos: parseProductVideos(p.videos),
+            weightGrams: p.weightGrams,
+            purityKarat: p.purityKarat,
+            isWeightBasedPricing: p.pricingModel === 'WEIGHT_BASED_FORMULA',
+            goldPricingSummary: goldPricingSummaryOf(p),
           });
           toolFetchedProductIds.add(p.id);
         }
@@ -3711,6 +3772,10 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           stock: displayStock(product),
           images: product.images,
           videos: parseProductVideos(product.videos),
+          weightGrams: product.weightGrams ?? null,
+          purityKarat: product.purityKarat ?? null,
+          isWeightBasedPricing: product.pricingModel === 'WEIGHT_BASED_FORMULA',
+          goldPricingSummary: product.goldPricingSummary ?? null,
         },
       ],
     };
@@ -3730,7 +3795,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     // نمی‌خواهد تعداد واقعی موجودی افشا شود؛ فقط وضعیت موجود/ناموجود کافی است.
     // docs/PRD-product-display-focus-and-variations.md §۴.۲ — اگر محصول گزینه (سایز/رنگ) دارد،
     // caption از قبل مشتری را آگاه می‌کند که بعد از «افزودن به سبد» باید گزینه انتخاب کند
-    const facts = `مشتری از لینک مستقیم این محصول وارد شده: ${product.name} (${product.basePrice} تومان)${product.stock === 0 ? ' — فعلاً ناموجود' : ''}${hasVariantOptions(product) ? ` — این محصول گزینه‌های مختلف (${product.optionTypes!.map((o) => o.name).join('/')}) دارد` : ''}${product.description ? `\nتوضیحات محصول: ${truncateDescriptionForFacts(product.description)}` : ''}${formatSpecsForFacts(parseProductSpecs(product.specs))}${await this.commentsFactsSuffix(product.id)}${await this.crossSellFactsSuffix(conversation.storeId, product.id)}`;
+    const facts = `مشتری از لینک مستقیم این محصول وارد شده: ${product.name} (${product.basePrice} تومان)${product.stock === 0 ? ' — فعلاً ناموجود' : ''}${product.goldPricingSummary ? ` — ${product.goldPricingSummary}` : ''}${hasVariantOptions(product) ? ` — این محصول گزینه‌های مختلف (${product.optionTypes!.map((o) => o.name).join('/')}) دارد` : ''}${product.description ? `\nتوضیحات محصول: ${truncateDescriptionForFacts(product.description)}` : ''}${formatSpecsForFacts(parseProductSpecs(product.specs))}${await this.commentsFactsSuffix(product.id)}${await this.crossSellFactsSuffix(conversation.storeId, product.id)}`;
     // skipGreeting=true چون finalReply پایین همیشه (بدون قید isFirstReply) یک buildGreeting
     // جلوی همین reply می‌چسباند — بدون این پرچم، caption() خودش هم یک «سلام!» جدا می‌ساخت
     const reply = await this.caption(facts, conversation, undefined, true);
@@ -3787,7 +3852,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
 
     // همون دلیل showProduct بالا — بدون عدد موجودی در واقعیت‌ها. hasVariantOptions هم همان‌جا
     // توضیح داده شد: فقط یک اشاره‌ی کوتاه که این محصول گزینه دارد، بدون جزئیات
-    const facts = `این محصولات فروشگاه است: ${products.map((p) => `${p.name} (${p.basePrice} تومان)${p.stock === 0 ? ' — فعلاً ناموجود' : ''}${hasVariantOptions(p) ? ` — دارای گزینه‌های مختلف (${p.optionTypes.map((o) => o.name).join('/')})` : ''}${p.description ? ` — توضیحات: ${truncateDescriptionForFacts(p.description)}` : ''}${formatSpecsForFacts(parseProductSpecs(p.specs))}`).join('، ')}`;
+    const facts = `این محصولات فروشگاه است: ${products.map((p) => `${p.name} (${p.basePrice} تومان)${p.stock === 0 ? ' — فعلاً ناموجود' : ''}${goldPricingSummaryOf(p) ? ` — ${goldPricingSummaryOf(p)}` : ''}${hasVariantOptions(p) ? ` — دارای گزینه‌های مختلف (${p.optionTypes.map((o) => o.name).join('/')})` : ''}${p.description ? ` — توضیحات: ${truncateDescriptionForFacts(p.description)}` : ''}${formatSpecsForFacts(parseProductSpecs(p.specs))}`).join('، ')}`;
 
     // docs/PRD-sales-agent-response-strategy-ab.md بخش ۱، جدول Track A — جدول تصمیمی که
     // docs/PRD-sales-agent-implicit-need-detection.md فاز ۱ محاسبه می‌کرد ولی تا امروز هیچ‌جا
@@ -3934,6 +3999,10 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         stock: displayStock(p),
         images: p.images,
         videos: parseProductVideos(p.videos),
+        weightGrams: p.weightGrams ?? null,
+        purityKarat: p.purityKarat ?? null,
+        isWeightBasedPricing: p.pricingModel === 'WEIGHT_BASED_FORMULA',
+        goldPricingSummary: goldPricingSummaryOf(p),
       })),
     };
     const nextState: ConversationState = 'BROWSING';

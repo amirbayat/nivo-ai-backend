@@ -84,6 +84,13 @@ export type UiBlock =
         // docs/PRD-product-video.md بخش ۴ — چندویدیویی، فرانت با MediaCarousel ویدیو(ها)
         // را قبل از عکس‌ها نشان می‌دهد
         videos: ProductVideoItem[];
+        // docs/PRD-category-specific-product-pricing-and-attributes.md بخش ۸.۱ — فقط محصولات
+        // WEIGHT_BASED_FORMULA این‌ها را پر دارند؛ goldPricingSummary یک خط فارسیِ آماده‌ی
+        // «وزن/عیار/اجرت/سود/مالیات» است، یک‌بار فرمت‌شده در بک‌اند
+        weightGrams?: number | null;
+        purityKarat?: number | null;
+        isWeightBasedPricing?: boolean;
+        goldPricingSummary?: string | null;
       }[];
     }
   // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۳ — برخلاف PRODUCT_CARD که فقط

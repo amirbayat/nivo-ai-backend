@@ -118,3 +118,38 @@ export function computeDisplayPrice(
 
   return Math.round(finalPrice / ROUND_TO_TOMAN) * ROUND_TO_TOMAN;
 }
+
+// docs/PRD-category-specific-product-pricing-and-attributes.md بخش ۸.۱ — فیدبک کاربر ۱۴۰۵/۰۷/۲۰:
+// نه کارت محصول (چت/صفحه‌ی فروشگاه) و نه ایجنت فروش هیچ‌کدام اجرت/کارمزد را نمی‌دیدند چون
+// computeDisplayPrice فقط عدد نهایی را برمی‌گرداند و بقیه‌ی اجزا را دور می‌ریزد. این تابع همان
+// اولویت override محصول روی پیش‌فرض فروشگاه را تکرار می‌کند (عمداً کپی کوچک، نه وابسته به
+// computeDisplayPrice، چون این یکی نیازی به نرخ لحظه‌ای طلا ندارد) تا یک خط فارسی آماده برای
+// نمایش/تزریق به مدل تولید کند — یک‌بار فرمت‌شده این‌جا، همه‌جا (چت، API عمومی، فرم فروشنده) از
+// همین رشته استفاده می‌کنند.
+export function describeGoldPricing(
+  product: Pick<
+    GoldPricingInputs,
+    | 'weightGrams'
+    | 'purityKarat'
+    | 'goldWageType'
+    | 'goldWageValue'
+    | 'goldProfitPercent'
+  >,
+  store: StoreGoldPricingSettings,
+): string | null {
+  if (!product.weightGrams || !product.purityKarat) return null;
+
+  const goldWageType = product.goldWageType ?? store.goldWageType;
+  const goldWageValue = product.goldWageValue ?? store.goldWageValue;
+  const goldProfitPercent = product.goldProfitPercent ?? store.goldProfitPercent;
+  if (!goldWageType || goldWageValue == null || goldProfitPercent == null) {
+    return null;
+  }
+
+  const wageText =
+    goldWageType === 'PERCENT'
+      ? `${goldWageValue.toLocaleString('fa-IR')}٪ از قیمت پایه‌ی طلا`
+      : `${goldWageValue.toLocaleString('fa-IR')} تومان به‌ازای هر گرم`;
+
+  return `وزن ${product.weightGrams.toLocaleString('fa-IR')} گرم، عیار ${product.purityKarat.toLocaleString('fa-IR')}، اجرت ${wageText}، سود فروشنده ${goldProfitPercent.toLocaleString('fa-IR')}٪، مالیات بر ارزش‌افزوده ${store.goldVatPercent.toLocaleString('fa-IR')}٪ (روی اجرت و سود)`;
+}
