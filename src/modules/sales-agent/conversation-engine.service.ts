@@ -6044,7 +6044,14 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     const tone = toneForCategory(conversation.store.category);
     const attempt = async (model: string): Promise<string | null> => {
       const { object, usage } = await generateObject({
-        model: this.aiProvider.buildClient()(model),
+        // فیدبک کاربر ۱۴۰۵/۰۷/۲۱ — بدون supportsStructuredOutputs=true، @ai-sdk/openai-compatible
+        // فقط response_format: {type:'json_object'} می‌فرستد؛ بعضی مدل‌ها/provider ها (مثل
+        // openai/gpt-6-luna روی Azure) این حالت را رد می‌کنند مگر کلمه‌ی «json» عیناً در پیام‌های
+        // ورودی باشد (که پرامپت فارسی زیر ندارد) — دقیقاً همان AI_APICallError 400 که با اضافه‌شدن
+        // DEFAULT_MODEL_FALLBACK_CHAIN به این تابع بروز کرد. همان فیکس callParseIntent/store-kb.service.ts.
+        model: this.aiProvider.buildClient(undefined, {
+          supportsStructuredOutputs: true,
+        })(model),
         schema: z.object({
           answered: z.boolean(),
           reply: z.string().optional(),
@@ -6110,7 +6117,11 @@ answered=false بده (به‌جای حدس‌زدن).`,
     const tone = toneForCategory(conversation.store.category);
     const attempt = async (model: string): Promise<string | null> => {
       const { object, usage } = await generateObject({
-        model: this.aiProvider.buildClient()(model),
+        // همون فیکس tryAnswerFromProductDescriptions بالا — بدون supportsStructuredOutputs=true
+        // بعضی مدل‌ها/provider های زنجیره‌ی fallback با 400 «must contain the word json» رد می‌شوند
+        model: this.aiProvider.buildClient(undefined, {
+          supportsStructuredOutputs: true,
+        })(model),
         schema: z.object({
           answered: z.boolean(),
           reply: z.string().optional(),
