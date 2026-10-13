@@ -15,6 +15,9 @@ interface BazaarValidateError {
   error_description: string;
 }
 
+// 0.13d — فقط کاراکترهای امن و بدون `..`؛ هر چیز دیگر قبل از ساخت URL رد می‌شود
+export const BAZAAR_SAFE_TOKEN = /^(?!.*\.\.)[A-Za-z0-9._-]+$/;
+
 @Injectable()
 export class BazaarIabService {
   private readonly logger = new Logger(BazaarIabService.name);
@@ -41,7 +44,17 @@ export class BazaarIabService {
       return { valid: false };
     }
 
-    const url = `${this.baseUrl}/validate/${this.packageName}/inapp/${productId}/purchases/${purchaseToken}/`;
+    if (
+      !BAZAAR_SAFE_TOKEN.test(purchaseToken) ||
+      !BAZAAR_SAFE_TOKEN.test(productId)
+    ) {
+      this.logger.warn(
+        `validatePurchase: rejected unsafe productId/purchaseToken (len=${purchaseToken.length})`,
+      );
+      return { valid: false };
+    }
+
+    const url = `${this.baseUrl}/validate/${encodeURIComponent(this.packageName)}/inapp/${encodeURIComponent(productId)}/purchases/${encodeURIComponent(purchaseToken)}/`;
     const res = await fetch(url, {
       headers: { 'CAFEBAZAAR-PISHKHAN-API-SECRET': this.apiSecret },
     });
