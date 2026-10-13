@@ -105,16 +105,20 @@ export class SalesAgentController {
   }
 
   @Post('chat/:conversationId/messages')
-  sendMessage(
+  async sendMessage(
     @Param('conversationId') conversationId: string,
     @Headers('x-session-token') sessionToken: string,
     @Body() dto: SendMessageDto,
+    @Res({ passthrough: true }) res: Response,
   ) {
-    return this.salesAgentService.sendMessage(
+    const result = await this.salesAgentService.sendMessage(
       conversationId,
       sessionToken,
       dto,
     );
+    // 0.4 — پیام در صف رفت (مکالمه مشغول turn قبلی است)؛ فرانت با polling جواب را می‌گیرد
+    if ('queued' in result && result.queued) res.status(202);
+    return result;
   }
 
   @Post('chat/:conversationId/receipt')

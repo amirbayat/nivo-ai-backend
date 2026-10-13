@@ -118,6 +118,8 @@ import type {
   SalesAgentVoiceJobData,
   UiBlock,
 } from './sales-agent.types';
+import { ConversationLockService } from './conversation-lock.service';
+import { CONVERSATION_DRAIN_MAX_ROUNDS } from '../../common/constants/sales-ops.constants';
 import { CART_MAX_QTY_PER_LINE } from '../../common/constants/sales-ops.constants';
 import { isValidCartQty, reconcileCart, lineKey } from './cart-validation.util';
 import type { CatalogLine } from './cart-validation.util';
@@ -586,6 +588,7 @@ export class ConversationEngineService {
     private readonly marketPrices: MarketPricesService,
     @InjectQueue('sales-agent-voice')
     private readonly voiceQueue: Queue<SalesAgentVoiceJobData>,
+    private readonly lock: ConversationLockService,
   ) {}
 
   // docs/PRD-category-specific-product-pricing-and-attributes.md بخش ۲.۳ — نقطه‌ی مرکزی حل
@@ -4280,7 +4283,118 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     });
   }
 
+  // 0.4 — شنونده‌ی نتیجه‌ی turnهای «صف‌شده» (پیام‌هایی که وسط پردازش یک turn دیگر رسیدند).
+  // وب با polling جواب را می‌گیرد؛ تلگرام باید این نتیجه را خودش به چت بفرستد.
+  private queuedResultListener:
+    ((conversationId: string, result: EngineResult) => Promise<void>) | null =
+    null;
+  onQueuedTurnResult(
+    fn: (conversationId: string, result: EngineResult) => Promise<void>,
+  ) {
+    this.queuedResultListener = fn;
+  }
+
+  private async reloadConversation(
+    conversation: ConversationWithStore,
+  ): Promise<ConversationWithStore> {
+    // بعد از گرفتن قفل، state/context «تازه» از DB خوانده می‌شود (نسخه‌ی قبل از قفل کهنه است)
+    return (
+      (await this.prisma.salesConversation.findUnique({
+        where: { id: conversation.id },
+        include: { store: true },
+      })) ?? conversation
+    );
+  }
+
+  // 0.4 — پیام آزاد: اگر مکالمه در حال پردازش است، پیام در صف می‌رود و فوراً queued=true
+  // برمی‌گردد؛ بعد از پایان turn جاری، پیام‌های صف با هم در «یک» turn پردازش می‌شوند.
   async handleMessage(
+    conversation: ConversationWithStore,
+    text: string,
+  ): Promise<EngineResult> {
+    let token = await this.lock.acquire(conversation.id);
+    if (!token) {
+      await this.lock.enqueue(conversation.id, text);
+      return {
+        reply: '',
+        uiBlocks: [],
+        state: conversation.currentState,
+        queued: true,
+      };
+    }
+    try {
+      const first = await this.handleMessageInner(
+        await this.reloadConversation(conversation),
+        text,
+      );
+      token = await this.drainPendingUnderLock(conversation, token);
+      return first;
+    } finally {
+      if (token) await this.lock.release(conversation.id, token);
+    }
+  }
+
+  // پیام‌های صف‌شده را (تا سقف دور) یکجا پردازش می‌کند؛ توکن قفل (احتمالاً تازه) یا null برمی‌گرداند
+  private async drainPendingUnderLock(
+    conversation: ConversationWithStore,
+    token: string,
+  ): Promise<string | null> {
+    let current: string | null = token;
+    for (
+      let round = 0;
+      round < CONVERSATION_DRAIN_MAX_ROUNDS && current;
+      round++
+    ) {
+      const pending = await this.lock.drain(conversation.id);
+      if (pending.length === 0) {
+        // پنجره‌ی race: پیامی بین drain و release صف شده باشد
+        await this.lock.release(conversation.id, current);
+        current = null;
+        if ((await this.lock.pendingCount(conversation.id)) === 0) return null;
+        current = await this.lock.acquire(conversation.id);
+        continue;
+      }
+      try {
+        const result = await this.handleMessageInner(
+          await this.reloadConversation(conversation),
+          pending.join('\n'),
+        );
+        await this.queuedResultListener?.(conversation.id, result);
+      } catch (err) {
+        this.logger.error(
+          `queued turn failed (conversation=${conversation.id})`,
+          err as Error,
+        );
+      }
+    }
+    return current;
+  }
+
+  // اکشن/رسید: برای آزاد شدن قفل تا چند ثانیه صبر می‌کنند؛ نشد → پیام «چند لحظه صبر کن»
+  private async runActionLocked(
+    conversation: ConversationWithStore,
+    run: (fresh: ConversationWithStore) => Promise<EngineResult>,
+  ): Promise<EngineResult> {
+    const token = await this.lock.acquireWithRetry(conversation.id);
+    if (!token) {
+      return {
+        reply: fa.salesAgent.conversationBusy,
+        uiBlocks: [],
+        state: conversation.currentState,
+        busy: true,
+      };
+    }
+    let held: string | null = token;
+    try {
+      const result = await run(await this.reloadConversation(conversation));
+      held = await this.drainPendingUnderLock(conversation, token);
+      return result;
+    } finally {
+      if (held) await this.lock.release(conversation.id, held);
+    }
+  }
+
+  private async handleMessageInner(
     conversation: ConversationWithStore,
     text: string,
   ): Promise<EngineResult> {
@@ -4989,14 +5103,16 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     conversation: ConversationWithStore,
     action: SalesAction,
   ): Promise<EngineResult> {
-    if (action.type !== 'ADD_TO_CART' && action.type !== 'REORDER') {
-      return this.handleActionInner(conversation, action);
-    }
-    const target = await this.forkConversationIfOrdered(conversation);
-    const result = await this.handleActionInner(target, action);
-    return target.id === conversation.id
-      ? result
-      : { ...result, switchedConversationId: target.id };
+    return this.runActionLocked(conversation, async (fresh) => {
+      if (action.type !== 'ADD_TO_CART' && action.type !== 'REORDER') {
+        return this.handleActionInner(fresh, action);
+      }
+      const target = await this.forkConversationIfOrdered(fresh);
+      const result = await this.handleActionInner(target, action);
+      return target.id === fresh.id
+        ? result
+        : { ...result, switchedConversationId: target.id };
+    });
   }
 
   private async handleActionInner(
@@ -7123,6 +7239,15 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     conversation: ConversationWithStore,
     receiptImageKey: string,
   ): Promise<EngineResult> {
+    return this.runActionLocked(conversation, (fresh) =>
+      this.handleReceiptUploadInner(fresh, receiptImageKey),
+    );
+  }
+
+  private async handleReceiptUploadInner(
+    conversation: ConversationWithStore,
+    receiptImageKey: string,
+  ): Promise<EngineResult> {
     const order = await this.prisma.order.findUnique({
       where: { conversationId: conversation.id },
     });
@@ -7937,40 +8062,79 @@ answered=false بده (به‌جای حدس‌زدن).`,
     note?: string,
   ) {
     const fromState = conversation.currentState;
-    await this.prisma.$transaction([
-      ...(toolName
-        ? [
-            this.prisma.conversationEvent.create({
-              data: {
-                conversationId: conversation.id,
-                type: 'TOOL_CALL',
-                payload: note ? { toolName, note } : { toolName },
-              },
-            }),
-          ]
-        : []),
-      this.prisma.conversationEvent.create({
-        data: {
-          conversationId: conversation.id,
-          type: 'STATE_TRANSITION',
-          payload: { fromState, toState: nextState },
-        },
-      }),
-      this.prisma.salesConversation.update({
+    // 0.4(۵) — کمربند دوم زیر قفل Redis: اگر کسی (cron، مسیر بدون قفل) بین خواندن و نوشتن
+    // مکالمه را عوض کرده باشد، version عوض شده و نوشتن شرطی count=0 می‌دهد
+    const attempt = async (
+      expectedVersion: number,
+      ctxToWrite: ConversationContext,
+    ) =>
+      this.prisma.$transaction(async (tx) => {
+        const updated = await tx.salesConversation.updateMany({
+          where: { id: conversation.id, version: expectedVersion },
+          data: {
+            currentState: nextState,
+            contextData: ctxToWrite as unknown as Prisma.InputJsonValue,
+            isMutedForHuman: nextState === 'HANDOFF_HUMAN' ? true : undefined,
+            version: { increment: 1 },
+          },
+        });
+        if (updated.count === 0) return false;
+        if (toolName) {
+          await tx.conversationEvent.create({
+            data: {
+              conversationId: conversation.id,
+              type: 'TOOL_CALL',
+              payload: note ? { toolName, note } : { toolName },
+            },
+          });
+        }
+        await tx.conversationEvent.create({
+          data: {
+            conversationId: conversation.id,
+            type: 'STATE_TRANSITION',
+            payload: { fromState, toState: nextState },
+          },
+        });
+        return true;
+      });
+
+    let written = context;
+    let expected = conversation.version ?? 0;
+    if (!(await attempt(expected, written))) {
+      // تعارض نسخه: آخرین وضعیت را بخوان و سبد را ادغام کن (هیچ آیتمی گم نشود)، یک‌بار دوباره
+      const latest = await this.prisma.salesConversation.findUnique({
         where: { id: conversation.id },
-        data: {
-          currentState: nextState,
-          contextData: context,
-          isMutedForHuman: nextState === 'HANDOFF_HUMAN' ? true : undefined,
-        },
-      }),
-    ]);
+        select: { version: true, contextData: true },
+      });
+      if (!latest) return;
+      this.logger.warn(
+        `persistTransition version conflict (conversation=${conversation.id}, expected=${expected}, actual=${latest.version}) — merging cart`,
+      );
+      const latestCart =
+        (latest.contextData as unknown as ConversationContext | null)?.cart ??
+        [];
+      const mine = new Set(written.cart.map((i) => lineKey(i)));
+      written = {
+        ...written,
+        cart: [
+          ...written.cart,
+          ...latestCart.filter((i) => !mine.has(lineKey(i))),
+        ],
+      };
+      expected = latest.version;
+      if (!(await attempt(expected, written))) {
+        throw new Error(
+          `persistTransition: conversation ${conversation.id} changed concurrently`,
+        );
+      }
+    }
+    conversation.version = expected + 1;
     conversation.currentState = nextState;
     // بخش ۱.۴ docs/PRD-full-agent-engineering-review.md — قبلاً فقط ردیف DB آپدیت می‌شد، نه
     // آبجکت درون‌حافظه‌ای؛ چون runFullAgentTurn همین آبجکت conversation را بین تلاش اول و
     // fallback پاس می‌دهد (بدون fetch دوباره)، بدون این خط هر retry از وضعیت قبل از جهش
     // (نه چیزی که واقعاً در DB نشسته) ادامه می‌داد
-    conversation.contextData = context;
+    conversation.contextData = written as unknown as Prisma.JsonValue;
   }
 
   private async logReply(

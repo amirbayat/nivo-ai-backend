@@ -12,6 +12,7 @@ import { MarketPricesModule } from '../market-prices/market-prices.module';
 import { SalesAgentController } from './sales-agent.controller';
 import { SalesAgentService } from './sales-agent.service';
 import { ConversationEngineService } from './conversation-engine.service';
+import { ConversationLockService } from './conversation-lock.service';
 import { CreditService } from './credit.service';
 import { AbuseGuardService } from './abuse-guard.service';
 import { PostPurchaseFollowUpService } from './post-purchase-followup.service';
@@ -46,6 +47,7 @@ import { SalesAgentQaController } from './sales-agent-qa.controller';
   providers: [
     SalesAgentService,
     ConversationEngineService,
+    ConversationLockService,
     CreditService,
     AbuseGuardService,
     PostPurchaseFollowUpService,

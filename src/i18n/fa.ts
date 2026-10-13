@@ -357,6 +357,7 @@ export const fa = {
         )
         .join('\n')}\nسبد با قیمت جدید به‌روز شد؛ ادامه بدیم؟`,
     cartEmpty: 'سبد خرید خالی است',
+    conversationBusy: 'یه لحظه، دارم پیام قبلی‌ت رو جواب می‌دم. چند ثانیه دیگه دوباره امتحان کن 🙏',
     // docs/PRD-product-display-focus-and-variations.md §۴.۲ — عیناً سبک addressAskProvince:
     // متن کوتاه + لیست مقادیر از خودِ چیپ‌ها (VARIANT_PROMPT) خوانده می‌شود، نه این‌جا تکرار
     variantAskOption: (optionName: string) => `${optionName} رو انتخاب کن 👇`,

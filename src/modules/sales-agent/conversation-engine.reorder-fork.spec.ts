@@ -45,6 +45,14 @@ describe('handleAction fork when conversation already has an order [0.13b]', () 
         decideBillingMode: jest.fn().mockResolvedValue('NORMAL'),
       },
       handleActionInner: inner,
+      lock: {
+        acquireWithRetry: jest.fn().mockResolvedValue('t'),
+        acquire: jest.fn().mockResolvedValue('t'),
+        release: jest.fn(),
+        drain: jest.fn().mockResolvedValue([]),
+        pendingCount: jest.fn().mockResolvedValue(0),
+      },
+      reloadConversation: async (c: unknown) => c,
     });
     return { eng, tx, inner };
   };
@@ -104,6 +112,14 @@ describe('handleReceiptUpload [0.13b][0.13c]', () => {
     Object.assign(eng, {
       prisma,
       persistTransition: jest.fn(),
+      lock: {
+        acquireWithRetry: jest.fn().mockResolvedValue('t'),
+        acquire: jest.fn().mockResolvedValue('t'),
+        release: jest.fn(),
+        drain: jest.fn().mockResolvedValue([]),
+        pendingCount: jest.fn().mockResolvedValue(0),
+      },
+      reloadConversation: async (c: unknown) => c,
       getContext: jest.fn().mockReturnValue({}),
       caption: jest.fn().mockResolvedValue('رسید دریافت شد'),
       logReply: jest.fn(),

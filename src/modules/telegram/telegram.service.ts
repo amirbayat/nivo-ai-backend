@@ -125,6 +125,18 @@ export class TelegramService {
       this.config.get<string>('TELEGRAM_API_BASE_URL') ??
       'https://api.telegram.org';
     this.relaySecret = this.config.get<string>('TELEGRAM_RELAY_SECRET');
+    // 0.4 — پیام‌هایی که وسط پردازش یک turn دیگر رسیدند با هم در یک turn جواب داده می‌شوند؛
+    // نتیجه‌شان را (برخلاف وب که poll می‌کند) باید خودمان به چت تلگرام بفرستیم
+    this.engine.onQueuedTurnResult(async (conversationId, result) => {
+      const conversation = await this.prisma.salesConversation.findUnique({
+        where: { id: conversationId },
+        include: { customer: true },
+      });
+      const chatId = conversation?.customer.telegramChatId;
+      if (conversation?.customer.channel === 'TELEGRAM' && chatId) {
+        await this.sendEngineResult(chatId, result);
+      }
+    });
     // این خط فقط یک‌بار موقع بالا آمدن اپ چاپ می‌شود — با این می‌شود از خودِ لاگ بک‌اند
     // (بدون نیاز به curl) فهمید که آیا این پراسسِ در حال اجرا اصلاً env varهای تلگرام را
     // دارد یا خیر (مثلاً بعد از ست‌کردن env روی همروش، اگر ری‌دیپلوی نشده باشد، این پراسس
@@ -1368,6 +1380,8 @@ export class TelegramService {
     chatId: string,
     result: EngineResult,
   ): Promise<void> {
+    // 0.4 — پیام در صف رفته؛ جوابش بعد از پایان turn جاری از onQueuedTurnResult می‌آید
+    if (result.queued) return;
     // docs/PRD-sales-agent-sales-state-machine.md §۱۲.۳ — کیبورد پاسخ سریع به «آخرین» پیام
     // ارسالی می‌چسبد: اگر بلوک UI ای نیست، به همان متن؛ وگرنه بعد از بلوک‌ها یک پیام کوتاه جدا
     // (کارت محصول خودش کیبورد دارد). 👇 اینجا مجاز است چون جهت عمودی است، نه چپ/راست
