@@ -72,6 +72,9 @@ export function providerToCreditSource(
 
 const FALLBACK_SOURCE: CreditSource = 'LEGACY';
 
+// قفل ردیف فروشگاه ممکن است پشت چند کسر هم‌زمان صف بکشد؛ پیش‌فرض ۵ثانیه‌ی Prisma کم است
+const TX_OPTIONS = { maxWait: 5_000, timeout: 15_000 };
+
 // فاز ۱ (1.2، مشخصات ج ۲۳.۳) — تنها جایی که اعتبار فروشگاه کم/زیاد می‌شود. جای سه کپی قبلی
 // (credit.service logUsage، store-kb، guide-assistant) و خرید جایگاه تبلیغاتی و شارژ پرداخت.
 // هر عملیات در یک تراکنش interactive با قفل ردیف فروشگاه (SELECT … FOR UPDATE) اجرا می‌شود؛
@@ -188,7 +191,7 @@ export class StoreCreditDeductionService {
           ? store.trialCreditRemainingToman - plan.trialChargedToman
           : 0);
       return { chargedToman: plan.chargedToman, breakdown, spendableAfter };
-    });
+    }, TX_OPTIONS);
 
     await this.cacheSpendable(storeId, result.spendableAfter);
     return {
