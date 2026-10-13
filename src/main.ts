@@ -16,6 +16,10 @@ async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     bodyParser: false,
   });
+  // 0.10 — پشت ingress همروش؛ با trust proxy تعداد hopهای مورداعتماد، req.ip آدرس واقعی
+  // کلاینت می‌شود و X-Forwarded-For جعلی سقف rate limit را دور نمی‌زند. اگر پشت Cloudflare
+  // هم هستید TRUST_PROXY_HOPS=2 بگذارید (اگر کمتر از واقعیت باشد همه‌ی کاربران یک IP می‌شوند).
+  app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS ?? 1));
   // docs/PRD-instagram-smart-dm-and-ir-intl-split.md بخش ۷.۲ — وبهوک اینستاگرام امضای
   // X-Hub-Signature-256 را روی بایت خام بدنه چک می‌کند (نه JSON.parse شده دوباره)؛ verify
   // همین بافر را روی req.rawBody می‌گذارد، برای همه‌ی request ها (هزینه‌اش ناچیز است)

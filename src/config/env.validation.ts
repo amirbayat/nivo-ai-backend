@@ -100,6 +100,8 @@ class EnvironmentVariables {
   // می‌شوند، بقیه‌ی بک‌اند بی‌اثر از این نیست.
   @IsOptional() @IsString() INSTAGRAM_APP_ID?: string;
   @IsOptional() @IsString() INSTAGRAM_APP_SECRET?: string;
+  // 0.10 — تعداد proxyهای مورداعتماد جلوی بک‌اند (پیش‌فرض ۱ = ingress همروش)
+  @IsOptional() @IsString() TRUST_PROXY_HOPS?: string;
   @IsOptional() @IsString() INSTAGRAM_WEBHOOK_VERIFY_TOKEN?: string;
   @IsOptional() @IsUrl({ require_tld: false }) INSTAGRAM_REDIRECT_URI?: string;
 

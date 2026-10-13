@@ -40,10 +40,10 @@ export class AppThrottlerGuard extends ThrottlerGuard {
       }
     }
 
+    // 0.10 — X-Forwarded-For مستقیماً از کلاینت می‌آید و جعل‌شدنی است؛ فقط req.ip معتبر است
+    // (main.ts با `trust proxy` فقط تعداد مشخصی proxy مورداعتماد را از زنجیره حذف می‌کند)
     const ip =
-      (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ??
-      req.socket?.remoteAddress ??
-      'unknown';
+      (req.ip as string | undefined) ?? req.socket?.remoteAddress ?? 'unknown';
     return `ip:${ip}`;
   }
 }

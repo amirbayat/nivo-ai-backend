@@ -2,12 +2,14 @@ import {
   BadRequestException,
   ForbiddenException,
   HttpException,
+  HttpStatus,
   Injectable,
   Logger,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import * as crypto from 'crypto';
+import { CHAT_START_LIMIT_PER_STORE_PER_MIN } from '../../common/constants/sales-ops.constants';
 import type { BillingMode } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RedisService } from '../../redis/redis.service';
@@ -69,6 +71,17 @@ export class SalesAgentService {
     const store = await this.prisma.store.findUnique({ where: { slug } });
     if (!store || store.status !== 'ACTIVE')
       throw new NotFoundException(fa.store.notFound);
+
+    // 0.10 — سقف per-store (علاوه بر سقف per-IP روی کنترلر): جلوی سیل ساخت مکالمه برای یک فروشگاه
+    const startKey = `rl:chat-start:${store.id}`;
+    const started = await this.redis.incr(startKey);
+    if (started === 1) await this.redis.expire(startKey, 60);
+    if (started > CHAT_START_LIMIT_PER_STORE_PER_MIN) {
+      throw new HttpException(
+        fa.errors.tooManyRequests,
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
 
     // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۶.۳ — اگر این اولین چتِ اولین
     // خریدار همین فروشگاه است، قبل از decideBillingMode دوره‌ی آزمایشی گرنت می‌شود
@@ -598,7 +611,9 @@ export class SalesAgentService {
   private async attachVoicePending(
     conversationId: string,
     result: EngineResult,
-  ): Promise<EngineResult & { voiceEventId?: string; awaitingReview: boolean }> {
+  ): Promise<
+    EngineResult & { voiceEventId?: string; awaitingReview: boolean }
+  > {
     const [latest, conversation] = await Promise.all([
       this.prisma.conversationEvent.findFirst({
         where: { conversationId, type: 'AGENT_REPLY' },

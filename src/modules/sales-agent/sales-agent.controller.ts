@@ -12,7 +12,8 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { SkipThrottle } from '@nestjs/throttler';
+import { SkipThrottle, Throttle } from '@nestjs/throttler';
+import { CHAT_START_LIMIT_PER_IP_PER_MIN } from '../../common/constants/sales-ops.constants';
 import type { Response } from 'express';
 import { SalesAgentService } from './sales-agent.service';
 import { SendMessageDto } from './dto/send-message.dto';
@@ -38,6 +39,9 @@ export class SalesAgentController {
     private readonly storage: StorageService,
   ) {}
 
+  @Throttle({
+    default: { limit: CHAT_START_LIMIT_PER_IP_PER_MIN, ttl: 60_000 },
+  })
   @Post('stores/:slug/chat/start')
   start(@Param('slug') slug: string, @Body('productId') productId?: string) {
     return this.salesAgentService.startChat(slug, productId);
