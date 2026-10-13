@@ -48,3 +48,20 @@ export const LLM_QUEUE_MAX_WAITING = 200;
 // 2.1 — Idempotency-Key پیام (clientMessageId): ارسال مجدد همان پیام جواب ذخیره‌شده را برمی‌گرداند
 export const MESSAGE_IDEMPOTENCY_TTL_SECONDS = 300;
 export const MESSAGE_IDEMPOTENCY_PENDING_TTL_SECONDS = 120;
+
+// 1.2 — برآورد هزینه‌ی یک turn میانگین (تومان، بعد از ضریب). هر turn در حال اجرا این مقدار از
+// موجودی قابل‌خرج «رزرو» می‌کند تا ده مکالمه‌ی هم‌زمان یک فروشگاه با موجودی صفر، هر کدام
+// جداگانه از چک عبور نکنند. TODO(product): بعد از چند هفته با داده‌ی واقعی تنظیم شود.
+export const TURN_COST_ESTIMATE_TOMAN = 1_700;
+// کف overdraft اعتبار فروشگاه: مکالمات باز تا این مقدار «زیر صفر» می‌توانند خرج کنند
+// (هزینه‌ی واقعی بعد از فراخوان معلوم می‌شود)؛ زیر آن، turn بعدی handoff «فروشنده شخصاً جواب
+// می‌دهد» می‌شود. ≈ هزینه‌ی ۳ turn میانگین.
+export const OVERDRAFT_FLOOR_TOMAN = 3 * TURN_COST_ESTIMATE_TOMAN;
+// رزرو یک turn در Redis بعد از این مدت خودکار منقضی می‌شود (turn کرش‌کرده نباید برای همیشه رزرو بماند)
+export const TURN_RESERVATION_TTL_SECONDS = 90;
+// کش Redis موجودی قابل‌خرج (store:bal:{id}) برای canSpend
+export const STORE_BALANCE_CACHE_TTL_SECONDS = 30;
+// 1.5 — هشدار «اعتبارت رو به اتمامه» وقتی موجودی ≤ این نسبت از آخرین شارژ شد؛ هر کدام حداکثر
+// روزی یک‌بار به‌ازای فروشگاه
+export const CREDIT_LOW_WARNING_RATIO = 0.2;
+export const CREDIT_ALERT_DEDUPE_TTL_SECONDS = 24 * 60 * 60;
