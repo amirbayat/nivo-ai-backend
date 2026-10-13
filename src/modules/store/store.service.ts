@@ -1382,6 +1382,8 @@ export class StoreService {
           name: string;
           unitPrice: number;
           qty: number;
+          variantId?: string;
+          variantLabel?: string;
         }[]
       ).map((item) => ({
         ...item,
@@ -1398,6 +1400,45 @@ export class StoreService {
     if (!order || order.storeId !== storeId)
       throw new NotFoundException(fa.salesAgent.orderNotFound);
     return order;
+  }
+
+  // فیدبک کاربر ۱۴۰۵/۰۷/۲۱ — قبلاً هیچ‌جا موجودی بعد از سفارش کم نمی‌شد. کسر فقط روی تایید
+  // فروشنده (نه لحظه‌ی ساخت سفارش، چون خریدار ممکن است اصلاً پرداخت نکند) و برگشتش فقط وقتی
+  // سفارش تاییدشده رد شود. آیتم با variantId از موجودی همان ترکیب کم می‌شود، وگرنه از خود محصول؛
+  // موجودی هیچ‌وقت منفی نمی‌شود (اگر کمتر از qty مانده بود، صفر می‌شود)
+  private async adjustOrderStock(
+    db: Prisma.TransactionClient,
+    items: Prisma.JsonValue,
+    direction: 'DEDUCT' | 'RESTORE',
+  ): Promise<void> {
+    for (const item of items as {
+      productId: string;
+      variantId?: string;
+      qty: number;
+    }[]) {
+      if (!(item.qty > 0)) continue;
+      const delegate = item.variantId ? db.productVariant : db.product;
+      const where = item.variantId
+        ? { id: item.variantId, productId: item.productId }
+        : { id: item.productId };
+      if (direction === 'RESTORE') {
+        await (delegate as typeof db.product).updateMany({
+          where,
+          data: { stock: { increment: item.qty } },
+        });
+        continue;
+      }
+      const { count } = await (delegate as typeof db.product).updateMany({
+        where: { ...where, stock: { gte: item.qty } },
+        data: { stock: { decrement: item.qty } },
+      });
+      if (count === 0) {
+        await (delegate as typeof db.product).updateMany({
+          where,
+          data: { stock: 0 },
+        });
+      }
+    }
   }
 
   async approveOrder(sellerId: string, storeId: string, orderId: string) {
@@ -1418,6 +1459,7 @@ export class StoreService {
           data: { totalConfirmedToman: { increment: order.totalAmount } },
         });
       }
+      await this.adjustOrderStock(tx, order.items, 'DEDUCT');
       await tx.salesConversation.update({
         where: { id: order.conversationId },
         data: { currentState: 'COMPLETED', archivedAt: new Date() },
@@ -1523,6 +1565,12 @@ export class StoreService {
         },
       }),
     ]);
+    // سفارش قبلاً تایید و موجودی کم شده بود → با رد شدن، موجودی برمی‌گردد
+    if (order.status === 'APPROVED') {
+      await this.prisma.$transaction((tx) =>
+        this.adjustOrderStock(tx, order.items, 'RESTORE'),
+      );
+    }
     await this.notifyBuyerOfRejection(order, reason);
     return updated;
   }

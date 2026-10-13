@@ -1481,7 +1481,7 @@ export class TelegramService {
       case 'CART_SUMMARY': {
         const lines = block.items.map(
           (i) =>
-            `${i.name} × ${i.qty.toLocaleString('fa-IR')} = ${(i.unitPrice * i.qty).toLocaleString('fa-IR')} تومان`,
+            `${i.name}${i.variantLabel ? ` (${i.variantLabel})` : ''} × ${i.qty.toLocaleString('fa-IR')} = ${(i.unitPrice * i.qty).toLocaleString('fa-IR')} تومان`,
         );
         const text = `${lines.join('\n')}\n\nجمع کل: ${block.total.toLocaleString('fa-IR')} تومان`;
         await this.sendText(chatId, text, {

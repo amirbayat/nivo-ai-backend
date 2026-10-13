@@ -283,7 +283,9 @@ export class SellerBotService {
 
     const lines = orders.map((o) => {
       const items = o.items as CartItem[];
-      const itemsSummary = items.map((i) => i.name).join('، ');
+      const itemsSummary = items
+        .map((i) => `${i.name}${i.variantLabel ? ` (${i.variantLabel})` : ''}`)
+        .join('، ');
       return fa.sellerBot.orderLine(
         itemsSummary,
         o.totalAmount,
@@ -299,7 +301,9 @@ export class SellerBotService {
     for (const order of orders) {
       if (order.status !== 'RECEIPT_SUBMITTED') continue;
       const items = order.items as CartItem[];
-      const itemsSummary = items.map((i) => i.name).join('، ');
+      const itemsSummary = items
+        .map((i) => `${i.name}${i.variantLabel ? ` (${i.variantLabel})` : ''}`)
+        .join('، ');
       await this.api.sendText(
         chatId,
         fa.sellerBot.orderNeedsDecision(itemsSummary, order.totalAmount),
