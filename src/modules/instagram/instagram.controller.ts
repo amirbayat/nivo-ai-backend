@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   ForbiddenException,
@@ -10,9 +11,11 @@ import {
   Query,
   Req,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { SkipThrottle } from '@nestjs/throttler';
 import type { Request } from 'express';
 import { InstagramService } from './instagram.service';
+import { parseSignedRequest } from './instagram-signed-request.util';
 import type { InstagramWebhookPayload } from './instagram.types';
 
 // docs/PRD-instagram-smart-dm-and-ir-intl-split.md بخش ۷.۲ — سمت Meta صدا می‌زند، بدون
@@ -22,7 +25,10 @@ import type { InstagramWebhookPayload } from './instagram.types';
 export class InstagramController {
   private readonly logger = new Logger(InstagramController.name);
 
-  constructor(private readonly instagram: InstagramService) {}
+  constructor(
+    private readonly instagram: InstagramService,
+    private readonly config: ConfigService,
+  ) {}
 
   @SkipThrottle()
   @Get('webhook')
@@ -66,10 +72,16 @@ export class InstagramController {
   async dataDeletion(
     @Body() body: { signed_request?: string; user_id?: string },
   ): Promise<{ url: string; confirmation_code: string }> {
-    const instagramBusinessId = body.user_id ?? '';
-    if (instagramBusinessId) {
-      await this.instagram.deleteStoreInstagramData(instagramBusinessId);
+    // 0.1 — فقط user_id از signed_request امضاشده‌ی متا؛ body.user_id خام هرگز اعتماد نمی‌شود
+    const verified = parseSignedRequest(
+      body.signed_request,
+      this.config.get<string>('INSTAGRAM_APP_SECRET'),
+    );
+    if (!verified?.user_id) {
+      this.logger.warn('data-deletion rejected: invalid signed_request');
+      throw new BadRequestException();
     }
+    await this.instagram.deleteStoreInstagramData(verified.user_id);
     const confirmationCode = `del_${Date.now()}`;
     return {
       url: `https://nivoai.site/data-deletion-status?code=${confirmationCode}`,

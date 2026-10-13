@@ -329,6 +329,8 @@ export class InstagramService {
   }
 
   // بخش ۵ (Meta App Review) — کال‌بک حذف داده‌ی کاربر
+  // 0.1 — سفارش‌ها و مکالمه‌ها (سابقه‌ی مالی فروشنده) نمی‌مانند cascade حذف شوند؛ فقط اطلاعات
+  // شخصی مشتری‌های اینستاگرام ناشناس می‌شود (نام/شماره null، دفترچه‌آدرس حذف، PSID هش‌شده)
   async deleteStoreInstagramData(instagramBusinessId: string): Promise<void> {
     const store = await this.prisma.store.findUnique({
       where: { instagramBusinessId },
@@ -336,13 +338,34 @@ export class InstagramService {
     });
     if (!store) return;
 
+    const customers = await this.prisma.customer.findMany({
+      where: { storeId: store.id, channel: 'INSTAGRAM' },
+      select: { id: true, instagramPsid: true },
+    });
+
     await this.prisma.$transaction([
       this.prisma.instagramAutomationRule.deleteMany({
         where: { storeId: store.id },
       }),
-      this.prisma.customer.deleteMany({
-        where: { storeId: store.id, channel: 'INSTAGRAM' },
+      this.prisma.customerAddress.deleteMany({
+        where: { customerId: { in: customers.map((c) => c.id) } },
       }),
+      ...customers.map((c) =>
+        this.prisma.customer.update({
+          where: { id: c.id },
+          data: {
+            phone: null,
+            fullName: null,
+            instagramPsid: c.instagramPsid
+              ? `anon_${crypto
+                  .createHash('sha256')
+                  .update(c.instagramPsid)
+                  .digest('hex')
+                  .slice(0, 32)}`
+              : null,
+          },
+        }),
+      ),
       this.prisma.store.update({
         where: { id: store.id },
         data: {
