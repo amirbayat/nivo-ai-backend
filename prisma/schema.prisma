@@ -606,6 +606,8 @@ model SalesAgentGlobalConfig {
   // docs/PRD-nivo-sales-unified.md 3.6 — کلید rollout پیامک‌های وضعیت سفارش به خریدار؛ false =
   // فقط پیام چت/تلگرام (هزینه‌ی SMS با پلتفرم است، D-7)
   orderSmsEnabled          Boolean  @default(false)
+  // Step 5 (4.13) — public order links in buyer status messages. Off until enabled.
+  orderPublicLinkEnabled   Boolean  @default(false)
   updatedAt           DateTime @updatedAt
 
   @@map("sales_agent_global_config")
@@ -2959,6 +2961,8 @@ enum CreditUsageKind {
   // docs/PRD-seller-guide-assistant-modal.md بخش ۳.۲/۳.۴ — خودِ مکالمه‌ی زنده‌ی چندمرحله‌ای
   // راهنما (pool پنج‌تایی خریدار)؛ ASR/VOICE_TTS داخل همین گفتگو از مقادیر موجود استفاده می‌کنند
   GUIDE_ASSISTANT
+  // Step 5 (3.9) — vision read of a buyer payment receipt. Additive enum value.
+  RECEIPT_CHECK
 }
 
 // docs/PRD-seller-guide-assistant-modal.md بخش ۱.۳ — لاگ تغییرات محتوا: فروشنده کی چه
@@ -3135,6 +3139,8 @@ model Order {
   // 3.9 — نتیجه‌ی بررسی خودکار رسید و اثرانگشت تصویر (فاز ۵؛ ستون‌ها از همین فاز آماده‌اند)
   receiptCheck                Json?
   receiptHash                 String?
+  // Step 5 — extra receipt images (max 3 including receiptImageKey). Empty until a receipt is stored.
+  receiptImageKeys            String[]           @default([])
   // 3.8 — نوع رسید: عکس یا «رسید ندارم» (اطلاعات دستی)
   receiptType                 ReceiptType?
   receiptManualInfo           Json?
@@ -3147,6 +3153,7 @@ model Order {
   refunds                     OrderRefund[]
   issues                      OrderIssue[]
   returns                     OrderReturn[]
+  shortLinks                  ShortLink[]
   createdAt                   DateTime           @default(now())
   updatedAt                   DateTime           @updatedAt
 
@@ -3252,6 +3259,20 @@ model OrderRefund {
   @@index([storeId, status, createdAt])
   @@index([orderId])
   @@map("order_refunds")
+}
+
+// Step 5 (4.13) — short capability URL for one order. The raw token is never stored.
+model ShortLink {
+  id        String   @id @default(uuid())
+  code      String   @unique
+  orderId   String
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  tokenHash String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([orderId])
+  @@map("short_links")
 }
 
 enum OrderIssueReason {
