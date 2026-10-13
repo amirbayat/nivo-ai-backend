@@ -25,6 +25,7 @@ import {
   JwtPayload,
 } from '../../common/decorators/current-user.decorator';
 import type { StoreKbKind } from '@prisma/client';
+import { ShipOrderDto } from './dto/ship-order.dto';
 import { StoreService } from './store.service';
 import { StoreKbService } from './store-kb.service';
 import { StoreCreditService } from './store-credit.service';
@@ -397,8 +398,9 @@ export class StoreController {
     @CurrentUser() user: JwtPayload,
     @Param('id') id: string,
     @Query('status') status?: OrderStatus,
+    @Query('q') q?: string,
   ) {
-    return this.storeService.listOrders(user.sub, id, status);
+    return this.storeService.listOrders(user.sub, id, status, q);
   }
 
   @Post(':id/orders/:orderId/approve')
@@ -426,8 +428,9 @@ export class StoreController {
     @CurrentUser() user: JwtPayload,
     @Param('id') id: string,
     @Param('orderId') orderId: string,
+    @Body() dto: ShipOrderDto,
   ) {
-    return this.storeService.shipOrder(user.sub, id, orderId);
+    return this.storeService.shipOrder(user.sub, id, orderId, dto);
   }
 
   // مثل conversations.controller.ts getImage — SkipThrottle چون filename/orderId قابل

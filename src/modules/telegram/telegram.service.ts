@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { ConflictException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { safeEqual } from '../../common/utils/safe-equal.util';
 import type { Store, Product } from '@prisma/client';
@@ -28,6 +28,7 @@ import {
 import { buildAsrVocabHint } from '../sales-agent/asr-vocab-hint';
 import { buildHistoryEntry } from '../sales-agent/conversation-history.util';
 import { reattachReceiptIfOrderOpen } from '../sales-agent/receipt-reattach.util';
+import { OrderStateService } from '../order-lifecycle/order-state.service';
 import type {
   ConversationContext,
   EngineResult,
@@ -119,6 +120,7 @@ export class TelegramService {
     private readonly creditService: CreditService,
     private readonly storeService: StoreService,
     private readonly storeKbService: StoreKbService,
+    private readonly orderState: OrderStateService,
   ) {
     this.botToken = this.config.get<string>('TELEGRAM_BOT_TOKEN');
     this.webhookSecret = this.config.get<string>('TELEGRAM_WEBHOOK_SECRET');
@@ -827,8 +829,10 @@ export class TelegramService {
       );
       const reattachedToOrder = await reattachReceiptIfOrderOpen(
         this.prisma,
+        this.orderState,
         conversation.id,
         imageKey,
+        'TELEGRAM',
       );
       await this.prisma.conversationEvent.create({
         data: {
@@ -1044,11 +1048,21 @@ export class TelegramService {
       return;
     const store = order.conversation.store;
     if (approve) {
-      const approved = await this.storeService.approveOrder(
-        store.sellerId,
-        store.id,
-        orderId,
-      );
+      let approved: Awaited<ReturnType<StoreService['approveOrder']>>;
+      try {
+        approved = await this.storeService.approveOrder(
+          store.sellerId,
+          store.id,
+          orderId,
+          'TELEGRAM',
+        );
+      } catch (err) {
+        if (err instanceof ConflictException) {
+          await this.sendText(chatId, err.message);
+          return;
+        }
+        throw err;
+      }
       await this.sendText(
         chatId,
         fa.telegram.orderApprovedFromTelegram +
@@ -1083,12 +1097,21 @@ export class TelegramService {
       !text || text === fa.telegram.sellerRejectReasonSkipKeyword
         ? undefined
         : text;
-    await this.storeService.rejectOrder(
-      store.sellerId,
-      store.id,
-      orderId,
-      reason,
-    );
+    try {
+      await this.storeService.rejectOrder(
+        store.sellerId,
+        store.id,
+        orderId,
+        reason,
+        'TELEGRAM',
+      );
+    } catch (err) {
+      if (err instanceof ConflictException) {
+        await this.sendText(chatId, err.message);
+        return;
+      }
+      throw err;
+    }
     await this.sendText(chatId, fa.telegram.orderRejectedFromTelegram);
   }
 

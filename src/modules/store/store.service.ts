@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type {
+  OrderChannel,
   OrderStatus,
   OrderPaymentMethod,
   GoldWageType,
@@ -55,6 +56,10 @@ import { MarketPricesService } from '../market-prices/market-prices.service';
 import { CommentsService } from '../comments/comments.service';
 import { safeFetch } from '../../common/utils/safe-fetch.util';
 import { StoreCreditDeductionService } from '../store-credit-engine/store-credit-deduction.service';
+import { OrderStateService } from '../order-lifecycle/order-state.service';
+import { normalizeOrderCodeInput } from '../../common/utils/order-code.util';
+import { toEnglishDigits } from '../../common/utils/normalize-digits';
+import { ORDER_CARRIERS } from '../../common/constants/sales-ops.constants';
 import {
   computeDisplayPrice,
   describeGoldPricing,
@@ -126,13 +131,6 @@ function csvEscape(v: unknown): string {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-// 0.3 — کمبود موجودی هنگام تایید سفارش (به فروشنده هشدار داده می‌شود، نه clamp بی‌صدا)
-export type StockShortage = {
-  name: string;
-  requested: number;
-  available: number;
-};
-
 @Injectable()
 export class StoreService {
   private readonly logger = new Logger(StoreService.name);
@@ -147,6 +145,7 @@ export class StoreService {
     private readonly aiProvider: AiProviderService,
     private readonly comments: CommentsService,
     private readonly creditDeduction: StoreCreditDeductionService,
+    private readonly orderState: OrderStateService,
   ) {}
 
   list(sellerId: string) {
@@ -1382,10 +1381,45 @@ export class StoreService {
   // docs/PRD-mvp-launch-plan.md گام ۱ — حداقلی، بدون UI: فروشنده باید بتواند سفارش‌های
   // در انتظار تایید را ببیند/تایید/رد کند تا حلقه‌ی سفارش با curl قابل تست باشد؛ صف کامل
   // با نمایش تصویر رسید در پنل موبایل، گام ۳ است.
-  async listOrders(sellerId: string, storeId: string, status?: OrderStatus) {
+  // 3.4/3.5 — `q`: کد سفارش (نرمال‌شده، دقیق)، شماره (دقیق یا ۴ رقم آخر) یا نام خریدار/گیرنده
+  private buildOrderSearchFilter(q?: string): Prisma.OrderWhereInput {
+    const text = q?.trim();
+    if (!text) return {};
+    const or: Prisma.OrderWhereInput[] = [];
+    const code = normalizeOrderCodeInput(text);
+    if (code) or.push({ orderCode: code });
+    const digits = toEnglishDigits(text).replace(/\D/g, '');
+    if (
+      digits.length >= 4 &&
+      digits.length <= 13 &&
+      digits === toEnglishDigits(text).replace(/[\s+-]/g, '')
+    ) {
+      const tail = digits.length >= 10 ? digits.slice(-10) : digits;
+      or.push({ recipientPhone: { endsWith: tail } });
+      or.push({ conversation: { customer: { phone: { endsWith: tail } } } });
+    }
+    or.push({ recipientName: { contains: text, mode: 'insensitive' } });
+    or.push({
+      conversation: {
+        customer: { fullName: { contains: text, mode: 'insensitive' } },
+      },
+    });
+    return { OR: or };
+  }
+
+  async listOrders(
+    sellerId: string,
+    storeId: string,
+    status?: OrderStatus,
+    q?: string,
+  ) {
     await this.getOwned(sellerId, storeId);
     const orders = await this.prisma.order.findMany({
-      where: { storeId, ...(status ? { status } : {}) },
+      where: {
+        storeId,
+        ...(status ? { status } : {}),
+        ...this.buildOrderSearchFilter(q),
+      },
       orderBy: { createdAt: 'desc' },
     });
     // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۱۳.۲ — عکس محصول در
@@ -1435,115 +1469,30 @@ export class StoreService {
     return order;
   }
 
-  // فیدبک کاربر ۱۴۰۵/۰۷/۲۱ — قبلاً هیچ‌جا موجودی بعد از سفارش کم نمی‌شد. کسر فقط روی تایید
-  // فروشنده (نه لحظه‌ی ساخت سفارش، چون خریدار ممکن است اصلاً پرداخت نکند) و برگشتش فقط وقتی
-  // سفارش تاییدشده رد شود. آیتم با variantId از موجودی همان ترکیب کم می‌شود، وگرنه از خود محصول؛
-  // موجودی هیچ‌وقت منفی نمی‌شود (اگر کمتر از qty مانده بود، صفر می‌شود)
-  private async adjustOrderStock(
-    db: Prisma.TransactionClient,
-    items: Prisma.JsonValue,
-    direction: 'DEDUCT' | 'RESTORE',
-  ): Promise<StockShortage[]> {
-    const shortages: StockShortage[] = [];
-    for (const item of items as {
-      productId: string;
-      name?: string;
-      variantId?: string;
-      qty: number;
-    }[]) {
-      if (!(item.qty > 0)) continue;
-      const delegate = item.variantId ? db.productVariant : db.product;
-      const where = item.variantId
-        ? { id: item.variantId, productId: item.productId }
-        : { id: item.productId };
-      if (direction === 'RESTORE') {
-        await (delegate as typeof db.product).updateMany({
-          where,
-          data: { stock: { increment: item.qty } },
-        });
-        continue;
-      }
-      const { count } = await (delegate as typeof db.product).updateMany({
-        where: { ...where, stock: { gte: item.qty } },
-        data: { stock: { decrement: item.qty } },
-      });
-      if (count === 0) {
-        // 0.3 — قبلاً بی‌صدا به ۰ clamp می‌شد؛ حالا clamp می‌ماند (تایید فروشنده مسدود نمی‌شود،
-        // چون ممکن است موجودی فیزیکی هست و فقط عدد سیستم عقب است) ولی کمبود به فروشنده هشدار
-        // داده می‌شود
-        const live = await (delegate as typeof db.product).findFirst({
-          where,
-          select: { stock: true },
-        });
-        await (delegate as typeof db.product).updateMany({
-          where,
-          data: { stock: 0 },
-        });
-        shortages.push({
-          name: item.name ?? '',
-          requested: item.qty,
-          available: Math.max(0, live?.stock ?? 0),
-        });
-      }
-    }
-    return shortages;
-  }
-
-  async approveOrder(sellerId: string, storeId: string, orderId: string) {
+  async approveOrder(
+    sellerId: string,
+    storeId: string,
+    orderId: string,
+    channel: OrderChannel = 'WEB',
+  ) {
     const order = await this.getOwnedOrder(sellerId, storeId, orderId);
-    // فیدبک کاربر — فروشنده باید بتواند بعد از رد اشتباهی یک سفارش، دوباره تاییدش کند
-    // (REJECTED -> APPROVED مجاز است)؛ اما اگر از قبل APPROVED بوده، بی‌صدا نادیده می‌گیریم
-    // تا totalConfirmedToman دوباره increment نشود و requestReviewFollowUp دوبار پیام نفرستد
-    if (order.status === 'APPROVED') return { ...order, stockWarnings: [] };
-    // docs/PRD-conversation-history.md — تأیید سفارش یعنی مکالمه واقعاً تمام شده: هم
-    // currentState (COMPLETED، تا امروز هیچ‌جا ست نمی‌شد) هم archivedAt پر می‌شود تا هم
-    // TERMINAL_STATES فرانت درست کار کند هم مکالمه از «فعال» بودن خارج شود
-    const result = await this.prisma.$transaction(async (tx) => {
-      // 0.13b — claim اتمیک: دو تایید هم‌زمان (دبل‌کلیک، پنل + بات) فقط یکی برنده می‌شود؛
-      // قبلاً هر دو از چک بیرون تراکنش رد می‌شدند و موجودی و سقف کارت دوبار کم/زیاد می‌شد
-      const claimed = await tx.order.updateMany({
-        where: {
-          id: orderId,
-          status: { in: ['PENDING_PAYMENT', 'RECEIPT_SUBMITTED', 'REJECTED'] },
-        },
-        data: { status: 'APPROVED', approvedAt: new Date() },
-      });
-      if (claimed.count === 0) return null;
-      // docs/PRD-seller-multi-bank-card-rotation.md بخش ۲ — فقط روی تایید واقعی (نه لحظه‌ی
-      // نمایش) به سقف THRESHOLD همان کارت اضافه می‌شود؛ خریدار ممکن است اصلاً پرداخت نکند
-      if (order.bankCardId) {
-        await tx.storeBankCard.update({
-          where: { id: order.bankCardId },
-          data: { totalConfirmedToman: { increment: order.totalAmount } },
-        });
-      }
-      const stockWarnings = await this.adjustOrderStock(
-        tx,
-        order.items,
-        'DEDUCT',
-      );
-      await tx.salesConversation.update({
-        where: { id: order.conversationId },
-        data: { currentState: 'COMPLETED', archivedAt: new Date() },
-      });
-      const updated = await tx.order.findUniqueOrThrow({
-        where: { id: orderId },
-      });
-      return { updated, stockWarnings };
+    // فیدبک کاربر — فروشنده باید بتواند بعد از رد اشتباهی، سفارش را دوباره تایید کند
+    // (REJECTED → APPROVED در ماشین وضعیت مجاز است). 3.2 — تایید دوگانه (وب + بات، دبل‌کلیک)
+    // فقط یک اثر دارد: OrderStateService زیر قفل ردیف کار می‌کند و دستور دوم changed=false می‌گیرد
+    const r = await this.orderState.transition({
+      orderId,
+      to: 'APPROVED',
+      actor: 'SELLER',
+      actorId: sellerId,
+      channel,
     });
-    if (!result) {
-      // تایید هم‌زمان دیگری زودتر انجام شد (یا سفارش در وضعیتی است که تایید ندارد)
-      const current = await this.getOwnedOrder(sellerId, storeId, orderId);
-      return { ...current, stockWarnings: [] };
-    }
-    const { updated: approved, stockWarnings } = result;
+    if (!r.changed) return { ...r.order, stockWarnings: [] };
     // docs/PRD-order-status-chat-tool-and-fulfillment-delay-reviews.md بخش ۲.۲ — برای
-    // سفارش‌های تحویل‌زمان‌بر (عکس/ویدیوی سفارشی و مشابه)، درخواست نظر به لحظه‌ی «ارسال شد»
-    // موکول می‌شود (پایین در shipOrder)، نه این‌جا که محصول هنوز آماده نشده
+    // سفارش‌های تحویل‌زمان‌بر، درخواست نظر به لحظه‌ی «ارسال شد» موکول می‌شود (shipOrder)
     if (!order.hasFulfillmentDelay) {
       await this.requestReviewFollowUp(order);
     }
-    return { ...approved, stockWarnings };
+    return { ...r.order, stockWarnings: r.stockWarnings };
   }
 
   // docs/PRD-customer-comments-and-discounts.md بخش الف/۳ — بعد از تایید سفارش، یک پیام
@@ -1605,125 +1554,56 @@ export class StoreService {
     storeId: string,
     orderId: string,
     reason?: string,
+    channel: OrderChannel = 'WEB',
+  ) {
+    await this.getOwnedOrder(sellerId, storeId, orderId);
+    // رد تکراری (مثلاً دکمه‌ی رد قدیمی تلگرام) changed=false می‌گیرد و پیام دوباره نمی‌رود؛
+    // برگشت موجودی/سقف کارت/کد تخفیف و پیام به خریدار داخل OrderStateService است
+    const r = await this.orderState.transition({
+      orderId,
+      to: 'REJECTED',
+      actor: 'SELLER',
+      actorId: sellerId,
+      channel,
+      data: { rejectReason: reason ?? null },
+    });
+    return r.order;
+  }
+
+  // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۱۳.۲ — ارسال: فقط از
+  // APPROVED (shipOrder روی PENDING/REJECTED دیگر مجاز نیست — 3.2)؛ شرکت حمل و کد رهگیری (3.5)
+  async shipOrder(
+    sellerId: string,
+    storeId: string,
+    orderId: string,
+    shipment?: { carrier?: string; trackingCode?: string },
+    channel: OrderChannel = 'WEB',
   ) {
     const order = await this.getOwnedOrder(sellerId, storeId, orderId);
-    // فیدبک کاربر — جلوگیری از تکرار پیام رد به خریدار اگر همین سفارش از قبل رد شده بود
-    // (مثلاً دوبار زدن دکمه‌ی رد قدیمی روی تلگرام)
-    if (order.status === 'REJECTED') return order;
-    const [, updated] = await this.prisma.$transaction([
-      this.prisma.salesConversation.update({
-        where: { id: order.conversationId },
-        // isMutedForHuman: true — بدون این، پیام بعدی خریدار (که فرانت دیگر برایش input را
-        // قفل نمی‌کند، طبق همان بنر/پیامی که می‌گوید «می‌تونی همینجا صحبت کنی») مستقیم به
-        // موتور مکالمه‌ی رباتی می‌رفت که اصلاً برای state=REJECTED طراحی نشده؛ همان مکانیزمی
-        // که برای HANDOFF_HUMAN استفاده می‌شود (sales-agent.service.ts سطر ۲۳۲) پیام را لاگ
-        // می‌کند تا فروشنده در تب «نیاز به توجه» ببیندش
-        data: {
-          currentState: 'REJECTED',
-          archivedAt: new Date(),
-          isMutedForHuman: true,
-        },
-      }),
-      this.prisma.order.update({
-        where: { id: orderId },
-        data: {
-          status: 'REJECTED',
-          rejectReason: reason,
-          rejectedAt: new Date(),
-        },
-      }),
-    ]);
-    // سفارش قبلاً تایید و موجودی کم شده بود → با رد شدن، موجودی برمی‌گردد
-    if (order.status === 'APPROVED') {
-      await this.prisma.$transaction((tx) =>
-        this.adjustOrderStock(tx, order.items, 'RESTORE'),
-      );
+    if (
+      shipment?.carrier &&
+      !(ORDER_CARRIERS as readonly string[]).includes(shipment.carrier)
+    ) {
+      throw new BadRequestException(fa.order.carrierInvalid);
     }
-    await this.notifyBuyerOfRejection(order, reason);
-    return updated;
-  }
-
-  // فیدبک کاربر — خریدار بعد از رد سفارش توسط فروشنده هیچ اطلاعی توی چت نمی‌گرفت؛ عیناً
-  // الگوی requestReviewFollowUp بالا (ConversationEvent + پوش تلگرام اگر کانال خریدار تلگرام است)
-  private async notifyBuyerOfRejection(
-    order: { conversationId: string },
-    reason?: string,
-  ): Promise<void> {
-    const conversation = await this.prisma.salesConversation.findUnique({
-      where: { id: order.conversationId },
-      include: { customer: true },
-    });
-    if (!conversation) return;
-
-    const text = fa.salesAgent.orderRejectedMessage(reason);
-    await this.prisma.conversationEvent.create({
+    const r = await this.orderState.transition({
+      orderId,
+      to: 'SHIPPED',
+      actor: 'SELLER',
+      actorId: sellerId,
+      channel,
       data: {
-        conversationId: conversation.id,
-        type: 'AGENT_REPLY',
-        payload: { text },
+        carrier: shipment?.carrier ?? null,
+        trackingCode: shipment?.trackingCode?.trim() || null,
       },
     });
-
-    if (
-      conversation.customer.channel === 'TELEGRAM' &&
-      conversation.customer.telegramChatId
-    ) {
-      await this.telegramApi.sendText(
-        conversation.customer.telegramChatId,
-        text,
-      );
-    }
-  }
-
-  // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۱۳.۲ — عیناً هم‌الگوی
-  // approveOrder/rejectOrder بالا؛ نیازی به دست‌زدن به salesConversation نیست چون با تایید
-  // سفارش از قبل COMPLETED/archived شده است
-  async shipOrder(sellerId: string, storeId: string, orderId: string) {
-    const order = await this.getOwnedOrder(sellerId, storeId, orderId);
-    // فیدبک کاربر — کلیک دوباره‌ی دکمه‌ی «ارسال شد» نباید notifyBuyerOfShipment را دوباره بفرستد
-    if (order.status === 'SHIPPED') return order;
-    const shipped = await this.prisma.order.update({
-      where: { id: orderId },
-      data: { status: 'SHIPPED', shippedAt: new Date() },
-    });
-    await this.notifyBuyerOfShipment(order);
-    // docs/PRD-order-status-chat-tool-and-fulfillment-delay-reviews.md بخش ۲.۲ — برای
-    // سفارش‌های تحویل‌زمان‌بر، درخواست نظر در approveOrder عمداً نادیده گرفته شده بود؛ اولین
-    // باری که واقعاً باید فرستاده شود همین لحظه است (بعد از پیام «ارسال/آماده شد» بالا)
+    if (!r.changed) return r.order;
+    // docs/PRD-order-status-chat-tool-and-fulfillment-delay-reviews.md بخش ۲.۲ — برای سفارش‌های
+    // تحویل‌زمان‌بر، اولین باری که باید درخواست نظر فرستاده شود همین لحظه است
     if (order.hasFulfillmentDelay) {
       await this.requestReviewFollowUp(order);
     }
-    return shipped;
-  }
-
-  // عیناً الگوی notifyBuyerOfRejection بالا — خریدار باید بفهمد سفارشش ارسال شده
-  private async notifyBuyerOfShipment(order: {
-    conversationId: string;
-  }): Promise<void> {
-    const conversation = await this.prisma.salesConversation.findUnique({
-      where: { id: order.conversationId },
-      include: { customer: true },
-    });
-    if (!conversation) return;
-
-    const text = fa.salesAgent.orderShippedMessage;
-    await this.prisma.conversationEvent.create({
-      data: {
-        conversationId: conversation.id,
-        type: 'AGENT_REPLY',
-        payload: { text },
-      },
-    });
-
-    if (
-      conversation.customer.channel === 'TELEGRAM' &&
-      conversation.customer.telegramChatId
-    ) {
-      await this.telegramApi.sendText(
-        conversation.customer.telegramChatId,
-        text,
-      );
-    }
+    return r.order;
   }
 
   // الگوی conversations.service.ts getImage — کلید در storage هیچ‌وقت مستقیم به فرانت داده
@@ -1832,6 +1712,8 @@ export class StoreService {
       APPROVED: 0,
       REJECTED: 0,
       SHIPPED: 0,
+      DELIVERED: 0,
+      CANCELLED: 0,
     };
     for (const row of orderCountsByStatus) {
       countByStatus[row.status] = row._count._all;

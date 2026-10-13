@@ -29,8 +29,12 @@ export const TELEGRAM_UPDATES_QUEUE_CONCURRENCY = 10;
 export const CONVERSATION_EVENTS_PAGE_SIZE = 50;
 
 // 0.7 — سفارش‌های «موفق» برای همه‌ی آمار درآمد/اثبات اجتماعی؛ با «ارسال» سفارش از آمار نمی‌افتد
-// (در فاز ۳ `DELIVERED` اضافه می‌شود)
-export const SUCCESSFUL_ORDER_STATUSES = ['APPROVED', 'SHIPPED'] as const;
+// 3.15 — DELIVERED هم موفق است (فاز ۳)
+export const SUCCESSFUL_ORDER_STATUSES = [
+  'APPROVED',
+  'SHIPPED',
+  'DELIVERED',
+] as const;
 
 // 2.1 — سقف زمان و هم‌زمانی call های LLM در یک turn موتور فروش
 // هر HTTP call به مدل حداکثر این مدت؛ کل turn (همه‌ی stepها، retry اصلاحی و fallback) حداکثر
@@ -65,3 +69,31 @@ export const STORE_BALANCE_CACHE_TTL_SECONDS = 30;
 // روزی یک‌بار به‌ازای فروشگاه
 export const CREDIT_LOW_WARNING_RATIO = 0.2;
 export const CREDIT_ALERT_DEDUPE_TTL_SECONDS = 24 * 60 * 60;
+
+// 3.10 — مهلت پرداخت سفارش: createdAt + ۲۴ ساعت؛ یادآوری خریدار بعد از ۲ ساعت؛ cron هر ۱۰ دقیقه
+export const ORDER_PAYMENT_WINDOW_HOURS = 24;
+export const ORDER_PAYMENT_REMINDER_AFTER_HOURS = 2;
+export const ORDER_EXPIRY_CRON = '*/10 * * * *';
+// سفارش‌های پرداخت‌نشده‌ای که از این قدیمی‌ترند بی‌صدا لغو می‌شوند (backfill؛ بدون پیام به خریدار)
+export const ORDER_EXPIRY_SILENT_AFTER_DAYS = 3;
+// هر پاس cron حداکثر این تعداد سفارش را پردازش می‌کند (دسته‌ای)
+export const ORDER_EXPIRY_BATCH_SIZE = 200;
+
+// 3.6 — قوانین ثابت NotificationService
+export const NOTIFICATION_DEDUPE_TTL_SECONDS = 600;
+export const NOTIFICATION_SMS_DAILY_CAP_PER_BUYER = 5;
+// ساعت سکوت پیامک (Asia/Tehran): از QUIET_START تا QUIET_END صبح روز بعد صف می‌شود
+export const NOTIFICATION_SMS_QUIET_START_HOUR = 22;
+export const NOTIFICATION_SMS_QUIET_END_HOUR = 8;
+export const NOTIFICATION_JOB_ATTEMPTS = 3;
+// TODO(product): هزینه‌ی واقعی هر پیامک از واحد مالی؛ تا آن موقع در NotificationLog صفر ثبت می‌شود
+export const NOTIFICATION_SMS_COST_TOMAN = 0;
+
+// 3.5 — شرکت‌های حمل (لیست ثابت)
+export const ORDER_CARRIERS = [
+  'پست پیشتاز',
+  'تیپاکس',
+  'چاپار',
+  'پیک',
+  'سایر',
+] as const;

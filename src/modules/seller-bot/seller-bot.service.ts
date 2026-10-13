@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { ConflictException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { safeEqual } from '../../common/utils/safe-equal.util';
 import type { Store } from '@prisma/client';
@@ -363,11 +363,21 @@ export class SellerBotService {
     if (!order || order.storeId !== store.id) return;
 
     if (approve) {
-      const approved = await this.storeService.approveOrder(
-        store.sellerId,
-        store.id,
-        orderId,
-      );
+      let approved: Awaited<ReturnType<StoreService['approveOrder']>>;
+      try {
+        approved = await this.storeService.approveOrder(
+          store.sellerId,
+          store.id,
+          orderId,
+          'TELEGRAM',
+        );
+      } catch (err) {
+        if (err instanceof ConflictException) {
+          await this.sendMenu(chatId, err.message);
+          return;
+        }
+        throw err;
+      }
       await this.sendMenu(
         chatId,
         fa.sellerBot.orderApproved +
@@ -400,12 +410,21 @@ export class SellerBotService {
       !text || text === fa.sellerBot.orderRejectReasonSkipKeyword
         ? undefined
         : text;
-    await this.storeService.rejectOrder(
-      store.sellerId,
-      store.id,
-      orderId,
-      reason,
-    );
+    try {
+      await this.storeService.rejectOrder(
+        store.sellerId,
+        store.id,
+        orderId,
+        reason,
+        'TELEGRAM',
+      );
+    } catch (err) {
+      if (err instanceof ConflictException) {
+        await this.sendMenu(chatId, err.message);
+        return;
+      }
+      throw err;
+    }
     await this.sendMenu(chatId, fa.sellerBot.orderRejected);
   }
 

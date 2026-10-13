@@ -2,6 +2,7 @@ import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
 import type { Queue } from 'bull';
 import { AiProviderService } from '../common/services/ai-provider.service';
+import { ORDER_EXPIRY_CRON } from '../common/constants/sales-ops.constants';
 
 const FLUSH_CRON = '*/5 * * * *';
 const SUMMARY_CRON = '0 2 * * *';
@@ -65,6 +66,8 @@ export class QueueService implements OnApplicationBootstrap {
     private readonly abandonedCartReminderQueue: Queue,
     @InjectQueue('product-enrichment-reminder')
     private readonly productEnrichmentReminderQueue: Queue,
+    @InjectQueue('order-expiry')
+    private readonly orderExpiryQueue: Queue,
     private readonly aiProvider: AiProviderService,
   ) {}
 
@@ -296,5 +299,18 @@ export class QueueService implements OnApplicationBootstrap {
     this.logger.log(
       `Product enrichment reminder job scheduled: ${PRODUCT_ENRICHMENT_REMINDER_CRON}`,
     );
+
+    // docs/PRD-nivo-sales-unified.md 3.10 — انقضا/یادآوری سفارش پرداخت‌نشده
+    const orderExpiryRepeatables =
+      await this.orderExpiryQueue.getRepeatableJobs();
+    for (const job of orderExpiryRepeatables) {
+      await this.orderExpiryQueue.removeRepeatableByKey(job.key);
+    }
+    await this.orderExpiryQueue.add(
+      'run',
+      {},
+      { repeat: { cron: ORDER_EXPIRY_CRON } },
+    );
+    this.logger.log(`Order expiry job scheduled: ${ORDER_EXPIRY_CRON}`);
   }
 }

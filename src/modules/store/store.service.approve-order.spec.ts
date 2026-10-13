@@ -1,80 +1,121 @@
 import { StoreService } from './store.service';
 
-// PRD-nivo-sales-unified.md تسک‌های 0.3 (هشدار کمبود موجودی) و 0.13b (تایید دوگانه)
+// PRD-nivo-sales-unified.md 3.2 — approve/reject/ship فقط به OrderStateService تفویض می‌شوند
+// (منطق انتقال، قفل و اثرهای جانبی در test/order-state.e2e-spec.ts روی Postgres واقعی تست شده)
 const order = {
   id: 'o1',
   storeId: 'st1',
   conversationId: 'cv1',
   status: 'RECEIPT_SUBMITTED',
-  bankCardId: null,
-  totalAmount: 2000,
   hasFulfillmentDelay: true, // تا requestReviewFollowUp اجرا نشود
-  items: [{ productId: 'p1', name: 'کفش', qty: 2, unitPrice: 1000 }],
 };
 
-const build = (claimCount: number, liveStock = 1) => {
-  const productDelegate = {
-    updateMany: jest.fn(),
-    findFirst: jest.fn().mockResolvedValue({ stock: liveStock }),
-  };
-  // اولین updateMany (شرط stock>=qty) شکست می‌خورد؛ دومی (clamp) موفق
-  productDelegate.updateMany
-    .mockResolvedValueOnce({ count: 0 })
-    .mockResolvedValue({ count: 1 });
-  const tx = {
-    order: {
-      updateMany: jest.fn().mockResolvedValue({ count: claimCount }),
-      findUniqueOrThrow: jest
-        .fn()
-        .mockResolvedValue({ ...order, status: 'APPROVED' }),
-    },
-    storeBankCard: { update: jest.fn() },
-    product: productDelegate,
-    productVariant: productDelegate,
-    salesConversation: { update: jest.fn() },
-  };
-  const prisma = {
-    $transaction: jest.fn(async (fn: (t: typeof tx) => unknown) => fn(tx)),
-  };
+const build = (transition: jest.Mock) => {
   const svc = Object.create(StoreService.prototype) as StoreService;
   Object.assign(svc, {
-    prisma,
+    orderState: { transition },
     getOwnedOrder: jest.fn().mockResolvedValue(order),
+    requestReviewFollowUp: jest.fn(),
   });
-  return { svc, tx, productDelegate };
+  return svc;
 };
 
-describe('StoreService.approveOrder [0.3][0.13b]', () => {
-  it('کمبود موجودی: clamp می‌شود ولی هشدار صریح برمی‌گردد', async () => {
-    const { svc } = build(1, 1);
-    const r = await svc.approveOrder('s', 'st1', 'o1');
-    expect(r.status).toBe('APPROVED');
-    expect(r.stockWarnings).toEqual([
-      { name: 'کفش', requested: 2, available: 1 },
-    ]);
+describe('StoreService.approveOrder/rejectOrder/shipOrder → OrderStateService [3.2]', () => {
+  it('approve: هشدار کمبود موجودی از ماشین وضعیت برمی‌گردد', async () => {
+    const shortages = [{ name: 'کفش', requested: 2, available: 1 }];
+    const transition = jest.fn().mockResolvedValue({
+      changed: true,
+      order: { ...order, status: 'APPROVED' },
+      stockWarnings: shortages,
+    });
+    const r = await build(transition).approveOrder('s', 'st1', 'o1');
+    expect(r.stockWarnings).toEqual(shortages);
+    expect(transition).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orderId: 'o1',
+        to: 'APPROVED',
+        actor: 'SELLER',
+        actorId: 's',
+        channel: 'WEB',
+      }),
+    );
   });
 
-  it('تایید دوم (claim ناموفق) → بدون کسر موجودی/سقف کارت و بدون هشدار', async () => {
-    const { svc, tx, productDelegate } = build(0);
+  it('approve دوم (changed=false) → بدون هشدار و بدون پیگیری نظر', async () => {
+    const transition = jest.fn().mockResolvedValue({
+      changed: false,
+      order: { ...order, status: 'APPROVED' },
+      stockWarnings: [],
+    });
+    const svc = build(transition);
+    (
+      svc as unknown as { getOwnedOrder: jest.Mock }
+    ).getOwnedOrder.mockResolvedValue({
+      ...order,
+      hasFulfillmentDelay: false,
+    });
     const r = await svc.approveOrder('s', 'st1', 'o1');
     expect(r.stockWarnings).toEqual([]);
-    expect(productDelegate.updateMany).not.toHaveBeenCalled();
-    expect(tx.storeBankCard.update).not.toHaveBeenCalled();
-    expect(tx.salesConversation.update).not.toHaveBeenCalled();
+    expect(
+      (svc as unknown as { requestReviewFollowUp: jest.Mock })
+        .requestReviewFollowUp,
+    ).not.toHaveBeenCalled();
   });
 
-  it('claim فقط از وضعیت‌های قابل‌تایید انجام می‌شود', async () => {
-    const { svc, tx } = build(1);
-    await svc.approveOrder('s', 'st1', 'o1');
-    const where = tx.order.updateMany.mock.calls[0][0].where;
-    expect(where.status.in).toEqual(
-      expect.arrayContaining([
-        'PENDING_PAYMENT',
-        'RECEIPT_SUBMITTED',
-        'REJECTED',
-      ]),
+  it('approve سفارش غیر-تحویل‌زمان‌بر: پیگیری نظر بعد از تایید', async () => {
+    const transition = jest.fn().mockResolvedValue({
+      changed: true,
+      order: { ...order, status: 'APPROVED' },
+      stockWarnings: [],
+    });
+    const svc = build(transition);
+    (
+      svc as unknown as { getOwnedOrder: jest.Mock }
+    ).getOwnedOrder.mockResolvedValue({
+      ...order,
+      hasFulfillmentDelay: false,
+    });
+    await svc.approveOrder('s', 'st1', 'o1', 'TELEGRAM');
+    expect(
+      (svc as unknown as { requestReviewFollowUp: jest.Mock })
+        .requestReviewFollowUp,
+    ).toHaveBeenCalledTimes(1);
+    expect(transition.mock.calls[0][0].channel).toBe('TELEGRAM');
+  });
+
+  it('reject: دلیل به ماشین وضعیت داده می‌شود', async () => {
+    const transition = jest.fn().mockResolvedValue({
+      changed: true,
+      order: { ...order, status: 'REJECTED' },
+    });
+    await build(transition).rejectOrder('s', 'st1', 'o1', 'ناموجود');
+    expect(transition).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: 'REJECTED',
+        data: { rejectReason: 'ناموجود' },
+      }),
     );
-    expect(where.status.in).not.toContain('APPROVED');
-    expect(where.status.in).not.toContain('SHIPPED');
+  });
+
+  it('ship: شرکت حمل نامعتبر رد می‌شود؛ معتبر با کد رهگیری به ماشین وضعیت می‌رود', async () => {
+    const transition = jest.fn().mockResolvedValue({
+      changed: true,
+      order: { ...order, status: 'SHIPPED' },
+    });
+    const svc = build(transition);
+    await expect(
+      svc.shipOrder('s', 'st1', 'o1', { carrier: 'ناشناس' }),
+    ).rejects.toThrow();
+    expect(transition).not.toHaveBeenCalled();
+    await svc.shipOrder('s', 'st1', 'o1', {
+      carrier: 'تیپاکس',
+      trackingCode: ' 12345 ',
+    });
+    expect(transition).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: 'SHIPPED',
+        data: { carrier: 'تیپاکس', trackingCode: '12345' },
+      }),
+    );
   });
 });

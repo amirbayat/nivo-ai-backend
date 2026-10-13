@@ -10,6 +10,8 @@ import { CommentsModule } from '../comments/comments.module';
 import { SmsModule } from '../../sms/sms.module';
 import { MarketPricesModule } from '../market-prices/market-prices.module';
 import { StoreCreditEngineModule } from '../store-credit-engine/store-credit-engine.module';
+import { OrderLifecycleModule } from '../order-lifecycle/order-lifecycle.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { SalesAgentController } from './sales-agent.controller';
 import { SalesAgentService } from './sales-agent.service';
 import { ConversationEngineService } from './conversation-engine.service';
@@ -46,6 +48,9 @@ import { SalesAgentQaController } from './sales-agent-qa.controller';
     MarketPricesModule,
     // فاز ۱ — CreditService کسر را به StoreCreditDeductionService می‌سپارد
     StoreCreditEngineModule,
+    // فاز ۳ — ماشین وضعیت سفارش + NotificationService (D-6)
+    OrderLifecycleModule,
+    NotificationsModule,
   ],
   controllers: [SalesAgentController, SalesAgentQaController],
   providers: [

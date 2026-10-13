@@ -1,8 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RedisService } from '../../redis/redis.service';
-import { SmsService } from '../../sms/sms.service';
-import { SellerBotApiClientService } from '../seller-bot/seller-bot-api-client.service';
+import { NotificationService } from '../notifications/notification.service';
 import {
   CREDIT_ALERT_DEDUPE_TTL_SECONDS,
   CREDIT_LOW_WARNING_RATIO,
@@ -12,7 +11,8 @@ import { fa } from '../../i18n/fa';
 // فاز ۱ (1.5) — هشدار اعتبار: «رو به اتمام» وقتی موجودی ≤ ۲۰٪ آخرین شارژ، «تموم شد» وقتی
 // مکالمه‌ای به‌خاطر اعتبار handoff می‌شود؛ هر کدام حداکثر روزی یک‌بار به‌ازای فروشگاه (قبلاً به‌ازای
 // هر مکالمه‌ی بلاک یک پیام می‌رفت). کانال: بات فروشنده + SMS.
-// TODO(3.6): با ساخت NotificationService (گام ۳) این سرویس به آن منتقل می‌شود (D-6).
+// ارسال واقعی (بات فروشنده + SMS + NotificationLog) از NotificationService است (3.6، D-6)؛
+// این سرویس فقط «کی» را تصمیم می‌گیرد (آستانه‌ها و dedupe روزانه).
 @Injectable()
 export class CreditAlertService {
   private readonly logger = new Logger(CreditAlertService.name);
@@ -20,8 +20,7 @@ export class CreditAlertService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
-    private readonly sellerBotApi: SellerBotApiClientService,
-    private readonly sms: SmsService,
+    private readonly notifications: NotificationService,
   ) {}
 
   private async firstToday(kind: 'exhausted' | 'low', storeId: string) {
@@ -39,6 +38,7 @@ export class CreditAlertService {
     try {
       if (!(await this.firstToday('exhausted', storeId))) return;
       await this.send(
+        'CREDIT_EXHAUSTED',
         storeId,
         fa.creditAlert.exhaustedBot,
         fa.creditAlert.exhaustedSms,
@@ -65,6 +65,7 @@ export class CreditAlertService {
         return;
       if (!(await this.firstToday('low', storeId))) return;
       await this.send(
+        'CREDIT_LOW',
         storeId,
         fa.creditAlert.lowBot(spendableToman),
         fa.creditAlert.lowSms,
@@ -77,28 +78,18 @@ export class CreditAlertService {
     }
   }
 
-  private async send(storeId: string, botText: string, smsText: string) {
-    const store = await this.prisma.store.findUnique({
-      where: { id: storeId },
-      select: { sellerBotChatId: true, seller: { select: { phone: true } } },
+  private async send(
+    kind: 'CREDIT_EXHAUSTED' | 'CREDIT_LOW',
+    storeId: string,
+    botText: string,
+    smsText: string,
+  ) {
+    await this.notifications.notifySeller({
+      storeId,
+      template: kind,
+      entityId: storeId,
+      botText,
+      smsText,
     });
-    if (!store) return;
-    if (store.sellerBotChatId) {
-      await this.sellerBotApi
-        .sendText(store.sellerBotChatId, botText)
-        .catch((err) =>
-          this.logger.error(
-            `credit alert bot send failed (store=${storeId})`,
-            err,
-          ),
-        );
-    }
-    if (store.seller.phone) {
-      await this.sms
-        .sendFreeText(store.seller.phone, smsText)
-        .catch((err) =>
-          this.logger.error(`credit alert sms failed (store=${storeId})`, err),
-        );
-    }
   }
 }

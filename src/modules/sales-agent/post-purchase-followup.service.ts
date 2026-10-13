@@ -47,7 +47,7 @@ export class PostPurchaseFollowUpService {
           },
           {
             hasFulfillmentDelay: true,
-            status: 'SHIPPED',
+            status: { in: ['SHIPPED', 'DELIVERED'] },
             shippedAt: { lte: threshold },
           },
         ],
@@ -124,7 +124,7 @@ export class PostPurchaseFollowUpService {
           },
           {
             hasFulfillmentDelay: true,
-            status: 'SHIPPED',
+            status: { in: ['SHIPPED', 'DELIVERED'] },
             shippedAt: { lte: threshold },
           },
         ],

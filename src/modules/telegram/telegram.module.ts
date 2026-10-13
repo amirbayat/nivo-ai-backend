@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bull';
 import { SalesAgentModule } from '../sales-agent/sales-agent.module';
 import { StoreModule } from '../store/store.module';
+import { OrderLifecycleModule } from '../order-lifecycle/order-lifecycle.module';
 import { MediaTranscodeModule } from '../../common/services/media-transcode.module';
 import { AsrModule } from '../../common/services/asr.module';
 import { TelegramController } from './telegram.controller';
@@ -19,6 +20,7 @@ import {
   imports: [
     SalesAgentModule,
     StoreModule,
+    OrderLifecycleModule,
     MediaTranscodeModule,
     AsrModule,
     BullModule.registerQueue({ name: TELEGRAM_UPDATES_QUEUE }),

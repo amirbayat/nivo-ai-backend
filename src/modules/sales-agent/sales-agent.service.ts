@@ -36,6 +36,7 @@ import {
 import { getSalesAgentGlobalConfig } from './sales-agent-global-config.util';
 import { buildAsrVocabHint } from './asr-vocab-hint';
 import { reattachReceiptIfOrderOpen } from './receipt-reattach.util';
+import { OrderStateService } from '../order-lifecycle/order-state.service';
 import { CommentsService } from '../comments/comments.service';
 import type { SubmitCommentDto } from './dto/submit-comment.dto';
 import {
@@ -73,6 +74,7 @@ export class SalesAgentService {
     private readonly redis: RedisService,
     private readonly sms: SmsService,
     private readonly comments: CommentsService,
+    private readonly orderState: OrderStateService,
   ) {}
 
   // productId اختیاری — لینک اختصاصی یک محصول (فروشنده در استوری گذاشته)؛ اگر معتبر و
@@ -415,8 +417,10 @@ export class SalesAgentService {
 
     const reattachedToOrder = await reattachReceiptIfOrderOpen(
       this.prisma,
+      this.orderState,
       conversation.id,
       imageKey,
+      'WEB',
     );
     await this.prisma.conversationEvent.create({
       data: {

@@ -23,6 +23,10 @@ import { ProductCommentModerationProcessor } from './processors/product-comment-
 import { PostPurchaseFollowUpProcessor } from './processors/post-purchase-followup.processor';
 import { AbandonedCartReminderProcessor } from './processors/abandoned-cart-reminder.processor';
 import { ProductEnrichmentReminderProcessor } from './processors/product-enrichment-reminder.processor';
+import { OrderNotificationProcessor } from './processors/order-notification.processor';
+import { OrderExpiryProcessor } from './processors/order-expiry.processor';
+import { OrderLifecycleModule } from '../modules/order-lifecycle/order-lifecycle.module';
+import { NotificationsModule } from '../modules/notifications/notifications.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { MessageFeedbackModule } from '../modules/message-feedback/message-feedback.module';
 import { CampaignModule } from '../modules/campaign/campaign.module';
@@ -91,6 +95,8 @@ import { StoreModule } from '../modules/store/store.module';
     // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۹ — یادآوری هفتگی محصولات
     // قدیمی‌نشده، تولیدکننده در store.module.ts (ProductEnrichmentReminderService)
     BullModule.registerQueue({ name: 'product-enrichment-reminder' }),
+    // docs/PRD-nivo-sales-unified.md 3.10 — cron انقضای سفارش پرداخت‌نشده
+    BullModule.registerQueue({ name: 'order-expiry' }),
     PrismaModule,
     MessageFeedbackModule,
     CampaignModule,
@@ -113,6 +119,9 @@ import { StoreModule } from '../modules/store/store.module';
     // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۹ — ProductEnrichmentReminderService
     // برای ProductEnrichmentReminderProcessor پایین
     StoreModule,
+    // فاز ۳ — OrderExpiryService + پردازشگر اعلان‌ها
+    OrderLifecycleModule,
+    NotificationsModule,
   ],
   // فیدبک کاربر ۱۴۰۵/۰۷/۰۱ — SalesAgentVoiceWebhookController اینجاست (نه در sales-agent
   // module) چون SalesAgentVoiceWebhookService مستقیم SalesAgentVoiceProcessor را تزریق
@@ -138,6 +147,8 @@ import { StoreModule } from '../modules/store/store.module';
     ImageModelCostEstimateProcessor,
     VideoModelCostEstimateProcessor,
     SalesAgentVoiceProcessor,
+    OrderNotificationProcessor,
+    OrderExpiryProcessor,
     ProductCommentModerationProcessor,
     PostPurchaseFollowUpProcessor,
     AbandonedCartReminderProcessor,

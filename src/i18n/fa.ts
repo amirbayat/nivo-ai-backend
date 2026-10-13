@@ -294,6 +294,60 @@ export const fa = {
     lowSms:
       'نیوو: اعتبار ایجنت فروش فروشگاهت رو به اتمامه. قبل از تموم‌شدن از پنل فروشنده شارژش کن.',
   },
+  // فاز ۳ — چرخه‌ی سفارش و اعلان‌ها (NotificationService، D-6). `code` همیشه با خط تیره‌ی نمایشی است
+  order: {
+    invalidTransition: 'این تغییر وضعیت برای سفارش در حالت فعلی مجاز نیست',
+    stateChanged: 'وضعیت سفارش همین الان تغییر کرد؛ صفحه را تازه کن',
+    expiredReason: 'مهلت پرداخت تمام شد',
+    carrierInvalid: 'شرکت حمل معتبر نیست',
+  },
+  orderNotify: {
+    placedSms: (
+      code: string,
+      storeName: string,
+      amount: number,
+      hours: number,
+    ) =>
+      `نیوو: سفارش ${code} از ${storeName} ثبت شد. مبلغ ${amount.toLocaleString('fa-IR')} تومان؛ تا ${hours.toLocaleString('fa-IR')} ساعت برات نگه می‌داریم.`,
+    reminderChat: (code: string, hoursLeft: number) =>
+      `یادآوری: سفارش ${code} هنوز پرداخت نشده. حدود ${hoursLeft.toLocaleString('fa-IR')} ساعت دیگه لغو می‌شه. بعد از واریز، عکس رسید رو همین‌جا بفرست 🙏`,
+    reminderSms: (code: string, storeName: string) =>
+      `نیوو: سفارش ${code} از ${storeName} هنوز پرداخت نشده. بعد از واریز، رسید رو در چت فروشگاه بفرست.`,
+    approvedChat: (code: string) =>
+      `سفارش ${code} تایید شد 🎉 به‌زودی ارسال می‌شه و خبرش رو همین‌جا بهت می‌دیم.`,
+    approvedSms: (code: string, storeName: string) =>
+      `نیوو: سفارش ${code} از ${storeName} تایید شد 🎉`,
+    shippedChat: (
+      code: string,
+      carrier?: string | null,
+      tracking?: string | null,
+    ) =>
+      `سفارش ${code} ارسال شد 📦` +
+      (carrier ? `\nشرکت حمل: ${carrier}` : '') +
+      (tracking ? `\nکد رهگیری: ${tracking}` : '') +
+      '\nبه‌زودی دستت می‌رسه.',
+    shippedSms: (
+      code: string,
+      storeName: string,
+      carrier?: string | null,
+      tracking?: string | null,
+    ) =>
+      `نیوو: سفارش ${code} از ${storeName} ارسال شد.` +
+      (carrier ? ` ${carrier}` : '') +
+      (tracking ? ` کد رهگیری: ${tracking}` : ''),
+    rejectedChat: (code: string, reason?: string | null) =>
+      `متأسفانه فروشنده سفارش ${code} رو رد کرد 😔` +
+      (reason ? `\nدلیل: ${reason}` : '') +
+      '\nاگه سوالی داری همین‌جا بپرس.',
+    rejectedSms: (code: string, storeName: string) =>
+      `نیوو: سفارش ${code} از ${storeName} توسط فروشنده رد شد. جزئیات در چت فروشگاه.`,
+    cancelledChat: (code: string, reason?: string | null) =>
+      `سفارش ${code} لغو شد.` +
+      (reason ? `\nدلیل: ${reason}` : '') +
+      '\nاگه هنوز می‌خوایش، می‌تونی دوباره سفارش بدی.',
+    cancelledSms: (code: string, storeName: string) =>
+      `نیوو: سفارش ${code} از ${storeName} لغو شد.`,
+  },
   salesAgent: {
     invalidSession: 'نشست معتبر نیست',
     conversationNotFound: 'مکالمه یافت نشد',
@@ -385,6 +439,9 @@ export const fa = {
     // بیشتر خواسته و محصول پیدا شد (نه caption تولیدی، چون خودِ عکس‌ها پیام اصلی‌اند)
     photosCaption: (productName: string) => `عکس‌های ${productName} 📸`,
     receiptReceived: 'رسید دریافت شد و برای فروشنده ارسال شد — منتظر تایید باش',
+    // 3.8 — بعد از ارسال رسید: کد سفارش را هم بگوید
+    receiptReceivedWithCode: (code: string) =>
+      `رسیدت رسید ✅ کد سفارش ${code} — بعد از بررسی فروشنده، تایید می‌شه و همین‌جا خبرت می‌کنم.`,
     // docs/PRD-buyer-payment-method-card-or-snapppay-link.md — پیام ثابت دکمه‌ی
     // PAYMENT_METHOD_PROMPT؛ هم‌الگوی addressChooseSavedPrompt پایین (caption تولیدی ندارد)
     choosePaymentMethodPrompt:
@@ -429,7 +486,7 @@ export const fa = {
     // docs/PRD-customer-comments-and-discounts.md بخش الف/۳ — بعد از تایید سفارش، پیام ثابت
     // (نه LLM-generated) که یک پیام آزاد بعدی مشتری را به یک ProductComment تبدیل می‌کند
     reviewFollowUpPrompt:
-      'سفارشت تایید شد ✅ امیدواریم راضی باشی 🙏 اگه دوست داری نظرت رو درباره‌ی خرید یا محصول همین‌جا برام بنویس، به بقیه هم کمک می‌کنه.',
+      'امیدواریم راضی باشی 🙏 اگه دوست داری نظرت رو درباره‌ی خرید یا محصول همین‌جا برام بنویس، به بقیه هم کمک می‌کنه.',
     reviewThanks: 'ممنون بابت نظرت! بعد از بررسی نمایش داده می‌شه 🙏',
     // docs/PRD-buyer-orders-page-and-direct-order.md بخش ۲.۳ — ثبت نظر مستقیم (بدون صبر برای
     // پیام پیگیری چت)؛ فقط خریدارهایی که واقعاً سفارش تاییدشده دارند مجازند
@@ -568,7 +625,9 @@ export const fa = {
     // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۱۶
     leadCaptureNotification: (phone?: string | null, name?: string | null) =>
       `📝 یک لید جدید ثبت شد:\n👤 ${name ?? '—'}\n📞 ${phone ?? '—'}`,
-    receiptNotificationCaption: '🧾 رسید جدید برای بررسی رسید.',
+    // 3.4 — کد سفارش در پیام فروشنده (برای جست‌وجو در پنل و پیگیری تلفنی)
+    receiptNotificationCaption: (code: string) =>
+      `🧾 رسید جدید برای سفارش ${code} — منتظر بررسی توست.`,
     // فیدبک کاربر — فروشنده قبل از تایید/رد، آدرس و مشخصات گیرنده رو نمی‌دید؛ فقط وقتی
     // Store.requiresShipping بوده و این فیلدها روی سفارش ست شده‌اند نمایش داده می‌شود
     receiptRecipientInfo: (name: string, phone: string, address: string) =>

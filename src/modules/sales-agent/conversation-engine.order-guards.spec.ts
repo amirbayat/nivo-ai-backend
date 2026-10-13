@@ -33,22 +33,29 @@ describe('executeCreateOrder guards [0.2/0.3]', () => {
   const setup = (live: Record<string, unknown>[] | null, cart = baseCart) => {
     const tx = {
       product: {
-        findMany: jest
-          .fn()
-          .mockResolvedValue(
-            live ?? [
-              {
-                id: 'p1',
-                basePrice: 1000,
-                stock: 5,
-                variants: [],
-                hasFulfillmentDelay: false,
-              },
-            ],
-          ),
+        findMany: jest.fn().mockResolvedValue(
+          live ?? [
+            {
+              id: 'p1',
+              basePrice: 1000,
+              stock: 5,
+              variants: [],
+              hasFulfillmentDelay: false,
+            },
+          ],
+        ),
       },
       $executeRaw: jest.fn().mockResolvedValue(1),
+      customer: { findUnique: jest.fn().mockResolvedValue({ channel: 'WEB' }) },
+      store: {
+        findUnique: jest.fn().mockResolvedValue({
+          returnPolicyMode: 'NONE',
+          returnWindowDays: 7,
+          returnShippingPaidBy: 'BUYER',
+        }),
+      },
       order: {
+        findUnique: jest.fn().mockResolvedValue(null),
         create: jest.fn().mockImplementation(async ({ data }) => ({
           id: 'o1',
           paymentMethod: 'CARD_TO_CARD',
@@ -77,6 +84,8 @@ describe('executeCreateOrder guards [0.2/0.3]', () => {
           .mockResolvedValue({ id: 'c1', cardNumber: '6037', ownerName: 'x' }),
       },
       persistTransition: jest.fn().mockResolvedValue(undefined),
+      orderNotifications: { onPlaced: jest.fn().mockResolvedValue(undefined) },
+      logger: { error: jest.fn() },
     });
     const conversation = {
       id: 'cv1',
@@ -150,5 +159,32 @@ describe('executeCreateOrder guards [0.2/0.3]', () => {
     expect(tx.$executeRaw).toHaveBeenCalledTimes(1);
     expect(tx.order.create).toHaveBeenCalledTimes(1);
     expect(tx.order.create.mock.calls[0][0].data.totalAmount).toBe(2000 - 100);
+  });
+
+  it('3.4/3.10/3.3: کد سفارش، مهلت پرداخت و رویداد اولیه داخل همان تراکنش ساخته می‌شود', async () => {
+    const { eng, tx, conversation, ctx } = setup(null);
+    await eng.executeCreateOrder(conversation, ctx);
+    const data = tx.order.create.mock.calls[0][0].data;
+    expect(data.orderCode).toMatch(/^NV[2-9A-HJKMNP-Z]{6}$/);
+    expect(data.paymentDueAt.getTime()).toBeGreaterThan(Date.now());
+    expect(data.statusEvents.create).toMatchObject({
+      from: null,
+      to: 'PENDING_PAYMENT',
+      actor: 'BUYER',
+    });
+    expect(data.returnPolicySnapshot).toMatchObject({
+      returnPolicyMode: 'NONE',
+    });
+  });
+
+  it('برخورد کد سفارش: دوباره تولید می‌شود (pre-check)', async () => {
+    const { eng, tx, conversation, ctx } = setup(null);
+    tx.order.findUnique
+      .mockResolvedValueOnce({ id: 'other' })
+      .mockResolvedValueOnce({ id: 'other2' })
+      .mockResolvedValue(null);
+    const r = await eng.executeCreateOrder(conversation, ctx);
+    expect(r).toMatchObject({ status: 'created' });
+    expect(tx.order.findUnique).toHaveBeenCalledTimes(3);
   });
 });

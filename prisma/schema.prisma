@@ -603,6 +603,9 @@ model SalesAgentGlobalConfig {
   forcedModelVariant  String?
   // docs/PRD-sales-agent-sales-state-machine.md §۱۸ — کلید rollout؛ false = مسیر FULL_AGENT قبلی
   salesStageMachineEnabled Boolean @default(false)
+  // docs/PRD-nivo-sales-unified.md 3.6 — کلید rollout پیامک‌های وضعیت سفارش به خریدار؛ false =
+  // فقط پیام چت/تلگرام (هزینه‌ی SMS با پلتفرم است، D-7)
+  orderSmsEnabled          Boolean  @default(false)
   updatedAt           DateTime @updatedAt
 
   @@map("sales_agent_global_config")
@@ -2159,6 +2162,10 @@ model Store {
   // shippingInfo/returnPolicy هم بخشی از چک‌لیست تکمیل‌بودن فروشگاه هستند (بخش ۳.۱).
   shippingInfo                   String?           @db.Text
   returnPolicy                   String?           @db.Text
+  // docs/PRD-nivo-sales-unified.md 3.16 — پیش‌فرض NONE: هیچ مسیر مرجوعی/تعویضی فعال نیست
+  returnPolicyMode               ReturnPolicyMode     @default(NONE)
+  returnWindowDays               Int                  @default(7)
+  returnShippingPaidBy           ReturnShippingPaidBy @default(BUYER)
   // معرفی کوتاه برند (۱-۲ جمله) — برای سؤالات عمومی نامرتبط با یک محصول خاص
   brandIntro                     String?           @db.Text
   // docs/PRD-seller-guide-assistant-modal.md بخش ۱.۲ — متن خام فروشنده (از راهنمای پرامپت
@@ -3033,6 +3040,9 @@ enum OrderStatus {
   APPROVED
   REJECTED
   SHIPPED
+  // docs/PRD-nivo-sales-unified.md D-3 / 3.1 — مقدارهای فاز ۳ (SQL: 20261033_order_lifecycle_enum.sql)
+  DELIVERED
+  CANCELLED
 }
 
 // docs/PRD-buyer-payment-method-card-or-snapppay-link.md — جدا از PaymentProvider (آن یکی
@@ -3111,6 +3121,32 @@ model Order {
   // doCreateOrder)؛ true یعنی حداقل یکی از آیتم‌ها تحویل زمان‌بر دارد — approveOrder/shipOrder
   // و PostPurchaseFollowUpService بر اساس همین تصمیم می‌گیرند کِی درخواست نظر بفرستند
   hasFulfillmentDelay         Boolean            @default(false)
+  // docs/PRD-nivo-sales-unified.md 3.1/3.4 — کد سفارش قابل‌نمایش (NV + ۶ نویسه‌ی بدون ابهام).
+  // nullable می‌ماند تا بعد از دیپلوی و backfill، فایل 20261036_order_code_not_null.sql
+  // (اختیاری) آن را NOT NULL کند؛ کد جدید همیشه آن را در همان تراکنش ساخت سفارش می‌نویسد
+  orderCode                   String?            @unique
+  // 3.2/3.5 — شرکت حمل و کد رهگیری که فروشنده هنگام «ارسال شد» می‌زند
+  carrier                     String?
+  trackingCode                String?
+  deliveredAt                 DateTime?
+  cancelledAt                 DateTime?
+  // 3.1 — یادداشت داخلی فروشنده (فاز ۵)
+  sellerNote                  String?            @db.Text
+  // 3.9 — نتیجه‌ی بررسی خودکار رسید و اثرانگشت تصویر (فاز ۵؛ ستون‌ها از همین فاز آماده‌اند)
+  receiptCheck                Json?
+  receiptHash                 String?
+  // 3.8 — نوع رسید: عکس یا «رسید ندارم» (اطلاعات دستی)
+  receiptType                 ReceiptType?
+  receiptManualInfo           Json?
+  // 3.10 — مهلت پرداخت (createdAt + ۲۴ ساعت)؛ نال برای سفارش‌های قبل از فاز ۳
+  paymentDueAt                DateTime?
+  paymentReminderSentAt       DateTime?
+  // 3.16 — سیاست مرجوعی لحظه‌ی ثبت سفارش (تغییر بعدی تنظیم فروشگاه روی این سفارش اثر ندارد)
+  returnPolicySnapshot        Json?
+  statusEvents                OrderStatusEvent[]
+  refunds                     OrderRefund[]
+  issues                      OrderIssue[]
+  returns                     OrderReturn[]
   createdAt                   DateTime           @default(now())
   updatedAt                   DateTime           @updatedAt
 
@@ -3126,7 +3162,216 @@ model Order {
   // docs/PRD-marketplace-explore-cross-store.md بخش ۷ (فاز ۵ MVP) — «سفارش‌های من،
   // همه‌ی فروشگاه‌ها»: جست‌وجوی سفارش بر اساس شماره‌تلفن در کل جدول (نه فقط یک storeId)
   @@index([recipientPhone])
+  // 3.9 — تشخیص رسید تکراری در همان فروشگاه
+  @@index([storeId, receiptHash])
+  // 3.10 — cron انقضا/یادآوری فقط سفارش‌های PENDING_PAYMENT با مهلت را می‌خواند
+  @@index([status, paymentDueAt])
   @@map("orders")
+}
+
+enum ReceiptType {
+  IMAGE
+  MANUAL_INFO
+}
+
+enum OrderActor {
+  BUYER
+  SELLER
+  SYSTEM
+  ADMIN
+}
+
+enum OrderChannel {
+  WEB
+  TELEGRAM
+  COPILOT
+  CRON
+}
+
+// 3.3 — تاریخچه‌ی وضعیت سفارش (timeline خریدار/فروشنده، SLA، حل اختلاف)
+model OrderStatusEvent {
+  id        String        @id @default(uuid())
+  orderId   String
+  order     Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  from      OrderStatus?
+  to        OrderStatus
+  actor     OrderActor
+  actorId   String?
+  channel   OrderChannel?
+  reason    String?
+  createdAt DateTime      @default(now())
+
+  @@index([orderId, createdAt])
+  @@map("order_status_events")
+}
+
+enum RefundStatus {
+  AWAITING_DESTINATION
+  READY
+  DONE
+  CANCELLED
+}
+
+enum RefundReason {
+  ORDER_REJECTED
+  ORDER_CANCELLED
+  ITEM_UNAVAILABLE
+  OVERPAID
+  RETURNED
+  OTHER
+}
+
+enum RefundDestinationType {
+  CARD
+  SHEBA
+}
+
+// 3.11 — جدول آماده است؛ منطق ساخت/مسیر بازپرداخت در گام ۵ (RefundService)
+model OrderRefund {
+  id                String                 @id @default(uuid())
+  orderId           String
+  order             Order                  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  storeId           String
+  amountToman       Int
+  reason            RefundReason
+  note              String?
+  status            RefundStatus
+  destinationType   RefundDestinationType?
+  destinationEnc    String?
+  destinationMasked String?
+  holderName        String?
+  bankName          String?
+  destinationAt     DateTime?
+  paidAt            DateTime?
+  paidRef           String?
+  proofImageKey     String?
+  createdByActor    String
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+
+  @@index([storeId, status, createdAt])
+  @@index([orderId])
+  @@map("order_refunds")
+}
+
+enum OrderIssueReason {
+  NOT_RECEIVED
+  DAMAGED
+  WRONG_ITEM
+  OTHER
+}
+
+enum OrderIssueStatus {
+  OPEN
+  RESOLVED
+}
+
+// 3.14 — «مشکل در سفارش» (جدول آماده؛ مسیر ثبت در گام‌های بعد)
+model OrderIssue {
+  id         String           @id @default(uuid())
+  orderId    String
+  order      Order            @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  reason     OrderIssueReason
+  text       String?          @db.Text
+  images     String[]
+  status     OrderIssueStatus @default(OPEN)
+  createdAt  DateTime         @default(now())
+  resolvedAt DateTime?
+
+  @@index([orderId])
+  @@map("order_issues")
+}
+
+enum ReturnType {
+  RETURN
+  EXCHANGE
+}
+
+enum ReturnReason {
+  SIZE
+  DAMAGED
+  WRONG_ITEM
+  NOT_AS_DESCRIBED
+  CHANGED_MIND
+  OTHER
+}
+
+enum ReturnStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+  BUYER_SHIPPED
+  RECEIVED
+  COMPLETED
+  CANCELLED
+}
+
+enum ReturnPolicyMode {
+  NONE
+  EXCHANGE_ONLY
+  EXCHANGE_AND_RETURN
+}
+
+enum ReturnShippingPaidBy {
+  BUYER
+  SELLER
+}
+
+// 3.16 — مرجوعی/تعویض (جدول آماده؛ پیش‌فرض Store.returnPolicyMode=NONE یعنی هیچ مسیری فعال نیست)
+model OrderReturn {
+  id                String       @id @default(uuid())
+  orderId           String
+  order             Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  storeId           String
+  type              ReturnType
+  items             Json
+  reason            ReturnReason
+  text              String?      @db.Text
+  images            String[]
+  status            ReturnStatus @default(REQUESTED)
+  rejectReason      String?
+  buyerTrackingCode String?
+  priceDiffToman    Int          @default(0)
+  refundId          String?
+  exchangeOrderId   String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  @@index([orderId])
+  @@index([storeId, status])
+  @@map("order_returns")
+}
+
+// پیوست ب — رویدادهای اندازه‌گیری؛ تنها جدول معیارها (نگهداری ۹۰ روز)
+model ProductEvent {
+  id             String   @id @default(uuid())
+  name           String
+  storeId        String?
+  conversationId String?
+  userId         String?
+  props          Json?
+  createdAt      DateTime @default(now())
+
+  @@index([name, createdAt])
+  @@index([storeId, createdAt])
+  @@map("product_events")
+}
+
+// 3.6 — لاگ همه‌ی اعلان‌های ارسالی NotificationService
+model NotificationLog {
+  id        String   @id @default(uuid())
+  template  String
+  channel   String
+  to        String
+  status    String
+  costToman Int      @default(0)
+  entityId  String?
+  error     String?
+  createdAt DateTime @default(now())
+
+  @@index([template, entityId, createdAt])
+  @@index([to, channel, createdAt])
+  @@map("notification_logs")
 }
 
 // docs/PRD-customer-comments-and-discounts.md بخش الف — نظرات خریداران؛ تایید نهایی همیشه با

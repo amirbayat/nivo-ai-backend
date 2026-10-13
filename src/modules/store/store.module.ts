@@ -11,6 +11,7 @@ import { StoreController } from './store.controller';
 import { DemoProductsAdminController } from './demo-products-admin.controller';
 import { StoreService } from './store.service';
 import { StoreKbService } from './store-kb.service';
+import { OrderLifecycleModule } from '../order-lifecycle/order-lifecycle.module';
 import { StoreCreditEngineModule } from '../store-credit-engine/store-credit-engine.module';
 import { StoreCreditService } from './store-credit.service';
 import { StoreBankCardService } from './store-bank-card.service';
@@ -44,6 +45,8 @@ import { ContentChangeLogService } from './content-change-log.service';
     MarketPricesModule,
     // فاز ۱ — کسر/شارژ اعتبار فروشگاه فقط از StoreCreditDeductionService
     StoreCreditEngineModule,
+    // فاز ۳ — تنها مسیر تغییر وضعیت سفارش (OrderStateService)
+    OrderLifecycleModule,
   ],
   controllers: [StoreController, DemoProductsAdminController],
   providers: [

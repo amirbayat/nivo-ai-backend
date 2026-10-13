@@ -94,23 +94,35 @@ describe('handleAction fork when conversation already has an order [0.13b]', () 
 });
 
 describe('handleReceiptUpload [0.13b][0.13c]', () => {
-  const setup = (claimCount: number, notifyFails: boolean) => {
+  const setup = (
+    transitionChanged: boolean,
+    notifyFails: boolean,
+    status = 'PENDING_PAYMENT',
+  ) => {
     const prisma = {
       order: {
         findUnique: jest.fn().mockResolvedValue({
           id: 'o1',
           totalAmount: 1000,
           paymentMethod: 'CARD_TO_CARD',
+          status,
         }),
-        updateMany: jest.fn().mockResolvedValue({ count: claimCount }),
         update: jest.fn(),
       },
+    };
+    // 3.2 — انتقال وضعیت فقط از OrderStateService
+    const orderState = {
+      transition: jest
+        .fn()
+        .mockResolvedValue({ changed: transitionChanged, order: {} }),
     };
     const eng = Object.create(
       ConversationEngineService.prototype,
     ) as unknown as Engine;
     Object.assign(eng, {
       prisma,
+      orderState,
+      orderChannelOf: jest.fn().mockResolvedValue('WEB'),
       persistTransition: jest.fn(),
       lock: {
         acquireWithRetry: jest.fn().mockResolvedValue('t'),
@@ -136,21 +148,28 @@ describe('handleReceiptUpload [0.13b][0.13c]', () => {
       notifySellerOfReceipt: jest.fn(),
       logger: { error: jest.fn() },
     });
-    return { eng, prisma };
+    return { eng, prisma, orderState };
   };
   const conv = { id: 'cv1', currentState: 'AWAITING_PAYMENT', store: {} };
 
   it('سفارش غیر PENDING_PAYMENT (مثلاً APPROVED) رسید نمی‌گیرد', async () => {
-    const { eng, prisma } = setup(0, false);
+    const { eng, orderState } = setup(false, false, 'APPROVED');
     const r = await eng.handleReceiptUpload(conv, 'k.jpg');
     expect(r.reply).toBe('noPending');
-    expect(prisma.order.updateMany.mock.calls[0][0].where).toMatchObject({
-      status: 'PENDING_PAYMENT',
-    });
+    expect(orderState.transition).not.toHaveBeenCalled();
+  });
+
+  it('انتقال هم‌زمان (changed=false) → رسید دوباره ثبت نمی‌شود', async () => {
+    const { eng, orderState } = setup(false, false);
+    const r = await eng.handleReceiptUpload(conv, 'k.jpg');
+    expect(r.reply).toBe('noPending');
+    expect(orderState.transition).toHaveBeenCalledWith(
+      expect.objectContaining({ to: 'RECEIPT_SUBMITTED', actor: 'BUYER' }),
+    );
   });
 
   it('خطای دانلود/تلگرام بعد از commit → همچنان پاسخ موفق (نه 500)', async () => {
-    const { eng } = setup(1, true);
+    const { eng } = setup(true, true);
     const r = await eng.handleReceiptUpload(conv, 'k.jpg');
     expect(r.state).toBe('AWAITING_SELLER_APPROVAL');
     expect(r.reply).toBe('رسید دریافت شد');

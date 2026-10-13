@@ -40,7 +40,14 @@ import type {
   TurnGoal,
 } from './sales-machine/sales-machine.types';
 import { getSalesAgentGlobalConfig } from './sales-agent-global-config.util';
-import { Injectable, Logger } from '@nestjs/common';
+import { ConflictException, Injectable, Logger } from '@nestjs/common';
+import { OrderStateService } from '../order-lifecycle/order-state.service';
+import { OrderNotificationService } from '../order-lifecycle/order-notification.service';
+import {
+  ORDER_CODE_MAX_ATTEMPTS,
+  displayOrderCode,
+  generateOrderCode,
+} from '../../common/utils/order-code.util';
 import { InjectQueue } from '@nestjs/bull';
 import type { Queue } from 'bull';
 import {
@@ -125,6 +132,7 @@ import {
   CONVERSATION_DRAIN_MAX_ROUNDS,
   LLM_FALLBACK_MAX_MODELS,
   LLM_MAX_RETRIES,
+  ORDER_PAYMENT_WINDOW_HOURS,
 } from '../../common/constants/sales-ops.constants';
 import {
   LlmSaturatedError,
@@ -600,6 +608,8 @@ export class ConversationEngineService {
     private readonly voiceQueue: Queue<SalesAgentVoiceJobData>,
     private readonly lock: ConversationLockService,
     private readonly creditAlerts: CreditAlertService,
+    private readonly orderState: OrderStateService,
+    private readonly orderNotifications: OrderNotificationService,
   ) {}
 
   // docs/PRD-category-specific-product-pricing-and-attributes.md بخش ۲.۳ — نقطه‌ی مرکزی حل
@@ -738,12 +748,12 @@ export class ConversationEngineService {
       SELECT item->>'name' AS name, COUNT(DISTINCT orders.id)::bigint AS count
       FROM orders, jsonb_array_elements(items) AS item
       WHERE orders."storeId" = ${storeId}
-        AND orders.status IN ('APPROVED', 'SHIPPED')
+        AND orders.status IN ('APPROVED', 'SHIPPED', 'DELIVERED')
         AND (item->>'productId') != ${productId}
         AND orders.id IN (
           SELECT id FROM orders
           WHERE "storeId" = ${storeId}
-            AND status IN ('APPROVED', 'SHIPPED')
+            AND status IN ('APPROVED', 'SHIPPED', 'DELIVERED')
             AND items @> ${JSON.stringify([{ productId }])}::jsonb
         )
       GROUP BY item->>'productId', item->>'name'
@@ -775,7 +785,7 @@ export class ConversationEngineService {
     const rows = await this.prisma.$queryRaw<{ count: bigint }[]>`
       SELECT COUNT(*)::bigint AS count FROM orders
       WHERE "storeId" = ${storeId}
-        AND status IN ('APPROVED', 'SHIPPED')
+        AND status IN ('APPROVED', 'SHIPPED', 'DELIVERED')
         AND items @> ${JSON.stringify([{ productId }])}::jsonb
     `;
     return Number(rows[0]?.count ?? 0);
@@ -2625,10 +2635,15 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
             : 'تاییدشده',
           REJECTED: 'رسید رد شده',
           SHIPPED: 'ارسال/آماده شده',
+          DELIVERED: 'تحویل داده شده',
+          CANCELLED: 'لغو شده',
         };
         return {
           found: true,
+          orderCode: displayOrderCode(order),
           status: order.status,
+          carrier: order.carrier,
+          trackingCode: order.trackingCode,
           statusLabel: statusLabel[order.status] ?? order.status,
           createdAt: order.createdAt,
           shippedAt: order.shippedAt,
@@ -6566,6 +6581,18 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     return { reply, uiBlocks: [uiBlock], state: conversation.currentState };
   }
 
+  // کانال ثبت‌کننده‌ی رویداد سفارش (OrderStatusEvent.channel): تلگرام یا وب
+  private async orderChannelOf(
+    db: Pick<Prisma.TransactionClient, 'customer'>,
+    conversation: ConversationWithStore,
+  ): Promise<'TELEGRAM' | 'WEB'> {
+    const customer = await db.customer.findUnique({
+      where: { id: conversation.customerId },
+      select: { channel: true },
+    });
+    return customer?.channel === 'TELEGRAM' ? 'TELEGRAM' : 'WEB';
+  }
+
   // منطق خالص DB (بدون caption/logReply) — docs/PRD-sales-agent-tool-calling-architecture.md
   // بخش ۳.۳ (ابزار create_order) هم عیناً همین تابع را صدا می‌زند، نه این‌که idempotency/چرخش
   // کارت/کسر اتمیک تخفیف را بازنویسی کند
@@ -6702,6 +6729,35 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           paymentMethod === 'CARD_TO_CARD'
             ? await this.cardSelector.selectCard(conversation.storeId)
             : null;
+        // 3.4 — کد سفارش داخل همین تراکنش؛ برخورد با pre-check و retry (۵ بار)
+        let orderCode: string | undefined;
+        for (let attempt = 0; attempt < ORDER_CODE_MAX_ATTEMPTS; attempt++) {
+          const candidate = generateOrderCode();
+          const taken = await tx.order.findUnique({
+            where: { orderCode: candidate },
+            select: { id: true },
+          });
+          if (!taken) {
+            orderCode = candidate;
+            break;
+          }
+        }
+        if (!orderCode) {
+          this.logger.error(
+            `order code collision x${ORDER_CODE_MAX_ATTEMPTS} (store=${conversation.storeId})`,
+          );
+          throw new Error('ORDER_CODE_GENERATION_FAILED');
+        }
+        const customerChannel = await this.orderChannelOf(tx, conversation);
+        // 3.16 — سیاست مرجوعی لحظه‌ی ثبت؛ تغییر بعدی تنظیم روی این سفارش اثر ندارد
+        const policy = await tx.store.findUnique({
+          where: { id: conversation.storeId },
+          select: {
+            returnPolicyMode: true,
+            returnWindowDays: true,
+            returnShippingPaidBy: true,
+          },
+        });
         const created = await tx.order.create({
           data: {
             storeId: conversation.storeId,
@@ -6712,6 +6768,21 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
             bankCardId: selectedCard?.id,
             discountCodeId,
             hasFulfillmentDelay,
+            orderCode,
+            // 3.10 — مهلت پرداخت
+            paymentDueAt: new Date(
+              Date.now() + ORDER_PAYMENT_WINDOW_HOURS * 60 * 60 * 1000,
+            ),
+            ...(policy ? { returnPolicySnapshot: policy } : {}),
+            // 3.3 — اولین رویداد تاریخچه در همان تراکنش
+            statusEvents: {
+              create: {
+                from: null,
+                to: 'PENDING_PAYMENT',
+                actor: 'BUYER',
+                channel: customerChannel,
+              },
+            },
             ...(addressSnapshot
               ? {
                   recipientName: addressSnapshot.recipientName,
@@ -6760,6 +6831,15 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       }
       order = txResult.order;
       card = txResult.selectedCard;
+      // 3.6/3.7 — ORDER_PLACED (SMS؛ بهترین تلاش و غیرمسدودکننده)
+      void this.orderNotifications
+        .onPlaced(order)
+        .catch((err) =>
+          this.logger.error(
+            `ORDER_PLACED notify failed (order=${order!.id})`,
+            err,
+          ),
+        );
       if (card) {
         cardNumber = card.cardNumber;
         ownerName = card.ownerName;
@@ -7372,12 +7452,27 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
 
     // 0.13b — فقط سفارش «در انتظار پرداخت» رسید می‌گیرد؛ قبلاً آپدیت بدون شرط، سفارش
     // تاییدشده را دوباره RECEIPT_SUBMITTED می‌کرد (دوبار تایید و دوبار کسر موجودی)
-    const claimed = await this.prisma.order.updateMany({
-      where: { id: order.id, status: 'PENDING_PAYMENT' },
-      data: { receiptImageKey, status: 'RECEIPT_SUBMITTED' },
-    });
-    if (claimed.count === 0) {
+    // 3.2 — انتقال فقط از PENDING_PAYMENT (از طریق OrderStateService؛ از REJECTED مسیر
+    // reattach دارد). دستور تکراری/هم‌زمان: changed=false یا Conflict → «سفارشی در انتظار نیست»
+    if (order.status !== 'PENDING_PAYMENT') {
       return this.doClarify(conversation, fa.salesAgent.noPendingOrder);
+    }
+    try {
+      const moved = await this.orderState.transition({
+        orderId: order.id,
+        to: 'RECEIPT_SUBMITTED',
+        actor: 'BUYER',
+        channel: await this.orderChannelOf(this.prisma, conversation),
+        data: { receiptImageKey, receiptType: 'IMAGE' },
+      });
+      if (!moved.changed) {
+        return this.doClarify(conversation, fa.salesAgent.noPendingOrder);
+      }
+    } catch (err) {
+      if (err instanceof ConflictException) {
+        return this.doClarify(conversation, fa.salesAgent.noPendingOrder);
+      }
+      throw err;
     }
 
     const nextState: ConversationState = 'AWAITING_SELLER_APPROVAL';
@@ -7394,7 +7489,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       status: 'RECEIPT_SUBMITTED',
     };
     const reply = await this.caption(
-      fa.salesAgent.receiptReceived,
+      fa.salesAgent.receiptReceivedWithCode(displayOrderCode(order)),
       conversation,
     );
     await this.logReply(conversation, reply, uiBlock);
@@ -7555,7 +7650,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       buffer,
       `receipt.${ext}`,
       mimeTypeForExt(ext),
-      `${fa.telegram.receiptNotificationCaption}${recipientLine}${verificationLine}${snapppayLine}`,
+      `${fa.telegram.receiptNotificationCaption(order ? displayOrderCode(order) : orderId.slice(0, 8))}${recipientLine}${verificationLine}${snapppayLine}`,
       {
         inline_keyboard: [
           [
@@ -8198,7 +8293,7 @@ answered=false بده (به‌جای حدس‌زدن).`,
           where: { id: conversation.id, version: expectedVersion },
           data: {
             currentState: nextState,
-            contextData: ctxToWrite as unknown as Prisma.InputJsonValue,
+            contextData: ctxToWrite,
             isMutedForHuman: nextState === 'HANDOFF_HUMAN' ? true : undefined,
             version: { increment: 1 },
           },
@@ -8259,7 +8354,7 @@ answered=false بده (به‌جای حدس‌زدن).`,
     // آبجکت درون‌حافظه‌ای؛ چون runFullAgentTurn همین آبجکت conversation را بین تلاش اول و
     // fallback پاس می‌دهد (بدون fetch دوباره)، بدون این خط هر retry از وضعیت قبل از جهش
     // (نه چیزی که واقعاً در DB نشسته) ادامه می‌داد
-    conversation.contextData = written as unknown as Prisma.JsonValue;
+    conversation.contextData = written;
   }
 
   private async logReply(
