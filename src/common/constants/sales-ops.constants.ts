@@ -20,3 +20,7 @@ export const CONVERSATION_LOCK_RETRY_INTERVAL_MS = 100;
 export const CONVERSATION_PENDING_MAX_MESSAGES = 20;
 // سقف دورهای drain پشت‌سرهم در یک نگه‌داری قفل
 export const CONVERSATION_DRAIN_MAX_ROUNDS = 5;
+
+// 0.5 — وب‌هوک تلگرام/اینستاگرام: dedupe روی شناسه‌ی رویداد و همزمانی پردازشگر صف
+export const WEBHOOK_DEDUPE_TTL_SECONDS = 86_400;
+export const TELEGRAM_UPDATES_QUEUE_CONCURRENCY = 10;

@@ -61,7 +61,12 @@ export class InstagramController {
       this.logger.warn('webhook rejected: signature mismatch');
       throw new ForbiddenException();
     }
-    await this.instagram.handlePayload(payload);
+    // 0.5 — Meta باید فوراً ۲۰۰ بگیرد؛ پردازش (و ارسال DM) پشت پرده انجام می‌شود
+    void this.instagram.handlePayload(payload).catch((err: unknown) => {
+      this.logger.error(
+        `handlePayload failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    });
     return { ok: true };
   }
 

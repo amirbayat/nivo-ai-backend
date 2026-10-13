@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
+import { WEBHOOK_DEDUPE_TTL_SECONDS } from '../../common/constants/sales-ops.constants';
+import { RedisService } from '../../redis/redis.service';
 import { AutomationTriggerType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { InstagramApiClientService } from './instagram-api-client.service';
@@ -20,6 +22,7 @@ export class InstagramService {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly api: InstagramApiClientService,
+    private readonly redis: RedisService,
   ) {}
 
   // GET /instagram/webhook — challenge-response یک‌بار، موقع ثبت URL در Meta Developer
@@ -60,11 +63,25 @@ export class InstagramService {
     }
   }
 
+  // 0.5 — Meta روی پاسخ کند دوباره می‌فرستد؛ true یعنی این شناسه قبلاً دیده شده
+  private async seenBefore(kind: string, id: string | undefined) {
+    if (!id) return false;
+    const first = await this.redis.set(
+      `ig:${kind}:${id}`,
+      '1',
+      'EX',
+      WEBHOOK_DEDUPE_TTL_SECONDS,
+      'NX',
+    );
+    return first !== 'OK';
+  }
+
   private async handleEntry(entry: InstagramWebhookEntry): Promise<void> {
     for (const change of entry.changes ?? []) {
       if (change.field !== 'comments') continue;
       const text = change.value.text;
       if (!text) continue;
+      if (await this.seenBefore('comment', change.value.id)) continue;
       await this.resolveAndDispatch({
         kind: 'COMMENT',
         storeInstagramBusinessId: entry.id,
@@ -76,6 +93,7 @@ export class InstagramService {
 
     for (const msg of entry.messaging ?? []) {
       if (!msg.message || msg.message.is_echo || !msg.message.text) continue;
+      if (await this.seenBefore('mid', msg.message.mid)) continue;
       const isStoryMention = msg.message.attachments?.some(
         (a) => a.type === 'story_mention',
       );

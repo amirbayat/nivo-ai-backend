@@ -7,19 +7,29 @@ import {
   Logger,
   Post,
 } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bull';
 import { SkipThrottle } from '@nestjs/throttler';
+import type { Queue } from 'bull';
+import { WEBHOOK_DEDUPE_TTL_SECONDS } from '../../common/constants/sales-ops.constants';
+import { RedisService } from '../../redis/redis.service';
+import { TELEGRAM_UPDATES_QUEUE } from './telegram-updates.processor';
 import { TelegramService } from './telegram.service';
 import type { TelegramUpdate } from './telegram.types';
 
 // docs/PRD-telegram-bot-channel.md بخش ۴.۱ — بدون JwtGuard (تلگرام از بیرون صدا می‌زند)؛
 // امنیت با secret_token هدر تأمین می‌شود، نه auth کاربر. باید فوراً ۲۰۰ برگرداند (تلگرام
-// دیرجوابی را retry می‌کند) — پردازش synchronous ولی سریع نگه داشته شده (بدون صف جدا،
-// همان‌طور که video-edit-webhook.controller.ts هم synchronous است).
+// دیرجوابی را retry می‌کند) — 0.5: آپدیت بعد از dedupe روی update_id در صف Bull
+// (telegram-updates) می‌رود و پردازش خارج از چرخه‌ی HTTP انجام می‌شود.
 @Controller('v2/telegram')
 export class TelegramController {
   private readonly logger = new Logger(TelegramController.name);
 
-  constructor(private readonly telegram: TelegramService) {}
+  constructor(
+    private readonly telegram: TelegramService,
+    private readonly redis: RedisService,
+    @InjectQueue(TELEGRAM_UPDATES_QUEUE)
+    private readonly updatesQueue: Queue<TelegramUpdate>,
+  ) {}
 
   @SkipThrottle()
   @Post('webhook')
@@ -49,7 +59,27 @@ export class TelegramController {
       this.logger.warn('webhook rejected: secret_token mismatch');
       throw new ForbiddenException();
     }
-    await this.telegram.handleUpdate(update);
+    // 0.5 — dedupe: تلگرام روی پاسخ کند دوباره می‌فرستد (دو جواب، دو هزینه، دو تغییر سبد)
+    if (update.update_id !== undefined) {
+      const first = await this.redis.set(
+        `tg:upd:${update.update_id}`,
+        '1',
+        'EX',
+        WEBHOOK_DEDUPE_TTL_SECONDS,
+        'NX',
+      );
+      if (first !== 'OK') {
+        this.logger.log(`duplicate update_id=${update.update_id} ignored`);
+        return { ok: true };
+      }
+    }
+    await this.updatesQueue.add('handle-update', update, {
+      jobId:
+        update.update_id !== undefined ? `tg-${update.update_id}` : undefined,
+      attempts: 1,
+      removeOnComplete: true,
+      removeOnFail: 100,
+    });
     return { ok: true };
   }
 }
