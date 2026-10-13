@@ -8,6 +8,7 @@ import {
 } from 'class-validator';
 import { VideoEditMode } from '@prisma/client';
 import { fa } from '../../../i18n/fa';
+import { ToNumber } from '../../../common/decorators/digits.decorators';
 
 const MODES = Object.values(VideoEditMode);
 const ASPECT_RATIOS = ['16:9', '9:16'] as const;
@@ -53,10 +54,12 @@ export class CreateVideoEditJobDto {
 
   @IsOptional()
   @IsNumber()
+  @ToNumber()
   videoWindowStartSec?: number;
 
   @IsOptional()
   @IsNumber()
+  @ToNumber()
   videoWindowEndSec?: number;
 
   // فقط معنادار برای مدل‌هایی که فیلد aspect_ratio دارند — با ویدیوی منبع هم ارسال می‌شود

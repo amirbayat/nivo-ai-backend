@@ -8,6 +8,7 @@ import {
   Min,
 } from 'class-validator';
 import { fa } from '../../../i18n/fa';
+import { ToNumber } from '../../../common/decorators/digits.decorators';
 
 export class ListConversationsDto {
   @IsOptional()
@@ -19,6 +20,7 @@ export class ListConversationsDto {
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(1, { message: fa.validation.numberPositive })
   @Max(50, { message: fa.validation.stringTooLong })
+  @ToNumber()
   limit?: number = 20;
 
   @IsOptional()

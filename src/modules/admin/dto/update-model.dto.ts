@@ -14,6 +14,7 @@ import {
   MODEL_TYPES,
   TOKENIZER_FAMILIES,
 } from './create-model.dto';
+import { ToNumber } from '../../../common/decorators/digits.decorators';
 
 export class UpdateModelDto {
   @IsOptional()
@@ -36,12 +37,14 @@ export class UpdateModelDto {
   @Type(() => Number)
   @IsNumber()
   @Min(0)
+  @ToNumber()
   inputPricePerM?: number;
 
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
+  @ToNumber()
   outputPricePerM?: number;
 
   @IsOptional()
@@ -73,12 +76,14 @@ export class UpdateModelDto {
   @Type(() => Number)
   @IsNumber()
   @Min(0)
+  @ToNumber()
   imageGenInputImagePricePerM?: number;
 
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
+  @ToNumber()
   imageGenOutputImagePricePerM?: number;
 
   @IsOptional()
@@ -93,6 +98,7 @@ export class UpdateModelDto {
   @Type(() => Number)
   @IsNumber()
   @Min(0)
+  @ToNumber()
   imageGenFlatPriceUsd?: number;
 
   @IsOptional()
@@ -111,18 +117,21 @@ export class UpdateModelDto {
   @Type(() => Number)
   @IsNumber()
   @Min(0)
+  @ToNumber()
   videoGenPricePerSecondUsd?: number;
 
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
+  @ToNumber()
   videoGenAudioMultiplier?: number;
 
   @IsOptional()
   @IsArray()
   @Type(() => Number)
   @IsNumber({}, { each: true })
+  @ToNumber()
   videoGenSupportedDurationsSec?: number[];
 
   @IsOptional()
@@ -137,6 +146,7 @@ export class UpdateModelDto {
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
+  @ToNumber()
   sortOrder?: number;
 
   @IsOptional()
@@ -151,6 +161,7 @@ export class UpdateModelDto {
   @Type(() => Number)
   @IsNumber()
   @Min(0)
+  @ToNumber()
   avgCharsPerToken?: number;
 
   // docs/PRD-openrouter-migration.md §۱۳.۴/۱۴.۴ — صفحه‌ی انتخاب مدل بازطراحی‌شده

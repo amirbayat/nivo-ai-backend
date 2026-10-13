@@ -10,6 +10,7 @@ import {
 } from 'class-validator';
 import type { DiscountKind } from '@prisma/client';
 import { fa } from '../../../i18n/fa';
+import { ToNumber } from '../../../common/decorators/digits.decorators';
 
 // docs/PRD-customer-comments-and-discounts.md بخش ۷/۸
 export class CreateDiscountCodeDto {
@@ -24,11 +25,13 @@ export class CreateDiscountCodeDto {
 
   @IsInt()
   @Min(1)
+  @ToNumber()
   value: number;
 
   @IsOptional()
   @IsInt()
   @Min(1)
+  @ToNumber()
   maxRedemptions?: number;
 
   @IsOptional()
@@ -40,6 +43,7 @@ export class CreateDiscountCodeDto {
   @IsOptional()
   @IsInt()
   @Min(2)
+  @ToNumber()
   minQuantity?: number;
 
   // docs/PRD-customer-comments-and-discounts.md بخش ۱۳ — محدود کردن کد به یک محصول خاص؛

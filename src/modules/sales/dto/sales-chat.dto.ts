@@ -8,6 +8,7 @@ import {
   IsIn,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { ToNumber } from '../../../common/decorators/digits.decorators';
 
 export class SalesChatMessageDto {
   @IsString()
@@ -51,6 +52,7 @@ export class SaveLeadDto {
 
   @IsOptional()
   @IsNumber()
+  @ToNumber()
   age?: number;
 
   @IsOptional()

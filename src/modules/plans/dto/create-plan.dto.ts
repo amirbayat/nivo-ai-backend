@@ -12,6 +12,7 @@ import {
 } from 'class-validator';
 import { fa } from '../../../i18n/fa';
 import { REASONING_EFFORT_VALUES } from '../reasoning-effort.constants';
+import { ToNumber } from '../../../common/decorators/digits.decorators';
 
 export class CreatePlanDto {
   @IsString({ message: fa.validation.required })
@@ -20,14 +21,17 @@ export class CreatePlanDto {
 
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(0, { message: fa.validation.numberPositive })
+  @ToNumber()
   priceMonthly: number; // تومان
 
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(0, { message: fa.validation.numberPositive })
+  @ToNumber()
   dailyFreeTokens: number;
 
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(0, { message: fa.validation.numberPositive })
+  @ToNumber()
   monthlyTotalTokens: number;
 
   @IsArray({ message: fa.validation.mustBeArray })
@@ -43,6 +47,7 @@ export class CreatePlanDto {
 
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(0, { message: fa.validation.numberPositive })
+  @ToNumber()
   sortOrder: number;
 
   @IsOptional()
@@ -57,16 +62,19 @@ export class CreatePlanDto {
   @IsOptional()
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(1, { message: fa.validation.numberPositive })
+  @ToNumber()
   featuredModelsCount?: number;
 
   @IsOptional()
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(1, { message: fa.validation.numberPositive })
+  @ToNumber()
   dailyMessageLimit?: number | null;
 
   @IsOptional()
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(1, { message: fa.validation.numberPositive })
+  @ToNumber()
   maxInputTokens?: number;
 
   @IsOptional()
@@ -76,26 +84,31 @@ export class CreatePlanDto {
   @IsOptional()
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(0, { message: fa.validation.numberPositive })
+  @ToNumber()
   throttledMessageCount?: number | null;
 
   @IsOptional()
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(1, { message: fa.validation.numberPositive })
+  @ToNumber()
   throttledInputTokens?: number | null;
 
   @IsOptional()
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(1, { message: fa.validation.numberPositive })
+  @ToNumber()
   throttledOutputTokens?: number | null;
 
   @IsOptional()
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(1, { message: fa.validation.numberPositive })
+  @ToNumber()
   rollingWindowLimit?: number | null;
 
   @IsOptional()
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(1, { message: fa.validation.numberPositive })
+  @ToNumber()
   rollingWindowHours?: number;
 
   @IsOptional()
@@ -117,26 +130,31 @@ export class CreatePlanDto {
   @IsOptional()
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(1, { message: fa.validation.numberPositive })
+  @ToNumber()
   trialMessageThreshold?: number | null;
 
   @IsOptional()
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(1, { message: fa.validation.numberPositive })
+  @ToNumber()
   trialDailyMessageLimit?: number | null;
 
   @IsOptional()
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(0, { message: fa.validation.numberPositive })
+  @ToNumber()
   trialThrottledMessageCount?: number | null;
 
   @IsOptional()
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(1, { message: fa.validation.numberPositive })
+  @ToNumber()
   trialRollingWindowLimit?: number | null;
 
   @IsOptional()
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(1, { message: fa.validation.numberPositive })
+  @ToNumber()
   trialRollingWindowHours?: number | null;
 
   // docs/PRD-pay-as-you-go-wallet.md
@@ -147,21 +165,25 @@ export class CreatePlanDto {
   @IsOptional()
   @IsNumber({}, { message: fa.validation.mustBeNumber })
   @Min(1, { message: fa.validation.numberPositive })
+  @ToNumber()
   payAsYouGoMarkup?: number;
 
   @IsOptional()
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(0, { message: fa.validation.numberPositive })
+  @ToNumber()
   payAsYouGoMinActivationToman?: number;
 
   @IsOptional()
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(0, { message: fa.validation.numberPositive })
+  @ToNumber()
   payAsYouGoMinTopupToman?: number;
 
   @IsOptional()
   @IsArray({ message: fa.validation.mustBeArray })
   @IsInt({ each: true, message: fa.validation.mustBeNumber })
+  @ToNumber()
   payAsYouGoTopupPresets?: number[];
 
   // تنظیمات تولید/ویرایش عکس مخصوص این پلن
@@ -172,15 +194,18 @@ export class CreatePlanDto {
   @IsOptional()
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(1, { message: fa.validation.numberPositive })
+  @ToNumber()
   maxImageGenPerDay?: number | null;
 
   @IsOptional()
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(1, { message: fa.validation.numberPositive })
+  @ToNumber()
   maxImageGenPerWindow?: number | null;
 
   @IsOptional()
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(1, { message: fa.validation.numberPositive })
+  @ToNumber()
   imageGenWindowHours?: number | null;
 }

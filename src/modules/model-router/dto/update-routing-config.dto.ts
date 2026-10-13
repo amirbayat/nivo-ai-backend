@@ -7,6 +7,7 @@ import {
   Min,
 } from 'class-validator';
 import { fa } from '../../../i18n/fa';
+import { ToNumber } from '../../../common/decorators/digits.decorators';
 
 export class UpdateRoutingConfigDto {
   @IsOptional()
@@ -26,6 +27,7 @@ export class UpdateRoutingConfigDto {
   @IsOptional()
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(0, { message: fa.validation.numberPositive })
+  @ToNumber()
   complexLenThreshold?: number;
 
   @IsOptional()

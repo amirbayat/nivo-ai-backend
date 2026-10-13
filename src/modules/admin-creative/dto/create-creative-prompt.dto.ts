@@ -11,6 +11,7 @@ import {
 } from 'class-validator';
 import { CreativeOutputType, CreativeSegment } from '@prisma/client';
 import { fa } from '../../../i18n/fa';
+import { ToNumber } from '../../../common/decorators/digits.decorators';
 
 // ادمین از این‌جا سبک‌های آماده‌ی دیسکاوری را می‌سازد — عکس یا متن، با context اختصاصی
 // (بخش ۵.۷ سند فنی: «توی ادمین هم بیار که بتونیم context بدیم برای تولید سبک‌های مختلف»)
@@ -54,6 +55,7 @@ export class CreateCreativePromptDto {
   @Type(() => Number)
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(0, { message: fa.validation.numberPositive })
+  @ToNumber()
   creditCost: number;
 
   @IsOptional()
@@ -71,6 +73,7 @@ export class CreateCreativePromptDto {
   @IsOptional()
   @Type(() => Number)
   @IsInt()
+  @ToNumber()
   sortOrder?: number;
 
   @IsOptional()

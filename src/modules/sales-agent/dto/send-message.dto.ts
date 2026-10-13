@@ -11,6 +11,7 @@ import {
 import { Type } from 'class-transformer';
 import type { OrderPaymentMethod } from '@prisma/client';
 import { IRAN_PROVINCES } from '../../../common/constants/iran-provinces';
+import { ToNumber } from '../../../common/decorators/digits.decorators';
 
 // دکمه‌های UiBlock به‌جای ساختن جمله‌ی فارسی (که دوباره از parseIntent رد می‌شد)، این
 // ساختار قطعی را می‌فرستند — یا message یا action، هیچ‌وقت هیچ‌کدام
@@ -61,6 +62,7 @@ export class SalesActionDto {
   @IsOptional()
   @IsInt()
   @Min(1)
+  @ToNumber()
   qty?: number;
 
   @IsOptional()

@@ -1,6 +1,7 @@
 import { Gender, ActivityLevel, NutritionGoal } from '@prisma/client';
 import { IsEnum, IsInt, IsNumber, IsOptional, Max, Min } from 'class-validator';
 import { fa } from '../../../i18n/fa';
+import { ToNumber } from '../../../common/decorators/digits.decorators';
 
 // ویزارد آنبوردینگ فاز ۲ (docs/PRD-nivo-cal.md بخش ۳.۱) — weightKg اینجا فقط برای ساخت
 // اولین رکورد WeightLog استفاده می‌شود، روی خود پروفایل ذخیره نمی‌شود (بخش ۴.۲)
@@ -11,16 +12,19 @@ export class CreateNutritionProfileDto {
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(10)
   @Max(100)
+  @ToNumber()
   age: number;
 
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(100)
   @Max(250)
+  @ToNumber()
   heightCm: number;
 
   @IsNumber({}, { message: fa.validation.mustBeNumber })
   @Min(30)
   @Max(300)
+  @ToNumber()
   weightKg: number;
 
   @IsEnum(ActivityLevel, { message: fa.validation.required })
@@ -35,5 +39,6 @@ export class CreateNutritionProfileDto {
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(1)
   @Max(3)
+  @ToNumber()
   goalPaceLevel?: number;
 }

@@ -12,6 +12,7 @@ import {
   KieVideoCategory,
   VideoModelProvider,
 } from '@prisma/client';
+import { ToNumber } from '../../../common/decorators/digits.decorators';
 
 const CATEGORIES = Object.values(KieVideoCategory);
 const PROVIDERS = Object.values(VideoModelProvider);
@@ -43,6 +44,7 @@ export class UpsertKieVideoModelDto {
 
   @IsOptional()
   @IsInt()
+  @ToNumber()
   sortOrder?: number;
 
   @IsOptional()
@@ -52,6 +54,7 @@ export class UpsertKieVideoModelDto {
   @IsOptional()
   @IsInt()
   @Min(0)
+  @ToNumber()
   maxImages?: number;
 
   @IsOptional()
@@ -61,11 +64,13 @@ export class UpsertKieVideoModelDto {
   @IsOptional()
   @IsInt()
   @Min(1)
+  @ToNumber()
   maxVideoDurationSec?: number;
 
   @IsOptional()
   @IsInt()
   @Min(1)
+  @ToNumber()
   maxVideoWindowSec?: number;
 
   @IsOptional()
@@ -103,6 +108,7 @@ export class UpsertKieVideoModelDto {
   @IsOptional()
   @IsArray()
   @IsInt({ each: true })
+  @ToNumber()
   fixedDurations?: number[];
 
   // معماری data-driven (input-fields.schema.ts) — عمداً اینجا فقط unknown و IsOptional است؛

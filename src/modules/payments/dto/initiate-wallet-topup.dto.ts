@@ -3,12 +3,14 @@ import { IsIn, IsInt, IsOptional, Min } from 'class-validator';
 import { PaymentProvider } from '@prisma/client';
 import { fa } from '../../../i18n/fa';
 import { PAYMENT_GATEWAY_NAMES } from '../gateways/payment-gateway.interface';
+import { ToNumber } from '../../../common/decorators/digits.decorators';
 
 // docs/PRD-pay-as-you-go-wallet.md بخش ۵.۱ — حداقل واقعی (فعال‌سازی ۱M در برابر شارژ بعدی ۵۰۰k)
 // در سرویس چک می‌شود چون به وضعیت کاربر (اولین شارژ یا نه) بستگی دارد، نه یک عدد ثابت این‌جا
 export class InitiateWalletTopupDto {
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(1, { message: fa.validation.numberPositive })
+  @ToNumber()
   amountToman: number;
 
   @IsOptional()

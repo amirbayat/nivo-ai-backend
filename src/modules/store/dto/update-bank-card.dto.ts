@@ -7,6 +7,7 @@ import {
   MaxLength,
 } from 'class-validator';
 import { fa } from '../../../i18n/fa';
+import { ToNumber } from '../../../common/decorators/digits.decorators';
 
 // docs/PRD-seller-multi-bank-card-rotation.md بخش ۳ — cardNumber عمداً قابل‌ویرایش نیست؛
 // اگر شماره‌کارت عوض شد، کارت قبلی غیرفعال و یک کارت جدید اضافه می‌شود (تاریخچه‌ی
@@ -24,15 +25,18 @@ export class UpdateBankCardDto {
   @IsOptional()
   @IsInt()
   @Min(0)
+  @ToNumber()
   sortOrder?: number;
 
   @IsOptional()
   @IsInt()
   @Min(1)
+  @ToNumber()
   thresholdToman?: number;
 
   @IsOptional()
   @IsInt()
   @Min(1)
+  @ToNumber()
   percentWeight?: number;
 }

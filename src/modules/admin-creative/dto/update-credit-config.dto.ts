@@ -9,6 +9,7 @@ import {
   Min,
 } from 'class-validator';
 import { fa } from '../../../i18n/fa';
+import { ToNumber } from '../../../common/decorators/digits.decorators';
 
 // نرخ تبدیل + ضریب فروش + شارژ اولیه‌ی رایگان — همه از ادمین قابل‌تغییر (بخش ۵.۷/۳.۱)
 export class UpdateCreditConfigDto {
@@ -16,18 +17,21 @@ export class UpdateCreditConfigDto {
   @Type(() => Number)
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(1, { message: fa.validation.numberPositive })
+  @ToNumber()
   tomanPerCredit?: number;
 
   @IsOptional()
   @Type(() => Number)
   @IsNumber({}, { message: fa.validation.mustBeNumber })
   @Min(1, { message: fa.validation.numberPositive })
+  @ToNumber()
   purchaseMarkup?: number;
 
   @IsOptional()
   @Type(() => Number)
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(0, { message: fa.validation.numberPositive })
+  @ToNumber()
   freeSignupCredits?: number;
 
   // پله‌های گرد‌کردن مصرف (PricingService.debitWallet) — هرکدام بین صفر و یک؛ ترتیب مهم نیست،
@@ -38,6 +42,7 @@ export class UpdateCreditConfigDto {
   @IsNumber({}, { each: true, message: fa.validation.mustBeNumber })
   @Min(0.01, { each: true, message: fa.validation.numberPositive })
   @Max(1, { each: true, message: fa.validation.numberPositive })
+  @ToNumber()
   roundingSteps?: number[];
 
   // دو حالت خودکار «تبدیل عکس به پرامپت» — نام AiModel + قیمت ثابت به نیوو برای هرکدام.
@@ -51,6 +56,7 @@ export class UpdateCreditConfigDto {
   @Type(() => Number)
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(0, { message: fa.validation.numberPositive })
+  @ToNumber()
   extractionEconomicalCreditCost?: number;
 
   @IsOptional()
@@ -61,6 +67,7 @@ export class UpdateCreditConfigDto {
   @Type(() => Number)
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(0, { message: fa.validation.numberPositive })
+  @ToNumber()
   extractionPremiumCreditCost?: number;
 
   // نیوو اضافه‌ای که سوییچ کاربر «استفاده از عکس اصلی» (تولید از سبک‌های استخراج‌شده) کسر می‌کند
@@ -68,5 +75,6 @@ export class UpdateCreditConfigDto {
   @Type(() => Number)
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(0, { message: fa.validation.numberPositive })
+  @ToNumber()
   sourceImageAccuracyCreditCost?: number;
 }

@@ -5,6 +5,7 @@ import {
   IsString,
   MinLength,
 } from 'class-validator';
+import { ToNumber } from '../../../common/decorators/digits.decorators';
 
 export class CreateArticleCategoryDto {
   @IsString()
@@ -17,6 +18,7 @@ export class CreateArticleCategoryDto {
 
   @IsOptional()
   @IsInt()
+  @ToNumber()
   sortOrder?: number;
 
   @IsOptional()
@@ -36,6 +38,7 @@ export class UpdateArticleCategoryDto {
 
   @IsOptional()
   @IsInt()
+  @ToNumber()
   sortOrder?: number;
 
   @IsOptional()

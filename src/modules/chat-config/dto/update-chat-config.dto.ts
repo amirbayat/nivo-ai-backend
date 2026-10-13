@@ -8,6 +8,7 @@ import {
   Max,
   Min,
 } from 'class-validator';
+import { ToNumber } from '../../../common/decorators/digits.decorators';
 
 export const CHAT_IMAGE_FORMATS = ['png', 'jpeg', 'webp', 'gif'] as const;
 
@@ -20,30 +21,35 @@ export class UpdateChatConfigDto {
   @IsInt()
   @Min(100)
   @Max(100_000)
+  @ToNumber()
   summaryTriggerTokens?: number;
 
   @IsOptional()
   @IsInt()
   @Min(50)
   @Max(4096)
+  @ToNumber()
   summaryMaxTokens?: number;
 
   @IsOptional()
   @IsInt()
   @Min(500)
   @Max(20_000)
+  @ToNumber()
   projectContextMaxChars?: number;
 
   @IsOptional()
   @IsInt()
   @Min(1)
   @Max(10)
+  @ToNumber()
   maxImagesPerMessage?: number;
 
   @IsOptional()
   @IsInt()
   @Min(1)
   @Max(20)
+  @ToNumber()
   maxImageSizeMb?: number;
 
   @IsOptional()

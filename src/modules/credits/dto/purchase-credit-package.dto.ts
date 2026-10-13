@@ -10,6 +10,7 @@ import {
 import { PaymentProvider } from '@prisma/client';
 import { fa } from '../../../i18n/fa';
 import { PAYMENT_GATEWAY_NAMES } from '../../payments/gateways/payment-gateway.interface';
+import { ToNumber } from '../../../common/decorators/digits.decorators';
 
 // خرید یک بسته‌ی نیوو — یا از پیش‌تعریف‌شده، یا (اگر packageId به یک بسته‌ی isCustomAmount اشاره
 // کند) مبلغ دلخواه با customCredits. مستقل از Plan/isPayAsYouGo — amountToman از روی
@@ -23,6 +24,7 @@ export class PurchaseCreditPackageDto {
   @Type(() => Number)
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(1, { message: fa.validation.numberPositive })
+  @ToNumber()
   customCredits?: number;
 
   @IsOptional()

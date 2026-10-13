@@ -8,6 +8,7 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
+import { ToNumber } from '../../../common/decorators/digits.decorators';
 
 export const LEAD_FOLLOW_UP_STATUSES = [
   'NEW',
@@ -34,11 +35,13 @@ export class UpdateSalesBotConfigDto {
   @IsInt()
   @Min(50)
   @Max(4096)
+  @ToNumber()
   maxOutputTokens?: number;
 
   @IsOptional()
   @IsInt()
   @Min(1)
+  @ToNumber()
   maxMessages?: number;
 
   @IsOptional()
@@ -48,6 +51,7 @@ export class UpdateSalesBotConfigDto {
   @IsOptional()
   @IsInt()
   @Min(1)
+  @ToNumber()
   discountMinMessages?: number;
 
   @IsOptional()

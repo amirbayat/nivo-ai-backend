@@ -8,6 +8,7 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
+import { ToNumber } from '../../../common/decorators/digits.decorators';
 
 // docs/PRD-buyer-orders-page-and-direct-order.md بخش ۲.۳ — ثبت نظر مستقیم از روی محصول/سفارش،
 // مستقل از پیام پیگیریِ چت (awaitingReview) که از قبل وجود دارد
@@ -29,6 +30,7 @@ export class SubmitCommentDto {
   @IsInt()
   @Min(1)
   @Max(5)
+  @ToNumber()
   rating?: number;
 
   // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۱۴.۲ — کلید MinIO، از

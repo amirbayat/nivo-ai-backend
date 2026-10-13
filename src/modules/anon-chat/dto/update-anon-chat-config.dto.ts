@@ -11,6 +11,7 @@ import {
   Min,
 } from 'class-validator';
 import { REASONING_EFFORT_VALUES } from '../../plans/reasoning-effort.constants';
+import { ToNumber } from '../../../common/decorators/digits.decorators';
 
 export class UpdateAnonChatConfigDto {
   @IsOptional()
@@ -30,24 +31,28 @@ export class UpdateAnonChatConfigDto {
   @IsInt()
   @Min(0)
   @Max(1000)
+  @ToNumber()
   freeMessageLimit?: number;
 
   @IsOptional()
   @IsInt()
   @Min(0)
   @Max(1000)
+  @ToNumber()
   dailyMessageLimitAfterFree?: number;
 
   @IsOptional()
   @IsInt()
   @Min(100)
   @Max(20_000)
+  @ToNumber()
   maxInputTokens?: number;
 
   @IsOptional()
   @IsInt()
   @Min(100)
   @Max(20_000)
+  @ToNumber()
   maxOutputTokens?: number;
 
   @IsOptional()
@@ -79,6 +84,7 @@ export class UpdateAnonChatConfigDto {
   @IsInt()
   @Min(0)
   @Max(50)
+  @ToNumber()
   signupBannerAfterMessages?: number;
 
   @IsOptional()

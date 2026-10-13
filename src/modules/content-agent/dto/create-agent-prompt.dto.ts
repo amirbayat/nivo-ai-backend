@@ -9,6 +9,7 @@ import {
   MinLength,
 } from 'class-validator';
 import { fa } from '../../../i18n/fa';
+import { ToNumber } from '../../../common/decorators/digits.decorators';
 
 // docs/PRD-daily-content-prompt-agent.md بخش ۵.۲ — بدنه‌ی POST /content-agent/prompts.
 // فاز ۱ فقط IMAGE است — CreativeOutputType هنوز VIDEO ندارد و استودیوی ویدیو اصلاً promptId
@@ -45,6 +46,7 @@ export class CreateAgentPromptDto {
   @Type(() => Number)
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(0, { message: fa.validation.numberPositive })
+  @ToNumber()
   creditCost!: number;
 
   // توضیح کوتاه کاربرپسند — جدا از contextMd (که به سیستم‌پرامپت تولید اضافه می‌شود، نه UI)

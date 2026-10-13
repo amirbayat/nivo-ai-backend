@@ -7,6 +7,7 @@ import {
 } from 'class-validator';
 import { StoreBusinessType } from '@prisma/client';
 import { fa } from '../../../i18n/fa';
+import { EnDigits } from '../../../common/decorators/digits.decorators';
 
 // گام ۰ سند PRD-mvp-launch-plan.md — قدم ۱و۲ ویزارد ثبت‌نام فروشنده
 export class CreateStoreDto {
@@ -32,6 +33,7 @@ export class CreateStoreDto {
 
   @IsString({ message: fa.validation.required })
   @Matches(/^[0-9]{16}$/, { message: fa.store.bankCardInvalid })
+  @EnDigits()
   bankCardNumber: string;
 
   @IsString({ message: fa.validation.required })

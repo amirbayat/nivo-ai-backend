@@ -8,6 +8,7 @@ import {
   IsString,
   Min,
 } from 'class-validator';
+import { ToNumber } from '../../../common/decorators/digits.decorators';
 
 export const MODEL_TIERS = ['SIMPLE', 'MEDIUM', 'COMPLEX'] as const;
 // docs/PRD-openrouter-migration.md §۶.۳ — کدام پلتفرم(های) inference این name را می‌شناسد
@@ -41,6 +42,7 @@ export class CreateModelDto {
   @Type(() => Number)
   @IsNumber()
   @Min(0)
+  @ToNumber()
   inputPricePerM!: number;
 
   // برای مدل‌های IMAGE_GEN بی‌ربط است (متن خروجی تولید نمی‌کنند) — اختیاری، پیش‌فرض ۰ (schema)
@@ -48,6 +50,7 @@ export class CreateModelDto {
   @Type(() => Number)
   @IsNumber()
   @Min(0)
+  @ToNumber()
   outputPricePerM?: number;
 
   @IsOptional()
@@ -81,12 +84,14 @@ export class CreateModelDto {
   @Type(() => Number)
   @IsNumber()
   @Min(0)
+  @ToNumber()
   imageGenInputImagePricePerM?: number;
 
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
+  @ToNumber()
   imageGenOutputImagePricePerM?: number;
 
   @IsOptional()
@@ -103,6 +108,7 @@ export class CreateModelDto {
   @Type(() => Number)
   @IsNumber()
   @Min(0)
+  @ToNumber()
   imageGenFlatPriceUsd?: number;
 
   @IsOptional()
@@ -126,18 +132,21 @@ export class CreateModelDto {
   @Type(() => Number)
   @IsNumber()
   @Min(0)
+  @ToNumber()
   videoGenPricePerSecondUsd?: number;
 
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
+  @ToNumber()
   videoGenAudioMultiplier?: number;
 
   @IsOptional()
   @IsArray()
   @Type(() => Number)
   @IsNumber({}, { each: true })
+  @ToNumber()
   videoGenSupportedDurationsSec?: number[];
 
   @IsOptional()
@@ -152,6 +161,7 @@ export class CreateModelDto {
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
+  @ToNumber()
   sortOrder?: number;
 
   @IsOptional()
@@ -166,6 +176,7 @@ export class CreateModelDto {
   @Type(() => Number)
   @IsNumber()
   @Min(0)
+  @ToNumber()
   avgCharsPerToken?: number;
 
   // docs/PRD-openrouter-migration.md §۱۳.۴/۱۴.۴ — صفحه‌ی انتخاب مدل بازطراحی‌شده

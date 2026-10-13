@@ -9,17 +9,20 @@ import {
 } from 'class-validator';
 import { CreditPackageScope } from '@prisma/client';
 import { fa } from '../../../i18n/fa';
+import { ToNumber } from '../../../common/decorators/digits.decorators';
 
 export class CreateCreditPackageDto {
   @Type(() => Number)
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(1, { message: fa.validation.numberPositive })
+  @ToNumber()
   credits: number;
 
   @IsOptional()
   @Type(() => Number)
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(0, { message: fa.validation.numberPositive })
+  @ToNumber()
   discountPercent?: number;
 
   @IsOptional()
@@ -42,6 +45,7 @@ export class CreateCreditPackageDto {
   @IsOptional()
   @Type(() => Number)
   @IsInt()
+  @ToNumber()
   sortOrder?: number;
 
   @IsOptional()

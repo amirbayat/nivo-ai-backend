@@ -12,6 +12,7 @@ import {
 import { GoldWageType, PricingModel } from '@prisma/client';
 import { fa } from '../../../i18n/fa';
 import type { ProductSpecItem } from '../product-specs.types';
+import { ToNumber } from '../../../common/decorators/digits.decorators';
 
 // گام ۰ سند PRD-mvp-launch-plan.md — قدم ۳ ویزارد ثبت‌نام فروشنده (فقط محصول تکی، بدون واریانت/عکس)
 export class CreateProductDto {
@@ -21,11 +22,13 @@ export class CreateProductDto {
 
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(0, { message: fa.validation.numberPositive })
+  @ToNumber()
   basePrice: number;
 
   @IsOptional()
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(0, { message: fa.validation.numberPositive })
+  @ToNumber()
   stock?: number;
 
   // فیدبک کاربر ۱۴۰۵/۰۷/۰۱ — ۲۰۰۰ سقف قبلی کم بود؛ ۵۰۰۰ شد. این سقفِ ذخیره‌سازی است، نه
@@ -64,11 +67,13 @@ export class CreateProductDto {
   @IsOptional()
   @IsNumber()
   @Min(0, { message: fa.validation.numberPositive })
+  @ToNumber()
   weightGrams?: number;
 
   @IsOptional()
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(1, { message: fa.validation.numberPositive })
+  @ToNumber()
   purityKarat?: number;
 
   // فیدبک کاربر ۱۴۰۵/۰۷/۱۴ — اجرت/سود اختصاصی این محصول؛ خالی = از تنظیمات پیش‌فرض فروشگاه
@@ -80,11 +85,13 @@ export class CreateProductDto {
   @IsOptional()
   @IsNumber()
   @Min(0, { message: fa.validation.numberPositive })
+  @ToNumber()
   goldWageValue?: number;
 
   @IsOptional()
   @IsNumber()
   @Min(0, { message: fa.validation.numberPositive })
+  @ToNumber()
   goldProfitPercent?: number;
 
   // docs/PRD-order-status-chat-tool-and-fulfillment-delay-reviews.md بخش ۲.۱ — فرم مشترک

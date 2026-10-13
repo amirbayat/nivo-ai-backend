@@ -11,6 +11,10 @@ import {
 } from 'class-validator';
 import { ContentChangeSource, GoldWageType } from '@prisma/client';
 import { fa } from '../../../i18n/fa';
+import {
+  EnDigits,
+  ToNumber,
+} from '../../../common/decorators/digits.decorators';
 
 // docs/PRD-product-strategy-and-roadmap.md بخش ۳.۲ — فیلدهای ساختاریافته‌ی سطح فروشگاه،
 // همه اختیاری (partial update، هیچ فیلدی اجباری برای پرکردن نیست)
@@ -42,10 +46,12 @@ export class UpdateStoreDto {
 
   @IsOptional()
   @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, { message: fa.store.invalidTimeFormat })
+  @EnDigits()
   workingHoursStart?: string;
 
   @IsOptional()
   @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, { message: fa.store.invalidTimeFormat })
+  @EnDigits()
   workingHoursEnd?: string;
 
   // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۰ بند ۴
@@ -97,18 +103,21 @@ export class UpdateStoreDto {
   @IsOptional()
   @IsNumber()
   @Min(0)
+  @ToNumber()
   goldWageValue?: number;
 
   @IsOptional()
   @IsNumber()
   @Min(0)
   @Max(100)
+  @ToNumber()
   goldProfitPercent?: number;
 
   @IsOptional()
   @IsNumber()
   @Min(0)
   @Max(100)
+  @ToNumber()
   goldVatPercent?: number;
 
   // docs/PRD-buyer-payment-method-card-or-snapppay-link.md بخش ۵ — نال/خالی یعنی این روش

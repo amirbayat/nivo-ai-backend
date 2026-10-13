@@ -8,6 +8,7 @@ import {
   Min,
 } from 'class-validator';
 import { IRAN_PROVINCES } from '../../../common/constants/iran-provinces';
+import { ToNumber } from '../../../common/decorators/digits.decorators';
 
 // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۲ (فاز ۱.۵) — برخلاف نسخه‌ی قبلی
 // (city غیرقابل‌تغییر)، provinces حالا قابل ویرایش است: فروشنده می‌تواند چک‌باکس استان‌های یک
@@ -22,6 +23,7 @@ export class UpdateShippingRuleDto {
   @IsOptional()
   @IsInt()
   @Min(0)
+  @ToNumber()
   cost?: number;
 
   @IsOptional()

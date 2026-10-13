@@ -1,4 +1,10 @@
-import { IsString, IsUUID, Matches, MaxLength, MinLength } from 'class-validator';
+import {
+  IsString,
+  IsUUID,
+  Matches,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 import { fa } from '../../../i18n/fa';
 
 // تایید یک خرید که از قبل سمت کلاینت (SDK پولکی کافه‌بازار) کامل شده — packageId باید به یک

@@ -8,6 +8,7 @@ import {
   Min,
 } from 'class-validator';
 import { IRAN_PROVINCES } from '../../../common/constants/iran-provinces';
+import { ToNumber } from '../../../common/decorators/digits.decorators';
 
 // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۲ (فاز ۱.۵) — provinces خالی/نبود
 // = ردیف پیش‌فرض «کل ایران» (فقط یکی به‌ازای هر فروشگاه، اعمال‌شده در سرویس نه constraint
@@ -21,6 +22,7 @@ export class CreateShippingRuleDto {
 
   @IsInt()
   @Min(0)
+  @ToNumber()
   cost: number;
 
   @IsOptional()

@@ -11,6 +11,7 @@ import {
 } from 'class-validator';
 import { CreativeOutputType, CreativeSegment } from '@prisma/client';
 import { fa } from '../../../i18n/fa';
+import { ToNumber } from '../../../common/decorators/digits.decorators';
 
 export class UpdateCreativePromptDto {
   @IsOptional()
@@ -57,6 +58,7 @@ export class UpdateCreativePromptDto {
   @Type(() => Number)
   @IsInt({ message: fa.validation.mustBeNumber })
   @Min(0, { message: fa.validation.numberPositive })
+  @ToNumber()
   creditCost?: number;
 
   @IsOptional()
@@ -74,6 +76,7 @@ export class UpdateCreativePromptDto {
   @IsOptional()
   @Type(() => Number)
   @IsInt()
+  @ToNumber()
   sortOrder?: number;
 
   @IsOptional()

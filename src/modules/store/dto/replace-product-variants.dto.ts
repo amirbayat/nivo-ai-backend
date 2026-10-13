@@ -12,6 +12,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { ToNumber } from '../../../common/decorators/digits.decorators';
 
 // docs/PRD-product-display-focus-and-variations.md §۴.۱ — فاز ۱ حداکثر ۲ بعد (سایز/رنگ) به‌ازای
 // محصول کافی‌ست؛ جدول ترکیب‌ها در پنل همیشه یک‌جا جایگزین می‌شود (نه patch تدریجی)
@@ -37,11 +38,13 @@ export class ProductVariantInputDto {
 
   @IsInt()
   @Min(0)
+  @ToNumber()
   stock: number;
 
   @IsOptional()
   @IsInt()
   @Min(0)
+  @ToNumber()
   priceOverride?: number | null;
 
   @IsOptional()
@@ -54,11 +57,13 @@ export class ProductVariantInputDto {
   @IsOptional()
   @IsNumber()
   @Min(0)
+  @ToNumber()
   weightGrams?: number;
 
   @IsOptional()
   @IsInt()
   @Min(1)
+  @ToNumber()
   purityKarat?: number;
 }
 

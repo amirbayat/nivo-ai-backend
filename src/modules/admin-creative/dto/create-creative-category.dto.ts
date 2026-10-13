@@ -7,6 +7,7 @@ import {
   IsUUID,
 } from 'class-validator';
 import { fa } from '../../../i18n/fa';
+import { ToNumber } from '../../../common/decorators/digits.decorators';
 
 // ادمین از این‌جا درخت دسته‌بندی دیسکاوری را می‌سازد (مثلاً اینستاگرام › کاور پست) —
 // parentId خالی یعنی این یک دسته‌ی ریشه است
@@ -21,6 +22,7 @@ export class CreateCreativeCategoryDto {
   @IsOptional()
   @Type(() => Number)
   @IsInt()
+  @ToNumber()
   sortOrder?: number;
 
   @IsOptional()
