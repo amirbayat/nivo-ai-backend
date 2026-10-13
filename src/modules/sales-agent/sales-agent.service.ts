@@ -46,6 +46,17 @@ import { fa } from '../../i18n/fa';
 import { getRecentConversationEvents } from '../../common/utils/conversation-events.util';
 import type { SendMessageDto } from './dto/send-message.dto';
 import type { EngineResult } from './sales-agent.types';
+import {
+  MESSAGE_IDEMPOTENCY_PENDING_TTL_SECONDS,
+  MESSAGE_IDEMPOTENCY_TTL_SECONDS,
+} from '../../common/constants/sales-ops.constants';
+
+type SendMessageResponse = EngineResult & {
+  voiceEventId?: string;
+  awaitingReview: boolean;
+};
+
+const MESSAGE_IDEMPOTENCY_PENDING_MARK = '__pending__';
 
 @Injectable()
 export class SalesAgentService {
@@ -257,9 +268,61 @@ export class SalesAgentService {
     conversationId: string,
     sessionToken: string,
     dto: SendMessageDto,
-  ) {
+  ): Promise<SendMessageResponse> {
     const conversation = await this.loadOwned(conversationId, sessionToken);
 
+    // 2.1 — Idempotency: همان clientMessageId دوباره آمد → جواب ذخیره‌شده (یا «در حال پردازش»)
+    const idemKey = dto.clientMessageId
+      ? `idem:msg:${conversation.id}:${dto.clientMessageId}`
+      : null;
+    if (!idemKey) return this.processMessage(conversation, conversationId, dto);
+
+    const claimed = await this.redis.set(
+      idemKey,
+      MESSAGE_IDEMPOTENCY_PENDING_MARK,
+      'EX',
+      MESSAGE_IDEMPOTENCY_PENDING_TTL_SECONDS,
+      'NX',
+    );
+    if (claimed !== 'OK') {
+      const existing = await this.redis.get(idemKey);
+      if (existing && existing !== MESSAGE_IDEMPOTENCY_PENDING_MARK) {
+        return JSON.parse(existing) as SendMessageResponse;
+      }
+      // همان درخواست هنوز در حال پردازش است؛ فرانت با polling جواب را می‌گیرد (۲۰۲)
+      return {
+        reply: '',
+        uiBlocks: [],
+        state: conversation.currentState,
+        queued: true,
+        awaitingReview: false,
+      };
+    }
+    try {
+      const response = await this.processMessage(
+        conversation,
+        conversationId,
+        dto,
+      );
+      await this.redis.set(
+        idemKey,
+        JSON.stringify(response),
+        'EX',
+        MESSAGE_IDEMPOTENCY_TTL_SECONDS,
+      );
+      return response;
+    } catch (err) {
+      // شکست: کلید آزاد شود تا retry واقعی بتواند دوباره تلاش کند
+      await this.redis.del(idemKey).catch(() => undefined);
+      throw err;
+    }
+  }
+
+  private async processMessage(
+    conversation: Awaited<ReturnType<SalesAgentService['loadOwned']>>,
+    conversationId: string,
+    dto: SendMessageDto,
+  ): Promise<SendMessageResponse> {
     // مکالمه‌ای که به انسان سپرده شده دیگر نباید از NLU/موتور مکالمه رد شود — فقط پیام
     // مشتری لاگ می‌شود تا فروشنده در تب «نیاز به توجه» ببیندش (خودش جواب می‌دهد)
     if (conversation.isMutedForHuman) {
@@ -270,15 +333,22 @@ export class SalesAgentService {
           payload: { text: dto.message ?? '' },
         },
       });
-      return { reply: '', uiBlocks: [], state: conversation.currentState };
+      return {
+        reply: '',
+        uiBlocks: [],
+        state: conversation.currentState,
+        awaitingReview: false,
+      };
     }
 
+    if (!dto.action && !dto.message) {
+      throw new BadRequestException(fa.errors.validation);
+    }
     let result: EngineResult;
     if (dto.action) {
       result = await this.engine.handleAction(conversation, dto.action);
     } else {
-      if (!dto.message) throw new BadRequestException(fa.errors.validation);
-      result = await this.engine.handleMessage(conversation, dto.message);
+      result = await this.engine.handleMessage(conversation, dto.message!);
     }
     // 0.13b — اگر اکشن مکالمه‌ی تازه ساخت، پاسخ/وویس مال همان است
     return this.attachVoicePending(
@@ -616,9 +686,7 @@ export class SalesAgentService {
   private async attachVoicePending(
     conversationId: string,
     result: EngineResult,
-  ): Promise<
-    EngineResult & { voiceEventId?: string; awaitingReview: boolean }
-  > {
+  ): Promise<SendMessageResponse> {
     const [latest, conversation] = await Promise.all([
       this.prisma.conversationEvent.findFirst({
         where: { conversationId, type: 'AGENT_REPLY' },

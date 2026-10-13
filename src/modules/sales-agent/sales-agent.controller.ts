@@ -111,13 +111,22 @@ export class SalesAgentController {
   async sendMessage(
     @Param('conversationId') conversationId: string,
     @Headers('x-session-token') sessionToken: string,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
     @Body() dto: SendMessageDto,
     @Res({ passthrough: true }) res: Response,
   ) {
+    // 2.1 — کلید از هدر Idempotency-Key (فرانت) یا فیلد clientMessageId بدنه؛ هدر با بک‌اند
+    // قدیمی هم سازگار است (هدر ناشناس نادیده گرفته می‌شود، فیلد ناشناس بدنه ۴۰۰ می‌دهد)
+    const safeKey =
+      idempotencyKey && /^[A-Za-z0-9_-]{8,64}$/.test(idempotencyKey)
+        ? idempotencyKey
+        : undefined;
     const result = await this.salesAgentService.sendMessage(
       conversationId,
       sessionToken,
-      dto,
+      safeKey && !dto.clientMessageId
+        ? { ...dto, clientMessageId: safeKey }
+        : dto,
     );
     // 0.4 — پیام در صف رفت (مکالمه مشغول turn قبلی است)؛ فرانت با polling جواب را می‌گیرد
     if ('queued' in result && result.queued) res.status(202);

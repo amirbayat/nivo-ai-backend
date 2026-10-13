@@ -3,6 +3,7 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  Matches,
   Min,
   MaxLength,
   MinLength,
@@ -105,4 +106,11 @@ export class SendMessageDto {
   @ValidateNested()
   @Type(() => SalesActionDto)
   action?: SalesActionDto;
+
+  // 2.1 — کلید یکتای هر ارسال (UUID سمت کلاینت). ارسال مجدد همان پیام (timeout شبکه، دبل‌تپ،
+  // retry مرورگر) جواب ذخیره‌شده را برمی‌گرداند و turn دوباره اجرا/بیل نمی‌شود
+  @IsOptional()
+  @IsString()
+  @Matches(/^[A-Za-z0-9_-]{8,64}$/)
+  clientMessageId?: string;
 }
