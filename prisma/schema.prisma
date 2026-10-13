@@ -2745,6 +2745,8 @@ model SalesConversation {
   currentState                      ConversationState @default(GREETING)
   contextData                       Json              @default("{}") // { cart: [{productId, name, unitPrice, qty}] }
   isMutedForHuman                   Boolean           @default(false)
+  // docs/PRD-nivo-sales-unified.md تسک 0.4 — قفل خوش‌بینانه: persistTransition با updateMany شرطی روی version
+  version                           Int               @default(0)
   // docs/PRD-conversation-history.md — پر می‌شود وقتی خریدار «گفتگوی جدید» می‌زند یا سفارش
   // این مکالمه تأیید/رد می‌شود (currentState به COMPLETED/REJECTED می‌رود)؛ مکالمه‌ی آرشیوشده
   // دیگر «فعال» فرض نمی‌شود (resolveActiveConversation تلگرام، شروع تازه‌ی وب)
