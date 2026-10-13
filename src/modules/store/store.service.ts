@@ -52,6 +52,7 @@ import { ContentChangeLogService } from './content-change-log.service';
 import { getSalesAgentGlobalConfig } from '../sales-agent/sales-agent-global-config.util';
 import { MarketPricesService } from '../market-prices/market-prices.service';
 import { CommentsService } from '../comments/comments.service';
+import { safeFetch } from '../../common/utils/safe-fetch.util';
 import {
   computeDisplayPrice,
   describeGoldPricing,
@@ -987,13 +988,20 @@ export class StoreService {
     const keys: string[] = [];
     for (const url of urls.slice(0, room)) {
       try {
-        const res = await fetch(url, {
-          signal: AbortSignal.timeout(10_000),
+        // 2.6 — SSRF: رد IP خصوصی/لینک‌لوکال/metadata، سقف ۵MB هنگام دانلود (نه بعد از آن)
+        const res = await safeFetch(url, {
+          timeoutMs: 10_000,
+          maxBytes: 5 * 1024 * 1024,
         });
-        const contentType = res.headers.get('content-type') ?? '';
-        if (!res.ok || !contentType.startsWith('image/')) continue;
-        const buffer = Buffer.from(await res.arrayBuffer());
-        if (buffer.length > 5 * 1024 * 1024) continue;
+        const contentType = res.contentType;
+        if (
+          res.status < 200 ||
+          res.status >= 300 ||
+          !contentType.startsWith('image/')
+        ) {
+          continue;
+        }
+        const buffer = res.body;
         const ext = contentType.split('/')[1]?.replace('jpeg', 'jpg') ?? 'jpg';
         keys.push(await this.storage.uploadImage(buffer, ext));
       } catch {

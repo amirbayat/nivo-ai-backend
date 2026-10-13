@@ -1,4 +1,5 @@
 import * as cheerio from 'cheerio';
+import { safeFetch } from './safe-fetch.util';
 
 // docs/PRD-seller-knowledge-base.md بخش ۲.۵ — هیچ dependency‌ای برای فچ/پارس HTML در پروژه
 // نبود؛ cheerio (بدون jsdom سنگین) برای استخراج متاتگ‌های Open Graph/عنوان/متن قابل‌مشاهده کافی است.
@@ -7,6 +8,8 @@ import * as cheerio from 'cheerio';
 const FETCH_TIMEOUT_MS = 10_000;
 const USER_AGENT =
   'Mozilla/5.0 (compatible; NivoAI-ProductImport/1.0; +https://nivoai.ir)';
+// 2.6 — سقف حجم HTML دانلودی (SSRF/حافظه)؛ صفحه‌ی محصول معمولاً زیر چند صد کیلوبایت است
+const MAX_PAGE_BYTES = 3 * 1024 * 1024;
 const MAX_PAGE_TEXT_CHARS = 8_000;
 const MAX_IMAGE_URLS = 3;
 
@@ -90,12 +93,16 @@ function parseJsonLdProduct($: cheerio.CheerioAPI): JsonLdProduct | null {
 export async function fetchProductPage(
   url: string,
 ): Promise<FetchedProductPage> {
-  const res = await fetch(url, {
-    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  // 2.6 — URL را فروشنده می‌دهد؛ فقط از طریق safeFetch (رد IP داخلی/metadata، سقف حجم)
+  const res = await safeFetch(url, {
+    timeoutMs: FETCH_TIMEOUT_MS,
+    maxBytes: MAX_PAGE_BYTES,
     headers: { 'User-Agent': USER_AGENT },
   });
-  if (!res.ok) throw new Error(`fetch failed with status ${res.status}`);
-  const html = await res.text();
+  if (res.status < 200 || res.status >= 300) {
+    throw new Error(`fetch failed with status ${res.status}`);
+  }
+  const html = res.body.toString('utf-8');
   const $ = cheerio.load(html);
 
   const jsonLdProduct = parseJsonLdProduct($);
