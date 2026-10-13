@@ -681,6 +681,11 @@ export const fa = {
     attentionReplyPrompt: (conversationId: string) =>
       `پیامت برای این مشتری رو بنویس.\nکد مکالمه: ${conversationId}`,
     attentionReplySent: 'پیامت برای مشتری ارسال شد ✅',
+    // 0.8 — بعد از پیام فروشنده، AI برای این مکالمه ساکت است
+    aiPausedNotice:
+      'از الان بات برای این مشتری جواب نمی‌دهد و خودت مکالمه را ادامه می‌دهی. هر وقت خواستی:',
+    backToBotButton: 'برگشت به بات 🤖',
+    backToBotDone: 'بات دوباره جواب این مشتری را می‌دهد 🤖',
     ordersEmpty: 'هنوز سفارشی ثبت نشده.',
     ordersHeader: '📦 سفارش‌های اخیر:',
     orderLine: (

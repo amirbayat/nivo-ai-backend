@@ -534,6 +534,15 @@ export class StoreController {
     );
   }
 
+  @Post(':id/conversations/:conversationId/mute')
+  muteConversation(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('conversationId') conversationId: string,
+  ) {
+    return this.storeService.muteConversation(user.sub, id, conversationId);
+  }
+
   @Post(':id/conversations/:conversationId/unmute')
   unmuteConversation(
     @CurrentUser() user: JwtPayload,

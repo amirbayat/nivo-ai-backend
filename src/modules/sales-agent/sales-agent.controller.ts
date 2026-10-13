@@ -8,6 +8,7 @@ import {
   Post,
   Query,
   Res,
+  UseGuards,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
@@ -15,6 +16,8 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { SkipThrottle, Throttle } from '@nestjs/throttler';
 import { CHAT_START_LIMIT_PER_IP_PER_MIN } from '../../common/constants/sales-ops.constants';
 import type { Response } from 'express';
+import { AdminGuard } from '../../common/guards/admin.guard';
+import { JwtGuard } from '../../common/guards/jwt.guard';
 import { SalesAgentService } from './sales-agent.service';
 import { SendMessageDto } from './dto/send-message.dto';
 import { SetResponseStrategyDto } from './dto/set-response-strategy.dto';
@@ -288,6 +291,8 @@ export class SalesAgentController {
 
   // docs/PRD-sales-agent-response-strategy-ab.md بخش ۹ — سوییچ دستی خریدار برای تست زنده‌ی
   // Track A/B، فعلاً فقط برای تست، نه قابلیت نهایی
+  // 0.9 — فقط ادمین؛ قبلاً هر خریدار می‌توانست مکالمه‌اش را به موتور legacy ببرد
+  @UseGuards(JwtGuard, AdminGuard)
   @Post('chat/:conversationId/response-strategy')
   setResponseStrategy(
     @Param('conversationId') conversationId: string,

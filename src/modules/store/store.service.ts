@@ -2052,6 +2052,23 @@ export class StoreService {
     const event = await this.prisma.conversationEvent.create({
       data: { conversationId, type: 'SELLER_MESSAGE', payload: { text } },
     });
+    // 0.8 — پیام فروشنده = takeover: AI از این به بعد ساکت می‌شود (قبلاً فروشنده جواب می‌داد و
+    // AI هم به پیام بعدی خریدار جواب می‌داد). «برگشت به بات» = unmute
+    if (!conversation.isMutedForHuman) {
+      await this.prisma.$transaction([
+        this.prisma.salesConversation.update({
+          where: { id: conversationId },
+          data: { isMutedForHuman: true },
+        }),
+        this.prisma.conversationEvent.create({
+          data: {
+            conversationId,
+            type: 'SYSTEM',
+            payload: { kind: 'SELLER_TAKEOVER' },
+          },
+        }),
+      ]);
+    }
     // docs/PRD-telegram-bot-channel.md بخش ۹.۱ — قبلاً فقط وب (polling) این پیام را می‌دید؛
     // اگر مشتری از کانال تلگرام است، مستقیم پوش می‌شود
     if (
@@ -2106,6 +2123,19 @@ export class StoreService {
   // «برگردون به ربات» — دستی، هیچ‌جا خودکار ریست نمی‌شود؛ currentState هم به BROWSING
   // برمی‌گردد چون دیسپچ موتور مکالمه (doUpdateCart و مشابه) فقط BROWSING/CART_REVIEW را
   // قبول می‌کند و سبد داخل contextData همچنان دست‌نخورده می‌ماند
+  // 0.8 — قطع دستی AI برای یک مکالمه (فروشنده می‌خواهد خودش ادامه بدهد، بدون ارسال پیام)
+  async muteConversation(
+    sellerId: string,
+    storeId: string,
+    conversationId: string,
+  ) {
+    await this.getOwnedConversation(sellerId, storeId, conversationId);
+    return this.prisma.salesConversation.update({
+      where: { id: conversationId },
+      data: { isMutedForHuman: true },
+    });
+  }
+
   async unmuteConversation(
     sellerId: string,
     storeId: string,

@@ -338,6 +338,10 @@ export class SellerBotService {
       await this.handleStockSelect(chatId, data.slice('sbst:'.length));
       return;
     }
+    if (data.startsWith('sbub:')) {
+      await this.handleBackToBot(chatId, data.slice('sbub:'.length));
+      return;
+    }
     if (data.startsWith('sbrp:')) {
       await this.handleAttentionReplyButton(chatId, data.slice('sbrp:'.length));
       return;
@@ -547,6 +551,28 @@ export class SellerBotService {
     }
   }
 
+  // 0.8 — «برگشت به بات»: همان unmute پنل (ownership داخل سرویس چک می‌شود)
+  private async handleBackToBot(
+    chatId: string,
+    conversationId: string,
+  ): Promise<void> {
+    const store = await this.getLinkedStore(chatId);
+    if (!store) return;
+    try {
+      await this.storeService.unmuteConversation(
+        store.sellerId,
+        store.id,
+        conversationId,
+      );
+      await this.sendMenu(chatId, fa.sellerBot.backToBotDone);
+    } catch (err) {
+      this.logger.error(
+        `handleBackToBot failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      await this.sendMenu(chatId, fa.sellerBot.genericError);
+    }
+  }
+
   private async handleAttentionReplyButton(
     chatId: string,
     conversationId: string,
@@ -576,6 +602,17 @@ export class SellerBotService {
         text,
       );
       await this.sendMenu(chatId, fa.sellerBot.attentionReplySent);
+      // 0.8 — پیام فروشنده AI را ساکت کرد؛ راه برگشت به بات
+      await this.api.sendText(chatId, fa.sellerBot.aiPausedNotice, {
+        inline_keyboard: [
+          [
+            {
+              text: fa.sellerBot.backToBotButton,
+              callback_data: `sbub:${conversationId}`,
+            },
+          ],
+        ],
+      });
     } catch (err) {
       this.logger.error(
         `handleAttentionReplyMessage failed: ${err instanceof Error ? err.message : String(err)}`,
