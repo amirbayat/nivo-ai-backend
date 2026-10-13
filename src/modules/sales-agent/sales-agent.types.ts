@@ -311,6 +311,9 @@ export type EngineResult = {
   reply: string;
   uiBlocks: UiBlock[];
   state: string;
+  // docs/PRD-sales-agent-sales-state-machine.md §۱۲.۱ — دکمه‌های پاسخ سریع زیر پیام (فقط مسیر
+  // ماشین‌حالت فروش آن را پر می‌کند)
+  quickReplies?: string[];
 };
 
 // دکمه‌های UiBlock (افزودن به سبد/تایید سبد) دیگر جمله‌ی فارسی نمی‌سازند تا از مسیر
@@ -418,4 +421,15 @@ export type AiTraceData = {
   // callFullAgentTurn. وجودش یعنی تناقض تشخیص داده شد؛ نبودنش یعنی هیچ تناقضی نبود
   correctiveRetryReason?:
     'READY_WITHOUT_ACTION' | 'PAIN_NOT_SOLVABLE_CONTRADICTION';
+  // docs/PRD-sales-agent-sales-state-machine.md §۱۶ — فقط مسیر ماشین‌حالت فروش (handler: 'callSalesTurn')
+  salesStage?: string;
+  prevSalesStage?: string;
+  turnGoal?: string;
+  decisionReason?: string;
+  perception?: unknown;
+  perceptionFailed?: boolean;
+  validatorViolations?: unknown[];
+  correctiveRetry?: boolean;
+  candidateProductIds?: string[];
+  quickReplies?: string[];
 };

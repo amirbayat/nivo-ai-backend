@@ -116,7 +116,7 @@ export type SalesActPromptInput = {
   leadCaptureInstruction: string | null; // فقط leadCaptureOnly
 };
 
-const EVIDENCE_GOALS: TurnGoal[] = [
+export const EVIDENCE_GOALS: TurnGoal[] = [
   'HANDLE_OBJECTION',
   'RECOMMEND',
   'TRIAL_CLOSE',

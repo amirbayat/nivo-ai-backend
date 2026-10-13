@@ -28,6 +28,7 @@ import { buildAsrVocabHint } from '../sales-agent/asr-vocab-hint';
 import { buildHistoryEntry } from '../sales-agent/conversation-history.util';
 import { reattachReceiptIfOrderOpen } from '../sales-agent/receipt-reattach.util';
 import type {
+  ConversationContext,
   EngineResult,
   SalesAction,
   UiBlock,
@@ -41,12 +42,31 @@ import type {
   TelegramMessage,
   TelegramUpdate,
 } from './telegram.types';
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 
 // docs/PRD-product-strategy-and-roadmap.md بخش ۶ آیتم #۲۱ — از ۵ نتیجه‌ی نمایش‌داده‌شده‌ی سرچ
 // فروشگاه، حداکثر همین تعداد می‌توانند ⭐ باشند؛ حل «۳۰ نفر هم‌زمان بخرن» را به «همه نوبتی دیده
 // می‌شوند» تبدیل می‌کند، نه «هرکی اول خرید همیشه برنده است»
 const SPONSORED_SLOT_CAP = 2;
+
+// docs/PRD-sales-agent-sales-state-machine.md §۱۲.۳ — callback_data هرگز متن فارسی نیست (سقف ۶۴
+// بایت)؛ `qr:<index>:<hash کوتاه لیبل>`. hash برای این است که دکمه‌ی قدیمی (وقتی لیست
+// lastQuickReplies بعد از پیام تازه عوض شده) به‌اشتباه به لیبل جدید نگاشت نشود
+const QUICK_REPLY_MAX_PER_ROW = 3;
+function quickReplyHash(label: string): string {
+  return createHash('md5').update(label).digest('hex').slice(0, 6);
+}
+function buildQuickReplyKeyboard(labels: string[]): TelegramInlineKeyboard {
+  const rows: { text: string; callback_data: string }[][] = [];
+  labels.forEach((label, i) => {
+    if (i % QUICK_REPLY_MAX_PER_ROW === 0) rows.push([]);
+    rows[rows.length - 1].push({
+      text: label,
+      callback_data: `qr:${i}:${quickReplyHash(label)}`,
+    });
+  });
+  return { inline_keyboard: rows };
+}
 
 // docs/PRD-bulk-product-import-from-document.md — نتیجه‌ی استخراج تا تایید فروشنده (دکمه‌ی
 // inline) در حافظه نگه داشته می‌شود؛ نیازی به جدول دیتابیس نیست چون کل چرخه عمرش چند دقیقه است
@@ -632,6 +652,29 @@ export class TelegramService {
 
     const conversation = await this.resolveActiveConversation(chatId);
     if (!conversation) return;
+
+    // docs/PRD-sales-agent-sales-state-machine.md §۱۲.۳ — دکمه‌ی پاسخ سریع: دقیقاً مثل این‌که
+    // مشتری لیبل را تایپ کرده باشد (همان الگوی handleText)
+    if (data.startsWith('qr:')) {
+      const [, indexRaw, hash] = data.split(':');
+      const labels =
+        (conversation.contextData as ConversationContext | null)?.sales
+          ?.lastQuickReplies ?? [];
+      const label = labels[Number(indexRaw)];
+      if (!label || quickReplyHash(label) !== hash) {
+        await this.sendText(chatId, fa.salesAgent.quickReplyExpired);
+        return;
+      }
+      if (conversation.isMutedForHuman) {
+        await this.logCustomerMessage(conversation.id, label);
+        return;
+      }
+      const qrResult = await this.withTypingIndicator(chatId, () =>
+        this.engine.handleMessage(conversation, label),
+      );
+      await this.sendEngineResult(chatId, qrResult);
+      return;
+    }
 
     let action: SalesAction | null = null;
     if (data.startsWith('ac:'))
@@ -1315,9 +1358,29 @@ export class TelegramService {
     chatId: string,
     result: EngineResult,
   ): Promise<void> {
-    if (result.reply) await this.sendText(chatId, result.reply);
+    // docs/PRD-sales-agent-sales-state-machine.md §۱۲.۳ — کیبورد پاسخ سریع به «آخرین» پیام
+    // ارسالی می‌چسبد: اگر بلوک UI ای نیست، به همان متن؛ وگرنه بعد از بلوک‌ها یک پیام کوتاه جدا
+    // (کارت محصول خودش کیبورد دارد). 👇 اینجا مجاز است چون جهت عمودی است، نه چپ/راست
+    const quickKeyboard = result.quickReplies?.length
+      ? buildQuickReplyKeyboard(result.quickReplies)
+      : undefined;
+    const visibleBlocks = result.uiBlocks.filter((b) => b.type !== 'NONE');
+    if (result.reply) {
+      await this.sendText(
+        chatId,
+        result.reply,
+        visibleBlocks.length === 0 ? quickKeyboard : undefined,
+      );
+    }
     for (const block of result.uiBlocks) {
       await this.sendUiBlock(chatId, block);
+    }
+    if (quickKeyboard && (visibleBlocks.length > 0 || !result.reply)) {
+      await this.sendText(
+        chatId,
+        fa.salesAgent.quickRepliesPickOne,
+        quickKeyboard,
+      );
     }
   }
 

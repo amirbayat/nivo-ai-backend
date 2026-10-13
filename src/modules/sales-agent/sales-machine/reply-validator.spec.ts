@@ -1,6 +1,7 @@
 import { PLAYBOOK } from './sales-playbook';
 import {
   buildCorrectiveInstruction,
+  extractNumbers,
   normalizeFa,
   sanitizeQuickReplies,
   validateReply,
@@ -236,5 +237,13 @@ describe('buildCorrectiveInstruction / sanitizeQuickReplies / normalizeFa', () =
 
   it('normalizeFa', () => {
     expect(normalizeFa('كاملاً مي‌كنم')).toBe('کاملا می کنم');
+  });
+});
+
+describe('extractNumbers', () => {
+  it('اعداد فارسی/جداکننده‌دار را برمی‌گرداند و اعداد کوتاه را نه', () => {
+    expect(extractNumbers('قیمت ۴۹۰,۰۰۰ تومان و ۲ عدد، کد 1234')).toEqual([
+      490000, 1234,
+    ]);
   });
 });

@@ -1,4 +1,45 @@
-import { findSuspiciousPriceClaims } from './sales-machine/reply-validator';
+import {
+  buildCorrectiveInstruction,
+  extractNumbers,
+  findSuspiciousPriceClaims,
+  sanitizeQuickReplies,
+  validateReply,
+  type Violation,
+} from './sales-machine/reply-validator';
+import {
+  buildPerceptionPrompt,
+  neutralPerception,
+  perceptionSchema,
+  sanitizePerception,
+  type Perception,
+} from './sales-machine/perception.schema';
+import {
+  applyPerception,
+  decideSalesTurn,
+  deriveLeadFunnelStage,
+  recordAgentTurn,
+} from './sales-machine/sales-stage-reducer';
+import {
+  hoursBetween,
+  loadSalesMemory,
+  summarizeCart,
+} from './sales-machine/sales-memory.util';
+import {
+  buildChatMessages,
+  type HistoryEntry,
+} from './sales-machine/chat-messages';
+import {
+  EVIDENCE_GOALS,
+  buildSalesActSystemPrompt,
+} from './sales-machine/sales-act-prompt';
+import { contractFor } from './sales-machine/sales-playbook';
+import type {
+  SalesDecision,
+  SalesMemory,
+  ServerFacts,
+  TurnGoal,
+} from './sales-machine/sales-machine.types';
+import { getSalesAgentGlobalConfig } from './sales-agent-global-config.util';
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
 import type { Queue } from 'bull';
@@ -49,6 +90,7 @@ import { formatShippingRulesSummary } from './shipping-rules-summary.util';
 import { fa } from '../../i18n/fa';
 import {
   defaultModel,
+  PERCEPTION_MODEL,
   resolveModel,
   DEFAULT_MODEL_FALLBACK_CHAIN,
   withDefaultModelFallbackChain,
@@ -253,6 +295,64 @@ type AgentTurnRuntime = {
   toolFetchedProductIds: Set<string>;
 };
 
+// docs/PRD-sales-agent-sales-state-machine.md §۴ — خروجی ادراک+تصمیم، یک‌بار در هر نوبت (نه در هر
+// تلاش fallback مدل Act)
+type PreparedSalesTurn = {
+  memBefore: SalesMemory;
+  mem: SalesMemory;
+  perception: Perception;
+  perceptionFailed: boolean;
+  decision: SalesDecision;
+  facts: ServerFacts;
+  history: HistoryEntry[];
+};
+
+// §۶.۳
+const PERCEPTION_TIMEOUT_MS = 8000;
+// §۱۰.۳ — محصولات تا ۱۵٪ بالاتر از بودجه هنوز کاندیدند (مدل باید صادقانه «بالاتر از بودجه» بگوید)
+const BUDGET_SOFT_CEILING = 1.15;
+const MAX_CANDIDATES = 8;
+// اهدافی که به نمونه‌ی کاتالوگ نیاز ندارند (صرفه‌جویی توکن)
+const GOALS_WITHOUT_CATALOG_SAMPLE: TurnGoal[] = [
+  'POST_PURCHASE_CARE',
+  'SOFT_EXIT',
+  'ASSIST_CHECKOUT',
+];
+
+// §۱۰.۵ — customerState و leadFunnelStage عمداً حذف شدند (مرحله را سرور تعیین می‌کند)
+const salesRespondShape = {
+  text: z
+    .string()
+    .describe('متن نهایی برای مشتری — طبق قرارداد پاسخ همین نوبت'),
+  relevantProductIds: z
+    .array(z.string())
+    .describe('محصولاتی که در همین متن معرفی کردی؛ وگرنه خالی'),
+  quickReplies: z
+    .array(z.string())
+    .max(3)
+    .describe(
+      '۰ تا ۳ گزینه‌ی کوتاه (حداکثر ۲۵ کاراکتر) که مشتری با یک لمس بفرستد؛ از زبان مشتری نوشته شود («مشکی رو میخوام»)',
+    ),
+  askedQuestion: z
+    .string()
+    .nullable()
+    .describe('اگر در متن سؤالی پرسیدی، همان سؤال؛ وگرنه null'),
+};
+
+// §۱۳ — نسخه‌ی مسیر جدید buildLeadCaptureOnlyInstruction: بخش «مسیر تبدیل (CTA)» حذف شد (نقشش را
+// هدف‌های نوبت گرفته‌اند)؛ فقط «سفارش ندارد»، «کاتالوگ خالی طبیعی است»، «۲-۳ ویژگی با ✅» و نگاشت
+// بستن به capture_lead
+function buildSalesLeadCaptureNote(hasWebsiteUrl: boolean): string {
+  return `این فروشگاه حالت ثبت سفارش/پرداخت ندارد — هرگز ادعا نکن سفارشی ثبت شده یا قرار است پرداختی انجام شود؛ سبد و create_order اصلاً در اختیارت نیست.
+این فروشگاه عمداً کاتالوگ محصول ندارد یا خیلی محدود است — اگر چیزی پیدا نشد هرگز نگو «محصولی نداریم»؛ طبق معرفی فروشگاه و باکس دانش درباره‌ی خودِ کسب‌وکار صحبت کن.
+وقتی ویژگی‌های واقعی نیوو را می‌گویی، ۲-۳ ویژگی مشخص را هر کدام در یک خط جدا با ✅ بنویس؛ تعریف کلی و مبهم («ما بهترینیم») ممنوع، و هرگز عدد/درصد اختراع نکن.
+اگر هدف نوبت «اجرای خرید» یا «بستن» است، به‌جای سبد: ${
+    hasWebsiteUrl
+      ? 'مشتری را به دکمه‌ی ثبت‌نام زیر پیام هدایت کن (اعتبار هدیه‌ی رایگان با ثبت‌نام) و capture_lead را صدا بزن؛ phone را خالی بگذار مگر مشتری خودش داد، و شماره نخواه.'
+      : 'مؤدبانه شماره‌ی تماسش را بخواه؛ به‌محض گرفتن شماره capture_lead را صدا بزن.'
+  } quickReplies برای بستن: «ثبت‌نام می‌کنم» و «اول یه سؤال دارم».`;
+}
+
 // findSuspiciousPriceClaims اکنون در sales-machine/reply-validator.ts است (docs/PRD-sales-agent-sales-state-machine.md
 // §۱۱) تا هر دو مسیر یک منبع داشته باشند؛ مسیر فعلی همچنان فقط لاگ می‌کند
 
@@ -345,6 +445,31 @@ type CompactProduct = {
   purityKarat?: number | null;
   isWeightBasedPricing?: boolean;
   goldPricingSummary?: string | null;
+};
+
+// docs/PRD-sales-agent-sales-state-machine.md §۱۵.۲ — از callFullAgentTurn به سطح ماژول آمد تا
+// callSalesTurn هم همین schema را استفاده کند
+// برای لاگ ادمین؛ خوداظهاری خودِ مدل، نه چیزی که سرور بتواند مستقل از متن تشخیص دهد
+const persuasionShape = {
+  persuasionTechniquesUsed: z
+    .array(
+      z.enum([
+        'COMMITMENT_CONSISTENCY',
+        'SOCIAL_PROOF',
+        'AUTHORITY',
+        'LIKING',
+        'RECIPROCITY',
+        'SCARCITY',
+      ]),
+    )
+    .describe(
+      'کدام‌یک از ۶ اصل متقاعدسازی را واقعاً در همین متن استفاده کردی — اگر هیچ‌کدام، خالی بگذار',
+    ),
+  usedGeneralKnowledge: z
+    .boolean()
+    .describe(
+      'آیا در همین متن از دانش عمومی خودت (نه facts فروشگاه) درباره‌ی محبوبیت/شناخته‌شده‌بودن یک محصول استفاده کردی',
+    ),
 };
 
 // docs/PRD-sales-agent-persuasion-principles.md بخش ۳.۲/۳.۳/۳.۴ — ثابت در کد (نه تنظیم پنل)،
@@ -566,6 +691,9 @@ export class ConversationEngineService {
       // برمی‌گردد (هم‌الگوی pendingAddress بالا)
       pendingOrderAddressSnapshot: raw?.pendingOrderAddressSnapshot ?? null,
       customerState: raw?.customerState ?? null,
+      // docs/PRD-sales-agent-sales-state-machine.md §۵ — بدون این whitelist هر persistTransition
+      // (که contextData را از getContext می‌سازد) حافظه‌ی فروش را پاک می‌کرد
+      sales: raw?.sales ?? null,
     };
   }
 
@@ -729,7 +857,11 @@ export class ConversationEngineService {
     // تا توکن/هزینه/تاخیر Track B (agent) در مقایسه با Track A قابل تفکیک بماند؛ ستون DB همچنان
     // String خام است (AbModelMetric.kind)، پس migration لازم ندارد
     kind:
-      'PARSE_INTENT' | 'CAPTION' | 'AGENT_CAPTION' | 'SATISFACTION_CLASSIFY',
+      | 'PARSE_INTENT'
+      | 'CAPTION'
+      | 'AGENT_CAPTION'
+      | 'SATISFACTION_CLASSIFY'
+      | 'PERCEPTION',
     success: boolean,
     latencyMs: number,
   ) {
@@ -905,7 +1037,11 @@ export class ConversationEngineService {
   private async tryModelFallbackChain<T>(
     conversation: ConversationWithStore,
     kind:
-      'PARSE_INTENT' | 'CAPTION' | 'AGENT_CAPTION' | 'SATISFACTION_CLASSIFY',
+      | 'PARSE_INTENT'
+      | 'CAPTION'
+      | 'AGENT_CAPTION'
+      | 'SATISFACTION_CLASSIFY'
+      | 'PERCEPTION',
     label: string,
     run: (
       model: string,
@@ -1787,6 +1923,28 @@ relevantProductIds را خالی بگذار.${
   // این یک نوبت کامل مکالمه (سبد/سفارش/تخفیف/FAQ/ارجاع انسانی) را با یک زنجیره‌ی
   // generateText چندمرحله‌ای تصمیم می‌گیرد — جایگزین کامل parseIntent+switch+do* برای
   // مکالمه‌هایی که responseStrategy=FULL_AGENT دارند.
+  // docs/PRD-sales-agent-sales-state-machine.md §۱۰.۱ — بخش «اطلاعات فروشگاه»؛ از
+  // buildFullAgentSystemPrompt بیرون کشیده شد تا مسیر ماشین‌حالت هم همان را استفاده کند
+  private async buildStoreProfileText(
+    conversation: ConversationWithStore,
+  ): Promise<string> {
+    const store = conversation.store;
+    const shippingRulesSummary = await formatShippingRulesSummary(
+      this.prisma,
+      conversation.storeId,
+    );
+    return [
+      store.category && `حوزه‌ی فعالیت: ${store.category}`,
+      store.brandIntro && `معرفی فروشگاه: ${store.brandIntro}`,
+      store.shippingInfo && `ارسال: ${store.shippingInfo}`,
+      shippingRulesSummary &&
+        `هزینه‌ی ارسال به‌تفکیک استان:\n${shippingRulesSummary}`,
+      store.returnPolicy && `شرایط مرجوعی/گارانتی: ${store.returnPolicy}`,
+    ]
+      .filter(Boolean)
+      .join('\n');
+  }
+
   private async buildFullAgentSystemPrompt(
     conversation: ConversationWithStore,
     ctx: ConversationContext,
@@ -1800,20 +1958,7 @@ relevantProductIds را خالی بگذار.${
   ): Promise<string> {
     const tone = toneForCategory(conversation.store.category);
     const store = conversation.store;
-    const shippingRulesSummary = await formatShippingRulesSummary(
-      this.prisma,
-      conversation.storeId,
-    );
-    const storeProfile = [
-      store.category && `حوزه‌ی فعالیت: ${store.category}`,
-      store.brandIntro && `معرفی فروشگاه: ${store.brandIntro}`,
-      store.shippingInfo && `ارسال: ${store.shippingInfo}`,
-      shippingRulesSummary &&
-        `هزینه‌ی ارسال به‌تفکیک استان:\n${shippingRulesSummary}`,
-      store.returnPolicy && `شرایط مرجوعی/گارانتی: ${store.returnPolicy}`,
-    ]
-      .filter(Boolean)
-      .join('\n');
+    const storeProfile = await this.buildStoreProfileText(conversation);
     const cartSummary = ctx.cart.length
       ? `سبد فعلی مشتری: ${ctx.cart.map((i) => `${i.name} × ${i.qty}`).join('، ')} — جمع ${this.cartTotal(ctx.cart)} تومان`
       : 'سبد فعلی مشتری خالی است.';
@@ -2723,28 +2868,6 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           'تحلیل خودت از وضعیت فعلی مشتری بعد از همین پاسخ — برای ثبت داخلی/استراتژی نوبت بعد، صادقانه، هرگز چیزی که مشتری ببیند نیست',
         ),
     };
-    // برای لاگ ادمین؛ خوداظهاری خودِ مدل، نه چیزی که سرور بتواند مستقل از متن تشخیص دهد
-    const persuasionShape = {
-      persuasionTechniquesUsed: z
-        .array(
-          z.enum([
-            'COMMITMENT_CONSISTENCY',
-            'SOCIAL_PROOF',
-            'AUTHORITY',
-            'LIKING',
-            'RECIPROCITY',
-            'SCARCITY',
-          ]),
-        )
-        .describe(
-          'کدام‌یک از ۶ اصل متقاعدسازی را واقعاً در همین متن استفاده کردی — اگر هیچ‌کدام، خالی بگذار',
-        ),
-      usedGeneralKnowledge: z
-        .boolean()
-        .describe(
-          'آیا در همین متن از دانش عمومی خودت (نه facts فروشگاه) درباره‌ی محبوبیت/شناخته‌شده‌بودن یک محصول استفاده کردی',
-        ),
-    };
     // فیدبک کاربر ۱۴۰۵/۰۷/۲۰ — خوداظهاری قیف لید، فقط برای فروشگاه‌های leadCaptureOnly؛
     // LEAD_CAPTURED عمداً اینجا نیست چون آن را فقط سرور، هم‌زمان با اجرای واقعی capture_lead،
     // ست می‌کند (همون الگوی rt.progressHappened/openQuestionStreak پایین‌تر: پیشرفت سرور-محور،
@@ -3111,11 +3234,37 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     conversation: ConversationWithStore,
     text: string,
   ): Promise<EngineResult> {
+    // docs/PRD-sales-agent-sales-state-machine.md §۱۵.۳ — با فلگ خاموش (پیش‌فرض) دقیقاً همان
+    // مسیر قبلی؛ ادراک+تصمیم فقط یک‌بار قبل از زنجیره‌ی fallback مدل انجام می‌شود
+    let turnFn = (model: string, isFallback: boolean) =>
+      this.callFullAgentTurn(conversation, text, model, isFallback);
+    const cfg = await getSalesAgentGlobalConfig(this.prisma);
+    if (cfg.salesStageMachineEnabled) {
+      let prepared: PreparedSalesTurn | null = null;
+      try {
+        prepared = await this.prepareSalesTurn(conversation, text);
+      } catch (err) {
+        this.logger.error(
+          `prepareSalesTurn failed, falling back to legacy FULL_AGENT: conversation=${conversation.id}`,
+          err as Error,
+        );
+      }
+      if (prepared) {
+        if (prepared.decision.shortCircuit) {
+          return this.runSalesShortCircuit(conversation, prepared);
+        }
+        const ready = prepared;
+        turnFn = (model, isFallback) =>
+          this.callSalesTurn(conversation, text, model, ready, isFallback);
+      }
+    }
     const primaryModel = resolveModel(conversation.abVariant);
     const started = Date.now();
     try {
-      const { engineResult, inputTokens, outputTokens } =
-        await this.callFullAgentTurn(conversation, text, primaryModel);
+      const { engineResult, inputTokens, outputTokens } = await turnFn(
+        primaryModel,
+        false,
+      );
       await this.logAiCall(
         conversation,
         'AGENT_CAPTION',
@@ -3145,13 +3294,10 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       }
       const fallbackStarted = Date.now();
       try {
-        const { engineResult, inputTokens, outputTokens } =
-          await this.callFullAgentTurn(
-            conversation,
-            text,
-            defaultModel(),
-            true,
-          );
+        const { engineResult, inputTokens, outputTokens } = await turnFn(
+          defaultModel(),
+          true,
+        );
         await this.logAiCall(
           conversation,
           'AGENT_CAPTION',
@@ -3181,7 +3327,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           'AGENT_CAPTION',
           'runFullAgentTurn',
           (model) =>
-            this.callFullAgentTurn(conversation, text, model, true).then(
+            turnFn(model, true).then(
               ({ engineResult, inputTokens, outputTokens }) => ({
                 result: engineResult,
                 inputTokens,
@@ -3192,6 +3338,897 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         return chained ?? this.doClarifyUnclear(conversation);
       }
     }
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────────────────
+  // docs/PRD-sales-agent-sales-state-machine.md §۴/§۱۵.۳ — مسیر ماشین‌حالت فروش. فقط وقتی
+  // SalesAgentGlobalConfig.salesStageMachineEnabled=true اجرا می‌شود (runFullAgentTurn)؛ با
+  // فلگ خاموش هیچ‌کدام از متدهای این بخش صدا زده نمی‌شوند
+  // ───────────────────────────────────────────────────────────────────────────────────────
+
+  // ۱۲ رویداد آخر چت (بدون پیام همین نوبت که handleMessage همین الان ثبتش کرده)، قدیمی → جدید
+  private async fetchChatHistory(
+    conversationId: string,
+    take: number,
+  ): Promise<HistoryEntry[]> {
+    const events = await this.prisma.conversationEvent.findMany({
+      where: {
+        conversationId,
+        type: { in: ['CUSTOMER_MESSAGE', 'AGENT_REPLY'] },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: take + 1,
+    });
+    return events
+      .slice(1)
+      .reverse()
+      .map((e) => ({
+        role:
+          e.type === 'CUSTOMER_MESSAGE'
+            ? ('user' as const)
+            : ('assistant' as const),
+        text: (e.payload as { text?: string } | null)?.text ?? '',
+      }))
+      .filter((h) => h.text.trim().length > 0);
+  }
+
+  private async loadTurnFacts(
+    conversation: ConversationWithStore,
+    ctx: ConversationContext,
+  ): Promise<ServerFacts> {
+    const catalogSize = await this.prisma.product.count({
+      where: { storeId: conversation.storeId },
+    });
+    return {
+      conversationState: conversation.currentState,
+      cartItemCount: ctx.cart.length,
+      leadCaptureOnly: conversation.store.leadCaptureOnly,
+      catalogSize,
+      hasWebsiteUrl: !!conversation.store.websiteUrl,
+      nowIso: new Date().toISOString(),
+    };
+  }
+
+  // §۶ — ادراک: مدل ثابت PERCEPTION_MODEL → defaultModel() → زنجیره‌ی fallback؛ اگر همه شکست
+  // خوردند perception خنثی (نوبت هرگز به‌خاطر ادراک متوقف نمی‌شود)
+  private async perceive(
+    conversation: ConversationWithStore,
+    mem: SalesMemory,
+    ctx: ConversationContext,
+    customerMessage: string,
+    history: HistoryEntry[],
+  ): Promise<{ perception: Perception; failed: boolean }> {
+    const store = conversation.store;
+    const known = new Set(mem.interests.map((i) => i.id));
+    const mentionedProducts = [
+      ...mem.interests.map((i) => ({
+        id: i.id,
+        name: i.name,
+        priceToman: i.priceToman,
+      })),
+      ...(ctx.lastShownProducts ?? [])
+        .filter((p) => !known.has(p.id))
+        .map((p) => ({ id: p.id, name: p.name, priceToman: 0 })),
+    ].slice(-8);
+    const lastAgentMessage =
+      [...history].reverse().find((h) => h.role === 'assistant')?.text ?? null;
+    const system = buildPerceptionPrompt({
+      storeContextSummary: [
+        store.category && `حوزه‌ی فعالیت: ${store.category}`,
+        store.brandIntro,
+      ]
+        .filter(Boolean)
+        .join('. ')
+        .slice(0, 300),
+      stage: mem.stage,
+      lastGoal: mem.lastGoal,
+      lastAgentMessage,
+      lastAgentQuestion: mem.lastAgentQuestion,
+      lastCloseOffer: mem.lastCloseOffer,
+      knownSlots: mem.slots,
+      mentionedProducts,
+      cartSummary: summarizeCart(ctx.cart),
+      recentTranscript: history
+        .slice(-6)
+        .map((h) => `${h.role === 'user' ? 'مشتری' : 'فروشنده'}: ${h.text}`)
+        .join('\n'),
+    });
+    const run = async (model: string) => {
+      const { object, usage } = await generateObject({
+        model: this.aiProvider.buildClient(undefined, {
+          supportsStructuredOutputs: true,
+        })(model),
+        schema: perceptionSchema,
+        system,
+        prompt: customerMessage,
+        temperature: 0,
+        abortSignal: AbortSignal.timeout(PERCEPTION_TIMEOUT_MS),
+      });
+      return {
+        result: object,
+        inputTokens: usage.inputTokens ?? 0,
+        outputTokens: usage.outputTokens ?? 0,
+      };
+    };
+    for (const model of [PERCEPTION_MODEL, defaultModel()]) {
+      const started = Date.now();
+      try {
+        const { result, inputTokens, outputTokens } = await run(model);
+        await this.logAiCall(
+          conversation,
+          'PERCEPTION',
+          true,
+          Date.now() - started,
+        );
+        await this.logTextCreditUsage(
+          conversation,
+          model,
+          inputTokens,
+          outputTokens,
+        );
+        return { perception: result, failed: false };
+      } catch (err) {
+        this.logger.error(
+          `perceive failed (model=${model}, conversation=${conversation.id})`,
+          err as Error,
+        );
+        await this.logAiCall(
+          conversation,
+          'PERCEPTION',
+          false,
+          Date.now() - started,
+        );
+      }
+    }
+    const chained = await this.tryModelFallbackChain(
+      conversation,
+      'PERCEPTION',
+      'perceive',
+      run,
+    );
+    if (chained) return { perception: chained, failed: false };
+    return { perception: neutralPerception(mem), failed: true };
+  }
+
+  // ادراک + تصمیم (کد قطعی)؛ فقط یک‌بار در هر نوبت — نه در هر تلاش fallback مدل Act
+  private async prepareSalesTurn(
+    conversation: ConversationWithStore,
+    text: string,
+  ): Promise<PreparedSalesTurn> {
+    const ctx = this.getContext(conversation);
+    const memBefore = loadSalesMemory(ctx);
+    const factsPromise = this.loadTurnFacts(conversation, ctx);
+    const perceivedPromise = this.fetchChatHistory(conversation.id, 12).then(
+      async (history) => ({
+        history,
+        ...(await this.perceive(conversation, memBefore, ctx, text, history)),
+      }),
+    );
+    const [facts, perceived] = await Promise.all([
+      factsPromise,
+      perceivedPromise,
+    ]);
+    const perception = sanitizePerception(
+      perceived.perception,
+      memBefore.interests.map((i) => i.id),
+    );
+    const mem = applyPerception(memBefore, perception, facts);
+    const decision = decideSalesTurn(
+      mem,
+      memBefore.stage,
+      perception,
+      facts,
+      hoursBetween(memBefore.lastCustomerMessageAt, facts.nowIso),
+    );
+    if (!perceived.failed && perception.buyerNeeds.length > 0) {
+      try {
+        await this.recordBuyerNeedCounts(
+          conversation.customerId,
+          perception.buyerNeeds,
+        );
+      } catch (err) {
+        this.logger.warn(
+          `recordBuyerNeedCounts failed: ${(err as Error).message}`,
+        );
+      }
+    }
+    return {
+      memBefore,
+      mem,
+      perception,
+      perceptionFailed: perceived.failed,
+      decision,
+      facts,
+      history: perceived.history,
+    };
+  }
+
+  // §۱۵.۴ — حافظه را روی contextData «تازه‌ی DB» merge می‌کند، نه روی ctx ابتدای نوبت؛ فلوهای
+  // قطعی (آدرس/واریانت/handoff) خودشان contextData را نوشته‌اند و با ctx کهنه پاک می‌شدند
+  private async persistSalesMemory(
+    conversation: ConversationWithStore,
+    mem: SalesMemory,
+    opts: {
+      lastShownProducts?: { id: string; name: string }[];
+      progressHappened?: boolean;
+    } = {},
+  ): Promise<void> {
+    const fresh = await this.prisma.salesConversation.findUnique({
+      where: { id: conversation.id },
+      select: { contextData: true },
+    });
+    const base = (fresh?.contextData ?? {}) as Record<string, unknown>;
+    const contextData = {
+      ...base,
+      ...(opts.lastShownProducts?.length
+        ? { lastShownProducts: opts.lastShownProducts }
+        : {}),
+      sales: mem,
+    };
+    const funnel = conversation.store.leadCaptureOnly
+      ? deriveLeadFunnelStage(mem.stage)
+      : null;
+    await this.prisma.salesConversation.update({
+      where: { id: conversation.id },
+      data: {
+        salesStage: mem.stage,
+        // سازگاری: شمارنده‌ی قدیمی هنوز برای آنالیتیکس/مسیر قدیمی؛ همان قاعده‌ی فعلی
+        ...(opts.progressHappened === undefined
+          ? {}
+          : opts.progressHappened
+            ? { openQuestionStreak: 0 }
+            : { openQuestionStreak: { increment: 1 } }),
+        contextData: contextData as unknown as Prisma.InputJsonObject,
+        ...(funnel ? { leadFunnelStage: funnel } : {}),
+      },
+    });
+    conversation.contextData = contextData;
+  }
+
+  // R2 (درخواست انسان) / R4 (اسپم) — بدون فراخوان Act
+  private async runSalesShortCircuit(
+    conversation: ConversationWithStore,
+    prepared: PreparedSalesTurn,
+  ): Promise<EngineResult> {
+    const { decision, mem, memBefore, perception, perceptionFailed } = prepared;
+    const trace: AiTraceData = {
+      intent: 'SALES_MACHINE',
+      handler: 'runSalesShortCircuit',
+      factsOrPrompt: decision.reason,
+      model: PERCEPTION_MODEL,
+      salesStage: decision.stage,
+      prevSalesStage: memBefore.stage,
+      turnGoal: decision.goal,
+      decisionReason: decision.reason,
+      perception,
+      perceptionFailed,
+    };
+    let result: EngineResult;
+    if (decision.shortCircuit === 'HUMAN_HANDOFF') {
+      result = await this.transitionToHandoff(
+        conversation,
+        'CUSTOMER_REQUESTED',
+      );
+      // transitionToHandoff خودش logReply (بدون trace) کرده؛ trace ادراک/تصمیم جدا ثبت می‌شود
+      await this.prisma.conversationEvent.create({
+        data: {
+          conversationId: conversation.id,
+          type: 'AI_TRACE',
+          payload: {
+            intent: trace.intent,
+            handler: trace.handler,
+            factsOrPrompt: trace.factsOrPrompt,
+            model: trace.model,
+            salesStage: trace.salesStage,
+            prevSalesStage: trace.prevSalesStage,
+            turnGoal: trace.turnGoal,
+            decisionReason: trace.decisionReason,
+            perception: perception,
+            ...(perceptionFailed ? { perceptionFailed: true } : {}),
+          },
+        },
+      });
+    } else {
+      const uiBlock: UiBlock = { type: 'NONE' };
+      const reply = fa.salesAgent.spamReply;
+      await this.logReply(conversation, reply, uiBlock, undefined, trace);
+      result = { reply, uiBlocks: [uiBlock], state: conversation.currentState };
+    }
+    await this.persistSalesMemory(conversation, mem);
+    return result;
+  }
+
+  private describeVariantOptions(product: ProductLike): string {
+    if (!hasVariantOptions(product)) return '';
+    const parts = (product.optionTypes ?? [])
+      .map((ot) => {
+        const available = ot.values
+          .map((v) => v.value)
+          .filter((val) =>
+            (product.variants ?? []).some(
+              (v) =>
+                v.stock > 0 &&
+                (v.optionValues as Record<string, string> | null)?.[ot.name] ===
+                  val,
+            ),
+          );
+        return available.length ? `${ot.name} (${available.join('، ')})` : null;
+      })
+      .filter(Boolean);
+    return parts.length ? ` — گزینه‌ها: ${parts.join('، ')}` : '';
+  }
+
+  // §۱۰.۳ — کاندیدهای مرتبط را سرور از قبل پیدا می‌کند (به‌جای ۵ محصول «جدیدترین»)
+  private async prefetchCandidates(
+    conversation: ConversationWithStore,
+    decision: SalesDecision,
+    mem: SalesMemory,
+    rt: AgentTurnRuntime,
+    persuasionEnabled: boolean,
+  ): Promise<{ text: string | null; ids: string[] }> {
+    const goal = decision.goal;
+    const objType = decision.focusObjection?.type;
+    const eligible =
+      goal === 'RECOMMEND' ||
+      goal === 'ALTERNATIVE_CLOSE' ||
+      goal === 'TRIAL_CLOSE' ||
+      goal === 'EXECUTE_PURCHASE' ||
+      (goal === 'HANDLE_OBJECTION' &&
+        (objType === 'PRICE' || objType === 'FIT'));
+    if (!eligible) return { text: null, ids: [] };
+    const storeId = conversation.storeId;
+    const rejected = new Set(
+      mem.interests.filter((i) => i.signal === 'REJECTED').map((i) => i.id),
+    );
+    const ids: string[] = [];
+    for (const i of [...mem.interests].reverse()) {
+      if (i.signal !== 'REJECTED' && !ids.includes(i.id)) ids.push(i.id);
+    }
+    if (
+      goal === 'RECOMMEND' ||
+      (goal === 'HANDLE_OBJECTION' && objType === 'PRICE')
+    ) {
+      const query = [mem.slots.goal, mem.needSummary, ...mem.slots.preferences]
+        .filter(Boolean)
+        .join(' ');
+      if (query) {
+        const found = await this.searchProductsForConsultation(storeId, query);
+        for (const p of found) {
+          if (!rejected.has(p.id) && !ids.includes(p.id)) ids.push(p.id);
+        }
+      }
+    }
+    if (ids.length === 0) return { text: null, ids: [] };
+    const products = await this.prisma.product.findMany({
+      where: { id: { in: ids }, storeId },
+      include: PRODUCT_VARIANT_INCLUDE,
+    });
+    await this.resolveProductPrices(storeId, products);
+    const budget = mem.slots.budgetMaxToman;
+    const inBudget = (p: { basePrice: number }) =>
+      budget === null || p.basePrice <= budget * BUDGET_SOFT_CEILING;
+    const order = new Map(ids.map((id, i) => [id, i]));
+    // حذف نمی‌شوند: مدل باید بتواند صادقانه بگوید «در بودجه نیست»
+    const sorted = [...products]
+      .sort(
+        (a, b) =>
+          Number(!inBudget(a)) - Number(!inBudget(b)) ||
+          Number(displayStock(a) <= 0) - Number(displayStock(b) <= 0) ||
+          (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0),
+      )
+      .slice(0, MAX_CANDIDATES);
+    for (const p of sorted) {
+      rt.seenProducts.set(p.id, {
+        id: p.id,
+        name: p.name,
+        basePrice: p.basePrice,
+        stock: displayStock(p),
+        images: p.images,
+        description: p.description,
+        videos: parseProductVideos(p.videos),
+        weightGrams: p.weightGrams,
+        purityKarat: p.purityKarat,
+        isWeightBasedPricing: p.pricingModel === 'WEIGHT_BASED_FORMULA',
+        goldPricingSummary: goldPricingSummaryOf(p),
+      });
+      rt.toolFetchedProductIds.add(p.id);
+    }
+    const lines = await Promise.all(
+      sorted.map(async (p) => {
+        const facts = await this.buildProductFactsLine(
+          storeId,
+          { ...p, stock: displayStock(p) },
+          persuasionEnabled,
+        );
+        const budgetTag =
+          budget === null
+            ? ''
+            : inBudget(p)
+              ? ' [در بودجه]'
+              : ' [بالاتر از بودجه]';
+        return `${facts}${this.describeVariantOptions(p)}${budgetTag}`;
+      }),
+    );
+    return { text: lines.join('\n'), ids: sorted.map((p) => p.id) };
+  }
+
+  // §۹ «پشتیبانی کد» — فقط شواهدی که سرور واقعاً دارد؛ مدل نباید چیزی بیرون از این‌ها ادعا کند
+  private async buildObjectionEvidence(
+    conversation: ConversationWithStore,
+    focusProductId: string | null,
+    persuasionEnabled: boolean,
+  ): Promise<string | null> {
+    const store = conversation.store;
+    const lines: string[] = [];
+    if (store.returnPolicy)
+      lines.push(`شرایط مرجوعی/گارانتی: ${store.returnPolicy}`);
+    if (store.shippingInfo) lines.push(`ارسال: ${store.shippingInfo}`);
+    const shipping = await formatShippingRulesSummary(
+      this.prisma,
+      conversation.storeId,
+    );
+    if (shipping) lines.push(`هزینه‌ی ارسال به‌تفکیک استان:\n${shipping}`);
+    lines.push(
+      `روش‌های پرداخت: کارت‌به‌کارت${this.snapppayAvailable(store) ? '، پرداخت اقساطی اسنپ‌پی: فعال' : ''}`,
+    );
+    if (focusProductId) {
+      const product = await this.prisma.product.findFirst({
+        where: { id: focusProductId, storeId: conversation.storeId },
+      });
+      if (product) {
+        if (product.description) {
+          lines.push(
+            `توضیحات «${product.name}»: ${truncateDescriptionForFacts(product.description)}`,
+          );
+        }
+        const specs = formatSpecsForFacts(parseProductSpecs(product.specs));
+        if (specs) lines.push(specs.trim());
+        // احترام به تنظیم فروشنده: وقتی persuasion خاموش است هیچ سیگنال اجتماعی/کمبود نمی‌آید
+        if (persuasionEnabled) {
+          const note = await this.buildPersuasionNote(
+            conversation.storeId,
+            product,
+            true,
+          );
+          if (note) lines.push(`«${product.name}»:${note}`);
+        }
+      }
+    }
+    if (persuasionEnabled) {
+      const urgent = await this.findUrgentActiveDiscount(conversation.storeId);
+      if (urgent) {
+        lines.push(
+          `کد تخفیف فعال واقعی: «${urgent.code}» تا ${urgent.expiresAt.toLocaleString('fa-IR')}`,
+        );
+      }
+    }
+    return lines.length ? lines.join('\n') : null;
+  }
+
+  // یک تلاش کامل Act (بدون fallback مدل) — همان قاعده‌ی callFullAgentTurn: بعد از جهش واقعی
+  // هرگز throw/retry نمی‌کند، فقط salvage امن
+  private async callSalesTurn(
+    conversation: ConversationWithStore,
+    customerMessage: string,
+    model: string,
+    prepared: PreparedSalesTurn,
+    isFallbackAttempt = false,
+  ): Promise<{
+    engineResult: EngineResult;
+    inputTokens: number;
+    outputTokens: number;
+  }> {
+    const {
+      memBefore,
+      mem,
+      perception,
+      perceptionFailed,
+      decision,
+      facts,
+      history,
+    } = prepared;
+    const storeId = conversation.storeId;
+    const store = conversation.store;
+    const persuasionEnabled = store.persuasionTechniquesEnabled;
+    const rt: AgentTurnRuntime = {
+      ctx: this.getContext(conversation),
+      mutationHappened: false,
+      progressHappened: false,
+      handoffResult: null,
+      flowResult: null,
+      cartResult: null,
+      orderResult: null,
+      photosResult: null,
+      compareResult: null,
+      seenProducts: new Map<string, CompactProduct>(),
+      toolFetchedProductIds: new Set<string>(),
+    };
+
+    const candidates = await this.prefetchCandidates(
+      conversation,
+      decision,
+      mem,
+      rt,
+      persuasionEnabled,
+    );
+    let fallbackCatalogText: string | null = null;
+    let initialCatalogProductIds: string[] = [];
+    if (
+      !candidates.text &&
+      !GOALS_WITHOUT_CATALOG_SAMPLE.includes(decision.goal)
+    ) {
+      const initial = await this.searchProducts(storeId);
+      initialCatalogProductIds = initial.map((p) => p.id);
+      for (const p of initial) {
+        rt.seenProducts.set(p.id, {
+          id: p.id,
+          name: p.name,
+          basePrice: p.basePrice,
+          stock: p.stock,
+          images: p.images,
+          description: p.description,
+          videos: parseProductVideos(p.videos),
+          weightGrams: p.weightGrams,
+          purityKarat: p.purityKarat,
+          isWeightBasedPricing: p.pricingModel === 'WEIGHT_BASED_FORMULA',
+          goldPricingSummary: goldPricingSummaryOf(p),
+        });
+      }
+      if (initial.length) {
+        fallbackCatalogText = (
+          await Promise.all(
+            initial.map((p) =>
+              this.buildProductFactsLine(
+                storeId,
+                { ...p, stock: displayStock(p) },
+                persuasionEnabled,
+              ),
+            ),
+          )
+        ).join('\n');
+      }
+    }
+
+    const focusProduct = [...mem.interests]
+      .filter((i) => i.signal !== 'REJECTED')
+      .sort((a, b) => b.lastTurn - a.lastTurn)[0];
+    const evidence = EVIDENCE_GOALS.includes(decision.goal)
+      ? await this.buildObjectionEvidence(
+          conversation,
+          focusProduct?.id ?? null,
+          persuasionEnabled,
+        )
+      : null;
+    const urgentDiscount = persuasionEnabled
+      ? await this.findUrgentActiveDiscount(storeId)
+      : null;
+
+    const systemPrompt = buildSalesActSystemPrompt({
+      storeName: store.name,
+      tone: toneForCategory(store.category),
+      storeProfile: await this.buildStoreProfileText(conversation),
+      paymentMethodsLine: `روش‌های پرداخت: کارت‌به‌کارت${this.snapppayAvailable(store) ? '، اسنپ‌پی (۴ قسط)' : ''}`,
+      mem,
+      decision,
+      cartSummary: rt.ctx.cart.length
+        ? `${summarizeCart(rt.ctx.cart)} — جمع ${this.cartTotal(rt.ctx.cart)} تومان`
+        : 'خالی',
+      catalogSize: facts.catalogSize,
+      evidence,
+      candidatesText: candidates.text,
+      fallbackCatalogText,
+      persuasionInstruction: persuasionEnabled
+        ? `${PERSUASION_INSTRUCTION}${
+            urgentDiscount
+              ? `\n\nیک کد تخفیف واقعی و زمان‌دار همین الان فعال است: «${urgentDiscount.code}»، تا ${urgentDiscount.expiresAt.toLocaleString('fa-IR')} معتبر. فقط اگر به مکالمه مرتبط است طبیعی مطرحش کن.`
+              : ''
+          }`
+        : null,
+      leadCaptureInstruction: store.leadCaptureOnly
+        ? buildSalesLeadCaptureNote(!!store.websiteUrl)
+        : null,
+    });
+
+    const respondToCustomer = tool({
+      description:
+        'پاسخ نهایی به مشتری را اعلام می‌کند — دقیقاً یک‌بار، به‌عنوان آخرین قدم (مگر وقتی create_order، update_cart برای محصول دارای سایز/رنگ، capture_lead یا request_human_handoff زده‌ای)',
+      inputSchema: z.object({
+        ...salesRespondShape,
+        ...(persuasionEnabled ? persuasionShape : {}),
+      }),
+    });
+    const tools = this.buildAgentTools(conversation, rt, {
+      persuasionEnabled,
+      respondToCustomer,
+    });
+    const activeTools = decision.allowedTools.filter(
+      (t) => t in tools,
+    ) as (keyof typeof tools)[];
+    const messages = buildChatMessages(history, customerMessage).map((m) =>
+      m.role === 'user'
+        ? { role: 'user' as const, content: m.content }
+        : { role: 'assistant' as const, content: m.content },
+    );
+    const generate = (system: string) =>
+      generateText({
+        model: this.aiProvider.buildClient(undefined, {
+          supportsStructuredOutputs: true,
+        })(model),
+        tools,
+        activeTools,
+        stopWhen: stepCountIs(6),
+        system,
+        messages,
+        temperature: 0.4,
+      });
+
+    // خروج بدون respond_to_customer (فلو قطعی/handoff/salvage): حافظه همچنان ثبت می‌شود
+    const finishPlain = async (
+      engineResult: EngineResult,
+      inputTokens: number,
+      outputTokens: number,
+    ) => {
+      await this.persistSalesMemory(
+        conversation,
+        recordAgentTurn(mem, decision, {
+          text: engineResult.reply,
+          askedQuestion: null,
+          quickReplies: [],
+          shownProducts: [],
+          cartProductIds: rt.ctx.cart.map((i) => i.productId),
+          comparedProductIds: [],
+        }),
+        { progressHappened: rt.progressHappened },
+      );
+      return { engineResult, inputTokens, outputTokens };
+    };
+
+    let result: Awaited<ReturnType<typeof generate>>;
+    try {
+      result = await generate(systemPrompt);
+    } catch (err) {
+      const caught = rt.handoffResult ?? rt.flowResult;
+      if (caught) return finishPlain(caught, 0, 0);
+      if (rt.mutationHappened) {
+        return finishPlain(
+          await this.salvageReplyAfterMutation(
+            conversation,
+            rt.orderResult,
+            rt.cartResult,
+          ),
+          0,
+          0,
+        );
+      }
+      throw err;
+    }
+    let usedIn = result.totalUsage.inputTokens ?? 0;
+    let usedOut = result.totalUsage.outputTokens ?? 0;
+
+    const shortCircuit = rt.handoffResult ?? rt.flowResult;
+    if (shortCircuit) return finishPlain(shortCircuit, usedIn, usedOut);
+
+    type SalesRespondCall = {
+      input: {
+        text: string;
+        relevantProductIds: string[];
+        quickReplies: string[];
+        askedQuestion: string | null;
+        persuasionTechniquesUsed?: PersuasionTechnique[];
+        usedGeneralKnowledge?: boolean;
+      };
+    };
+    const findFinal = (r: typeof result) =>
+      r.toolCalls.find((c) => c.toolName === 'respond_to_customer') as
+        SalesRespondCall | undefined;
+    let finalCall = findFinal(result);
+    if (!finalCall) {
+      if (rt.mutationHappened) {
+        return finishPlain(
+          await this.salvageReplyAfterMutation(
+            conversation,
+            rt.orderResult,
+            rt.cartResult,
+          ),
+          usedIn,
+          usedOut,
+        );
+      }
+      throw new Error(
+        'SALES_MACHINE did not call respond_to_customer within step limit',
+      );
+    }
+
+    // §۱۱ — validator قطعی؛ مبلغ‌های معتبر = قیمت‌های واقعی ابزارها/سبد + هر عددی که خود پرامپت
+    // (پروفایل/شواهد/کاندیدها) واقعاً دارد + بودجه‌ای که خود مشتری گفته
+    const contract = contractFor(decision.goal, facts.catalogSize);
+    const lastAgentMessage =
+      [...history].reverse().find((h) => h.role === 'assistant')?.text ?? null;
+    const knownAmounts = new Set<number>(extractNumbers(systemPrompt));
+    for (const p of rt.seenProducts.values()) knownAmounts.add(p.basePrice);
+    for (const i of mem.interests)
+      if (i.priceToman > 0) knownAmounts.add(i.priceToman);
+    for (const b of [mem.slots.budgetMaxToman, mem.slots.budgetMinToman]) {
+      if (b !== null) knownAmounts.add(b);
+    }
+    const validate = (call: SalesRespondCall) =>
+      validateReply({
+        text: call.input.text.trim(),
+        relevantProductIds: call.input.relevantProductIds ?? [],
+        quickReplies: call.input.quickReplies ?? [],
+        contract,
+        mem,
+        lastAgentMessage,
+        knownAmounts: (() => {
+          const k = new Set(knownAmounts);
+          for (const item of rt.ctx.cart) {
+            k.add(item.unitPrice);
+            k.add(item.unitPrice * item.qty);
+          }
+          k.add(this.cartTotal(rt.ctx.cart));
+          if (rt.cartResult) k.add(rt.cartResult.total);
+          if (rt.orderResult) k.add(rt.orderResult.amount);
+          if (rt.ctx.appliedDiscount) k.add(rt.ctx.appliedDiscount.amountToman);
+          return k;
+        })(),
+        catalogSize: facts.catalogSize,
+        mutationShortCircuited: false,
+        askedQuestion: call.input.askedQuestion,
+      });
+
+    let violations = validate(finalCall);
+    const allViolations: Violation[] = [...violations];
+    let correctiveRetry = false;
+    if (violations.length > 0 && !rt.mutationHappened) {
+      correctiveRetry = true;
+      this.logger.warn(
+        `SALES_MACHINE reply violations [${violations.map((v) => v.code).join(',')}], retrying once: conversation=${conversation.id}`,
+      );
+      try {
+        const retry = await generate(
+          `${systemPrompt}\n\n${buildCorrectiveInstruction(violations)}`,
+        );
+        usedIn += retry.totalUsage.inputTokens ?? 0;
+        usedOut += retry.totalUsage.outputTokens ?? 0;
+        const retryShortCircuit = rt.handoffResult ?? rt.flowResult;
+        if (retryShortCircuit)
+          return finishPlain(retryShortCircuit, usedIn, usedOut);
+        const retryFinal = findFinal(retry);
+        if (retryFinal) {
+          result = retry;
+          finalCall = retryFinal;
+          violations = validate(retryFinal);
+          allViolations.push(...violations);
+        }
+      } catch (err) {
+        this.logger.error(
+          `sales corrective retry failed, keeping original reply: conversation=${conversation.id}`,
+          err as Error,
+        );
+      }
+    } else if (
+      rt.mutationHappened &&
+      violations.some((v) => v.code === 'SUSPICIOUS_PRICE') &&
+      (rt.cartResult || rt.orderResult)
+    ) {
+      // بعد از جهش retry ممنوع است؛ متن امن از روی واقعیت‌ها جایگزین می‌شود
+      return finishPlain(
+        await this.salvageReplyAfterMutation(
+          conversation,
+          rt.orderResult,
+          rt.cartResult,
+        ),
+        usedIn,
+        usedOut,
+      );
+    }
+
+    const text = finalCall.input.text.trim();
+    const relevantProductIds = finalCall.input.relevantProductIds ?? [];
+    const askedQuestion = finalCall.input.askedQuestion?.trim() || null;
+    const uiBlock = this.deriveFullAgentUiBlock({
+      orderResult: rt.orderResult,
+      cartResult: rt.cartResult,
+      photosResult: rt.photosResult,
+      compareResult: rt.compareResult,
+      relevantProductIds,
+      seenProducts: rt.seenProducts,
+      toolFetchedProductIds: rt.toolFetchedProductIds,
+    });
+    const quickReplies = sanitizeQuickReplies(
+      finalCall.input.quickReplies ?? [],
+      {
+        goal: decision.goal,
+        uiBlockType: uiBlock.type,
+      },
+    );
+    const lastShownProducts = relevantProductIds
+      .filter((id) => rt.toolFetchedProductIds.has(id))
+      .map((id) => rt.seenProducts.get(id))
+      .filter((p): p is CompactProduct => !!p)
+      .map((p) => ({ id: p.id, name: p.name }));
+    const shownProducts =
+      uiBlock.type === 'PRODUCT_CARD'
+        ? uiBlock.products.map((p) => ({
+            id: p.id,
+            name: p.name,
+            priceToman: p.basePrice,
+          }))
+        : [];
+
+    const nextMem = recordAgentTurn(mem, decision, {
+      text,
+      askedQuestion,
+      quickReplies,
+      shownProducts,
+      cartProductIds: rt.ctx.cart.map((i) => i.productId),
+      comparedProductIds: rt.compareResult?.products.map((p) => p.id) ?? [],
+    });
+    await this.persistSalesMemory(conversation, nextMem, {
+      lastShownProducts,
+      progressHappened: rt.progressHappened,
+    });
+
+    const suspiciousAmounts = allViolations.flatMap((v) =>
+      v.code === 'SUSPICIOUS_PRICE' ? v.amounts : [],
+    );
+    await this.logReply(
+      conversation,
+      text,
+      uiBlock,
+      undefined,
+      {
+        intent: 'SALES_MACHINE',
+        handler: 'callSalesTurn',
+        factsOrPrompt: systemPrompt,
+        model,
+        ...(finalCall.input.persuasionTechniquesUsed?.length
+          ? {
+              persuasionTechniquesUsed:
+                finalCall.input.persuasionTechniquesUsed,
+            }
+          : {}),
+        ...(finalCall.input.usedGeneralKnowledge
+          ? { usedGeneralKnowledge: true }
+          : {}),
+        salesStage: decision.stage,
+        prevSalesStage: memBefore.stage,
+        turnGoal: decision.goal,
+        decisionReason: decision.reason,
+        perception,
+        perceptionFailed,
+        validatorViolations: allViolations,
+        correctiveRetry,
+        candidateProductIds: candidates.ids,
+        quickReplies,
+        relevantProductIdsRaw: relevantProductIds,
+        lastShownProducts,
+        toolsCalled: result.steps
+          .flatMap((s) => s.toolCalls)
+          .filter((c) => c.toolName !== 'respond_to_customer')
+          .map((c) => ({ name: c.toolName, args: c.input })),
+        initialCatalogProductIds,
+        stepsUsed: result.steps.length,
+        mutationHappened: rt.mutationHappened,
+        progressHappened: rt.progressHappened,
+        isFallbackAttempt,
+        ...(suspiciousAmounts.length
+          ? { suspiciousPriceClaims: suspiciousAmounts }
+          : {}),
+      },
+      quickReplies,
+    );
+
+    return {
+      engineResult: {
+        reply: text,
+        uiBlocks: [uiBlock],
+        state: conversation.currentState,
+        ...(quickReplies.length ? { quickReplies } : {}),
+      },
+      inputTokens: usedIn,
+      outputTokens: usedOut,
+    };
   }
 
   private resolveProductRef(
@@ -6750,6 +7787,8 @@ answered=false بده (به‌جای حدس‌زدن).`,
     uiBlock: UiBlock,
     flag?: 'UNCLEAR' | 'NO_KB_MATCH',
     trace?: AiTraceData,
+    // docs/PRD-sales-agent-sales-state-machine.md §۱۲.۱ — فقط مسیر ماشین‌حالت فروش
+    quickReplies?: string[],
   ) {
     // برخلاف قبل، طول کوتاه/رسیدن به سقف باید از هم تفکیک شوند (نه فقط یک بولین) — بخش
     // voice.reason در AI_TRACE (docs/PRD-admin-ai-decision-trace-log.md بخش ۱) به همین نیاز دارد
@@ -6824,6 +7863,7 @@ answered=false بده (به‌جای حدس‌زدن).`,
       text,
       uiBlock,
       ...(flag ? { flag } : {}),
+      ...(quickReplies?.length ? { quickReplies } : {}),
       ...(wantsVoice ? { voicePending: true } : {}),
       voice: wantsVoice
         ? { generated: true }
@@ -6877,6 +7917,30 @@ answered=false بده (به‌جای حدس‌زدن).`,
         ...(trace.isFallbackAttempt ? { isFallbackAttempt: true } : {}),
         ...(trace.suspiciousPriceClaims?.length
           ? { suspiciousPriceClaims: trace.suspiciousPriceClaims }
+          : {}),
+        // docs/PRD-sales-agent-sales-state-machine.md §۱۶ — فقط روی trace مسیر callSalesTurn
+        ...(trace.salesStage ? { salesStage: trace.salesStage } : {}),
+        ...(trace.prevSalesStage
+          ? { prevSalesStage: trace.prevSalesStage }
+          : {}),
+        ...(trace.turnGoal ? { turnGoal: trace.turnGoal } : {}),
+        ...(trace.decisionReason
+          ? { decisionReason: trace.decisionReason }
+          : {}),
+        ...(trace.perception ? { perception: trace.perception } : {}),
+        ...(trace.perceptionFailed ? { perceptionFailed: true } : {}),
+        ...(trace.validatorViolations?.length
+          ? {
+              validatorViolations:
+                trace.validatorViolations as Prisma.InputJsonValue,
+            }
+          : {}),
+        ...(trace.correctiveRetry ? { correctiveRetry: true } : {}),
+        ...(trace.candidateProductIds?.length
+          ? { candidateProductIds: trace.candidateProductIds }
+          : {}),
+        ...(trace.quickReplies?.length
+          ? { quickReplies: trace.quickReplies }
           : {}),
         voice: wantsVoice
           ? { generated: true }

@@ -1552,10 +1552,28 @@ export class AdminService {
     let costIdx = 0;
     for (const item of items) {
       if (item.trace) {
-        const cost = costEvents[costIdx];
-        if (cost) {
-          item.trace.chargedToman = cost.chargedToman;
-          costIdx++;
+        // docs/PRD-sales-agent-sales-state-machine.md §۱۶ — هر نوبت ماشین‌حالت فروش دو رویداد
+        // TEXT_REPLY دارد (اول ادراک، بعد Act) ولی فقط یک trace؛ بدون این، تطبیق ترتیبی بعد از
+        // اولین نوبت جابه‌جا می‌شد. ادراکِ ناموفق (perceptionFailed) رویداد هزینه‌ای ندارد و
+        // shortCircuit (handoff/اسپم) فقط هزینه‌ی ادراک دارد
+        const handler = item.trace.handler;
+        if (handler === 'callSalesTurn' || handler === 'runSalesShortCircuit') {
+          const perceptionCost = item.trace.perceptionFailed
+            ? undefined
+            : costEvents[costIdx++];
+          const actCost =
+            handler === 'callSalesTurn' ? costEvents[costIdx++] : undefined;
+          if (perceptionCost || actCost) {
+            item.trace.chargedToman =
+              (perceptionCost?.chargedToman ?? 0) +
+              (actCost?.chargedToman ?? 0);
+          }
+        } else {
+          const cost = costEvents[costIdx];
+          if (cost) {
+            item.trace.chargedToman = cost.chargedToman;
+            costIdx++;
+          }
         }
       }
     }

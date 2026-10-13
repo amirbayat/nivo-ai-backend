@@ -62,6 +62,14 @@ export function findSuspiciousPriceClaims(
   return [...suspicious];
 }
 
+// همه‌ی اعداد ≥۳ رقمی یک متن (فارسی‌رقم و جداکننده نرمال می‌شود) — engine از اعداد داخل
+// خود پرامپت (قیمت‌ها/هزینه‌ی ارسال) به‌عنوان «مبلغ واقعی معتبر» استفاده می‌کند تا validator
+// قیمتِ واقعاً موجود در پرامپت را اشتباهاً SUSPICIOUS_PRICE نکند
+export function extractNumbers(text: string): number[] {
+  const normalized = toWesternDigits(text).replace(/(\d)[,٬](?=\d)/g, '$1');
+  return [...normalized.matchAll(/\d{3,}/g)].map((m) => Number(m[0]));
+}
+
 const STOPWORDS = new Set(
   [
     'و',

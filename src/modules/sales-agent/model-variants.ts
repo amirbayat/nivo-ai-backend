@@ -60,6 +60,10 @@ export function resolveModel(variant: string | null | undefined): string {
   );
 }
 
+// docs/PRD-sales-agent-sales-state-machine.md §۶.۳ — مدل ثابت لایه‌ی ادراک؛ عمداً وابسته به abVariant
+// نیست تا جدول انتقال ماشین‌حالت برای همه‌ی مکالمه‌ها قابل‌مقایسه بماند
+export const PERCEPTION_MODEL = 'google/gemini-3.8-flash';
+
 export function defaultModel(): string {
   return MODEL_VARIANTS[DEFAULT_VARIANT_KEY];
 }
