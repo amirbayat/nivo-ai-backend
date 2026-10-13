@@ -409,4 +409,9 @@ export type AiTraceData = {
   leadFunnelStage?: string;
   // فیدبک کاربر ۱۴۰۵/۰۸/۲۱ — هر دو نوع فروشگاه، خوداظهاری مدل هر نوبت؛ نگاه کن به CustomerState بالا
   customerState?: CustomerState;
+  // فیدبک کاربر ۱۴۰۵/۰۸/۲۱ («دیگه رد خور نداشته باشه») — گارد قطعی روی تناقض خودگزارشی
+  // customerState؛ نگاه کن به conversation-engine.service.ts، درست بعد از finalCall اول در
+  // callFullAgentTurn. وجودش یعنی تناقض تشخیص داده شد؛ نبودنش یعنی هیچ تناقضی نبود
+  correctiveRetryReason?:
+    'READY_WITHOUT_ACTION' | 'PAIN_NOT_SOLVABLE_CONTRADICTION';
 };

@@ -299,6 +299,20 @@ const EMPATHY_MISSING_INSTRUCTION = `طبق تحلیل خودت در نوبت ق
 واقعاً با او همدلی نکرده‌ای (empathyShown=false). قبل از هر معرفی ویژگی/قیمت/CTA در همین پاسخ، اول با
 یک جمله‌ی کوتاه و واقعی (نه کلیشه‌ای) نشان بده که دردش را فهمیدی — بعد ادامه بده.`;
 
+// فیدبک کاربر ۱۴۰۵/۰۸/۲۱ — برخلاف سه مورد بالا (که قبل از تولید پاسخ، به پرامپت اضافه می‌شوند)،
+// این دو مخصوص یک retry اصلاحی *بعد از* تولید پاسخ‌اند — وقتی خودِ همان پاسخ با خودگزارشی
+// customerState‌اش در تناقض است (مثلاً READY ولی بدون اقدام، یا painSolvable=NO ولی هنوز دارد
+// می‌فروشد). نگاه کن به callFullAgentTurn، درست بعد از اولین finalCall
+const CTA_CORRECTIVE_INSTRUCTION = `توجه فوری — تناقض در پاسخ قبلی‌ات: خودت گزارش دادی مشتری در
+مرحله‌ی READY (آماده‌ی اقدام) است، ولی در همان پاسخ نه capture_lead را صدا زدی و نه شماره تماس
+خواستی. این بار دقیقاً طبق بخش «مسیر تبدیل (CTA)» بالا عمل کن — یا capture_lead را صدا بزن (اگر
+فروشگاه لینک وبسایت دارد) یا صریح و مؤدبانه شماره تماس بخواه؛ دیگر فقط توضیح یا سؤال عمومی دیگری نده.`;
+
+const PAIN_NOT_SOLVABLE_CORRECTIVE_INSTRUCTION = `توجه فوری — تناقض در پاسخ قبلی‌ات: خودت گزارش
+دادی دردی که مشتری دارد را این فروشگاه نمی‌تواند حل کند (painSolvable=NO)، ولی هم‌زمان داشتی
+می‌فروختی/پرزنت می‌کردی یا آماده‌ی بستن معامله اعلام کردی. این بار این تناقض را اصلاح کن: صادقانه و
+مؤدبانه بگو این دقیقاً کاری نیست که این فروشگاه انجام می‌دهد — هیچ فشار فروش یا CTA دیگری نده.`;
+
 // docs/PRD-sales-agent-tool-calling-architecture.md بخش ۳.۳ — یک محصول کمینه برای facts/ابزارهای
 // FULL_AGENT؛ همون شکلی که seenProducts/uiBlock derivation نیاز دارند
 type CompactProduct = {
@@ -2739,29 +2753,35 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       leadCaptureNudgeActive,
     );
 
+    // فیدبک کاربر ۱۴۰۵/۰۸/۲۱ — جدا شده از فراخوانی generateText پایین تا guard تناقض‌خودگزارشی
+    // (پایین‌تر، بعد از finalCall اول) بتواند دقیقاً همان ابزارها را بدون تکرار برای یک تلاش
+    // اصلاحی دوباره استفاده کند؛ closureهای این ابزارها (mutationHappened/handoffResult/...)
+    // مشترکند، پس حالت بین دو تلاش درست منتقل می‌شود
+    const tools = {
+      search_products: searchProductsTool,
+      get_product_details: getProductDetailsTool,
+      update_cart: updateCartTool,
+      view_cart: viewCartTool,
+      apply_discount: applyDiscountTool,
+      ...(conversation.store.leadCaptureOnly
+        ? { capture_lead: captureLeadTool }
+        : { create_order: createOrderTool }),
+      cancel_order: cancelOrderTool,
+      check_order_status: checkOrderStatusTool,
+      answer_faq: answerFaqTool,
+      request_human_handoff: requestHumanHandoffTool,
+      show_product_photos: showProductPhotosTool,
+      compare_products: compareProductsTool,
+      respond_to_customer: respondToCustomer,
+    };
+
     let result;
     try {
       result = await generateText({
         model: this.aiProvider.buildClient(undefined, {
           supportsStructuredOutputs: true,
         })(model),
-        tools: {
-          search_products: searchProductsTool,
-          get_product_details: getProductDetailsTool,
-          update_cart: updateCartTool,
-          view_cart: viewCartTool,
-          apply_discount: applyDiscountTool,
-          ...(conversation.store.leadCaptureOnly
-            ? { capture_lead: captureLeadTool }
-            : { create_order: createOrderTool }),
-          cancel_order: cancelOrderTool,
-          check_order_status: checkOrderStatusTool,
-          answer_faq: answerFaqTool,
-          request_human_handoff: requestHumanHandoffTool,
-          show_product_photos: showProductPhotosTool,
-          compare_products: compareProductsTool,
-          respond_to_customer: respondToCustomer,
-        },
+        tools,
         // docs/PRD-sales-agent-tool-calling-architecture.md بخش ۲.۳ — سقف هزینه‌ی فروشنده:
         // تعداد قدم ابزار در هر نوبت محدود است، نه بی‌نهایت (Track B مشابه از ۴ استفاده می‌کند؛
         // اینجا چون کل مکالمه‌ست نه فقط doBrowse، کمی بیشتر لازم است)
@@ -2811,20 +2831,19 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       };
     }
 
-    const finalCall = result.toolCalls.find(
+    type RespondToCustomerCall = {
+      input: {
+        text: string;
+        relevantProductIds: string[];
+        persuasionTechniquesUsed?: PersuasionTechnique[];
+        usedGeneralKnowledge?: boolean;
+        leadFunnelStage?: Exclude<LeadFunnelStage, 'LEAD_CAPTURED'>;
+        customerState: CustomerState;
+      };
+    };
+    let finalCall = result.toolCalls.find(
       (c) => c.toolName === 'respond_to_customer',
-    ) as
-      | {
-          input: {
-            text: string;
-            relevantProductIds: string[];
-            persuasionTechniquesUsed?: PersuasionTechnique[];
-            usedGeneralKnowledge?: boolean;
-            leadFunnelStage?: Exclude<LeadFunnelStage, 'LEAD_CAPTURED'>;
-            customerState: CustomerState;
-          };
-        }
-      | undefined;
+    ) as RespondToCustomerCall | undefined;
 
     if (!finalCall) {
       if (mutationHappened) {
@@ -2842,6 +2861,84 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       throw new Error(
         'FULL_AGENT did not call respond_to_customer within step limit',
       );
+    }
+
+    // فیدبک کاربر ۱۴۰۵/۰۸/۲۱ («دیگه رد خور نداشته باشه») — گارد قطعی روی دو تناقض خودگزارشی
+    // پرریسک CustomerState: (۱) مدل گفته مشتری READY است ولی هیچ اقدام واقعی (capture_lead/
+    // گرفتن شماره) نکرده، (۲) مدل گفته این درد قابل‌حل نیست ولی هم‌زمان دارد پرزنت/فروش می‌کند.
+    // قبلاً این‌ها (مثل suspiciousPriceClaims پایین‌تر) فقط لاگ می‌شدند، هیچ‌وقت خروجی واقعی را
+    // عوض نمی‌کردند. فقط وقتی safe است یک‌بار retry می‌کنیم: اگر این تلاش قبلاً یک جهش واقعی ثبت
+    // کرده (mutationHappened)، دست به regenerate نمی‌زنیم — دقیقاً همان قاعده‌ای که catch اصلی
+    // بالاتر هم رعایت می‌کند (ریسک دوبار افزودن به سبد/دوبار capture). اگر retry چیزی معتبر
+    // تولید نکرد (خطا یا بازهم بدون respond_to_customer)، پاسخ اول (هرچند ناقص) را نگه می‌داریم —
+    // یک retry ناموفق هرگز نباید یک پاسخ موجود را از بین ببرد.
+    let usedInputTokens = result.usage.inputTokens ?? 0;
+    let usedOutputTokens = result.usage.outputTokens ?? 0;
+    // فیدبک کاربر ۱۴۰۵/۰۸/۲۱ — برای AI_TRACE ادمین (logReply پایین‌تر)؛ null یعنی هیچ تناقضی
+    // تشخیص داده نشد یا (مثل suspiciousPriceClaims) پیش‌تر هم مشتبه بود ولی mutationHappened
+    // اجازه‌ی retry نداد
+    let correctiveRetryReason:
+      'READY_WITHOUT_ACTION' | 'PAIN_NOT_SOLVABLE_CONTRADICTION' | null = null;
+    const firstAttemptState = finalCall.input.customerState;
+    const readyWithoutAction =
+      conversation.store.leadCaptureOnly && firstAttemptState.stage === 'READY';
+    const painNotSolvableContradiction =
+      firstAttemptState.painSolvable === 'NO' &&
+      (firstAttemptState.stage === 'PITCHED' ||
+        firstAttemptState.stage === 'READY');
+    if (readyWithoutAction || painNotSolvableContradiction) {
+      const reason = readyWithoutAction
+        ? 'READY_WITHOUT_ACTION'
+        : 'PAIN_NOT_SOLVABLE_CONTRADICTION';
+      correctiveRetryReason = reason;
+      if (mutationHappened) {
+        // یک جهش واقعی (مثلاً update_cart) همین تلاش ثبت شده — دیگر دست به regenerate نمی‌زنیم
+        // (ریسک دوبار افزودن به سبد/دوبار capture)، فقط برای بررسی دستی ادمین لاگ می‌کنیم
+        this.logger.warn(
+          `FULL_AGENT self-report contradiction (${reason}) but mutation already happened, cannot retry: conversation=${conversation.id}`,
+        );
+      } else {
+        this.logger.warn(
+          `FULL_AGENT self-report contradiction (${reason}), retrying once: conversation=${conversation.id}`,
+        );
+        try {
+          const retryResult = await generateText({
+            model: this.aiProvider.buildClient(undefined, {
+              supportsStructuredOutputs: true,
+            })(model),
+            tools,
+            stopWhen: stepCountIs(6),
+            system: `${systemPrompt}\n\n${
+              readyWithoutAction
+                ? CTA_CORRECTIVE_INSTRUCTION
+                : PAIN_NOT_SOLVABLE_CORRECTIVE_INSTRUCTION
+            }`,
+            prompt: customerMessage,
+            temperature: 0.3,
+          });
+          usedInputTokens += retryResult.usage.inputTokens ?? 0;
+          usedOutputTokens += retryResult.usage.outputTokens ?? 0;
+          if (handoffResult) {
+            return {
+              engineResult: handoffResult,
+              inputTokens: usedInputTokens,
+              outputTokens: usedOutputTokens,
+            };
+          }
+          const retryFinalCall = retryResult.toolCalls.find(
+            (c) => c.toolName === 'respond_to_customer',
+          ) as RespondToCustomerCall | undefined;
+          if (retryFinalCall) {
+            result = retryResult;
+            finalCall = retryFinalCall;
+          }
+        } catch (err) {
+          this.logger.error(
+            `corrective retry failed, keeping original reply: conversation=${conversation.id}`,
+            err as Error,
+          );
+        }
+      }
     }
 
     // docs/PRD-full-agent-engineering-review.md بخش ۵ — برای AI_TRACE ادمین؛ همه‌ی ابزارهایی
@@ -2963,6 +3060,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       progressHappened,
       isFallbackAttempt,
       ...(suspiciousPriceClaims.length ? { suspiciousPriceClaims } : {}),
+      ...(correctiveRetryReason ? { correctiveRetryReason } : {}),
     });
 
     return {
@@ -2971,8 +3069,8 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         uiBlocks: [uiBlock],
         state: conversation.currentState,
       },
-      inputTokens: result.usage.inputTokens ?? 0,
-      outputTokens: result.usage.outputTokens ?? 0,
+      inputTokens: usedInputTokens,
+      outputTokens: usedOutputTokens,
     };
   }
 
