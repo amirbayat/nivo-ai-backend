@@ -1798,8 +1798,17 @@ export class StoreService {
     });
     const lines = [fa.store.csvOrdersHeader.map(csvEscape).join(',')];
     for (const order of orders) {
-      const items = order.items as { name: string; qty: number }[];
-      const productNames = items.map((i) => `${i.name} × ${i.qty}`).join(' + ');
+      const items = order.items as {
+        name: string;
+        qty: number;
+        variantLabel?: string;
+      }[];
+      const productNames = items
+        .map(
+          (i) =>
+            `${i.name}${i.variantLabel ? ` (${i.variantLabel})` : ''} × ${i.qty}`,
+        )
+        .join(' + ');
       lines.push(
         [
           order.createdAt.toLocaleDateString('fa-IR'),
@@ -1810,8 +1819,10 @@ export class StoreService {
             order.paymentMethod,
           order.shippingProvince ?? '',
           order.shippingAddress ?? '',
+          order.postalCode ?? '',
           order.recipientName ?? '',
           order.recipientPhone ?? '',
+          order.shippingCostToman?.toLocaleString('fa-IR') ?? '',
         ]
           .map(csvEscape)
           .join(','),
@@ -1823,34 +1834,58 @@ export class StoreService {
   async exportProductsCsv(sellerId: string, storeId: string): Promise<string> {
     await this.getOwned(sellerId, storeId);
     const [products, approvedOrders] = await Promise.all([
-      this.prisma.product.findMany({ where: { storeId } }),
+      this.prisma.product.findMany({
+        where: { storeId },
+        include: { optionTypes: { select: { id: true } }, variants: true },
+      }),
       this.prisma.order.findMany({
         where: { storeId, status: 'APPROVED' },
         select: { items: true },
       }),
     ]);
-    const soldQtyByProduct = new Map<string, number>();
+    // فروش‌رفته هم به تفکیک ترکیب (کلید productId یا productId:variantId) هم جمع کل محصول
+    const soldQty = new Map<string, number>();
+    const bump = (key: string, qty: number) =>
+      soldQty.set(key, (soldQty.get(key) ?? 0) + qty);
     for (const order of approvedOrders) {
-      const items = order.items as { productId: string; qty: number }[];
+      const items = order.items as {
+        productId: string;
+        variantId?: string;
+        qty: number;
+      }[];
       for (const item of items) {
-        soldQtyByProduct.set(
-          item.productId,
-          (soldQtyByProduct.get(item.productId) ?? 0) + item.qty,
-        );
+        bump(item.productId, item.qty);
+        if (item.variantId)
+          bump(`${item.productId}:${item.variantId}`, item.qty);
       }
     }
+    const variantLabel = (optionValues: unknown): string =>
+      Object.entries(optionValues as Record<string, string>)
+        .map(([k, v]) => `${k}: ${v}`)
+        .join('، ');
     const lines = [fa.store.csvProductsHeader.map(csvEscape).join(',')];
     for (const product of products) {
-      lines.push(
-        [
-          product.name,
-          product.basePrice.toLocaleString('fa-IR'),
-          product.stock,
-          soldQtyByProduct.get(product.id) ?? 0,
-        ]
-          .map(csvEscape)
-          .join(','),
-      );
+      // محصول واریانت‌دار: یک ردیف به‌ازای هر ترکیب (موجودی/قیمت/فروش خود ترکیب)؛
+      // Product.stock برایش معنی ندارد
+      const rows =
+        product.optionTypes.length > 0 && product.variants.length > 0
+          ? product.variants.map((v) => [
+              product.name,
+              variantLabel(v.optionValues),
+              (v.priceOverride ?? product.basePrice).toLocaleString('fa-IR'),
+              v.stock,
+              soldQty.get(`${product.id}:${v.id}`) ?? 0,
+            ])
+          : [
+              [
+                product.name,
+                '',
+                product.basePrice.toLocaleString('fa-IR'),
+                product.stock,
+                soldQty.get(product.id) ?? 0,
+              ],
+            ];
+      for (const row of rows) lines.push(row.map(csvEscape).join(','));
     }
     return lines.join('\n');
   }

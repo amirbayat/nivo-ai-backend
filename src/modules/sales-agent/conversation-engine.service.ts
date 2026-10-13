@@ -183,17 +183,13 @@ type ProductVariantRow = {
 // محصول با گزینه فعال است یعنی حداقل یک ProductOptionType دارد — خودِ وجود واریانت‌ها هم
 // همین را نشان می‌دهد، ولی optionTypes منبع واقعی تصمیم است (ممکن است فروشنده گزینه ساخته
 // ولی هنوز هیچ ردیف موجودی‌دار نساخته باشد)
-function hasVariantOptions(
-  product: Pick<ProductLike, 'optionTypes'>,
-): boolean {
+function hasVariantOptions(product: Pick<ProductLike, 'optionTypes'>): boolean {
   return (product.optionTypes?.length ?? 0) > 0;
 }
 
 // مجموع موجودی همه‌ی ترکیب‌ها — برای PRODUCT_CARD/COMPARE_CARD وقتی محصول واریانت دارد،
 // چون Product.stock خودش برای محصول واریانت‌دار دیگر معنی ندارد (تصمیم §۴)
-function aggregateVariantStock(
-  product: Pick<ProductLike, 'variants'>,
-): number {
+function aggregateVariantStock(product: Pick<ProductLike, 'variants'>): number {
   return (product.variants ?? []).reduce((sum, v) => sum + v.stock, 0);
 }
 

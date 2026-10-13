@@ -237,8 +237,10 @@ export const fa = {
       'روش پرداخت',
       'استان',
       'آدرس',
+      'کد پستی',
       'گیرنده',
       'تلفن گیرنده',
+      'هزینه ارسال (تومان)',
     ],
     csvOrderStatusLabels: {
       PENDING_PAYMENT: 'در انتظار پرداخت',
@@ -253,6 +255,7 @@ export const fa = {
     } as Record<string, string>,
     csvProductsHeader: [
       'نام محصول',
+      'گزینه (variant)',
       'قیمت (تومان)',
       'موجودی',
       'تعداد فروش‌رفته',
