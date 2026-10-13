@@ -5481,6 +5481,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           items: o.items as CartItem[],
           totalAmount: o.totalAmount,
           status: o.status,
+          orderCode: displayOrderCode(o),
         })),
       };
       const reply = orders.length
@@ -7037,12 +7038,16 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
             type: 'SNAPPPAY_PAYMENT_INSTRUCTIONS',
             link: created.snapppayLink!,
             amount: created.order.totalAmount,
+            orderCode: displayOrderCode(created.order),
+            dueAt: created.order.paymentDueAt?.toISOString(),
           }
         : {
             type: 'PAYMENT_INSTRUCTIONS',
             cardNumber: created.cardNumber!,
             ownerName: created.ownerName!,
             amount: created.order.totalAmount,
+            orderCode: displayOrderCode(created.order),
+            dueAt: created.order.paymentDueAt?.toISOString(),
           };
     // docs/PRD-buyer-payment-method-card-or-snapppay-link.md بخش ۳ — لینک اسنپ‌پی ثابت و
     // بدون callback است؛ چون نیوو هیچ راه خودکاری برای تطبیق مقصد پرداخت ندارد، هم اسکرین‌شات
@@ -7487,6 +7492,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       type: 'ORDER_STATUS',
       orderId: order.id,
       status: 'RECEIPT_SUBMITTED',
+      orderCode: displayOrderCode(order),
     };
     const reply = await this.caption(
       fa.salesAgent.receiptReceivedWithCode(displayOrderCode(order)),

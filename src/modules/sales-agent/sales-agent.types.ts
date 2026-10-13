@@ -157,15 +157,25 @@ export type UiBlock =
       cardNumber: string;
       ownerName: string;
       amount: number;
+      // 3.8 — کد سفارش (با خط تیره‌ی نمایشی) و مهلت پرداخت (ISO)؛ اختیاری چون مسیرهای
+      // قدیمی‌تر تولید بلاک (salvage) سفارش را در دست ندارند
+      orderCode?: string;
+      dueAt?: string;
     }
   // docs/PRD-buyer-payment-method-card-or-snapppay-link.md — بلاک جدا از PAYMENT_INSTRUCTIONS
   // بالا (نه یک mode روی همان)، چون رندر کاملاً فرق دارد (لینک قابل‌کلیک، نه شماره‌کارت) و
   // مصرف‌کننده‌های فعلی PAYMENT_INSTRUCTIONS نباید نگران فیلدهای جدید باشند
-  | { type: 'SNAPPPAY_PAYMENT_INSTRUCTIONS'; link: string; amount: number }
+  | {
+      type: 'SNAPPPAY_PAYMENT_INSTRUCTIONS';
+      link: string;
+      amount: number;
+      orderCode?: string;
+      dueAt?: string;
+    }
   // همان سند — فقط وقتی فروشگاه هم کارت‌به‌کارت هم لینک اسنپ‌پی فعال دارد نشان داده می‌شود؛
   // options همیشه هر دو مقدار را دارد (این بلاک اصلاً ساخته نمی‌شود مگر هر دو فعال باشند)
   | { type: 'PAYMENT_METHOD_PROMPT'; options: OrderPaymentMethod[] }
-  | { type: 'ORDER_STATUS'; orderId: string; status: string }
+  | { type: 'ORDER_STATUS'; orderId: string; status: string; orderCode?: string }
   // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۱ + docs/PRD-buyer-saved-addresses.md —
   // یک نوع بلاک با سه حالت (نه سه نوع جدا) تا سطح UiBlock شلوغ نشود؛ هر حالت فقط فیلدهای
   // مرتبط با خودش را پر می‌کند
@@ -189,6 +199,7 @@ export type UiBlock =
         items: CartItem[];
         totalAmount: number;
         status: string;
+        orderCode?: string;
       }[];
     }
   // همان بخش — مقایسه‌ی ۲-۳ محصول کنار هم؛ specs از همان فیلد Product.specs (فاز ۴.۳)

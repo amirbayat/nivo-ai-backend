@@ -1552,7 +1552,7 @@ export class TelegramService {
         return;
       }
       case 'PAYMENT_INSTRUCTIONS': {
-        const text = `شماره کارت: ${block.cardNumber}\nبه نام: ${block.ownerName}\nمبلغ: ${block.amount.toLocaleString('fa-IR')} تومان\n\nلطفاً عکس رسید رو همینجا بفرست`;
+        const text = `${block.orderCode ? `کد سفارش: ${block.orderCode}\n` : ''}شماره کارت: ${block.cardNumber}\nبه نام: ${block.ownerName}\nمبلغ: ${block.amount.toLocaleString('fa-IR')} تومان\n\nلطفاً عکس رسید رو همینجا بفرست`;
         await this.sendText(chatId, text);
         return;
       }
@@ -1560,7 +1560,7 @@ export class TelegramService {
       // رهگیری هم اسکرین‌شات به‌صورت پیام/عکس آزاد همین‌جا در تلگرام فرستاده می‌شوند (همان
       // handleMessage/handleReceiptUpload عمومی، بدون مسیر جدا برای تلگرام)
       case 'SNAPPPAY_PAYMENT_INSTRUCTIONS': {
-        const text = `پرداخت با اسنپ‌پی: ${block.link}\nمبلغ: ${block.amount.toLocaleString('fa-IR')} تومان\n\nبعد از پرداخت، هم کد رهگیری و هم عکس صفحه‌ی موفقیت رو همینجا بفرست`;
+        const text = `${block.orderCode ? `کد سفارش: ${block.orderCode}\n` : ''}پرداخت با اسنپ‌پی: ${block.link}\nمبلغ: ${block.amount.toLocaleString('fa-IR')} تومان\n\nبعد از پرداخت، هم کد رهگیری و هم عکس صفحه‌ی موفقیت رو همینجا بفرست`;
         await this.sendText(chatId, text);
         return;
       }
