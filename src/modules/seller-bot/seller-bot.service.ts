@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { safeEqual } from '../../common/utils/safe-equal.util';
 import type { Store } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthService } from '../auth/auth.service';
@@ -71,7 +72,7 @@ export class SellerBotService {
   }
 
   verifySecret(secret: string | undefined): boolean {
-    return !!this.webhookSecret && secret === this.webhookSecret;
+    return !!this.webhookSecret && safeEqual(secret, this.webhookSecret);
   }
 
   async handleUpdate(update: TelegramUpdate): Promise<void> {

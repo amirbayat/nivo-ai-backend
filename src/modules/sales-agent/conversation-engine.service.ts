@@ -4398,6 +4398,11 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     conversation: ConversationWithStore,
     text: string,
   ): Promise<EngineResult> {
+    // 2.6 — گارد سوءاستفاده قبل از هر نوشتن: پیام کاربرِ قفل‌شده نباید حتی یک ConversationEvent
+    // بسازد (وگرنه spam، جدول eventها را بی‌سقف پر می‌کند)
+    const abuseResult = await this.checkAbuseGuard(conversation);
+    if (abuseResult) return abuseResult;
+
     await this.prisma.conversationEvent.create({
       data: {
         conversationId: conversation.id,
@@ -4408,9 +4413,6 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
 
     const demoCapResult = await this.checkDemoMessageCap(conversation);
     if (demoCapResult) return demoCapResult;
-
-    const abuseResult = await this.checkAbuseGuard(conversation);
-    if (abuseResult) return abuseResult;
 
     // docs/PRD-customer-comments-and-discounts.md بخش الف/۳ — بعد از تایید سفارش (COMPLETED)
     // یک پیام پیگیری باز می‌شود؛ اولین پیام آزاد بعدی مستقیم متن نظر می‌شود، بدون فراخوان AI

@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
+import { safeEqual } from '../../common/utils/safe-equal.util';
 import { WEBHOOK_DEDUPE_TTL_SECONDS } from '../../common/constants/sales-ops.constants';
 import { RedisService } from '../../redis/redis.service';
 import { AutomationTriggerType } from '@prisma/client';
@@ -32,7 +33,7 @@ export class InstagramService {
     challenge?: string,
   ): string | null {
     const expected = this.config.get<string>('INSTAGRAM_WEBHOOK_VERIFY_TOKEN');
-    if (mode === 'subscribe' && token && expected && token === expected) {
+    if (mode === 'subscribe' && token && expected && safeEqual(token, expected)) {
       return challenge ?? '';
     }
     return null;

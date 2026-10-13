@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { safeEqual } from '../../common/utils/safe-equal.util';
 import type { Store, Product } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
@@ -153,7 +154,7 @@ export class TelegramService {
   }
 
   verifySecret(secret: string | undefined): boolean {
-    return !!this.webhookSecret && secret === this.webhookSecret;
+    return !!this.webhookSecret && safeEqual(secret, this.webhookSecret);
   }
 
   // docs/PRD-sales-agent-voice.md بخش ۱.۵ — صدا زده می‌شود از sales-agent-voice.processor.ts
