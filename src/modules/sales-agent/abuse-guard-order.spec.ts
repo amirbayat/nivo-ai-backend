@@ -8,6 +8,10 @@ describe('2.6 — گارد سوءاستفاده قبل از هر write', () => {
     const create = jest.fn();
     Object.assign(svc, {
       prisma: { conversationEvent: { create } },
+      creditService: {
+        reserveTurn: jest.fn().mockResolvedValue(true),
+        releaseTurn: jest.fn().mockResolvedValue(undefined),
+      },
       abuseGuard: {
         checkAndRecord: jest
           .fn()

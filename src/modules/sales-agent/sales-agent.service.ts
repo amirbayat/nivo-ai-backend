@@ -731,6 +731,18 @@ export class SalesAgentService {
       throw new BadRequestException(fa.salesAgent.invalidSession);
     }
 
+    // 1.2(۱) — قبل از ASR (هزینه‌ی واقعی) کف overdraft چک می‌شود؛ زیر کف همان handoff
+    // «فروشنده شخصاً جواب می‌دهد» بدون هیچ هزینه‌ای
+    if (
+      conversation.billingMode === 'BLOCKED' ||
+      !(await this.creditService.canSpend(conversation.storeId))
+    ) {
+      return this.attachVoicePending(
+        conversationId,
+        await this.engine.announceBillingBlocked(conversation),
+      );
+    }
+
     // فیدبک کاربر: قبلاً هر خطای extractAudio/ASR (مثلاً یک 400 غیرمنتظره از یکی از مدل‌های
     // VOICE_MESSAGE_ASR_CHAIN — طبق asr.service.ts فقط خطای ۴۲۹/۵xx باعث fallback می‌شود، نه
     // هر خطا) بدون catch تا کنترلر بالا می‌رفت و یک 500 خام («خطای داخلی سرور») به مشتری

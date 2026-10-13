@@ -13,6 +13,7 @@ import type {
   ContentChangeSource,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { StoreCreditDeductionService } from '../store-credit-engine/store-credit-deduction.service';
 import { AiProviderService } from '../../common/services/ai-provider.service';
 import {
   AsrService,
@@ -38,7 +39,6 @@ import {
   AnalyzeOwnerNotesDto,
   NotesAnalysisEntityType,
 } from './dto/analyze-owner-notes.dto';
-import { getSalesAgentGlobalConfig } from '../sales-agent/sales-agent-global-config.util';
 
 // docs/PRD-seller-knowledge-base.md بخش ۲.۳ — دقیقاً همان shape که chat.service.ts's
 // OPENROUTER_WEB_SEARCH_TOOLS استفاده می‌کند (کپی محلی، نه import — آن فایل چیزی export نمی‌کند
@@ -266,6 +266,7 @@ export class StoreKbService {
     private readonly asr: AsrService,
     private readonly mediaTranscode: MediaTranscodeService,
     private readonly changeLog: ContentChangeLogService,
+    private readonly deduction: StoreCreditDeductionService,
   ) {
     // supportsStructuredOutputs=true — بدون این، @ai-sdk/openai-compatible فقط
     // response_format: {type:'json_object'} می‌فرستد (JSON معتبر ولی بدون تضمین سمت سرور برای
@@ -321,33 +322,6 @@ JSON را برگردان، بدون توضیح یا markdown fence.`,
       store.trialEndsAt > new Date() &&
       store.trialCreditRemainingToman > 0;
     return store.creditBalanceToman > 0 || trialActive;
-  }
-
-  // همون الگوی credit.service.ts's logUsage — اول از بودجه‌ی آزمایشی کم می‌شود (اگر فعال/مثبت)،
-  // وگرنه از اعتبار واقعی فروشگاه. فیدبک کاربر ۱۴۰۵/۰۷/۱۷ — این مصرفِ خودِ فروشنده (نه
-  // خریدار) است، پس با sellerCostMarkup ضرب می‌شود؛ costToman خام (COGS) را caller جدا در
-  // creditUsageEvent.create لاگ می‌کند، اینجا فقط مبلغ واقعاً کسرشده را برمی‌گردانیم
-  private async decrementStoreCredit(
-    storeId: string,
-    costToman: number,
-  ): Promise<number> {
-    const config = await getSalesAgentGlobalConfig(this.prisma);
-    const chargedToman = Math.ceil(costToman * config.sellerCostMarkup);
-    const store = await this.prisma.store.findUnique({
-      where: { id: storeId },
-      select: { trialEndsAt: true, trialCreditRemainingToman: true },
-    });
-    const trialActive =
-      !!store?.trialEndsAt &&
-      store.trialEndsAt > new Date() &&
-      store.trialCreditRemainingToman > 0;
-    await this.prisma.store.update({
-      where: { id: storeId },
-      data: trialActive
-        ? { trialCreditRemainingToman: { decrement: chargedToman } }
-        : { creditBalanceToman: { decrement: chargedToman } },
-    });
-    return chargedToman;
   }
 
   // ابزار داخلی فروشنده روی فرم محصول (میکروفون کنار توضیحات) — فیدبک کاربر ۱۴۰۵/۰۷/۰۱.
@@ -852,19 +826,11 @@ sourceNote را خالی بگذار. پاسخ را فقط به‌صورت یک �
           usage.outputTokens ?? 0,
           model,
         );
-        const chargedToman = await this.decrementStoreCredit(
+        await this.deduction.deductSafely({
           storeId,
-          costToman,
-        );
-        await this.prisma.creditUsageEvent.create({
-          data: {
-            storeId,
-            model,
-            kind: 'PRODUCT_ENRICHMENT',
-            costToman,
-            chargedToman,
-            isFreeQuota: false,
-          },
+          rawCostToman: costToman,
+          kind: 'SELLER',
+          event: { model: model, kind: 'PRODUCT_ENRICHMENT' },
         });
 
         const savedCanonical = staleCanonical
@@ -979,16 +945,11 @@ sourceNote را خالی بگذار. پاسخ را فقط به‌صورت یک �
         usage.outputTokens ?? 0,
         model,
       );
-      const chargedToman = await this.decrementStoreCredit(storeId, costToman);
-      await this.prisma.creditUsageEvent.create({
-        data: {
-          storeId,
-          model,
-          kind: 'PRODUCT_ENRICHMENT',
-          costToman,
-          chargedToman,
-          isFreeQuota: false,
-        },
+      await this.deduction.deductSafely({
+        storeId,
+        rawCostToman: costToman,
+        kind: 'SELLER',
+        event: { model: model, kind: 'PRODUCT_ENRICHMENT' },
       });
 
       return {
@@ -1063,16 +1024,11 @@ sourceNote را خالی بگذار. پاسخ را فقط به‌صورت یک �
         usage.outputTokens ?? 0,
         model,
       );
-      const chargedToman = await this.decrementStoreCredit(storeId, costToman);
-      await this.prisma.creditUsageEvent.create({
-        data: {
-          storeId,
-          model,
-          kind: 'PRODUCT_ENRICHMENT',
-          costToman,
-          chargedToman,
-          isFreeQuota: false,
-        },
+      await this.deduction.deductSafely({
+        storeId,
+        rawCostToman: costToman,
+        kind: 'SELLER',
+        event: { model: model, kind: 'PRODUCT_ENRICHMENT' },
       });
 
       return {
@@ -1569,16 +1525,11 @@ ${updatedNotes}`,
       usage.outputTokens ?? 0,
       model,
     );
-    const chargedToman = await this.decrementStoreCredit(storeId, costToman);
-    await this.prisma.creditUsageEvent.create({
-      data: {
-        storeId,
-        model,
-        kind: 'NOTES_ANALYSIS',
-        costToman,
-        chargedToman,
-        isFreeQuota: false,
-      },
+    await this.deduction.deductSafely({
+      storeId,
+      rawCostToman: costToman,
+      kind: 'SELLER',
+      event: { model: model, kind: 'NOTES_ANALYSIS' },
     });
   }
 

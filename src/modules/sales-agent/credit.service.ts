@@ -3,12 +3,16 @@ import type { BillingMode, CreditUsageKind } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PricingService } from '../usage/pricing.service';
 import { getSalesAgentGlobalConfig } from './sales-agent-global-config.util';
+import { CreditAlertService } from './credit-alert.service';
+import { StoreCreditDeductionService } from '../store-credit-engine/store-credit-deduction.service';
 
 @Injectable()
 export class CreditService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly pricing: PricingService,
+    private readonly deduction: StoreCreditDeductionService,
+    private readonly alerts: CreditAlertService,
   ) {}
 
   // تک سورس عدد سهمیه‌ی رایگان روزانه — فیدبک کاربر ۱۴۰۵/۰۷/۱۲: سقف رایگان روزانه‌ی وویس هم
@@ -157,6 +161,9 @@ export class CreditService {
     });
   }
 
+  // 1.2 — کسر (و ثبت CreditUsageEvent) کاملاً در StoreCreditDeductionService: یک تراکنش با قفل
+  // ردیف فروشگاه، ضریب به‌ازای منبع بخش، آزمایشی تا حد موجودی‌اش. costToman خام (COGS) بدون تغییر
+  // لاگ می‌شود تا حسابداری ادمین (StoresPage) همچنان COGS واقعی را ببیند.
   private async logUsage(params: {
     storeId: string;
     customerId: string | null;
@@ -169,48 +176,37 @@ export class CreditService {
     tokensOutput?: number;
     costUsdMicros?: number;
   }): Promise<void> {
-    // فیدبک کاربر ۱۴۰۵/۰۷/۱۷ — مصرف خریدار (TEXT_REPLY/VOICE_TTS، تنها دو kind ای که از این
-    // متد عبور می‌کنند) با buyerCostMarkup ضرب می‌شود قبل از کسر از اعتبار؛ costToman خام
-    // (COGS) بدون تغییر لاگ می‌شود تا حسابداری ادمین (StoresPage) همچنان COGS واقعی را ببیند.
-    // گرنت اولیه‌ی ۳۰۰هزارتومانی (grantTrialIfFirstChat) دست‌نخورده می‌ماند — این ضریب فقط
-    // روی نرخ مصرف از آن بودجه اثر می‌گذارد.
-    const config = await getSalesAgentGlobalConfig(this.prisma);
-    const chargedToman = Math.ceil(params.costToman * config.buyerCostMarkup);
-
-    await this.prisma.creditUsageEvent.create({
-      data: {
-        storeId: params.storeId,
-        customerId: params.customerId ?? undefined,
-        conversationId: params.conversationId,
+    const result = await this.deduction.deductSafely({
+      storeId: params.storeId,
+      rawCostToman: params.costToman,
+      kind: 'BUYER',
+      isFreeQuota: params.isFreeQuota,
+      event: {
         model: params.model,
         kind: params.kind,
-        costToman: params.costToman,
-        chargedToman,
-        isFreeQuota: params.isFreeQuota,
-        tokensInput: params.tokensInput ?? 0,
-        tokensOutput: params.tokensOutput ?? 0,
-        costUsdMicros: params.costUsdMicros ?? 0,
+        customerId: params.customerId,
+        conversationId: params.conversationId,
+        tokensInput: params.tokensInput,
+        tokensOutput: params.tokensOutput,
+        costUsdMicros: params.costUsdMicros,
       },
     });
-    // decrement ساده، نه شرطی — طبق تصمیم معماری، چون هزینه‌ی واقعی فقط بعد از فراخوان
-    // معلوم می‌شود؛ ممکن است منفی شود، که همین باعث BLOCKED شدن مکالمه‌ی بعدی است
-    if (!params.isFreeQuota) {
-      // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۶.۴ — اول از بودجه‌ی
-      // آزمایشی کم شود (اگر هنوز فعال و مثبت است)، وگرنه از اعتبار واقعی فروشگاه
-      const store = await this.prisma.store.findUnique({
-        where: { id: params.storeId },
-        select: { trialEndsAt: true, trialCreditRemainingToman: true },
-      });
-      const trialActive =
-        !!store?.trialEndsAt &&
-        store.trialEndsAt > new Date() &&
-        store.trialCreditRemainingToman > 0;
-      await this.prisma.store.update({
-        where: { id: params.storeId },
-        data: trialActive
-          ? { trialCreditRemainingToman: { decrement: chargedToman } }
-          : { creditBalanceToman: { decrement: chargedToman } },
-      });
+    // 1.5 — هشدار «رو به اتمام» (ارزان؛ بدون await روی مسیر پاسخ به خریدار)
+    if (result?.spendableAfter != null) {
+      void this.alerts.checkLow(params.storeId, result.spendableAfter);
     }
+  }
+
+  // 1.2(۱) — رزرو/آزادسازی یک turn (کف overdraft با رزرو هم‌زمانی)
+  reserveTurn(storeId: string): Promise<boolean> {
+    return this.deduction.reserveTurn(storeId);
+  }
+  releaseTurn(storeId: string): Promise<void> {
+    return this.deduction.releaseTurn(storeId);
+  }
+
+  // 1.2(۱) — قبل از هر turn AI/TTS/ASR: زیر کف overdraft ← false
+  async canSpend(storeId: string): Promise<boolean> {
+    return this.deduction.canSpend(storeId);
   }
 }

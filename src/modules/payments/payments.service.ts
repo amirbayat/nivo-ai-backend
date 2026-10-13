@@ -15,6 +15,10 @@ import { PaymentGateway } from './gateways/payment-gateway.interface';
 import { BazaarIabService } from './bazaar/bazaar-iab.service';
 import { AdminNotificationsService } from '../admin-notifications/admin-notifications.service';
 import { fa } from '../../i18n/fa';
+import {
+  StoreCreditDeductionService,
+  providerToCreditSource,
+} from '../store-credit-engine/store-credit-deduction.service';
 import { InitiatePaymentDto } from './dto/initiate-payment.dto';
 import { InitiateWalletTopupDto } from './dto/initiate-wallet-topup.dto';
 import type { CreditPackage, Payment, Plan, Store, User } from '@prisma/client';
@@ -47,6 +51,7 @@ export class PaymentsService {
     private readonly config: ConfigService,
     private readonly adminNotifications: AdminNotificationsService,
     private readonly bazaarIab: BazaarIabService,
+    private readonly creditDeduction: StoreCreditDeductionService,
   ) {}
 
   async initiate(userId: string, dto: InitiatePaymentDto) {
@@ -452,6 +457,43 @@ export class PaymentsService {
     return this.config.get<string>('APP_URL')!;
   }
 
+  // 1.4 — callback تکراری/هم‌زمان برای پرداخت COMPLETED: همیشه صفحه‌ی موفقیت (نه 500)
+  private async alreadyCompletedRedirect(payment: Payment) {
+    const invoice = await this.prisma.invoice.findUnique({
+      where: { paymentId: payment.id },
+    });
+    this.logger.log(
+      `verify: already COMPLETED — idempotent redirect (paymentId=${payment.id}, invoiceId=${invoice?.id ?? 'none'})`,
+    );
+    return {
+      redirect: this.withSourceParam(
+        `${this.resolveReturnBaseUrl(payment.metadata)}/payment?status=success&refId=${payment.refId}&invoiceId=${invoice?.id ?? ''}`,
+        payment.metadata,
+      ),
+    };
+  }
+
+  private async completedByRaceRedirect(paymentId: string) {
+    const current = await this.prisma.payment.findUniqueOrThrow({
+      where: { id: paymentId },
+    });
+    return this.alreadyCompletedRedirect(current);
+  }
+
+  // 1.4 — CAS تکمیل پرداخت داخل تراکنش: فقط یک callback برنده می‌شود؛ بازنده (count=0) هیچ
+  // اثر جانبی‌ای (شارژ/اشتراک/فاکتور) نمی‌سازد
+  private async claimPaymentCompletion(
+    tx: Prisma.TransactionClient,
+    paymentId: string,
+    refId: string,
+  ): Promise<boolean> {
+    const claimed = await tx.payment.updateMany({
+      where: { id: paymentId, status: 'PENDING' },
+      data: { status: 'COMPLETED', refId },
+    });
+    return claimed.count === 1;
+  }
+
   private async verify(
     gateway: PaymentGateway,
     providerRef: string,
@@ -462,8 +504,10 @@ export class PaymentsService {
         where: { providerRef },
       });
       if (payment) {
-        await this.prisma.payment.update({
-          where: { providerRef },
+        // 1.4 — فقط PENDING می‌تواند FAILED شود؛ callback «ناموفق» دیرهنگام/تکراری نباید
+        // پرداخت COMPLETED را خراب کند
+        await this.prisma.payment.updateMany({
+          where: { providerRef, status: 'PENDING' },
           data: { status: 'FAILED' },
         });
       }
@@ -494,18 +538,7 @@ export class PaymentsService {
     );
 
     if (payment.status === 'COMPLETED') {
-      const invoice = await this.prisma.invoice.findUnique({
-        where: { paymentId: payment.id },
-      });
-      this.logger.log(
-        `verify: already COMPLETED — idempotent redirect (invoiceId=${invoice?.id ?? 'none'})`,
-      );
-      return {
-        redirect: this.withSourceParam(
-          `${this.resolveReturnBaseUrl(payment.metadata)}/payment?status=success&refId=${payment.refId}&invoiceId=${invoice?.id ?? ''}`,
-          payment.metadata,
-        ),
-      };
+      return this.alreadyCompletedRedirect(payment);
     }
     if (payment.status !== 'PENDING')
       throw new BadRequestException(fa.payment.invalidStatus);
@@ -520,10 +553,20 @@ export class PaymentsService {
     );
 
     if (!success) {
-      await this.prisma.payment.update({
-        where: { providerRef },
+      // 1.4 — callback هم‌زمان دیگری ممکن است همین پرداخت را COMPLETED کرده باشد (درگاه
+      // verify دوم را «قبلاً تایید شده» رد می‌کند)؛ آن را FAILED نکن و صفحه‌ی موفقیت نشان بده
+      const flipped = await this.prisma.payment.updateMany({
+        where: { providerRef, status: 'PENDING' },
         data: { status: 'FAILED' },
       });
+      if (flipped.count === 0) {
+        const current = await this.prisma.payment.findUnique({
+          where: { providerRef },
+        });
+        if (current?.status === 'COMPLETED') {
+          return this.alreadyCompletedRedirect(current);
+        }
+      }
       this.logger.warn(
         `verify: gateway verify failed for providerRef=${providerRef} — marked FAILED`,
       );
@@ -577,10 +620,9 @@ export class PaymentsService {
     const isFirstCompletedPayment = priorCompletedCount === 0;
 
     const invoice = await this.prisma.$transaction(async (tx) => {
-      await tx.payment.update({
-        where: { providerRef },
-        data: { status: 'COMPLETED', refId: refId! },
-      });
+      if (!(await this.claimPaymentCompletion(tx, payment.id, refId!))) {
+        return null;
+      }
 
       await tx.subscription.upsert({
         where: { userId: payment.userId },
@@ -623,6 +665,8 @@ export class PaymentsService {
         },
       });
     });
+
+    if (!invoice) return this.completedByRaceRedirect(payment.id);
 
     await this.tokenService.invalidatePlanCache(payment.userId);
 
@@ -717,10 +761,9 @@ export class PaymentsService {
     const creditToman = this.resolveWalletCreditToman(payment);
 
     const invoice = await this.prisma.$transaction(async (tx) => {
-      await tx.payment.update({
-        where: { id: payment.id },
-        data: { status: 'COMPLETED', refId },
-      });
+      if (!(await this.claimPaymentCompletion(tx, payment.id, refId))) {
+        return null;
+      }
 
       const wallet = await tx.wallet.upsert({
         where: { userId: payment.userId },
@@ -777,6 +820,8 @@ export class PaymentsService {
       });
     });
 
+    if (!invoice) return this.completedByRaceRedirect(payment.id);
+
     await this.tokenService.invalidatePlanCache(payment.userId);
     this.logger.log(
       `completeWalletTopup: wallet credited ${payment.amount} for user=${payment.userId}, invoice=${invoice.id}`,
@@ -829,15 +874,17 @@ export class PaymentsService {
     // همون فرمول resolveWalletCreditToman — credits × tomanPerCreditSnapshot لحظه‌ی خرید
     const creditToman = this.resolveWalletCreditToman(payment);
 
+    // فاز ۱ (۲۳.۲) — بخش اعتبار بر اساس درگاه پرداخت؛ در همان تراکنش و با همان ایدمپوتنسی (CAS)
+    const source = providerToCreditSource(payment.provider);
     const invoice = await this.prisma.$transaction(async (tx) => {
-      await tx.payment.update({
-        where: { id: payment.id },
-        data: { status: 'COMPLETED', refId },
-      });
+      if (!(await this.claimPaymentCompletion(tx, payment.id, refId))) {
+        return null;
+      }
 
-      await tx.store.update({
-        where: { id: payment.storeId! },
-        data: { creditBalanceToman: { increment: creditToman } },
+      await this.creditDeduction.applyTopup(tx, {
+        storeId: payment.storeId!,
+        source,
+        amountToman: creditToman,
       });
 
       await tx.creditUsageEvent.create({
@@ -846,7 +893,10 @@ export class PaymentsService {
           model: 'n/a',
           kind: 'TOPUP',
           costToman: creditToman,
+          // 1.4 — قبلاً صفر ثبت می‌شد؛ شارژ «مبلغ دریافتی» است
+          chargedToman: creditToman,
           isFreeQuota: false,
+          source,
         },
       });
 
@@ -864,9 +914,22 @@ export class PaymentsService {
       });
     });
 
+    if (!invoice) return this.completedByRaceRedirect(payment.id);
+
     this.logger.log(
-      `completeStoreCreditTopup: store=${payment.storeId} credited ${creditToman}, invoice=${invoice.id}`,
+      `completeStoreCreditTopup: store=${payment.storeId} credited ${creditToman} (source=${source}), invoice=${invoice.id}`,
     );
+
+    // 1.3 — کش موجودی پاک و مکالمات BLOCKED فروشگاه که حالا موجودی مثبت دارند دوباره فعال می‌شوند
+    await this.creditDeduction.invalidateBalanceCache(payment.storeId);
+    await this.creditDeduction
+      .reevaluateBlockedConversations(payment.storeId)
+      .catch((err) =>
+        this.logger.error(
+          `reevaluateBlockedConversations failed for store=${payment.storeId}`,
+          err,
+        ),
+      );
 
     this.adminNotifications
       .notify(

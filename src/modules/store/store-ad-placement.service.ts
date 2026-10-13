@@ -2,6 +2,7 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StoreService } from './store.service';
 import { fa } from '../../i18n/fa';
+import { StoreCreditDeductionService } from '../store-credit-engine/store-credit-deduction.service';
 
 // docs/PRD-seller-advertising-placements.md بخش ۳/۴ — دو بازه‌ی زمانی ثابت با قیمت ثابت،
 // عمداً بدون مزایده؛ خرید مستقیم از Store.creditBalanceToman، نه یک تراکنش پرداخت جدا
@@ -17,6 +18,7 @@ export class StoreAdPlacementService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storeService: StoreService,
+    private readonly creditDeduction: StoreCreditDeductionService,
   ) {}
 
   async getStatus(sellerId: string, storeId: string) {
@@ -41,11 +43,12 @@ export class StoreAdPlacementService {
     if (!tier) throw new BadRequestException(fa.validation.required);
 
     return this.prisma.$transaction(async (tx) => {
-      const debited = await tx.store.updateMany({
-        where: { id: storeId, creditBalanceToman: { gte: tier.priceToman } },
-        data: { creditBalanceToman: { decrement: tier.priceToman } },
+      // فاز ۱ — کسر از بخش‌های اعتبار (مشخصات ج ۲۳.۳): بدون overdraft، ناوردایی حفظ می‌شود
+      const chargedToman = await this.creditDeduction.debitFixedPrice(tx, {
+        storeId,
+        priceToman: tier.priceToman,
       });
-      if (debited.count === 0) {
+      if (chargedToman === null) {
         throw new BadRequestException(fa.store.adPlacementInsufficientBalance);
       }
 
@@ -77,6 +80,7 @@ export class StoreAdPlacementService {
           model: 'n/a',
           kind: 'AD_PLACEMENT',
           costToman: tier.priceToman,
+          chargedToman,
           isFreeQuota: false,
         },
       });
@@ -114,11 +118,12 @@ export class StoreAdPlacementService {
     if (!tier) throw new BadRequestException(fa.validation.required);
 
     return this.prisma.$transaction(async (tx) => {
-      const debited = await tx.store.updateMany({
-        where: { id: storeId, creditBalanceToman: { gte: tier.priceToman } },
-        data: { creditBalanceToman: { decrement: tier.priceToman } },
+      // فاز ۱ — کسر از بخش‌های اعتبار (مشخصات ج ۲۳.۳): بدون overdraft، ناوردایی حفظ می‌شود
+      const chargedToman = await this.creditDeduction.debitFixedPrice(tx, {
+        storeId,
+        priceToman: tier.priceToman,
       });
-      if (debited.count === 0) {
+      if (chargedToman === null) {
         throw new BadRequestException(fa.store.adPlacementInsufficientBalance);
       }
 
@@ -152,6 +157,7 @@ export class StoreAdPlacementService {
           model: 'n/a',
           kind: 'AD_PLACEMENT',
           costToman: tier.priceToman,
+          chargedToman,
           isFreeQuota: false,
         },
       });

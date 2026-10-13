@@ -6,12 +6,18 @@ import { ZarinpalGateway } from './gateways/zarinpal.gateway';
 import { VandarGateway } from './gateways/vandar.gateway';
 import { ZibalGateway } from './gateways/zibal.gateway';
 import { BazaarIabService } from './bazaar/bazaar-iab.service';
+import { StoreCreditEngineModule } from '../store-credit-engine/store-credit-engine.module';
 import { UsageModule } from '../usage/usage.module';
 import { GrowthModule } from '../growth/growth.module';
 import { AdminNotificationsModule } from '../admin-notifications/admin-notifications.module';
 
 @Module({
-  imports: [UsageModule, GrowthModule, AdminNotificationsModule],
+  imports: [
+    UsageModule,
+    GrowthModule,
+    AdminNotificationsModule,
+    StoreCreditEngineModule,
+  ],
   controllers: [PaymentsController],
   providers: [
     PaymentsService,

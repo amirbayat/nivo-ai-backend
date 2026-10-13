@@ -11,6 +11,7 @@ import type { CreditUsageKind } from '@prisma/client';
 import { JwtGuard } from '../../common/guards/jwt.guard';
 import { AdminGuard } from '../../common/guards/admin.guard';
 import { parseDateRange } from '../usage-analytics/usage-analytics.service';
+import { StoreCreditDeductionService } from '../store-credit-engine/store-credit-deduction.service';
 import { AdminStoreCreditService } from './admin-store-credit.service';
 
 // docs/PRD-admin-seller-credit-overview.md — ماژول جدا از AdminModule غول‌پیکر موجود (مثل
@@ -18,7 +19,18 @@ import { AdminStoreCreditService } from './admin-store-credit.service';
 @Controller('admin/stores')
 @UseGuards(JwtGuard, AdminGuard)
 export class AdminStoreCreditController {
-  constructor(private readonly service: AdminStoreCreditService) {}
+  constructor(
+    private readonly service: AdminStoreCreditService,
+    private readonly deduction: StoreCreditDeductionService,
+  ) {}
+
+  // فاز ۱ (مشخصات ج ۲۳.۱) — تطبیق ناوردایی creditBalanceToman = Σ بخش‌ها (فقط‌خواندنی).
+  // خروجی خالی = سالم. هر ردیف یک فروشگاه ناهمخوان است (منبع حقیقت: Σ بخش‌ها).
+  @Get('credit-invariant')
+  async getCreditInvariant() {
+    const violations = await this.deduction.findInvariantViolations(200);
+    return { ok: violations.length === 0, violations };
+  }
 
   @Get('summary')
   getSummary(@Query('from') from?: string, @Query('to') to?: string) {

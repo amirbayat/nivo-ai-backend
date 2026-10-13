@@ -83,6 +83,7 @@ import {
   type ProductSpecItem,
 } from '../store/product-specs.types';
 import { CreditService } from './credit.service';
+import { CreditAlertService } from './credit-alert.service';
 import { AbuseGuardService } from './abuse-guard.service';
 import { SellerBotApiClientService } from '../seller-bot/seller-bot-api-client.service';
 import { CommentsService } from '../comments/comments.service';
@@ -598,6 +599,7 @@ export class ConversationEngineService {
     @InjectQueue('sales-agent-voice')
     private readonly voiceQueue: Queue<SalesAgentVoiceJobData>,
     private readonly lock: ConversationLockService,
+    private readonly creditAlerts: CreditAlertService,
   ) {}
 
   // docs/PRD-category-specific-product-pricing-and-attributes.md بخش ۲.۳ — نقطه‌ی مرکزی حل
@@ -1043,15 +1045,25 @@ export class ConversationEngineService {
     inputTokens: number,
     outputTokens: number,
   ): Promise<void> {
-    await this.creditService.logTextUsage({
-      storeId: conversation.storeId,
-      customerId: conversation.customerId,
-      conversationId: conversation.id,
-      billingMode: conversation.billingMode,
-      model,
-      inputTokens,
-      outputTokens,
-    });
+    // 1.2(۳) — کسر اعتبار هیچ‌وقت نباید از فراخوان مدل throw شود: این تابع داخل try ی فراخوان
+    // مدل صدا زده می‌شود و خطای کسر آنجا به «مدل بعدی fallback» تعبیر می‌شد (هزینه‌ی دوباره
+    // برای یک پاسخ). خطا فقط لاگ می‌شود (Sentry)؛ مصرف از دست‌رفته قابل‌پیگیری است.
+    try {
+      await this.creditService.logTextUsage({
+        storeId: conversation.storeId,
+        customerId: conversation.customerId,
+        conversationId: conversation.id,
+        billingMode: conversation.billingMode,
+        model,
+        inputTokens,
+        outputTokens,
+      });
+    } catch (err) {
+      this.logger.error(
+        `credit deduction failed (store=${conversation.storeId}, conversation=${conversation.id}, model=${model}, in=${inputTokens}, out=${outputTokens})`,
+        err as Error,
+      );
+    }
   }
 
   // فیدبک کاربر ۱۴۰۵/۰۷/۲۱ — وقتی مدل A/B و بعد defaultModel() هم شکست خوردند، به‌جای تسلیم‌شدن
@@ -4424,9 +4436,29 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     text: string,
   ): Promise<EngineResult> {
     if (isLlmSaturated()) return this.saturatedResult(conversation);
-    return runLlmTurn(() => this.handleMessageTurn(conversation, text)).catch(
-      (err: unknown) => this.onTurnError(conversation, err),
+    return this.withTurnReservation(conversation, () =>
+      runLlmTurn(() => this.handleMessageTurn(conversation, text)).catch(
+        (err: unknown) => this.onTurnError(conversation, err),
+      ),
     );
+  }
+
+  // 1.2(۱) — کف overdraft: هر turn قبل از شروع، برآورد هزینه‌اش را از موجودی قابل‌خرج رزرو
+  // می‌کند (کش Redis ۳۰ثانیه‌ای + شمارنده‌ی رزرو)؛ اگر از کف رد شود همان handoff «فروشنده شخصاً
+  // جواب می‌دهد» (BILLING_BLOCKED). مکالمه‌ی از قبل BLOCKED رزرو نمی‌خواهد (خودش handoff می‌شود).
+  private async withTurnReservation(
+    conversation: ConversationWithStore,
+    run: () => Promise<EngineResult>,
+  ): Promise<EngineResult> {
+    if (conversation.billingMode === 'BLOCKED') return run();
+    const reserved = await this.creditService.reserveTurn(conversation.storeId);
+    if (!reserved)
+      return this.transitionToHandoff(conversation, 'BILLING_BLOCKED');
+    try {
+      return await run();
+    } finally {
+      await this.creditService.releaseTurn(conversation.storeId);
+    }
   }
 
   private saturatedResult(conversation: ConversationWithStore): EngineResult {
@@ -5176,8 +5208,10 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     action: SalesAction,
   ): Promise<EngineResult> {
     if (isLlmSaturated()) return this.saturatedResult(conversation);
-    return runLlmTurn(() => this.handleActionTurn(conversation, action)).catch(
-      (err: unknown) => this.onTurnError(conversation, err),
+    return this.withTurnReservation(conversation, () =>
+      runLlmTurn(() => this.handleActionTurn(conversation, action)).catch(
+        (err: unknown) => this.onTurnError(conversation, err),
+      ),
     );
   }
 
@@ -7927,6 +7961,17 @@ answered=false بده (به‌جای حدس‌زدن).`,
       reason,
       freeTextReason,
     );
+    // 1.3 — مکالمه‌ای که به‌خاطر اعتبار handoff شد BLOCKED می‌ماند تا بعد از شارژ/unmute
+    // بازارزیابی شود (reevaluateBlockedConversations)؛ turnهای بعدی رزرو/AI نمی‌خواهند
+    if (
+      reason === 'BILLING_BLOCKED' &&
+      conversation.billingMode !== 'BLOCKED'
+    ) {
+      await this.prisma.salesConversation.update({
+        where: { id: conversation.id },
+        data: { billingMode: 'BLOCKED' },
+      });
+    }
     const reply =
       reason === 'BILLING_BLOCKED'
         ? fa.salesAgent.billingBlockedHandoff
@@ -8033,18 +8078,14 @@ answered=false بده (به‌جای حدس‌زدن).`,
       | 'BILLING_BLOCKED'
       | 'SUPPORT_NEEDED',
   ): Promise<void> {
-    const chatId = conversation.store.sellerBotChatId;
-    if (!chatId) return;
-
-    // فیدبک کاربر ۱۴۰۵/۰۷/۱۷ — قبلاً این نوتیف برای همه‌ی دلایل handoff یکسان بود، یعنی فروشنده
-    // وقتی اعتبارش تموم می‌شد هیچ سیگنال مشخصی نمی‌گرفت و فکر می‌کرد فقط یک سوال سخت بوده
+    // 1.5 — «اعتبار تمام شد» حداکثر روزی یک‌بار به‌ازای فروشگاه (بات + SMS)، نه به‌ازای هر مکالمه
     if (reason === 'BILLING_BLOCKED') {
-      await this.sellerBotApi.sendText(
-        chatId,
-        fa.telegram.billingBlockedNotification,
-      );
+      await this.creditAlerts.notifyExhausted(conversation.storeId);
       return;
     }
+
+    const chatId = conversation.store.sellerBotChatId;
+    if (!chatId) return;
 
     const lastCustomerMessage = await this.prisma.conversationEvent.findFirst({
       where: { conversationId: conversation.id, type: 'CUSTOMER_MESSAGE' },
@@ -8266,6 +8307,9 @@ answered=false بده (به‌جای حدس‌زدن).`,
         conversation.voiceGenerationCount === 0 &&
         !(await this.reserveFreeVoiceConversationSlot(conversation.storeId))
       ) {
+        voiceReason = 'STORE_NO_CREDIT_CAP';
+      } else if (!(await this.creditService.canSpend(conversation.storeId))) {
+        // 1.2(۱) — TTS هزینه‌ی واقعی دارد؛ زیر کف overdraft وویس تولید نمی‌شود (فقط متن)
         voiceReason = 'STORE_NO_CREDIT_CAP';
       } else {
         wantsVoice = await this.reserveVoiceSlot(conversation.id);

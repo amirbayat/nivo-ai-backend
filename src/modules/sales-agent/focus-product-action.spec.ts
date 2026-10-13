@@ -35,6 +35,10 @@ describe('FOCUS_PRODUCT [0.11a]', () => {
       .mockResolvedValueOnce({ id: 'p2', storeId: 'OTHER' });
     Object.assign(eng, {
       prisma: { product: { findUnique } },
+      creditService: {
+        reserveTurn: jest.fn().mockResolvedValue(true),
+        releaseTurn: jest.fn().mockResolvedValue(undefined),
+      },
       checkAbuseGuard: jest.fn().mockResolvedValue(null),
       billingBlocked: jest.fn().mockReturnValue(false),
       getContext: jest.fn().mockReturnValue({ cart: [] }),

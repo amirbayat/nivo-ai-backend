@@ -9,11 +9,13 @@ import { SellerBotApiClientModule } from '../seller-bot/seller-bot-api-client.mo
 import { CommentsModule } from '../comments/comments.module';
 import { SmsModule } from '../../sms/sms.module';
 import { MarketPricesModule } from '../market-prices/market-prices.module';
+import { StoreCreditEngineModule } from '../store-credit-engine/store-credit-engine.module';
 import { SalesAgentController } from './sales-agent.controller';
 import { SalesAgentService } from './sales-agent.service';
 import { ConversationEngineService } from './conversation-engine.service';
 import { ConversationLockService } from './conversation-lock.service';
 import { CreditService } from './credit.service';
+import { CreditAlertService } from './credit-alert.service';
 import { AbuseGuardService } from './abuse-guard.service';
 import { PostPurchaseFollowUpService } from './post-purchase-followup.service';
 import { AbandonedCartReminderService } from './abandoned-cart-reminder.service';
@@ -42,6 +44,8 @@ import { SalesAgentQaController } from './sales-agent-qa.controller';
     // docs/PRD-category-specific-product-pricing-and-attributes.md بخش ۲.۳ — نرخ لحظه‌ای طلا
     // برای resolveProductPrices
     MarketPricesModule,
+    // فاز ۱ — CreditService کسر را به StoreCreditDeductionService می‌سپارد
+    StoreCreditEngineModule,
   ],
   controllers: [SalesAgentController, SalesAgentQaController],
   providers: [
@@ -49,6 +53,7 @@ import { SalesAgentQaController } from './sales-agent-qa.controller';
     ConversationEngineService,
     ConversationLockService,
     CreditService,
+    CreditAlertService,
     AbuseGuardService,
     PostPurchaseFollowUpService,
     AbandonedCartReminderService,

@@ -3,6 +3,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
@@ -53,6 +54,7 @@ import { getSalesAgentGlobalConfig } from '../sales-agent/sales-agent-global-con
 import { MarketPricesService } from '../market-prices/market-prices.service';
 import { CommentsService } from '../comments/comments.service';
 import { safeFetch } from '../../common/utils/safe-fetch.util';
+import { StoreCreditDeductionService } from '../store-credit-engine/store-credit-deduction.service';
 import {
   computeDisplayPrice,
   describeGoldPricing,
@@ -133,6 +135,8 @@ export type StockShortage = {
 
 @Injectable()
 export class StoreService {
+  private readonly logger = new Logger(StoreService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
@@ -142,6 +146,7 @@ export class StoreService {
     private readonly marketPrices: MarketPricesService,
     private readonly aiProvider: AiProviderService,
     private readonly comments: CommentsService,
+    private readonly creditDeduction: StoreCreditDeductionService,
   ) {}
 
   list(sellerId: string) {
@@ -2150,6 +2155,16 @@ export class StoreService {
     conversationId: string,
   ) {
     await this.getOwnedConversation(sellerId, storeId, conversationId);
+    // 1.3 — اگر فروشگاه حالا اعتبار دارد، مکالمات BLOCKED آن (از جمله همین مکالمه) دوباره PAID
+    // می‌شوند؛ وگرنه «برگشت به بات» دوباره handoff و هشدار تکراری می‌داد
+    await this.creditDeduction
+      .reevaluateBlockedConversations(storeId)
+      .catch((err) =>
+        this.logger.error(
+          `reevaluateBlockedConversations failed (store=${storeId})`,
+          err,
+        ),
+      );
     return this.prisma.salesConversation.update({
       where: { id: conversationId },
       data: {

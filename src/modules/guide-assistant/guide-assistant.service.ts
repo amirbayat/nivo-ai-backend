@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { streamText, type ModelMessage } from 'ai';
 import { PrismaService } from '../../prisma/prisma.service';
+import { StoreCreditDeductionService } from '../store-credit-engine/store-credit-deduction.service';
 import { AiProviderService } from '../../common/services/ai-provider.service';
 import { KieProviderService } from '../../common/services/kie-provider.service';
 import { MediaTranscodeService } from '../../common/services/media-transcode.service';
@@ -10,8 +11,10 @@ import { StoreService } from '../store/store.service';
 import { pickVariant, resolveModel } from '../sales-agent/model-variants';
 import { NEUTRAL_VOICE } from '../sales-agent/voice-gender';
 import { fa } from '../../i18n/fa';
-import { GuideAssistantStreamDto, GuideAssistantTtsDto } from './dto/guide-assistant.dto';
-import { getSalesAgentGlobalConfig } from '../sales-agent/sales-agent-global-config.util';
+import {
+  GuideAssistantStreamDto,
+  GuideAssistantTtsDto,
+} from './dto/guide-assistant.dto';
 
 const MAX_USER_MESSAGES = 12;
 
@@ -34,6 +37,7 @@ export class GuideAssistantService {
     private readonly kie: KieProviderService,
     private readonly mediaTranscode: MediaTranscodeService,
     private readonly pricing: PricingService,
+    private readonly deduction: StoreCreditDeductionService,
   ) {}
 
   // همون چک trial-aware StoreKbService.hasUsableCredit/decrementStoreCredit — آن متدها private
@@ -51,30 +55,6 @@ export class GuideAssistantService {
     return store.creditBalanceToman > 0 || trialActive;
   }
 
-  // فیدبک کاربر ۱۴۰۵/۰۷/۱۷ — این مصرفِ خودِ فروشنده است، پس با sellerCostMarkup ضرب می‌شود
-  private async decrementStoreCredit(
-    storeId: string,
-    costToman: number,
-  ): Promise<number> {
-    const config = await getSalesAgentGlobalConfig(this.prisma);
-    const chargedToman = Math.ceil(costToman * config.sellerCostMarkup);
-    const store = await this.prisma.store.findUnique({
-      where: { id: storeId },
-      select: { trialEndsAt: true, trialCreditRemainingToman: true },
-    });
-    const trialActive =
-      !!store?.trialEndsAt &&
-      store.trialEndsAt > new Date() &&
-      store.trialCreditRemainingToman > 0;
-    await this.prisma.store.update({
-      where: { id: storeId },
-      data: trialActive
-        ? { trialCreditRemainingToman: { decrement: chargedToman } }
-        : { creditBalanceToman: { decrement: chargedToman } },
-    });
-    return chargedToman;
-  }
-
   // docs/PRD-seller-guide-assistant-modal.md بخش ۳.۳ — بدون پرسیست مکالمه (۲.۳)؛ هر درخواست کل
   // تاریخچه را حمل می‌کند. مدل یک‌بار در اولین پیام انتخاب می‌شود (pickVariant) و کلیدش در همون
   // اولین رویداد SSE به فرانت برمی‌گردد تا در درخواست‌های بعدی همین جلسه ثابت بماند (۳.۲)
@@ -87,12 +67,16 @@ export class GuideAssistantService {
   ): Promise<void> {
     const store = await this.storeService.getOwned(sellerId, storeId);
 
-    const userMessageCount = dto.messages.filter((m) => m.role === 'user').length;
+    const userMessageCount = dto.messages.filter(
+      (m) => m.role === 'user',
+    ).length;
     if (userMessageCount === 0 || userMessageCount > MAX_USER_MESSAGES) {
       throw new BadRequestException(fa.errors.validation);
     }
     if (!this.hasUsableCredit(store)) {
-      throw new BadRequestException(fa.store.insufficientCreditForGuideAssistant);
+      throw new BadRequestException(
+        fa.store.insufficientCreditForGuideAssistant,
+      );
     }
 
     const variantKey = dto.modelVariant ?? pickVariant();
@@ -103,7 +87,9 @@ export class GuideAssistantService {
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders();
-    res.write(`data: ${JSON.stringify({ info: 'model', variant: variantKey })}\n\n`);
+    res.write(
+      `data: ${JSON.stringify({ info: 'model', variant: variantKey })}\n\n`,
+    );
 
     const abortController = new AbortController();
     req.on('close', () => {
@@ -134,16 +120,11 @@ export class GuideAssistantService {
         usage.outputTokens ?? 0,
         modelId,
       );
-      const chargedToman = await this.decrementStoreCredit(storeId, costToman);
-      await this.prisma.creditUsageEvent.create({
-        data: {
-          storeId,
-          model: modelId,
-          kind: 'GUIDE_ASSISTANT',
-          costToman,
-          chargedToman,
-          isFreeQuota: false,
-        },
+      await this.deduction.deductSafely({
+        storeId,
+        rawCostToman: costToman,
+        kind: 'SELLER',
+        event: { model: modelId, kind: 'GUIDE_ASSISTANT' },
       });
 
       res.write('data: [DONE]\n\n');
@@ -154,7 +135,9 @@ export class GuideAssistantService {
             err instanceof Error ? err.message : String(err)
           }`,
         );
-        res.write(`data: ${JSON.stringify({ error: fa.chat.streamError })}\n\n`);
+        res.write(
+          `data: ${JSON.stringify({ error: fa.chat.streamError })}\n\n`,
+        );
       }
     } finally {
       res.end();
@@ -172,7 +155,9 @@ export class GuideAssistantService {
   ): Promise<Buffer> {
     const store = await this.storeService.getOwned(sellerId, storeId);
     if (!this.hasUsableCredit(store)) {
-      throw new BadRequestException(fa.store.insufficientCreditForGuideAssistant);
+      throw new BadRequestException(
+        fa.store.insufficientCreditForGuideAssistant,
+      );
     }
 
     const { taskId } = await this.kie.createTask(TTS_MODEL_SLUG, {
@@ -203,22 +188,20 @@ export class GuideAssistantService {
     }
 
     const wavBuffer = await this.kie.downloadResult(resultUrl);
-    const mp3Buffer = await this.mediaTranscode.transcodeAudioToMp3(wavBuffer, 'wav');
+    const mp3Buffer = await this.mediaTranscode.transcodeAudioToMp3(
+      wavBuffer,
+      'wav',
+    );
 
     if (creditsConsumed != null) {
       const { costToman } = await this.pricing.calcFlatCostToman(
         creditsConsumed * KIE_USD_PER_CREDIT,
       );
-      const chargedToman = await this.decrementStoreCredit(storeId, costToman);
-      await this.prisma.creditUsageEvent.create({
-        data: {
-          storeId,
-          model: TTS_MODEL_SLUG,
-          kind: 'VOICE_TTS',
-          costToman,
-          chargedToman,
-          isFreeQuota: false,
-        },
+      await this.deduction.deductSafely({
+        storeId,
+        rawCostToman: costToman,
+        kind: 'SELLER',
+        event: { model: TTS_MODEL_SLUG, kind: 'VOICE_TTS' },
       });
     }
 

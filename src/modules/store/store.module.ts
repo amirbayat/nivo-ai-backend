@@ -11,6 +11,7 @@ import { StoreController } from './store.controller';
 import { DemoProductsAdminController } from './demo-products-admin.controller';
 import { StoreService } from './store.service';
 import { StoreKbService } from './store-kb.service';
+import { StoreCreditEngineModule } from '../store-credit-engine/store-credit-engine.module';
 import { StoreCreditService } from './store-credit.service';
 import { StoreBankCardService } from './store-bank-card.service';
 import { StoreDiscountCodeService } from './store-discount-code.service';
@@ -41,6 +42,8 @@ import { ContentChangeLogService } from './content-change-log.service';
     AsrModule,
     MediaTranscodeModule,
     MarketPricesModule,
+    // فاز ۱ — کسر/شارژ اعتبار فروشگاه فقط از StoreCreditDeductionService
+    StoreCreditEngineModule,
   ],
   controllers: [StoreController, DemoProductsAdminController],
   providers: [

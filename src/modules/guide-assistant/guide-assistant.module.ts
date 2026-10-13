@@ -3,11 +3,18 @@ import { StoreModule } from '../store/store.module';
 import { UsageModule } from '../usage/usage.module';
 import { KieProviderModule } from '../../common/services/kie-provider.module';
 import { MediaTranscodeModule } from '../../common/services/media-transcode.module';
+import { StoreCreditEngineModule } from '../store-credit-engine/store-credit-engine.module';
 import { GuideAssistantController } from './guide-assistant.controller';
 import { GuideAssistantService } from './guide-assistant.service';
 
 @Module({
-  imports: [StoreModule, UsageModule, KieProviderModule, MediaTranscodeModule],
+  imports: [
+    StoreModule,
+    UsageModule,
+    KieProviderModule,
+    MediaTranscodeModule,
+    StoreCreditEngineModule,
+  ],
   controllers: [GuideAssistantController],
   providers: [GuideAssistantService],
 })

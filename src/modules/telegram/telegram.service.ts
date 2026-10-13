@@ -880,6 +880,18 @@ export class TelegramService {
     const conversation = await this.resolveActiveConversation(chatId);
     if (!conversation || conversation.isMutedForHuman || !message.voice) return;
 
+    // 1.2(۱) — قبل از ASR (هزینه‌ی واقعی) کف overdraft چک می‌شود
+    if (
+      conversation.billingMode === 'BLOCKED' ||
+      !(await this.creditService.canSpend(conversation.storeId))
+    ) {
+      await this.sendEngineResult(
+        chatId,
+        await this.engine.announceBillingBlocked(conversation),
+      );
+      return;
+    }
+
     try {
       await this.withTypingIndicator(chatId, async () => {
         const oggBuffer = await this.downloadFile(message.voice!.file_id);
