@@ -43,6 +43,7 @@ import {
   type ConversationHistoryEntry,
 } from './conversation-history.util';
 import { fa } from '../../i18n/fa';
+import { getRecentConversationEvents } from '../../common/utils/conversation-events.util';
 import type { SendMessageDto } from './dto/send-message.dto';
 import type { EngineResult } from './sales-agent.types';
 
@@ -866,13 +867,17 @@ export class SalesAgentService {
     };
   }
 
-  async getConversation(conversationId: string, sessionToken: string) {
+  async getConversation(
+    conversationId: string,
+    sessionToken: string,
+    before?: string,
+  ) {
     const conversation = await this.loadOwned(conversationId, sessionToken);
-    const events = await this.prisma.conversationEvent.findMany({
-      where: { conversationId },
-      orderBy: { createdAt: 'asc' },
-      take: 50,
-    });
+    const { events, hasMoreEvents } = await getRecentConversationEvents(
+      this.prisma,
+      conversationId,
+      before,
+    );
     // docs/PRD-order-status-chat-tool-and-fulfillment-delay-reviews.md بخش ۳.۱ — فرانت باید
     // بداند الان منتظر نظر است یا نه تا دکمه‌های پیوست عکس/ویدیو را نشان بدهد
     const awaitingReview = (
@@ -887,6 +892,7 @@ export class SalesAgentService {
       responseStrategy: conversation.responseStrategy,
       awaitingReview: !!awaitingReview,
       events,
+      hasMoreEvents,
     };
   }
 

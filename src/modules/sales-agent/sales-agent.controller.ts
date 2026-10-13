@@ -277,8 +277,13 @@ export class SalesAgentController {
   getConversation(
     @Param('conversationId') conversationId: string,
     @Headers('x-session-token') sessionToken: string,
+    @Query('before') before?: string,
   ) {
-    return this.salesAgentService.getConversation(conversationId, sessionToken);
+    return this.salesAgentService.getConversation(
+      conversationId,
+      sessionToken,
+      before,
+    );
   }
 
   // docs/PRD-sales-agent-response-strategy-ab.md بخش ۹ — سوییچ دستی خریدار برای تست زنده‌ی

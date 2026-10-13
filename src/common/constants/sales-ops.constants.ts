@@ -24,3 +24,6 @@ export const CONVERSATION_DRAIN_MAX_ROUNDS = 5;
 // 0.5 — وب‌هوک تلگرام/اینستاگرام: dedupe روی شناسه‌ی رویداد و همزمانی پردازشگر صف
 export const WEBHOOK_DEDUPE_TTL_SECONDS = 86_400;
 export const TELEGRAM_UPDATES_QUEUE_CONCURRENCY = 10;
+
+// 0.6 — تعداد رویداد مکالمه در هر صفحه (جدیدترین‌ها؛ «قدیمی‌تر» با cursor)
+export const CONVERSATION_EVENTS_PAGE_SIZE = 50;

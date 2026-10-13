@@ -509,8 +509,14 @@ export class StoreController {
     @CurrentUser() user: JwtPayload,
     @Param('id') id: string,
     @Param('conversationId') conversationId: string,
+    @Query('before') before?: string,
   ) {
-    return this.storeService.getConversation(user.sub, id, conversationId);
+    return this.storeService.getConversation(
+      user.sub,
+      id,
+      conversationId,
+      before,
+    );
   }
 
   @Post(':id/conversations/:conversationId/messages')

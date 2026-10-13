@@ -32,6 +32,7 @@ import { UpdateProductDto } from './dto/update-product.dto';
 import { ReplaceProductVariantsDto } from './dto/replace-product-variants.dto';
 import { UpdateStoreDto } from './dto/update-store.dto';
 import { fa } from '../../i18n/fa';
+import { getRecentConversationEvents } from '../../common/utils/conversation-events.util';
 import { computeConversationStats } from '../sales-agent/conversation-stats.util';
 import { TelegramApiClientService } from '../telegram/telegram-api-client.service';
 import { computeProductCompleteness } from './product-completeness.util';
@@ -2002,17 +2003,18 @@ export class StoreService {
     sellerId: string,
     storeId: string,
     conversationId: string,
+    before?: string,
   ) {
     const conversation = await this.getOwnedConversation(
       sellerId,
       storeId,
       conversationId,
     );
-    const events = await this.prisma.conversationEvent.findMany({
-      where: { conversationId },
-      orderBy: { createdAt: 'asc' },
-      take: 50,
-    });
+    const { events, hasMoreEvents } = await getRecentConversationEvents(
+      this.prisma,
+      conversationId,
+      before,
+    );
     return {
       id: conversation.id,
       isMutedForHuman: conversation.isMutedForHuman,
@@ -2024,6 +2026,7 @@ export class StoreService {
       // docs/PRD-seller-panel-order-chat-linking.md بخش ۲.۱
       orderId: conversation.order?.id ?? null,
       events,
+      hasMoreEvents,
     };
   }
 
