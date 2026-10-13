@@ -5699,6 +5699,14 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       question,
     );
     if (match) {
+      if (match.usage) {
+        await this.logTextCreditUsage(
+          conversation,
+          match.usage.model,
+          match.usage.inputTokens,
+          match.usage.outputTokens,
+        );
+      }
       return {
         source: 'STORE_KB',
         fact: `سؤال مشتری: ${match.question}\nجواب واقعی: ${match.answer}`,
@@ -5738,6 +5746,14 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       question,
     );
     if (match) {
+      if (match.usage) {
+        await this.logTextCreditUsage(
+          conversation,
+          match.usage.model,
+          match.usage.inputTokens,
+          match.usage.outputTokens,
+        );
+      }
       const facts = `سؤال مشتری: ${match.question}\nجواب واقعی: ${match.answer}`;
       const reply = await this.caption(facts, conversation);
       await this.logReply(conversation, reply, { type: 'NONE' }, undefined, {
@@ -5840,7 +5856,10 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       const model = defaultModel();
       const { object, usage } = await generateObject({
         model: this.aiProvider.buildClient()(model),
-        schema: z.object({ answered: z.boolean(), reply: z.string() }),
+        schema: z.object({
+          answered: z.boolean(),
+          reply: z.string().optional(),
+        }),
         system: `تو دستیار فروش یک فروشگاه در دایرکت اینستاگرام هستی. زیر توضیح چند محصول
 (نوشته‌ی خودِ فروشنده) را داری. اگر واقعاً می‌شود از همین توضیحات به سؤال مشتری جواب داد،
 answered=true و یک پیام فارسی کوتاه (۲-۳ جمله، لحن ${tone}) بده — هیچ چیزی (قیمت/موجودی/مشخصات)
@@ -5854,7 +5873,7 @@ answered=false بده (به‌جای حدس‌زدن).`,
         usage.inputTokens ?? 0,
         usage.outputTokens ?? 0,
       );
-      return object.answered ? object.reply.trim() : null;
+      return object.answered ? (object.reply ?? '').trim() || null : null;
     } catch (err) {
       this.logger.error(
         `tryAnswerFromProductDescriptions failed (conversation=${conversation.id})`,
@@ -5895,7 +5914,10 @@ answered=false بده (به‌جای حدس‌زدن).`,
       const model = defaultModel();
       const { object, usage } = await generateObject({
         model: this.aiProvider.buildClient()(model),
-        schema: z.object({ answered: z.boolean(), reply: z.string() }),
+        schema: z.object({
+          answered: z.boolean(),
+          reply: z.string().optional(),
+        }),
         system: `تو دستیار فروش یک فروشگاه در دایرکت اینستاگرام هستی. زیر چند واقعیت ثابت
 درباره‌ی خودِ فروشگاه (نه یک محصول خاص) را داری. اگر واقعاً می‌شود از همین واقعیت‌ها به سؤال
 مشتری جواب داد، answered=true و یک پیام فارسی کوتاه (۱-۲ جمله، لحن ${tone}) بده — هیچ چیزی که
@@ -5908,7 +5930,7 @@ answered=false بده (به‌جای حدس‌زدن).`,
         usage.inputTokens ?? 0,
         usage.outputTokens ?? 0,
       );
-      return object.answered ? object.reply.trim() : null;
+      return object.answered ? (object.reply ?? '').trim() || null : null;
     } catch (err) {
       this.logger.error(
         `tryAnswerFromStoreProfile failed (conversation=${conversation.id})`,

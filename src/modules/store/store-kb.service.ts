@@ -140,7 +140,14 @@ const BASIC_SUGGESTIONS_SYSTEM_PROMPT = `تو دستیار یک فروشنده�
 // است — SalesKbService یک singleton برای ویجت فروش خودِ nivoai.ir است، نه چندمستأجری.
 const EMBEDDING_MODEL = 'openai/text-embedding-3-small'; // همان مدل پیش‌فرض SalesKbService
 const CACHE_TTL_MS = 60_000;
-const SIMILARITY_THRESHOLD = 0.75;
+// فیدبک کاربر ۱۴۰۵/۰۷/۲۱ — آستانه‌ی قبلی (۰.۷۵) به‌عنوان تصمیم نهایی خیلی سخت‌گیر بود: دو
+// سؤال هم‌معنی اما با فرمول‌بندی متفاوت («قیمتش چقدره؟» در برابر «هزینه‌ها چقدره؟») اغلب زیر
+// این عدد امتیاز می‌گیرند. حالا این فقط یک پیش‌فیلتر ارزان است (کاندیدهای واقعاً نامرتبط را
+// قبل از فراخوان مدل حذف می‌کند)، تصمیم نهایی را retrieveRelevant با یک generateObject می‌گیرد
+// — همان الگویی که tryAnswerFromProductDescriptions/tryAnswerFromStoreProfile در
+// conversation-engine.service.ts از قبل استفاده می‌کنند.
+const CANDIDATE_SIMILARITY_FLOOR = 0.5;
+const MAX_CANDIDATES_FOR_LLM = 5;
 const MAX_EXTRACTED_CHARS = 20_000;
 // فیدبک کاربر ۱۴۰۵/۰۷/۱۲ — پسوندهای صوتی که extractCandidatesFromFile به‌جای parseUploadedKbFile
 // (که فقط سند/متن می‌شناسد) به مسیر رونویسی ASR می‌فرستد
@@ -366,7 +373,11 @@ JSON را برگردان، بدون توضیح یا markdown fence.`,
   async retrieveRelevant(
     storeId: string,
     question: string,
-  ): Promise<{ question: string; answer: string } | null> {
+  ): Promise<{
+    question: string;
+    answer: string;
+    usage?: { model: string; inputTokens: number; outputTokens: number };
+  } | null> {
     const entries = (await this.getActiveEntriesCached(storeId)).filter(
       (e) => e.embeddingModel === EMBEDDING_MODEL,
     );
@@ -375,16 +386,70 @@ JSON را برگردان، بدون توضیح یا markdown fence.`,
     const embedded = await this.computeEmbedding(question);
     if (!embedded) return null;
 
-    let best: { entry: CachedEntry; score: number } | null = null;
-    for (const entry of entries) {
-      const score = cosineSimilarity(embedded, entry.embedding);
-      if (score >= SIMILARITY_THRESHOLD && (!best || score > best.score)) {
-        best = { entry, score };
-      }
+    const candidates = entries
+      .map((entry) => ({
+        entry,
+        score: cosineSimilarity(embedded, entry.embedding),
+      }))
+      .filter((c) => c.score >= CANDIDATE_SIMILARITY_FLOOR)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, MAX_CANDIDATES_FOR_LLM);
+    if (candidates.length === 0) return null;
+
+    return this.pickRelevantCandidate(question, candidates.map((c) => c.entry));
+  }
+
+  // فیدبک کاربر ۱۴۰۵/۰۷/۲۱ — به‌جای این‌که cosine similarity خودش تصمیم نهایی «match هست یا
+  // نه» را بگیرد (که برای پارافریزهای فارسی غیرقابل‌اعتماد بود)، embedding فقط فهرست کاندید را
+  // کوتاه می‌کند و خودِ مدل با دیدن متن کامل سؤال+جواب هر کاندید تصمیم می‌گیرد کدام (اگر
+  // اصلاً) واقعاً جواب سؤال مشتری است. هرگز متن جواب را از نو نمی‌نویسد — فقط index کاندید
+  // انتخابی را برمی‌گرداند تا answer عیناً همان چیزی بماند که فروشنده ثبت کرده.
+  private async pickRelevantCandidate(
+    question: string,
+    candidates: CachedEntry[],
+  ): Promise<{
+    question: string;
+    answer: string;
+    usage: { model: string; inputTokens: number; outputTokens: number };
+  } | null> {
+    const model = defaultModel();
+    try {
+      const { object, usage } = await generateObject({
+        model: this.provider(model),
+        schema: z.object({
+          answered: z.boolean(),
+          matchedIndex: z.number().int().optional(),
+        }),
+        system: `تو داری بررسی می‌کنی که آیا یکی از سؤال-جواب‌های آماده‌ی زیر (که فروشنده از قبل
+در باکس دانش فروشگاهش ثبت کرده) واقعاً به سؤال مشتری جواب می‌دهد یا نه. حتی اگر فرمول‌بندی سؤال
+مشتری با سؤال ثبت‌شده فرق داشته باشد ولی معنایشان یکی باشد (مثل «قیمتش چقدره؟» در برابر
+«هزینه‌ها چقدره؟»)، آن را match در نظر بگیر. اگر یکی واقعاً جواب می‌دهد، answered=true و
+matchedIndex همان شماره‌ی کاندید بده. اگر هیچ‌کدام واقعاً ربطی ندارد یا کافی نیست، answered=false
+بده و matchedIndex را خالی بگذار — هیچ‌وقت صرفاً به‌خاطر شباهت موضوعی match اعلام نکن.`,
+        prompt: `سؤال مشتری: ${question}\n\nکاندیدها:\n${candidates
+          .map((c, i) => `[${i}] سؤال: ${c.question}\nجواب: ${c.answer}`)
+          .join('\n\n')}`,
+      });
+      const matched =
+        object.answered && object.matchedIndex !== undefined
+          ? candidates[object.matchedIndex]
+          : undefined;
+      if (!matched) return null;
+      return {
+        question: matched.question,
+        answer: matched.answer,
+        usage: {
+          model,
+          inputTokens: usage.inputTokens ?? 0,
+          outputTokens: usage.outputTokens ?? 0,
+        },
+      };
+    } catch (err) {
+      this.logger.error(
+        `pickRelevantCandidate failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return null;
     }
-    return best
-      ? { question: best.entry.question, answer: best.entry.answer }
-      : null;
   }
 
   async list(sellerId: string, storeId: string, kind?: StoreKbKind) {
