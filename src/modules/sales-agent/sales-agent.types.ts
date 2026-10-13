@@ -41,8 +41,31 @@ export type AddressSnapshot = {
   shippingCostToman: number;
 };
 
+// فیدبک کاربر ۱۴۰۵/۰۸/۲۱ — خودگزارش‌دهی مدل از وضعیت «انسانی/فروش» مشتری، بعد از هر نوبت —
+// برای هر دو نوع فروشگاه (leadCaptureOnly و کاتالوگ واقعی)، برخلاف LeadFunnelStage که فقط
+// مخصوص leadCaptureOnly بود. دقیقاً همان الگوی leadFunnelStage: خودِ مدل همین را در همان
+// respond_to_customer گزارش می‌دهد (بدون کال جدای LLM)، و نوبت بعد به‌عنوان «آخرین تحلیل» در
+// پرامپت و چند دستورالعمل استراتژی (conversation-engine.service.ts) مصرف می‌شود
+export type CustomerState = {
+  pain: string | null;
+  painSolvable: 'UNKNOWN' | 'YES' | 'PARTIAL' | 'NO';
+  empathyShown: boolean;
+  attentionCaptured: boolean;
+  stage:
+    | 'DISCOVERY'
+    | 'PAIN_IDENTIFIED'
+    | 'PITCHED'
+    | 'OBJECTION'
+    | 'READY'
+    | 'STALLED'
+    | 'LOST';
+};
+
 export type ConversationContext = {
   cart: CartItem[];
+  // همان توضیح بالا — آخرین خودگزارشی‌ای که مدل درباره‌ی وضعیت مشتری داده؛ نبودنش یعنی هنوز
+  // هیچ نوبتی از این مکالمه این را گزارش نداده (مکالمه‌های قدیمی‌تر از این فیچر)
+  customerState?: CustomerState | null;
   // آخرین لیست محصولاتی که با PRODUCT_CARD نشان داده شده — برای ارجاع‌های ترتیبی مشتری
   // («اولی رو بذار تو سبد») بدون اینکه مدل مستقیم productId حدس بزند
   lastShownProducts?: { id: string; name: string }[];
@@ -384,4 +407,6 @@ export type AiTraceData = {
   // فیدبک کاربر ۱۴۰۵/۰۷/۲۰ — فقط فروشگاه‌های leadCaptureOnly، خوداظهاری مدل هر نوبت (نگاه کن
   // به enum LeadFunnelStage در schema.prisma)
   leadFunnelStage?: string;
+  // فیدبک کاربر ۱۴۰۵/۰۸/۲۱ — هر دو نوع فروشگاه، خوداظهاری مدل هر نوبت؛ نگاه کن به CustomerState بالا
+  customerState?: CustomerState;
 };

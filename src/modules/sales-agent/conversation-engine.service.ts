@@ -63,6 +63,7 @@ import type {
   BuyerNeedTag,
   CartItem,
   ConversationContext,
+  CustomerState,
   EngineResult,
   ParsedIntent,
   PendingVariantSelection,
@@ -282,6 +283,21 @@ CTA (گرفتن شماره یا هدایت به لینک ثبت‌نام) نرس
 فروشگاه لینک وبسایت دارد همین الان capture_lead را صدا بزن و مشتری را به دکمه‌ی ثبت‌نام دعوت کن؛ اگر
 ندارد، مستقیم و مؤدبانه شماره تماسش را بخواه. دیگر صرفاً یک سؤال عمومی دیگر («بیشتر پیام‌هاتون از
 دایرکته؟» و مشابه آن) نپرس و فقط ویژگی‌ها را دوباره بازگو نکن.`;
+
+// فیدبک کاربر ۱۴۰۵/۰۸/۲۱ — دو دستورالعمل استراتژی مبتنی بر CustomerState خودگزارش‌دهی‌شده
+// (sales-agent.types.ts)، برای هر دو نوع فروشگاه. هر دو فقط وقتی فعال می‌شوند که تحلیل *نوبت
+// قبل* مدل همین شرط را داشته باشد — یک فروشنده‌ی حرفه‌ای هیچ‌وقت به کسی که نمی‌تواند کمکش کند
+// فشار نمی‌آورد، و هیچ‌وقت قبل از همدلی مستقیم می‌رود سراغ ویژگی/قیمت
+const PAIN_NOT_SOLVABLE_INSTRUCTION = `طبق تحلیل خودت در نوبت قبل، دردی که مشتری دارد را این
+فروشگاه/نیوو واقعاً نمی‌تواند حل کند (painSolvable=NO). از همین پاسخ دیگر هیچ فشار فروش یا دعوت به
+CTA برای حل همین درد نده — صادقانه و مؤدبانه همین را بگو (مثلاً این دقیقاً کاری نیست که انجام
+می‌دهیم)، و گفت‌وگو را با احترام جمع کن یا اگر لازم شد request_human_handoff بزن. هرگز برای بستن
+فروش ادعای نادرست نساز. اگر پیام تازه‌ی مشتری نشان داد موضوع/نیاز عوض شده، این محدودیت را نادیده
+بگیر و عادی ادامه بده.`;
+
+const EMPATHY_MISSING_INSTRUCTION = `طبق تحلیل خودت در نوبت قبل، درد/نگرانی مشتری شناسایی شده ولی هنوز
+واقعاً با او همدلی نکرده‌ای (empathyShown=false). قبل از هر معرفی ویژگی/قیمت/CTA در همین پاسخ، اول با
+یک جمله‌ی کوتاه و واقعی (نه کلیشه‌ای) نشان بده که دردش را فهمیدی — بعد ادامه بده.`;
 
 // docs/PRD-sales-agent-tool-calling-architecture.md بخش ۳.۳ — یک محصول کمینه برای facts/ابزارهای
 // FULL_AGENT؛ همون شکلی که seenProducts/uiBlock derivation نیاز دارند
@@ -520,6 +536,7 @@ export class ConversationEngineService {
       // بعد از persistTransition دوباره raw از DB خوانده می‌شود و این فیلد همیشه undefined
       // برمی‌گردد (هم‌الگوی pendingAddress بالا)
       pendingOrderAddressSnapshot: raw?.pendingOrderAddressSnapshot ?? null,
+      customerState: raw?.customerState ?? null,
     };
   }
 
@@ -1772,6 +1789,36 @@ relevantProductIds را خالی بگذار.${
       ? `سبد فعلی مشتری: ${ctx.cart.map((i) => `${i.name} × ${i.qty}`).join('، ')} — جمع ${this.cartTotal(ctx.cart)} تومان`
       : 'سبد فعلی مشتری خالی است.';
 
+    // فیدبک کاربر ۱۴۰۵/۰۸/۲۱ — خودگزارش‌دهی نوبت قبل (CustomerState)، به‌عنوان یک fact برای
+    // تداوم تحلیل؛ به مدل می‌گوییم این تحلیل قبلی است تا اگر پیام تازه چیزی را عوض کرد، خودش
+    // در customerState همین نوبت به‌روزش کند، نه این‌که کورکورانه همان مقدار قبلی را تکرار کند
+    const customerState = ctx.customerState;
+    const customerStateSummary = customerState
+      ? `\nآخرین تحلیل خودت از وضعیت مشتری (نوبت قبل — اگر پیام تازه چیزی را عوض کرد، در ` +
+        `customerState همین پاسخ به‌روزش کن): درد شناسایی‌شده: ${customerState.pain ?? 'هنوز نامشخص'}، ` +
+        `قابل‌حل‌بودن با این فروشگاه: ${
+          { UNKNOWN: 'نامشخص', YES: 'بله', PARTIAL: 'تا حدی', NO: 'خیر' }[
+            customerState.painSolvable
+          ]
+        }، همدلی نشان‌داده‌شده: ${customerState.empathyShown ? 'بله' : 'خیر'}، توجه/درگیری مشتری: ${
+          customerState.attentionCaptured ? 'دارد' : 'ندارد'
+        }، مرحله: ${
+          {
+            DISCOVERY: 'کشف نیاز',
+            PAIN_IDENTIFIED: 'درد شناسایی‌شده',
+            PITCHED: 'راه‌حل پرزنت‌شده',
+            OBJECTION: 'اعتراض/تردید',
+            READY: 'آماده‌ی اقدام',
+            STALLED: 'گیرکرده/بدون پیشرفت',
+            LOST: 'ازدست‌رفته',
+          }[customerState.stage]
+        }.\n`
+      : '';
+    const painNotSolvable = customerState?.painSolvable === 'NO';
+    const empathyMissing =
+      customerState?.stage === 'PAIN_IDENTIFIED' &&
+      customerState.empathyShown === false;
+
     return `تو دستیار فروش یک فروشگاه در دایرکت اینستاگرام هستی و با ابزارهای زیر مستقیماً سبد/
 سفارش مشتری را مدیریت می‌کنی، نه فقط متن می‌نویسی. لحن نوشتار باید ${tone} باشد.
 ${storeProfile ? `\nاطلاعات فروشگاه:\n${storeProfile}\n` : ''}
@@ -1780,11 +1827,11 @@ ${storeProfile ? `\nاطلاعات فروشگاه:\n${storeProfile}\n` : ''}
 ${catalogFacts}
 
 ${cartSummary}
-${
-  ctx.lastShownProducts?.length
-    ? `\nآخرین محصولاتی که واقعاً در همین مکالمه مطرح/پیشنهاد شده‌اند: ${ctx.lastShownProducts.map((p) => p.name).join('، ')}\n`
-    : ''
-}${
+${customerStateSummary}${
+      ctx.lastShownProducts?.length
+        ? `\nآخرین محصولاتی که واقعاً در همین مکالمه مطرح/پیشنهاد شده‌اند: ${ctx.lastShownProducts.map((p) => p.name).join('، ')}\n`
+        : ''
+    }${
       transcript
         ? `\nتاریخچه‌ی اخیر مکالمه (حتماً برای فهمیدن منظور پیام‌های ناقص/ادامه‌دار مشتری — مثل «پس اگه بخوام X بشم چی؟» بعد از بحث قبلی — این را در نظر بگیر):\n${transcript}\n`
         : ''
@@ -1850,7 +1897,9 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       leadCaptureOnly
         ? `\n\n${buildLeadCaptureOnlyInstruction(!!store.websiteUrl)}`
         : ''
-    }${leadCaptureNudgeActive ? `\n\n${LEAD_CAPTURE_NUDGE_INSTRUCTION}` : ''}`;
+    }${leadCaptureNudgeActive ? `\n\n${LEAD_CAPTURE_NUDGE_INSTRUCTION}` : ''}${
+      painNotSolvable ? `\n\n${PAIN_NOT_SOLVABLE_INSTRUCTION}` : ''
+    }${empathyMissing ? `\n\n${EMPATHY_MISSING_INSTRUCTION}` : ''}`;
   }
 
   // docs/PRD-sales-agent-tool-calling-architecture.md بخش ۳.۴ — نرده‌ی حفاظتی حیاتی: قیمت/
@@ -2565,6 +2614,54 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         .describe(
           'شناسه‌ی محصول(های) واقعاً مرتبط برای نمایش کارت — اگر موضوعی ندارد خالی بگذار',
         ),
+      // فیدبک کاربر ۱۴۰۵/۰۸/۲۱ — برخلاف persuasionShape/leadFunnelStageShape پایین، این برای
+      // هر دو نوع فروشگاه (leadCaptureOnly و کاتالوگ واقعی) همیشه اجباری است؛ دقیقاً همان الگوی
+      // خودگزارش‌دهی leadFunnelStage (بدون کال جدای LLM) ولی تعمیم‌یافته — نوبت بعد به‌عنوان
+      // «آخرین تحلیل» در پرامپت (ctx.customerState) و چند دستورالعمل استراتژی مصرف می‌شود
+      customerState: z
+        .object({
+          pain: z
+            .string()
+            .nullable()
+            .describe(
+              'درد/نیاز واقعی مشتری که تا همین پاسخ فهمیدی، کوتاه و مشخص — اگر هنوز معلوم نیست null',
+            ),
+          painSolvable: z
+            .enum(['UNKNOWN', 'YES', 'PARTIAL', 'NO'])
+            .describe(
+              'آیا همین فروشگاه/نیوو واقعاً می‌تواند این درد را حل کند — UNKNOWN فقط وقتی pain هنوز null است',
+            ),
+          empathyShown: z
+            .boolean()
+            .describe(
+              'آیا در متن همین پاسخ واقعاً با درد/نگرانی مشتری همدلی کردی (نه فقط رفتی سراغ ویژگی‌ها/قیمت)',
+            ),
+          attentionCaptured: z
+            .boolean()
+            .describe(
+              'آیا مشتری الان واقعاً درگیر گفتگوست — نه جواب‌های کوتاه/سرد/تک‌کلمه‌ای/بی‌حوصله',
+            ),
+          stage: z
+            .enum([
+              'DISCOVERY',
+              'PAIN_IDENTIFIED',
+              'PITCHED',
+              'OBJECTION',
+              'READY',
+              'STALLED',
+              'LOST',
+            ])
+            .describe(
+              'DISCOVERY=هنوز درد/نیاز معلوم نیست، PAIN_IDENTIFIED=درد مشخص شد ولی هنوز راه‌حل ' +
+                'پرزنت نشده، PITCHED=راه‌حل/محصول مشخص معرفی شد، OBJECTION=تردید/اعتراض مطرح کرد، ' +
+                'READY=علاقه‌ی روشن نشان داد و آماده‌ی اقدام (خرید یا ثبت لید) است، STALLED=چند ' +
+                'نوبت است بدون پیشرفت واقعی فقط سؤال‌های کلی رد و بدل می‌شود، LOST=بی‌علاقه یا ' +
+                'پیامش کلاً بی‌ربط است',
+            ),
+        })
+        .describe(
+          'تحلیل خودت از وضعیت فعلی مشتری بعد از همین پاسخ — برای ثبت داخلی/استراتژی نوبت بعد، صادقانه، هرگز چیزی که مشتری ببیند نیست',
+        ),
     };
     // برای لاگ ادمین؛ خوداظهاری خودِ مدل، نه چیزی که سرور بتواند مستقل از متن تشخیص دهد
     const persuasionShape = {
@@ -2724,6 +2821,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
             persuasionTechniquesUsed?: PersuasionTechnique[];
             usedGeneralKnowledge?: boolean;
             leadFunnelStage?: Exclude<LeadFunnelStage, 'LEAD_CAPTURED'>;
+            customerState: CustomerState;
           };
         }
       | undefined;
@@ -2825,9 +2923,16 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         ...(progressHappened
           ? { openQuestionStreak: 0 }
           : { openQuestionStreak: { increment: 1 } }),
-        ...(lastShownProducts.length
-          ? { contextData: { ...ctx, lastShownProducts } }
-          : {}),
+        // فیدبک کاربر ۱۴۰۵/۰۸/۲۱ — قبلاً contextData فقط وقتی lastShownProducts غیرخالی بود
+        // نوشته می‌شد؛ چون customerState حالا اجباری و هر نوبت موجود است (نه فقط وقتی محصولی
+        // دیده شده)، این write باید همیشه انجام شود — ولی lastShownProducts قبلی را فقط وقتی
+        // این نوبت واقعاً چیزی نشان داده شده جایگزین می‌کنیم (همان رفتار قبلی، تا ارجاع‌های
+        // ترتیبی مشتری یک نوبت بعد هم کار کند)
+        contextData: {
+          ...ctx,
+          ...(lastShownProducts.length ? { lastShownProducts } : {}),
+          customerState: finalCall.input.customerState,
+        },
         ...(finalCall.input.leadFunnelStage
           ? { leadFunnelStage: finalCall.input.leadFunnelStage }
           : {}),
@@ -2848,6 +2953,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       ...(finalCall.input.leadFunnelStage
         ? { leadFunnelStage: finalCall.input.leadFunnelStage }
         : {}),
+      customerState: finalCall.input.customerState,
       relevantProductIdsRaw: relevantProductIds,
       lastShownProducts,
       toolsCalled,
