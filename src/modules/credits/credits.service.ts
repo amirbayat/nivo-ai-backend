@@ -148,12 +148,25 @@ export class CreditsService {
     return { pkg, priceToman };
   }
 
+  // 0.13e — شارژ کیف‌پول عمومی فقط با بسته‌ی هم‌scope و عمومی (storeId=null) مجاز است؛ در غیر این
+  // صورت یک بسته‌ی اعتبار فروشگاه (یا بسته‌ی اختصاصی یک فروشگاه) با تخفیف/نرخ دیگر به‌عنوان
+  // اعتبار کیف‌پول نیوو فروخته می‌شد
+  private assertWalletPackage(
+    pkg: CreditPackage,
+    allowedScopes: CreditPackageScope[],
+  ): void {
+    if (!allowedScopes.includes(pkg.scope) || pkg.storeId != null) {
+      throw new NotFoundException(fa.errors.notFound);
+    }
+  }
+
   async purchasePackage(userId: string, dto: PurchaseCreditPackageDto) {
     const config = await this.getConfig();
     const pkg = await this.prisma.creditPackage.findUnique({
       where: { id: dto.packageId },
     });
     if (!pkg || !pkg.isActive) throw new NotFoundException(fa.errors.notFound);
+    this.assertWalletPackage(pkg, ['GENERAL', 'NIVO_CAL']);
 
     // کارت «مبلغ دلخواه» — credits این بسته یعنی حداقل مجاز؛ کاربر عدد واقعی را در customCredits می‌فرستد
     let effectiveCredits = pkg.credits;
@@ -200,6 +213,9 @@ export class CreditsService {
       where: { id: dto.packageId },
     });
     if (!pkg || !pkg.isActive) throw new NotFoundException(fa.errors.notFound);
+    // 0.13e — بسته‌ی اعتبار فروشگاه (STORE_AI_CREDIT) یا بسته‌ی مخصوص یک فروشگاه هیچ‌وقت
+    // نباید به کیف‌پول عمومی شارژ شود
+    this.assertWalletPackage(pkg, ['NIVO_CAL_BAZAAR', 'NIVO_CAL', 'GENERAL']);
     if (pkg.isCustomAmount || !pkg.bazaarSku) {
       throw new BadRequestException(fa.payment.bazaarPackageNotSupported);
     }
