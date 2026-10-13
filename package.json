@@ -45,6 +45,7 @@
     "gpt-tokenizer": "^3.4.0",
     "harfbuzzjs": "1.6.1",
     "heic-convert": "^2.1.0",
+    "helmet": "^8.1.0",
     "ioredis": "^5.11.1",
     "kavenegar": "^1.1.4",
     "mammoth": "^1.12.2",
@@ -60,7 +61,7 @@
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
     "undici": "^8.10.1",
-    "xlsx": "^0.18.5",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
     "zod": "^4.4.3"
   },
   "devDependencies": {
