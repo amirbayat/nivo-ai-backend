@@ -38,6 +38,8 @@ export class SalesActionDto {
     'SELECT_VARIANT_VALUE',
     // docs/PRD-buyer-payment-method-card-or-snapppay-link.md — انتخاب روش پرداخت
     'SELECT_PAYMENT_METHOD',
+    // 0.11a — لینک محصول (استوری) برای خریدار برگشتی: کارت محصول بدون LLM
+    'FOCUS_PRODUCT',
   ])
   type:
     | 'ADD_TO_CART'
@@ -53,7 +55,8 @@ export class SalesActionDto {
     | 'TOGGLE_SAVE_PRODUCT'
     | 'REORDER'
     | 'SELECT_VARIANT_VALUE'
-    | 'SELECT_PAYMENT_METHOD';
+    | 'SELECT_PAYMENT_METHOD'
+    | 'FOCUS_PRODUCT';
 
   @IsOptional()
   @IsString()

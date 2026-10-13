@@ -351,8 +351,10 @@ export type SalesAction = {
     | 'SELECT_VARIANT_VALUE'
     // docs/PRD-buyer-payment-method-card-or-snapppay-link.md — جواب دکمه‌ی PAYMENT_METHOD_PROMPT؛
     // فقط وقتی conversation.currentState واقعاً PAYMENT_METHOD_SELECTION است معنا دارد
-    | 'SELECT_PAYMENT_METHOD';
-  productId?: string; // ADD_TO_CART, TOGGLE_SAVE_PRODUCT
+    | 'SELECT_PAYMENT_METHOD'
+    // 0.11a — نمایش کارت یک محصول (لینک اختصاصی محصول برای خریدار برگشتی)، بدون LLM
+    | 'FOCUS_PRODUCT';
+  productId?: string; // ADD_TO_CART, TOGGLE_SAVE_PRODUCT, FOCUS_PRODUCT
   qty?: number;
   addressId?: string;
   // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۲ (فاز ۱.۵) — فقط برای SELECT_PROVINCE

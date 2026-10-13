@@ -5128,6 +5128,21 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
 
     const ctx = this.getContext(conversation);
 
+    // 0.11a — خریدار برگشتی با لینک محصول (استوری اینستاگرام)؛ همان نمایش کارت محصولِ شروع
+    // مکالمه (showProduct: کارت + یک خط معرفی قطعی، بدون LLM)
+    if (action.type === 'FOCUS_PRODUCT') {
+      const product = action.productId
+        ? await this.prisma.product.findUnique({
+            where: { id: action.productId },
+            include: PRODUCT_VARIANT_INCLUDE,
+          })
+        : null;
+      if (!product || product.storeId !== conversation.storeId) {
+        return this.doClarify(conversation, fa.salesAgent.productNotFound);
+      }
+      return this.showProduct(conversation, product);
+    }
+
     if (action.type === 'ADD_TO_CART') {
       const product = action.productId
         ? await this.prisma.product.findUnique({
