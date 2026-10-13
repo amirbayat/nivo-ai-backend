@@ -27,7 +27,10 @@ import { PricingService } from '../usage/pricing.service';
 import { StoreService } from './store.service';
 import { CommentsService } from '../comments/comments.service';
 import { ContentChangeLogService } from './content-change-log.service';
-import { defaultModel } from '../sales-agent/model-variants';
+import {
+  defaultModel,
+  withDefaultModelFallbackChain,
+} from '../sales-agent/model-variants';
 import { clampProductSpecs } from './product-specs.types';
 import { BUSINESS_CATEGORIES } from './business-categories';
 import { IRAN_PROVINCES } from '../../common/constants/iran-provinces';
@@ -396,7 +399,10 @@ JSON را برگردان، بدون توضیح یا markdown fence.`,
       .slice(0, MAX_CANDIDATES_FOR_LLM);
     if (candidates.length === 0) return null;
 
-    return this.pickRelevantCandidate(question, candidates.map((c) => c.entry));
+    return this.pickRelevantCandidate(
+      question,
+      candidates.map((c) => c.entry),
+    );
   }
 
   // فیدبک کاربر ۱۴۰۵/۰۷/۲۱ — به‌جای این‌که cosine similarity خودش تصمیم نهایی «match هست یا
@@ -412,8 +418,16 @@ JSON را برگردان، بدون توضیح یا markdown fence.`,
     answer: string;
     usage: { model: string; inputTokens: number; outputTokens: number };
   } | null> {
-    const model = defaultModel();
-    try {
+    // فیدبک کاربر ۱۴۰۵/۰۷/۲۱ — نتیجه‌ی «هیچ‌کدام match نیست» (answered=false) یک تصمیم واقعی
+    // روی کل کاندیدهاست، نه شکست فنی — فقط خطای واقعی (throw) باعث رفتن به مدل بعدی زنجیره
+    // می‌شود، نه یک answered=false معتبر.
+    const attempt = async (
+      model: string,
+    ): Promise<{
+      question: string;
+      answer: string;
+      usage: { model: string; inputTokens: number; outputTokens: number };
+    } | null> => {
       const { object, usage } = await generateObject({
         model: this.provider(model),
         schema: z.object({
@@ -444,11 +458,19 @@ matchedIndex همان شماره‌ی کاندید بده. اگر هیچ‌کد�
           outputTokens: usage.outputTokens ?? 0,
         },
       };
+    };
+
+    try {
+      return await attempt(defaultModel());
     } catch (err) {
       this.logger.error(
-        `pickRelevantCandidate failed: ${err instanceof Error ? err.message : String(err)}`,
+        `pickRelevantCandidate failed (model=${defaultModel()}): ${err instanceof Error ? err.message : String(err)}`,
       );
-      return null;
+      return withDefaultModelFallbackChain(attempt, (model, chainErr) =>
+        this.logger.error(
+          `pickRelevantCandidate chain fallback failed (model=${model}): ${chainErr instanceof Error ? chainErr.message : String(chainErr)}`,
+        ),
+      );
     }
   }
 

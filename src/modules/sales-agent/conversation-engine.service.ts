@@ -46,7 +46,12 @@ import { SellerBotApiClientService } from '../seller-bot/seller-bot-api-client.s
 import { CommentsService } from '../comments/comments.service';
 import { formatShippingRulesSummary } from './shipping-rules-summary.util';
 import { fa } from '../../i18n/fa';
-import { defaultModel, resolveModel } from './model-variants';
+import {
+  defaultModel,
+  resolveModel,
+  DEFAULT_MODEL_FALLBACK_CHAIN,
+  withDefaultModelFallbackChain,
+} from './model-variants';
 import { toneForCategory } from './tone-by-category';
 import {
   buildIntentClassificationPrompt,
@@ -338,21 +343,26 @@ function buildLeadCaptureOnlyInstruction(hasWebsiteUrl: boolean): string {
 ۳) اگر مشتری علاقه نشان داد، صادقانه بگو با ثبت‌نام یک اعتبار هدیه‌ی رایگان برای شروع کار دریافت
    می‌کند — هرگز عدد/درصد دقیق اختراع نکن مگر در پروفایل فروشگاه یا باکس دانش زیر عدد واقعی‌اش
    آمده باشد.
-مسیر تبدیل (CTA) — این بخش حیاتی است (توجه: اگر سؤال مشتری واقعاً یک سؤال واقعی است، مثل قیمت/
-هزینه/شرایط، نه صرفاً ابراز علاقه‌ی کلی، طبق «قوانین حیاتی» بالا اول جوابش را بده، بعد مسیر زیر را
-ادامه بده — پیوت به CTA جایگزین جواب‌دادن نمی‌شود):
+مسیر تبدیل (CTA) — این بخش حیاتی است. توجه، این نکته را با دقت رعایت کن: اگر آخرین پیام مشتری
+شامل یک سؤال مشخص است (قیمت/هزینه/شرایط/نحوه‌ی کارکرد و مشابه آن) — حتی اگر همزمان نشانه‌ی علاقه‌ی
+خرید هم باشد (مثلاً «هزینه‌اش چقدره؟» هم سؤال است هم نشانه‌ی علاقه) — این یک «سؤال واقعی» است، نه
+صرفاً «ابراز علاقه‌ی کلی». طبق «قوانین حیاتی» بالا باید همین الان (در همین نوبت) answer_faq را با
+همان سؤال صدا بزنی و جوابش را بدهی؛ تنها بعد از آن مسیر زیر را ادامه بده. پیوت مستقیم به CTA
+به‌جای جواب‌دادن، حتی وقتی مشتری آماده‌ی تبدیل به‌نظر می‌رسد، همیشه اشتباه است. «ابراز علاقه‌ی کلی»
+(بدون سؤال مشخص) یعنی چیزهایی مثل «باشه خوبه»، «جالبه»، «آره می‌خوام» — فقط در این حالت‌ها
+می‌توانی مستقیم سراغ CTA بروی:
 ${
   hasWebsiteUrl
     ? `این فروشگاه لینک وبسایت واقعی ثبت کرده؛ هدف نهایی رساندن مشتری به همان لینک است، **نه**
-گرفتن شماره تماس. وقتی مشتری علاقه‌ی واقعی نشان داد (نه صرفاً یک سؤال عمومی)، هرگز شماره تماس
-نخواه و اصرار هم نکن؛ فقط با لحن طبیعی بگو همین الان می‌تواند با زدن دکمه‌ی زیر ثبت‌نام کند و
-اعتبار هدیه‌اش را بگیرد، و بلافاصله capture_lead را صدا بزن (interest را پر کن؛ phone را خالی
+گرفتن شماره تماس. وقتی مشتری علاقه‌ی کلی نشان داد (طبق تعریف بالا — نه یک سؤال مشخص بی‌جواب)، هرگز
+شماره تماس نخواه و اصرار هم نکن؛ فقط با لحن طبیعی بگو همین الان می‌تواند با زدن دکمه‌ی زیر ثبت‌نام
+کند و اعتبار هدیه‌اش را بگیرد، و بلافاصله capture_lead را صدا بزن (interest را پر کن؛ phone را خالی
 بگذار — فقط اگر مشتری خودش داوطلبانه شماره‌اش را گفت، همان را هم در phone بگذار). به‌محض صدازدن
 capture_lead، دکمه‌ی لینک خودش زیر پیام نمایش داده می‌شود؛ دیگر respond_to_customer لازم نیست.`
     : `این فروشگاه لینک وبسایتی ثبت نکرده، پس مسیر تبدیل گرفتن شماره تماس است. وقتی مشتری علاقه‌ی
-واقعی نشان داد (نه صرفاً سؤال عمومی)، مؤدبانه شماره تماسش را بپرس؛ به‌محض گرفتن شماره (و اگر
-گفت، اسمش) بلافاصله capture_lead را صدا بزن — دیگر respond_to_customer لازم نیست، مکالمه
-همان‌جا تمام می‌شود.`
+کلی نشان داد (طبق تعریف بالا — نه یک سؤال مشخص بی‌جواب)، مؤدبانه شماره تماسش را بپرس؛ به‌محض گرفتن
+شماره (و اگر گفت، اسمش) بلافاصله capture_lead را صدا بزن — دیگر respond_to_customer لازم نیست،
+مکالمه همان‌جا تمام می‌شود.`
 }
 این فروشگاه عمداً کاتالوگ محصول ندارد یا خیلی محدود است — اگر search_products چیزی پیدا نکرد یا
 کاتالوگ خالی بود، هرگز نگو «محصولی نداریم» یا عذرخواهی نکن؛ این طبیعی و مورد انتظار است. به‌جایش
@@ -785,7 +795,19 @@ export class ConversationEngineService {
           false,
           Date.now() - fallbackStarted,
         );
-        return { intent: 'UNCLEAR' };
+        const chained = await this.tryModelFallbackChain(
+          conversation,
+          'PARSE_INTENT',
+          'parseIntent',
+          (model) =>
+            this.callParseIntent(
+              text,
+              conversation.currentState,
+              model,
+              storeContextSummary,
+            ),
+        );
+        return chained ?? { intent: 'UNCLEAR' };
       }
     }
   }
@@ -807,6 +829,42 @@ export class ConversationEngineService {
       inputTokens,
       outputTokens,
     });
+  }
+
+  // فیدبک کاربر ۱۴۰۵/۰۷/۲۱ — وقتی مدل A/B و بعد defaultModel() هم شکست خوردند، به‌جای تسلیم‌شدن
+  // به مقدار degraded، DEFAULT_MODEL_FALLBACK_CHAIN را به‌ترتیب امتحان کن. هر تلاش دقیقاً مثل
+  // تلاش‌های قبلی لاگ/بیل می‌شود (logAiCall/logTextCreditUsage)؛ روی اولین موفقیت برمی‌گردد، و
+  // اگر همه شکست خوردند null برمی‌گرداند تا caller مقدار degraded مخصوص خودش را برگرداند.
+  private async tryModelFallbackChain<T>(
+    conversation: ConversationWithStore,
+    kind:
+      'PARSE_INTENT' | 'CAPTION' | 'AGENT_CAPTION' | 'SATISFACTION_CLASSIFY',
+    label: string,
+    run: (
+      model: string,
+    ) => Promise<{ result: T; inputTokens: number; outputTokens: number }>,
+  ): Promise<T | null> {
+    for (const model of DEFAULT_MODEL_FALLBACK_CHAIN) {
+      const started = Date.now();
+      try {
+        const { result, inputTokens, outputTokens } = await run(model);
+        await this.logAiCall(conversation, kind, true, Date.now() - started);
+        await this.logTextCreditUsage(
+          conversation,
+          model,
+          inputTokens,
+          outputTokens,
+        );
+        return result;
+      } catch (err) {
+        this.logger.error(
+          `${label} chain fallback failed (model=${model}, conversation=${conversation.id})`,
+          err as Error,
+        );
+        await this.logAiCall(conversation, kind, false, Date.now() - started);
+      }
+    }
+    return null;
   }
 
   private async callCaption(
@@ -939,7 +997,25 @@ export class ConversationEngineService {
           false,
           Date.now() - fallbackStarted,
         );
-        return facts;
+        const chained = await this.tryModelFallbackChain(
+          conversation,
+          'CAPTION',
+          'caption',
+          (model) =>
+            this.callCaption(
+              facts,
+              model,
+              category,
+              customerQuestion,
+              skipGreeting,
+              bridgeNeedSummary,
+            ).then(({ text, inputTokens, outputTokens }) => ({
+              result: text,
+              inputTokens,
+              outputTokens,
+            })),
+        );
+        return chained ?? facts;
       }
     }
   }
@@ -1110,7 +1186,36 @@ export class ConversationEngineService {
           false,
           Date.now() - fallbackStarted,
         );
-        return { text: facts, relevantProductIds: candidateProductIds };
+        const chained = await this.tryModelFallbackChain(
+          conversation,
+          'CAPTION',
+          'captionWithRelevance',
+          (model) =>
+            this.callCaptionWithRelevance(
+              facts,
+              model,
+              category,
+              candidateProductIds,
+              customerQuestion,
+              skipGreeting,
+              bridgeNeedSummary,
+            ).then(
+              ({ text, relevantProductIds, inputTokens, outputTokens }) => ({
+                result: {
+                  text,
+                  relevantProductIds:
+                    relevantProductIds.length > 0
+                      ? relevantProductIds
+                      : candidateProductIds,
+                },
+                inputTokens,
+                outputTokens,
+              }),
+            ),
+        );
+        return (
+          chained ?? { text: facts, relevantProductIds: candidateProductIds }
+        );
       }
     }
   }
@@ -1226,7 +1331,24 @@ export class ConversationEngineService {
           false,
           Date.now() - fallbackStarted,
         );
-        return fa.salesAgent.clarifyNeedFallback;
+        const chained = await this.tryModelFallbackChain(
+          conversation,
+          'CAPTION',
+          'askClarifyingQuestion',
+          (model) =>
+            this.callAskClarifyingQuestion(
+              facts,
+              model,
+              category,
+              needSummary,
+              skipGreeting,
+            ).then(({ text, inputTokens, outputTokens }) => ({
+              result: text,
+              inputTokens,
+              outputTokens,
+            })),
+        );
+        return chained ?? fa.salesAgent.clarifyNeedFallback;
       }
     }
   }
@@ -1565,7 +1687,30 @@ relevantProductIds را خالی بگذار.${
           false,
           Date.now() - fallbackStarted,
         );
-        return { text: facts, relevantProductIds: candidateProductIds };
+        const chained = await this.tryModelFallbackChain(
+          conversation,
+          'AGENT_CAPTION',
+          'agentCaptionWithRelevance',
+          (model) =>
+            this.callAgentCaptionWithRelevance(
+              facts,
+              model,
+              category,
+              conversation.storeId,
+              candidateProductIds,
+              customerQuestion,
+              skipGreeting,
+            ).then(
+              ({ text, relevantProductIds, inputTokens, outputTokens }) => ({
+                result: { text, relevantProductIds },
+                inputTokens,
+                outputTokens,
+              }),
+            ),
+        );
+        return (
+          chained ?? { text: facts, relevantProductIds: candidateProductIds }
+        );
       }
     }
   }
@@ -1926,7 +2071,13 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       : null;
 
     const transcript = await this.buildRecentTranscript(conversation.id);
+    // فیدبک کاربر ۱۴۰۵/۰۷/۲۱ — این نادج ذاتاً حول search_products/سبد است (فروشگاه‌های با
+    // کاتالوگ واقعی)؛ در leadCaptureOnly هیچ کاتالوگ/سبد واقعی‌ای نیست، پس progressHappened
+    // هیچ‌وقت true نمی‌شود و این نادج همیشه زودتر از حد فعال می‌شد — و فشار «دیگه وقت
+    // سوال‌پرسیدن تمام شده»ی آن با قانون «اول answer_faq، بعد CTA» تداخل پیدا می‌کرد (دیده‌شده:
+    // یک سؤال قیمت واقعی بدون صدازدن answer_faq مستقیم با CTA جواب داده شد)
     const nudgeActive =
+      !conversation.store.leadCaptureOnly &&
       conversation.openQuestionStreak >= OPEN_QUESTION_NUDGE_THRESHOLD;
 
     const searchProductsTool = tool({
@@ -2372,9 +2523,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     // مجبور به حدس‌زدن کورکورانه می‌شود و برچسب‌های غلط/بی‌ربط (مثلاً AUTHORITY بدون هیچ ادعای
     // واقعی) می‌سازد — پس وقتی خاموش است، این فیلدها اصلاً در schema نیستند، نه فقط optional
     const respondBaseShape = {
-      text: z
-        .string()
-        .describe('متن فارسی کوتاه (حداکثر ۲-۳ جمله) برای مشتری'),
+      text: z.string().describe('متن فارسی کوتاه (حداکثر ۲-۳ جمله) برای مشتری'),
       relevantProductIds: z
         .array(z.string())
         .describe(
@@ -2429,7 +2578,11 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         'پاسخ نهایی به مشتری را اعلام می‌کند — دقیقاً یک‌بار، به‌عنوان آخرین قدم (مگر وقتی request_human_handoff زده‌ای)',
       inputSchema:
         storePersuasionEnabled && conversation.store.leadCaptureOnly
-          ? z.object({ ...respondBaseShape, ...persuasionShape, ...leadFunnelStageShape })
+          ? z.object({
+              ...respondBaseShape,
+              ...persuasionShape,
+              ...leadFunnelStageShape,
+            })
           : storePersuasionEnabled
             ? z.object({ ...respondBaseShape, ...persuasionShape })
             : conversation.store.leadCaptureOnly
@@ -2753,7 +2906,20 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           false,
           Date.now() - fallbackStarted,
         );
-        return this.doClarifyUnclear(conversation);
+        const chained = await this.tryModelFallbackChain(
+          conversation,
+          'AGENT_CAPTION',
+          'runFullAgentTurn',
+          (model) =>
+            this.callFullAgentTurn(conversation, text, model, true).then(
+              ({ engineResult, inputTokens, outputTokens }) => ({
+                result: engineResult,
+                inputTokens,
+                outputTokens,
+              }),
+            ),
+        );
+        return chained ?? this.doClarifyUnclear(conversation);
       }
     }
   }
@@ -3256,7 +3422,20 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           false,
           Date.now() - fallbackStarted,
         );
-        return 'UNRELATED';
+        const chained = await this.tryModelFallbackChain(
+          conversation,
+          'SATISFACTION_CLASSIFY',
+          'classifySatisfactionReply',
+          (model) =>
+            this.callSatisfactionClassify(text, model).then(
+              ({ verdict, inputTokens, outputTokens }) => ({
+                result: verdict,
+                inputTokens,
+                outputTokens,
+              }),
+            ),
+        );
+        return chained ?? 'UNRELATED';
       }
     }
   }
@@ -5531,24 +5710,26 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     expectedAmountToman: number,
     paymentMethod: OrderPaymentMethod = 'CARD_TO_CARD',
   ): Promise<{ extractedAmountToman: number; match: boolean } | null> {
-    try {
-      const ext = receiptImageKey.split('.').pop() ?? 'jpg';
-      const dataUrl = `data:${mimeTypeForExt(ext)};base64,${buffer.toString('base64')}`;
-      const promptText =
-        paymentMethod === 'SNAPPPAY'
-          ? 'این تصویر باید اسکرین‌شات صفحه‌ی موفقیت پرداخت اپلیکیشن/وب اسنپ‌پی (Snapp Pay) باشد. مبلغ پرداخت‌شده را به تومان استخراج کن (اگر به ریال نوشته شده، بر ۱۰ تقسیم کن). اگر این تصویر اصلاً شبیه صفحه‌ی موفقیت اسنپ‌پی نیست یا مبلغ قابل‌تشخیص نیست، found را false بگذار و amountToman را null بگذار.'
-          : 'این تصویر یک رسید انتقال وجه بانکی ایرانی (کارت‌به‌کارت/پایا/ساتنا) است. مبلغ واریزشده را به تومان استخراج کن (اگر مبلغ روی رسید به ریال نوشته شده، آن را بر ۱۰ تقسیم کن تا به تومان تبدیل شود). اگر مبلغ به‌هیچ‌وجه قابل‌تشخیص نیست، found را false بگذار و amountToman را null بگذار.';
-      const visionMessage: UserModelMessage = {
-        role: 'user',
-        content: [
-          { type: 'image', image: dataUrl },
-          { type: 'text', text: promptText },
-        ],
-      };
+    const ext = receiptImageKey.split('.').pop() ?? 'jpg';
+    const dataUrl = `data:${mimeTypeForExt(ext)};base64,${buffer.toString('base64')}`;
+    const promptText =
+      paymentMethod === 'SNAPPPAY'
+        ? 'این تصویر باید اسکرین‌شات صفحه‌ی موفقیت پرداخت اپلیکیشن/وب اسنپ‌پی (Snapp Pay) باشد. مبلغ پرداخت‌شده را به تومان استخراج کن (اگر به ریال نوشته شده، بر ۱۰ تقسیم کن). اگر این تصویر اصلاً شبیه صفحه‌ی موفقیت اسنپ‌پی نیست یا مبلغ قابل‌تشخیص نیست، found را false بگذار و amountToman را null بگذار.'
+        : 'این تصویر یک رسید انتقال وجه بانکی ایرانی (کارت‌به‌کارت/پایا/ساتنا) است. مبلغ واریزشده را به تومان استخراج کن (اگر مبلغ روی رسید به ریال نوشته شده، آن را بر ۱۰ تقسیم کن تا به تومان تبدیل شود). اگر مبلغ به‌هیچ‌وجه قابل‌تشخیص نیست، found را false بگذار و amountToman را null بگذار.';
+    const visionMessage: UserModelMessage = {
+      role: 'user',
+      content: [
+        { type: 'image', image: dataUrl },
+        { type: 'text', text: promptText },
+      ],
+    };
+    const attempt = async (
+      model: string,
+    ): Promise<{ extractedAmountToman: number; match: boolean } | null> => {
       const { object } = await generateObject({
         model: this.aiProvider.buildClient(undefined, {
           supportsStructuredOutputs: true,
-        })(defaultModel()),
+        })(model),
         schema: z.object({
           found: z.boolean(),
           amountToman: z.number().nullable(),
@@ -5559,12 +5740,21 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       // تلورانس کوچک (۱۰۰۰ تومان) برای خطای رند/OCR، نه برابری دقیق ریاضی
       const match = Math.abs(object.amountToman - expectedAmountToman) <= 1000;
       return { extractedAmountToman: object.amountToman, match };
+    };
+
+    try {
+      return await attempt(defaultModel());
     } catch (err) {
       this.logger.error(
         `receipt vision extraction failed for key=${receiptImageKey}`,
         err as Error,
       );
-      return null;
+      return withDefaultModelFallbackChain(attempt, (model, chainErr) =>
+        this.logger.error(
+          `receipt vision extraction chain fallback failed (model=${model}, key=${receiptImageKey})`,
+          chainErr as Error,
+        ),
+      );
     }
   }
 
@@ -5851,9 +6041,8 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     );
     if (withDescription.length === 0) return null;
 
-    try {
-      const tone = toneForCategory(conversation.store.category);
-      const model = defaultModel();
+    const tone = toneForCategory(conversation.store.category);
+    const attempt = async (model: string): Promise<string | null> => {
       const { object, usage } = await generateObject({
         model: this.aiProvider.buildClient()(model),
         schema: z.object({
@@ -5874,12 +6063,21 @@ answered=false بده (به‌جای حدس‌زدن).`,
         usage.outputTokens ?? 0,
       );
       return object.answered ? (object.reply ?? '').trim() || null : null;
+    };
+
+    try {
+      return await attempt(defaultModel());
     } catch (err) {
       this.logger.error(
         `tryAnswerFromProductDescriptions failed (conversation=${conversation.id})`,
         err as Error,
       );
-      return null;
+      return withDefaultModelFallbackChain(attempt, (model, chainErr) =>
+        this.logger.error(
+          `tryAnswerFromProductDescriptions chain fallback failed (model=${model}, conversation=${conversation.id})`,
+          chainErr as Error,
+        ),
+      );
     }
   }
 
@@ -5909,9 +6107,8 @@ answered=false بده (به‌جای حدس‌زدن).`,
       .filter(Boolean)
       .join('\n');
 
-    try {
-      const tone = toneForCategory(conversation.store.category);
-      const model = defaultModel();
+    const tone = toneForCategory(conversation.store.category);
+    const attempt = async (model: string): Promise<string | null> => {
       const { object, usage } = await generateObject({
         model: this.aiProvider.buildClient()(model),
         schema: z.object({
@@ -5931,12 +6128,21 @@ answered=false بده (به‌جای حدس‌زدن).`,
         usage.outputTokens ?? 0,
       );
       return object.answered ? (object.reply ?? '').trim() || null : null;
+    };
+
+    try {
+      return await attempt(defaultModel());
     } catch (err) {
       this.logger.error(
         `tryAnswerFromStoreProfile failed (conversation=${conversation.id})`,
         err as Error,
       );
-      return null;
+      return withDefaultModelFallbackChain(attempt, (model, chainErr) =>
+        this.logger.error(
+          `tryAnswerFromStoreProfile chain fallback failed (model=${model}, conversation=${conversation.id})`,
+          chainErr as Error,
+        ),
+      );
     }
   }
 
@@ -6059,7 +6265,11 @@ answered=false بده (به‌جای حدس‌زدن).`,
         : fa.salesAgent.leadCaptured;
     await this.logReply(conversation, reply, uiBlock);
     await this.notifySellerOfLeadCapture(conversation, args.phone, args.name);
-    return { reply, uiBlocks: uiBlock.type === 'NONE' ? [] : [uiBlock], state: nextState };
+    return {
+      reply,
+      uiBlocks: uiBlock.type === 'NONE' ? [] : [uiBlock],
+      state: nextState,
+    };
   }
 
   // docs/PRD-product-strategy-and-roadmap.md بخش ۳.۲ — وقتی هر دو فیلد ست نشده، یعنی

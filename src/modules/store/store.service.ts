@@ -18,7 +18,10 @@ import { randomBytes } from 'crypto';
 import { generateObject } from 'ai';
 import { z } from 'zod';
 import { AiProviderService } from '../../common/services/ai-provider.service';
-import { defaultModel } from '../sales-agent/model-variants';
+import {
+  defaultModel,
+  withDefaultModelFallbackChain,
+} from '../sales-agent/model-variants';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
 import { MediaTranscodeService } from '../../common/services/media-transcode.service';
@@ -470,7 +473,13 @@ export class StoreService {
         const goldPricingSummary =
           pricingModel === 'WEIGHT_BASED_FORMULA'
             ? describeGoldPricing(
-                { weightGrams, purityKarat, goldWageType, goldWageValue, goldProfitPercent },
+                {
+                  weightGrams,
+                  purityKarat,
+                  goldWageType,
+                  goldWageValue,
+                  goldProfitPercent,
+                },
                 store,
               )
             : null;
@@ -656,44 +665,57 @@ export class StoreService {
       }`;
     });
 
-    const { object } = await generateObject({
-      model: this.aiProvider.buildClient(undefined, {
-        supportsStructuredOutputs: true,
-      })(defaultModel()),
-      schema: z.object({
-        topics: z
-          .array(
-            z.object({
-              topic: z
-                .string()
-                .describe('خلاصه‌ی کوتاه فارسی موضوع تکرارشونده'),
-              field: z.enum([
-                'brandIntro',
-                'returnPolicy',
-                'shippingInfo',
-                'ownerNotes',
-                'workingHours',
-                'other',
-              ]),
-              summary: z
-                .string()
-                .describe(
-                  'یک جمله توضیح برای فروشنده که چرا این را به پروفایلش اضافه کند',
-                ),
-              occurrences: z.number(),
-            }),
-          )
-          .max(5),
-      }),
-      system: `فهرست زیر مواردی است که ربات فروش یک فروشگاه نتوانسته جواب مشتری را بدهد یا مشتری
+    const attempt = async (model: string) => {
+      const { object } = await generateObject({
+        model: this.aiProvider.buildClient(undefined, {
+          supportsStructuredOutputs: true,
+        })(model),
+        schema: z.object({
+          topics: z
+            .array(
+              z.object({
+                topic: z
+                  .string()
+                  .describe('خلاصه‌ی کوتاه فارسی موضوع تکرارشونده'),
+                field: z.enum([
+                  'brandIntro',
+                  'returnPolicy',
+                  'shippingInfo',
+                  'ownerNotes',
+                  'workingHours',
+                  'other',
+                ]),
+                summary: z
+                  .string()
+                  .describe(
+                    'یک جمله توضیح برای فروشنده که چرا این را به پروفایلش اضافه کند',
+                  ),
+                occurrences: z.number(),
+              }),
+            )
+            .max(5),
+        }),
+        system: `فهرست زیر مواردی است که ربات فروش یک فروشگاه نتوانسته جواب مشتری را بدهد یا مشتری
 صریح خواسته با انسان صحبت کند. موضوعات تکرارشونده را پیدا کن و خوشه‌بندی کن — هر خوشه یکی از
 فیلدهای پروفایل فروشگاه (brandIntro=معرفی برند، returnPolicy=قوانین مرجوعی، shippingInfo=شرایط
 ارسال، ownerNotes=یادداشت‌های آزاد فروشنده، workingHours=ساعت پاسخ‌گویی، other=هیچ‌کدام) را نشانه
 می‌گیرد که اگر فروشنده پر کند، دفعه‌ی بعد ربات خودش جواب می‌دهد. فقط موضوعات واقعاً تکرارشونده
 (حداقل ۲ مورد مشابه) را برگردان، نه موارد تکی. حداکثر ۵ خوشه، فقط JSON مطابق schema.`,
-      prompt: cases.join('\n'),
-    });
-    return object.topics;
+        prompt: cases.join('\n'),
+      });
+      return object.topics;
+    };
+
+    try {
+      return await attempt(defaultModel());
+    } catch (err) {
+      // فیدبک کاربر ۱۴۰۵/۰۷/۲۱ — قبل از تسلیم، DEFAULT_MODEL_FALLBACK_CHAIN را امتحان کن؛
+      // فقط اگر همه (از جمله این‌ها) شکست خوردند همان خطای اصلی را دوباره throw کن تا رفتار
+      // قبلی (propagate به caller) حفظ شود، نه یک [] ساکت/گمراه‌کننده
+      const chained = await withDefaultModelFallbackChain(attempt);
+      if (chained) return chained;
+      throw err;
+    }
   }
 
   // عمداً public — StoreAdPlacementService (جایگاه تبلیغاتی محصول‌محور) هم از همین چک

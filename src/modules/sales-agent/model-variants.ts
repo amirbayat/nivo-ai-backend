@@ -63,3 +63,35 @@ export function resolveModel(variant: string | null | undefined): string {
 export function defaultModel(): string {
   return MODEL_VARIANTS[DEFAULT_VARIANT_KEY];
 }
+
+// فیدبک کاربر ۱۴۰۵/۰۷/۲۱ — زنجیره‌ی مدل‌هایی که وقتی defaultModel() («شبکه‌ی ایمنی» بالا) هم
+// شکست خورد باید به‌ترتیب امتحان شوند، نه این‌که مستقیم به مقدار degraded (مثل UNCLEAR/stub)
+// تسلیم شویم. ترتیب دقیقاً همان ترتیبی است که کاربر خواسته — هیچ منطق انتخاب/امتیازدهی دیگری
+// روی این لیست اعمال نمی‌شود.
+export const DEFAULT_MODEL_FALLBACK_CHAIN: readonly string[] = [
+  'openai/gpt-6-luna-pro',
+  'openai/gpt-6-luna',
+  'google/gemini-3.8-flash',
+  'google/gemini-3-flash-preview',
+  'openai/gpt-5.6-luna',
+  'openai/gpt-6.1-sol',
+  'openai/gpt-5.6-sol',
+];
+
+// فیدبک کاربر ۱۴۰۵/۰۷/۲۱ — نسخه‌ی ساده (بدون لاگ AiCallMetric/credit خاص ConversationEngineService)
+// برای caller هایی که فقط یک تلاش ساده‌ی defaultModel() داشتند (بدون زیرساخت A/B)، مثل
+// store-kb.service.ts/store.service.ts؛ به ترتیب DEFAULT_MODEL_FALLBACK_CHAIN را امتحان می‌کند
+// و روی اولین موفقیت برمی‌گردد، یا اگر همه شکست خوردند null.
+export async function withDefaultModelFallbackChain<T>(
+  run: (model: string) => Promise<T>,
+  onAttemptFailed?: (model: string, err: unknown) => void,
+): Promise<T | null> {
+  for (const model of DEFAULT_MODEL_FALLBACK_CHAIN) {
+    try {
+      return await run(model);
+    } catch (err) {
+      onAttemptFailed?.(model, err);
+    }
+  }
+  return null;
+}
