@@ -361,6 +361,9 @@ enum PaymentProvider {
   // PaymentGatewayRegistry/createPayment redirect عبور نمی‌کند (خرید کاملاً سمت کلاینت با SDK
   // بازار انجام می‌شود، بک‌اند فقط purchaseToken را در برابر API بازار اعتبارسنجی می‌کند)
   BAZAAR
+  // docs/PRD-nivo-sales-unified.md فاز ۱ (مشخصات ج بخش ۲۴) — درگاه اسنپ‌پی برای خرید اعتبار
+  // فروشنده؛ تا رسیدن کد درگاه dark است (SNAPPPAY_ENABLED + CreditSourceMarkup.enabledForPurchase)
+  SNAPPPAY
 }
 
 model RefreshToken {
@@ -2132,6 +2135,8 @@ model Store {
   // docs/PRD-seller-credit-billing.md بخش ۱/۵ — اعتبار AI فروشگاه به تومان؛ بعد از تمام‌شدن
   // سهمیه‌ی رایگان روزانه، مصرف واقعی هر فراخوانی AI از همین فیلد کم می‌شود
   creditBalanceToman             Int               @default(0)
+  // فاز ۱ — تفکیک creditBalanceToman به‌ازای منبع (Σ بخش‌ها = creditBalanceToman)
+  creditBuckets                  StoreCreditBucket[]
   // فیدبک کاربر ۱۴۰۵/۰۷/۱۲ — برای فروشنده‌ای که هنوز اعتبار نخریده (billingMode!==PAID)،
   // حداکثر به‌تعداد FREE_DAILY_QUOTA (همون سقف ۱۰ خریدار جدید رایگان در روز) مکالمه‌ی مجزای
   // وویس **در روز** می‌گیرند؛ با اولین وویسِ هر مکالمه‌ی تازه زیاد می‌شود، نیمه‌شب با
@@ -2866,11 +2871,68 @@ model CreditUsageEvent {
   tokensInput    Int                @default(0)
   tokensOutput   Int                @default(0)
   costUsdMicros  Int                @default(0) // دلار × ۱٬۰۰۰٬۰۰۰ — مستقل از نوسان نرخ ارز
+  // فاز ۱ (مشخصات ج ۲۳.۱) — فقط برای TOPUP: منبع (درگاه) شارژ
+  source          CreditSource?
+  // فاز ۱ — برای مصرف: [{source, chargedToman, markup}]؛ یک مصرف می‌تواند از چند بخش کسر شود
+  // (source='TRIAL' برای بخشی که از اعتبار آزمایشی رفته)
+  chargeBreakdown Json?
   createdAt      DateTime           @default(now())
 
   @@index([storeId, createdAt])
   @@index([customerId])
   @@map("credit_usage_events")
+}
+
+// فاز ۱ (مشخصات ج ۲۳.۱) — منبع هر بخش از اعتبار فروشگاه؛ نگاشت یک‌به‌یک از PaymentProvider
+// (+ ADMIN_MANUAL شارژ دستی ادمین، LEGACY موجودی قبل از این قابلیت)
+enum CreditSource {
+  ZIBAL
+  ZARINPAL
+  VANDAR
+  BAZAAR
+  SNAPPPAY
+  ADMIN_MANUAL
+  LEGACY
+}
+
+// ناوردایی: Store.creditBalanceToman = Σ StoreCreditBucket.balanceToman — همیشه در یک تراکنش
+// به‌روز می‌شود (StoreCreditDeductionService). می‌تواند منفی شود (مصرف تا کف overdraft).
+model StoreCreditBucket {
+  id           String       @id @default(uuid())
+  storeId      String
+  store        Store        @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  source       CreditSource
+  balanceToman Int          @default(0)
+  updatedAt    DateTime     @updatedAt
+
+  @@unique([storeId, source])
+  @@map("store_credit_buckets")
+}
+
+// ضریب مصرف AI به‌ازای منبع اعتبار (قابل‌تنظیم توسط ادمین)؛ null = ارث از SalesAgentGlobalConfig
+model CreditSourceMarkup {
+  source             CreditSource @id
+  buyerMarkup        Float?
+  sellerMarkup       Float?
+  enabledForPurchase Boolean      @default(true)
+  updatedAt          DateTime     @updatedAt
+  updatedByAdminId   String?
+
+  @@map("credit_source_markups")
+}
+
+// ممیزی تغییر ضرایب: چه کسی، کی، از چه عددی به چه عددی
+model CreditSourceMarkupHistory {
+  id        String       @id @default(uuid())
+  source    CreditSource
+  field     String // buyerMarkup | sellerMarkup | enabledForPurchase
+  oldValue  String?
+  newValue  String?
+  adminId   String?
+  createdAt DateTime     @default(now())
+
+  @@index([source, createdAt])
+  @@map("credit_source_markup_history")
 }
 
 enum CreditUsageKind {
