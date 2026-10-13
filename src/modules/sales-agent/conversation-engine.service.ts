@@ -183,17 +183,23 @@ type ProductVariantRow = {
 // محصول با گزینه فعال است یعنی حداقل یک ProductOptionType دارد — خودِ وجود واریانت‌ها هم
 // همین را نشان می‌دهد، ولی optionTypes منبع واقعی تصمیم است (ممکن است فروشنده گزینه ساخته
 // ولی هنوز هیچ ردیف موجودی‌دار نساخته باشد)
-function hasVariantOptions(product: ProductLike): boolean {
+function hasVariantOptions(
+  product: Pick<ProductLike, 'optionTypes'>,
+): boolean {
   return (product.optionTypes?.length ?? 0) > 0;
 }
 
 // مجموع موجودی همه‌ی ترکیب‌ها — برای PRODUCT_CARD/COMPARE_CARD وقتی محصول واریانت دارد،
 // چون Product.stock خودش برای محصول واریانت‌دار دیگر معنی ندارد (تصمیم §۴)
-function aggregateVariantStock(product: ProductLike): number {
+function aggregateVariantStock(
+  product: Pick<ProductLike, 'variants'>,
+): number {
   return (product.variants ?? []).reduce((sum, v) => sum + v.stock, 0);
 }
 
-function displayStock(product: ProductLike): number {
+function displayStock(
+  product: Pick<ProductLike, 'stock' | 'optionTypes' | 'variants'>,
+): number {
   return hasVariantOptions(product)
     ? aggregateVariantStock(product)
     : product.stock;
@@ -795,6 +801,8 @@ export class ConversationEngineService {
     product: {
       id: string;
       stock: number;
+      optionTypes?: ProductOptionTypeWithValues[];
+      variants?: ProductVariantRow[];
       persuasionTechniquesEnabled: boolean;
     },
     storePersuasionEnabled: boolean,
@@ -814,7 +822,8 @@ export class ConversationEngineService {
         `تاکنون ${orderCount} سفارش واقعی تاییدشده برای این محصول ثبت شده`,
       );
     }
-    if (product.stock > 0 && product.stock <= LOW_STOCK_THRESHOLD) {
+    const stockNow = displayStock(product);
+    if (stockNow > 0 && stockNow <= LOW_STOCK_THRESHOLD) {
       signals.push(
         'موجودی این محصول محدود است (فقط عبارت کلی بگو، هرگز عدد دقیق)',
       );
@@ -840,7 +849,7 @@ export class ConversationEngineService {
     },
     storePersuasionEnabled: boolean,
   ): Promise<string> {
-    const base = `${product.name} (شناسه: ${product.id}, ${product.basePrice} تومان)${product.stock === 0 ? ' — فعلاً ناموجود' : ''}${product.goldPricingSummary ? ` — ${product.goldPricingSummary}` : ''}${product.description ? ` — توضیحات: ${truncateDescriptionForFacts(product.description)}` : ''}${formatSpecsForFacts(parseProductSpecs(product.specs))}`;
+    const base = `${product.name} (شناسه: ${product.id}, ${product.basePrice} تومان)${displayStock(product) === 0 ? ' — فعلاً ناموجود' : ''}${product.goldPricingSummary ? ` — ${product.goldPricingSummary}` : ''}${product.description ? ` — توضیحات: ${truncateDescriptionForFacts(product.description)}` : ''}${formatSpecsForFacts(parseProductSpecs(product.specs))}`;
     const note = await this.buildPersuasionNote(
       storeId,
       product,
@@ -1703,7 +1712,7 @@ export class ConversationEngineService {
           id: product.id,
           name: product.name,
           basePrice: product.basePrice,
-          inStock: product.stock > 0,
+          inStock: displayStock(product) > 0,
           description: product.description
             ? truncateDescriptionForFacts(product.description)
             : null,
@@ -1722,7 +1731,7 @@ export class ConversationEngineService {
           id: p.id,
           name: p.name,
           basePrice: p.basePrice,
-          inStock: p.stock > 0,
+          inStock: displayStock(p) > 0,
         }));
       },
     });
@@ -2165,7 +2174,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
             id: p.id,
             name: p.name,
             basePrice: p.basePrice,
-            stock: p.stock,
+            stock: displayStock(p),
             images: p.images,
             videos: p.videos,
             weightGrams: p.weightGrams ?? null,
@@ -2247,7 +2256,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
             id: p.id,
             name: p.name,
             basePrice: p.basePrice,
-            stock: p.stock,
+            stock: displayStock(p),
             images: p.images,
             description: p.description,
             videos: parseProductVideos(p.videos),
@@ -2262,7 +2271,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           id: p.id,
           name: p.name,
           basePrice: p.basePrice,
-          inStock: p.stock > 0,
+          inStock: displayStock(p) > 0,
           description: p.description
             ? truncateDescriptionForFacts(p.description)
             : null,
@@ -2290,7 +2299,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           id: product.id,
           name: product.name,
           basePrice: product.basePrice,
-          stock: product.stock,
+          stock: displayStock(product),
           images: product.images,
           description: product.description,
           videos: parseProductVideos(product.videos),
@@ -2309,7 +2318,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           id: product.id,
           name: product.name,
           basePrice: product.basePrice,
-          inStock: product.stock > 0,
+          inStock: displayStock(product) > 0,
           description: product.description
             ? truncateDescriptionForFacts(product.description)
             : null,
@@ -2656,7 +2665,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
             id: p.id,
             name: p.name,
             basePrice: p.basePrice,
-            stock: p.stock,
+            stock: displayStock(p),
             images: p.images,
             description: p.description,
             videos: parseProductVideos(p.videos),
@@ -2672,7 +2681,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
             id: p.id,
             name: p.name,
             basePrice: p.basePrice,
-            stock: p.stock,
+            stock: displayStock(p),
             specs: parseProductSpecs(p.specs),
           })),
         };
@@ -2724,7 +2733,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           id: p.id,
           name: p.name,
           basePrice: p.basePrice,
-          stock: p.stock,
+          stock: displayStock(p),
           images: p.images,
           description: p.description,
           videos: parseProductVideos(p.videos),
@@ -3864,7 +3873,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           id: p.id,
           name: p.name,
           basePrice: p.basePrice,
-          stock: p.stock,
+          stock: displayStock(p),
           images: p.images,
           description: p.description,
           videos: parseProductVideos(p.videos),
@@ -5414,7 +5423,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     // نمی‌خواهد تعداد واقعی موجودی افشا شود؛ فقط وضعیت موجود/ناموجود کافی است.
     // docs/PRD-product-display-focus-and-variations.md §۴.۲ — اگر محصول گزینه (سایز/رنگ) دارد،
     // caption از قبل مشتری را آگاه می‌کند که بعد از «افزودن به سبد» باید گزینه انتخاب کند
-    const facts = `مشتری از لینک مستقیم این محصول وارد شده: ${product.name} (${product.basePrice} تومان)${product.stock === 0 ? ' — فعلاً ناموجود' : ''}${product.goldPricingSummary ? ` — ${product.goldPricingSummary}` : ''}${hasVariantOptions(product) ? ` — این محصول گزینه‌های مختلف (${product.optionTypes!.map((o) => o.name).join('/')}) دارد` : ''}${product.description ? `\nتوضیحات محصول: ${truncateDescriptionForFacts(product.description)}` : ''}${formatSpecsForFacts(parseProductSpecs(product.specs))}${await this.commentsFactsSuffix(product.id)}${await this.crossSellFactsSuffix(conversation.storeId, product.id)}`;
+    const facts = `مشتری از لینک مستقیم این محصول وارد شده: ${product.name} (${product.basePrice} تومان)${displayStock(product) === 0 ? ' — فعلاً ناموجود' : ''}${product.goldPricingSummary ? ` — ${product.goldPricingSummary}` : ''}${hasVariantOptions(product) ? ` — این محصول گزینه‌های مختلف (${product.optionTypes!.map((o) => o.name).join('/')}) دارد` : ''}${product.description ? `\nتوضیحات محصول: ${truncateDescriptionForFacts(product.description)}` : ''}${formatSpecsForFacts(parseProductSpecs(product.specs))}${await this.commentsFactsSuffix(product.id)}${await this.crossSellFactsSuffix(conversation.storeId, product.id)}`;
     // skipGreeting=true چون finalReply پایین همیشه (بدون قید isFirstReply) یک buildGreeting
     // جلوی همین reply می‌چسباند — بدون این پرچم، caption() خودش هم یک «سلام!» جدا می‌ساخت
     const reply = await this.caption(facts, conversation, undefined, true);
@@ -5482,7 +5491,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
 
     // همون دلیل showProduct بالا — بدون عدد موجودی در واقعیت‌ها. hasVariantOptions هم همان‌جا
     // توضیح داده شد: فقط یک اشاره‌ی کوتاه که این محصول گزینه دارد، بدون جزئیات
-    const facts = `این محصولات فروشگاه است: ${products.map((p) => `${p.name} (${p.basePrice} تومان)${p.stock === 0 ? ' — فعلاً ناموجود' : ''}${goldPricingSummaryOf(p) ? ` — ${goldPricingSummaryOf(p)}` : ''}${hasVariantOptions(p) ? ` — دارای گزینه‌های مختلف (${p.optionTypes.map((o) => o.name).join('/')})` : ''}${p.description ? ` — توضیحات: ${truncateDescriptionForFacts(p.description)}` : ''}${formatSpecsForFacts(parseProductSpecs(p.specs))}`).join('، ')}`;
+    const facts = `این محصولات فروشگاه است: ${products.map((p) => `${p.name} (${p.basePrice} تومان)${displayStock(p) === 0 ? ' — فعلاً ناموجود' : ''}${goldPricingSummaryOf(p) ? ` — ${goldPricingSummaryOf(p)}` : ''}${hasVariantOptions(p) ? ` — دارای گزینه‌های مختلف (${p.optionTypes.map((o) => o.name).join('/')})` : ''}${p.description ? ` — توضیحات: ${truncateDescriptionForFacts(p.description)}` : ''}${formatSpecsForFacts(parseProductSpecs(p.specs))}`).join('، ')}`;
 
     // docs/PRD-sales-agent-response-strategy-ab.md بخش ۱، جدول Track A — جدول تصمیمی که
     // docs/PRD-sales-agent-implicit-need-detection.md فاز ۱ محاسبه می‌کرد ولی تا امروز هیچ‌جا

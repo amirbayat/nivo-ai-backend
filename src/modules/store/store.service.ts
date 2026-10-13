@@ -412,6 +412,8 @@ export class StoreService {
           goldWageType: true,
           goldWageValue: true,
           goldProfitPercent: true,
+          optionTypes: { select: { id: true } },
+          variants: { select: { stock: true } },
         },
       }),
       this.prisma.product.count({ where }),
@@ -437,8 +439,14 @@ export class StoreService {
           goldWageType,
           goldWageValue,
           goldProfitPercent,
+          optionTypes,
+          variants,
           ...publicFields
         } = p;
+        // محصول واریانت‌دار: موجودی واقعی جمع ترکیب‌هاست، Product.stock معنی ندارد
+        if (optionTypes.length > 0) {
+          publicFields.stock = variants.reduce((n, v) => n + v.stock, 0);
+        }
         let displayPrice = p.basePrice;
         let priceUnavailable = false;
         if (pricingModel === 'WEIGHT_BASED_FORMULA') {

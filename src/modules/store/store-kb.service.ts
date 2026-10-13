@@ -203,6 +203,15 @@ export interface KbExtractResult {
 
 // فیدبک کاربر ۱۴۰۵/۰۷/۱۵ — همان شکلی که generateProductOptionsFromText برمی‌گرداند (§۴.۱.۱)،
 // به‌علاوه‌ی stock اختیاری هر مقدار؛ وقتی متن تعداد هر حالت را هم می‌گوید («سایز M سه تا»)
+// دسته‌هایی از BUSINESS_CATEGORIES که محصولشان معمولاً سایز/رنگ/مدل دارد
+const VARIANT_PRONE_CATEGORIES = new Set([
+  'پوشاک',
+  'کیف و کفش',
+  'کودک و نوزاد',
+  'ورزش و سفر',
+  'جواهرات و اکسسوری',
+]);
+
 export interface ExtractedVariantOption {
   name: string;
   values: { value: string; stock?: number }[];
@@ -1584,6 +1593,17 @@ ${updatedNotes}`,
     storeId: string,
     text: string,
   ): Promise<ExtractProductsResult> {
+    // فیدبک کاربر ۱۴۰۵/۰۷/۲۱ — «از سایز XL تا 3XL، موجودی هرکدام ۲۰» در آپلود دسته‌جمعی variant
+    // نساخت؛ دسته‌ی فروشگاه (پوشاک/کیف و کفش/...) سیگنال قوی‌ای است که محصول احتمالاً
+    // سایز/رنگ دارد و باید به مدل گفته شود، نه اینکه فقط به عبارت صریح متن تکیه کند
+    const store = await this.prisma.store.findUnique({
+      where: { id: storeId },
+      select: { category: true },
+    });
+    const variantCategoryHint =
+      store?.category && VARIANT_PRONE_CATEGORIES.has(store.category)
+        ? `\nدسته‌ی این فروشگاه «${store.category}» است؛ محصولات این دسته تقریباً همیشه سایز/رنگ/مدل دارند، پس اگر متن هر اشاره‌ای به سایز، رنگ یا مدل می‌کند حتماً variantOptions را پر کن.`
+        : '';
     const { object } = await generateObject({
       model: this.provider('openai/gpt-5.4-mini'),
       // code/description/basePrice/stock عمداً .nullable() هستند نه .optional() — طبق
@@ -1656,6 +1676,10 @@ ${updatedNotes}`,
 عدد را در stock همان مقدار بگذار، وگرنه stock آن مقدار را null بگذار. وقتی محصول variant دارد،
 stock کلی محصول دیگر مهم نیست (همان را null بگذار) چون موجودیِ واقعی به تفکیک هر حالت است، نه کل
 محصول. حداکثر ۲ نوع گزینه برگردان. اگر محصول چند حالته نیست، variantOptions را آرایه‌ی خالی بگذار.
+اگر متن بازه گفته («از سایز XL تا 3XL»، «سایز ۳۶ تا ۴۲»)، همه‌ی مقادیر بین دو سر بازه را یکی‌یکی
+در values بیاور (XL، 2XL، 3XL). اگر یک تعداد برای همه گفته شده («موجودی هرکدام ۲۰ تا»، «از هر سایز
+۲۰ تا دارم»)، همان عدد را در stock تک‌تک مقادیر بگذار. وقتی variantOptions پر است، stock سطح محصول را
+null بگذار.${variantCategoryHint}
 اگر برای چیزی مجبور به فرض شدی (مثلاً تفسیر یک کلمه‌ی مبهم)، آن فرض را به‌صورت یک جمله‌ی کوتاه فارسی در
 assumptions بنویس. اگر متن هیچ محصول قابل‌تشخیصی نداشت، items را آرایه‌ی خالی برگردان. پاسخ را
 فقط به‌صورت یک شیء JSON معتبر برگردان.`,
