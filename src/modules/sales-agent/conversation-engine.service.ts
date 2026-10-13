@@ -1598,6 +1598,7 @@ export class ConversationEngineService {
   private async searchProductsForConsultation(storeId: string, query: string) {
     const exact = await this.prisma.product.findFirst({
       where: { storeId, code: { equals: query, mode: 'insensitive' } },
+      include: PRODUCT_VARIANT_INCLUDE,
     });
     if (exact) {
       await this.resolveProductPrices(storeId, [exact]);
@@ -1614,6 +1615,7 @@ export class ConversationEngineService {
       },
       orderBy: { createdAt: 'desc' },
       take: 8,
+      include: PRODUCT_VARIANT_INCLUDE,
     });
     if (literalMatches.length > 0) {
       await this.resolveProductPrices(storeId, literalMatches);
@@ -1640,6 +1642,7 @@ export class ConversationEngineService {
       where: { storeId },
       orderBy: { createdAt: 'desc' },
       take: CONSULTATION_FULL_CATALOG_FALLBACK_CAP,
+      include: PRODUCT_VARIANT_INCLUDE,
     });
     await this.resolveProductPrices(storeId, fallback);
     return fallback;
@@ -1703,6 +1706,7 @@ export class ConversationEngineService {
       execute: async ({ productId }: { productId: string }) => {
         const product = await this.prisma.product.findUnique({
           where: { id: productId },
+          include: PRODUCT_VARIANT_INCLUDE,
         });
         if (!product || product.storeId !== storeId) {
           return { error: 'محصولی با این شناسه در این فروشگاه پیدا نشد' };
@@ -2290,6 +2294,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       execute: async ({ productId }: { productId: string }) => {
         const product = await this.prisma.product.findUnique({
           where: { id: productId },
+          include: PRODUCT_VARIANT_INCLUDE,
         });
         if (!product || product.storeId !== storeId) {
           return { error: 'محصولی با این شناسه در این فروشگاه پیدا نشد' };
@@ -2658,6 +2663,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       execute: async ({ productIds }: { productIds: string[] }) => {
         const products = await this.prisma.product.findMany({
           where: { id: { in: productIds }, storeId },
+          include: PRODUCT_VARIANT_INCLUDE,
         });
         await this.resolveProductPrices(storeId, products);
         for (const p of products) {
