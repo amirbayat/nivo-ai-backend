@@ -7,3 +7,6 @@ export const SALES_OPS_TIMEZONE = 'Asia/Tehran';
 // 0.10 — سقف ساخت مکالمه‌ی جدید (chat/start، هر کدام Customer + مکالمه + احتمالاً call LLM می‌سازد)
 export const CHAT_START_LIMIT_PER_IP_PER_MIN = 10;
 export const CHAT_START_LIMIT_PER_STORE_PER_MIN = 300;
+
+// 0.2 — سقف تعداد هر خط سبد؛ qty باید عدد صحیح بین ۱ و این سقف باشد
+export const CART_MAX_QTY_PER_LINE = 50;

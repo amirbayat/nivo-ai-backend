@@ -334,6 +334,28 @@ export const fa = {
       'دوست دارم دقیق‌تر کمکت کنم — می‌تونی بیشتر توضیح بدی دنبال چی هستی؟',
     productNotFound: 'این محصول رو پیدا نکردم، می‌تونی دوباره اسمش رو بگی؟',
     insufficientStock: 'موجودی این محصول کافی نیست',
+    // 0.2/0.3 — پیام‌های ثابت ثبت سفارش
+    cartInvalidQty:
+      'تعداد یکی از اقلام سبد معتبر نیست. لطفاً تعداد را دوباره مشخص کنید.',
+    orderOutOfStock: (
+      lines: { name: string; requested: number; available: number }[],
+    ) =>
+      `متاسفانه موجودی بعضی اقلام تغییر کرده و سفارش ثبت نشد:\n${lines
+        .map((l) =>
+          l.available > 0
+            ? `• ${l.name}: ${l.requested} عدد خواستید، ${l.available} عدد موجود است`
+            : `• ${l.name}: دیگر موجود نیست`,
+        )
+        .join('\n')}\nمی‌خواهید تعداد را کم کنیم یا محصول دیگری انتخاب کنید؟`,
+    orderPriceChanged: (
+      changes: { name: string; from: number; to: number }[],
+    ) =>
+      `قیمت بعضی اقلام از وقتی به سبد اضافه شد تغییر کرده:\n${changes
+        .map(
+          (c) =>
+            `• ${c.name}: ${c.from.toLocaleString('fa-IR')} ← ${c.to.toLocaleString('fa-IR')} تومان`,
+        )
+        .join('\n')}\nسبد با قیمت جدید به‌روز شد؛ ادامه بدیم؟`,
     cartEmpty: 'سبد خرید خالی است',
     // docs/PRD-product-display-focus-and-variations.md §۴.۲ — عیناً سبک addressAskProvince:
     // متن کوتاه + لیست مقادیر از خودِ چیپ‌ها (VARIANT_PROMPT) خوانده می‌شود، نه این‌جا تکرار

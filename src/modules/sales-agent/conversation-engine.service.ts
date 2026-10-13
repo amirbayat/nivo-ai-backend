@@ -115,6 +115,9 @@ import type {
   SalesAgentVoiceJobData,
   UiBlock,
 } from './sales-agent.types';
+import { CART_MAX_QTY_PER_LINE } from '../../common/constants/sales-ops.constants';
+import { isValidCartQty, reconcileCart, lineKey } from './cart-validation.util';
+import type { CatalogLine } from './cart-validation.util';
 
 export type ConversationWithStore = Prisma.SalesConversationGetPayload<{
   include: { store: true };
@@ -2337,7 +2340,8 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         'محصولی را به سبد مشتری اضافه یا از آن حذف می‌کند — تنها راه واقعی تغییر سبد، تغییر فقط در متن کافی نیست',
       inputSchema: z.object({
         productId: z.string(),
-        qty: z.number().optional(),
+        // 0.2 — فقط عدد صحیح ۱..سقف؛ qty منفی/اعشاری مبلغ سفارش را دستکاری می‌کرد
+        qty: z.number().int().min(1).max(CART_MAX_QTY_PER_LINE).optional(),
         remove: z.boolean().optional(),
       }),
       execute: async ({
@@ -5761,6 +5765,8 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       return { ok: true, cart: next };
     }
 
+    // 0.2 — qty نامعتبر (منفی/صفر/اعشاری/بیش از سقف) هرگز به سبد نمی‌رسد
+    if (!isValidCartQty(qty)) return { ok: false };
     const availableStock = variant ? variant.stock : product.stock;
     if (availableStock < qty) return { ok: false };
     const unitPrice = variant?.priceOverride ?? product.basePrice;
@@ -5770,9 +5776,12 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         (i.variantId ?? null) === (variant?.id ?? null),
     );
     if (existingIdx >= 0) {
+      const mergedQty = next[existingIdx].qty + qty;
+      if (!isValidCartQty(mergedQty) || availableStock < mergedQty)
+        return { ok: false };
       next[existingIdx] = {
         ...next[existingIdx],
-        qty: next[existingIdx].qty + qty,
+        qty: mergedQty,
       };
     } else {
       next.push({
@@ -6284,9 +6293,16 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     // معتبر است، نه این پارامتر (idempotent reload نباید روش را عوض کند)
     paymentMethod: OrderPaymentMethod = 'CARD_TO_CARD',
   ): Promise<
-    | { empty: true }
+    | { status: 'empty' }
     | {
-        empty: false;
+        // 0.2/0.3 — سفارش ساخته نشد: تعداد نامعتبر، موجودی ناکافی یا تغییر قیمت (cart = سبد به‌روز)
+        status: 'blocked';
+        reason: 'INVALID_QTY' | 'OUT_OF_STOCK' | 'PRICE_CHANGED';
+        message: string;
+        cart?: CartItem[];
+      }
+    | {
+        status: 'created';
         order: Order;
         paymentMethod: OrderPaymentMethod;
         cardNumber?: string;
@@ -6295,7 +6311,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       }
   > {
     if (ctx.cart.length === 0) {
-      return { empty: true };
+      return { status: 'empty' };
     }
 
     // idempotent: اگر سفارش این مکالمه از قبل هست، همان را برمی‌گرداند (بدون ساخت تکراری)
@@ -6305,85 +6321,160 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     let cardNumber: string | undefined;
     let ownerName: string | undefined;
     let snapppayLink: string | undefined;
+    let card: Awaited<ReturnType<CardSelectorService['selectCard']>> | null =
+      null;
     if (!order) {
-      const cartTotal = this.cartTotal(ctx.cart);
-      // docs/PRD-order-status-chat-tool-and-fulfillment-delay-reviews.md بخش ۲.۱ — هم‌الگوی
-      // کپی‌شدن requiresShipping در doCreateOrder؛ اگر حداقل یکی از محصولات سفارش تحویل
-      // زمان‌بر دارد، کل سفارش hasFulfillmentDelay می‌شود (approveOrder/shipOrder و
-      // PostPurchaseFollowUpService بر اساس همین تصمیم می‌گیرند کِی درخواست نظر بفرستند)
-      const delayProducts = await this.prisma.product.findMany({
-        where: { id: { in: ctx.cart.map((item) => item.productId) } },
-        select: { hasFulfillmentDelay: true },
-      });
-      const hasFulfillmentDelay = delayProducts.some(
-        (p) => p.hasFulfillmentDelay,
-      );
-      // docs/PRD-customer-comments-and-discounts.md بخش ۹ — مصرف واقعی کد تخفیف همین‌جا،
-      // نه در doApplyDiscount (پیش‌نمایش)؛ UPDATE شرطی خام (نه updateMany) چون شرط سقف
-      // (redemptionCount < maxRedemptions) مقایسه‌ی دو ستون همین ردیف است — چیزی که فیلتر
-      // Prisma نمی‌تواند بدون رفتن به raw SQL بیان کند. لاک ردیف پستگرس خودش اتمیک‌بودن را
-      // تضمین می‌کند: دو خریدار هم‌زمان نمی‌توانند هردو از آخرین ظرفیت کد استفاده کنند.
-      let discountAmount = 0;
-      let discountCodeId: string | undefined;
-      if (ctx.appliedDiscount) {
-        // فیدبک کاربر ۱۴۰۵/۰۷/۱۶ — قبلاً اینجا کورکورانه به ctx.appliedDiscount.amountToman
-        // (محاسبه‌شده روی سبدِ لحظه‌ی اعمال کد) اعتماد می‌شد؛ اگر سبد بعداً تغییر کرده بود
-        // (محصول اضافه/حذف شد) ولی appliedDiscount در context دست‌نخورده مانده بود، مبلغ
-        // تخفیف می‌توانست با سبد نهایی واقعی هم‌خوان نباشد. دوباره روی سبد نهایی اعتبارسنجی
-        // می‌شود؛ فقط اگر هنوز معتبر است مصرف اتمیک انجام می‌شود
-        const preview = await this.previewDiscount(
-          conversation.storeId,
-          ctx.cart,
-          ctx.appliedDiscount.code,
-        );
-        if (preview.valid) {
-          const affected = await this.prisma.$executeRaw`
+      // 0.2 — قبل از هر چیز: تعداد هر خط عدد صحیح ۱..سقف (جمع مبلغ سفارش از همین سبد ساخته می‌شود)
+      if (ctx.cart.some((i) => !isValidCartQty(i.qty))) {
+        return {
+          status: 'blocked',
+          reason: 'INVALID_QTY',
+          message: fa.salesAgent.cartInvalidQty,
+        };
+      }
+      // docs/PRD-customer-comments-and-discounts.md بخش ۹ — فیدبک ۱۴۰۵/۰۷/۱۶: کد تخفیف روی سبد
+      // نهایی دوباره اعتبارسنجی می‌شود (read-only)؛ مصرف واقعی پایین‌تر داخل تراکنش است
+      const discountPreview = ctx.appliedDiscount
+        ? await this.previewDiscount(
+            conversation.storeId,
+            ctx.cart,
+            ctx.appliedDiscount.code,
+          )
+        : null;
+
+      // 0.3 + 0.4(۴) — خواندن قیمت/موجودی تازه، مصرف کد تخفیف و ساخت سفارش در «یک» تراکنش
+      // تعاملی: یا همه با هم یا هیچ. (کد تخفیف قبلاً قبل از order.create مصرف می‌شد و اگر
+      // ساخت سفارش fail می‌کرد هدر می‌رفت.)
+      const txResult = await this.prisma.$transaction(async (tx) => {
+        const products = await tx.product.findMany({
+          where: {
+            id: { in: [...new Set(ctx.cart.map((i) => i.productId))] },
+            storeId: conversation.storeId,
+          },
+          include: PRODUCT_VARIANT_INCLUDE,
+        });
+        // قیمت طلا و … همان مسیر نمایش/افزودن به سبد را طی می‌کند تا مقایسه هم‌معنا باشد
+        await this.resolveProductPrices(conversation.storeId, products);
+        const catalog = new Map<string, CatalogLine>();
+        for (const item of ctx.cart) {
+          const product = products.find((p) => p.id === item.productId);
+          if (!product) {
+            catalog.set(lineKey(item), null);
+            continue;
+          }
+          if (item.variantId) {
+            const v = product.variants.find((x) => x.id === item.variantId);
+            catalog.set(
+              lineKey(item),
+              v
+                ? {
+                    unitPrice: v.priceOverride ?? product.basePrice,
+                    stock: v.stock,
+                  }
+                : null,
+            );
+          } else {
+            catalog.set(lineKey(item), {
+              unitPrice: product.basePrice,
+              stock: product.stock,
+            });
+          }
+        }
+        const rec = reconcileCart(ctx.cart, catalog);
+        if (rec.status !== 'OK') return { ok: false as const, rec };
+
+        const cartTotal = this.cartTotal(ctx.cart);
+        // docs/PRD-order-status-chat-tool-and-fulfillment-delay-reviews.md بخش ۲.۱ — اگر حداقل
+        // یکی از محصولات سفارش تحویل زمان‌بر دارد، کل سفارش hasFulfillmentDelay می‌شود
+        const hasFulfillmentDelay = products.some((p) => p.hasFulfillmentDelay);
+        // مصرف اتمیک کد تخفیف (UPDATE شرطی خام چون سقف مقایسه‌ی دو ستون همین ردیف است؛ لاک
+        // ردیف پستگرس اتمیک‌بودن را تضمین می‌کند)
+        let discountAmount = 0;
+        let discountCodeId: string | undefined;
+        if (discountPreview?.valid) {
+          const affected = await tx.$executeRaw`
             UPDATE store_discount_codes
             SET "redemptionCount" = "redemptionCount" + 1
-            WHERE id = ${preview.id}
+            WHERE id = ${discountPreview.id}
               AND "isActive" = true
               AND ("maxRedemptions" IS NULL OR "redemptionCount" < "maxRedemptions")
           `;
           if (affected > 0) {
-            discountAmount = preview.amountToman;
-            discountCodeId = preview.id;
+            discountAmount = discountPreview.amountToman;
+            discountCodeId = discountPreview.id;
           }
         }
-      }
-      // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۲ — هزینه‌ی ارسال همین‌جا
-      // به مجموع اضافه می‌شود (نه بعداً روی پرداخت)؛ shippingCostToman جدا هم ذخیره می‌شود
-      // فقط برای شفافیت/نمایش
-      const total =
-        cartTotal - discountAmount + (addressSnapshot?.shippingCostToman ?? 0);
-      // docs/PRD-buyer-payment-method-card-or-snapppay-link.md — انتخاب کارت فقط برای
-      // CARD_TO_CARD معنا دارد؛ مسیر SNAPPPAY هیچ bankCardId‌ای ندارد (لینک ثابت فروشگاه است)
-      const card =
-        paymentMethod === 'CARD_TO_CARD'
-          ? await this.cardSelector.selectCard(conversation.storeId)
-          : null;
-      order = await this.prisma.order.create({
-        data: {
-          storeId: conversation.storeId,
-          conversationId: conversation.id,
-          items: ctx.cart,
-          totalAmount: total,
-          paymentMethod,
-          bankCardId: card?.id,
-          discountCodeId,
-          hasFulfillmentDelay,
-          ...(addressSnapshot
-            ? {
-                recipientName: addressSnapshot.recipientName,
-                recipientPhone: addressSnapshot.recipientPhone,
-                shippingProvince: addressSnapshot.province,
-                shippingAddress: addressSnapshot.address,
-                postalCode: addressSnapshot.postalCode ?? undefined,
-                addressId: addressSnapshot.addressId ?? undefined,
-                shippingCostToman: addressSnapshot.shippingCostToman,
-              }
-            : {}),
-        },
+        // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۲ — هزینه‌ی ارسال همین‌جا
+        // به مجموع اضافه می‌شود؛ shippingCostToman جدا هم فقط برای شفافیت ذخیره می‌شود
+        const total =
+          cartTotal -
+          discountAmount +
+          (addressSnapshot?.shippingCostToman ?? 0);
+        // docs/PRD-buyer-payment-method-card-or-snapppay-link.md — انتخاب کارت فقط برای
+        // CARD_TO_CARD معنا دارد؛ مسیر SNAPPPAY لینک ثابت فروشگاه است. (بعد از reconcile تا
+        // چرخش کارت‌ها با سفارش ردشده جلو نرود)
+        const selectedCard =
+          paymentMethod === 'CARD_TO_CARD'
+            ? await this.cardSelector.selectCard(conversation.storeId)
+            : null;
+        const created = await tx.order.create({
+          data: {
+            storeId: conversation.storeId,
+            conversationId: conversation.id,
+            items: ctx.cart,
+            totalAmount: total,
+            paymentMethod,
+            bankCardId: selectedCard?.id,
+            discountCodeId,
+            hasFulfillmentDelay,
+            ...(addressSnapshot
+              ? {
+                  recipientName: addressSnapshot.recipientName,
+                  recipientPhone: addressSnapshot.recipientPhone,
+                  shippingProvince: addressSnapshot.province,
+                  shippingAddress: addressSnapshot.address,
+                  postalCode: addressSnapshot.postalCode ?? undefined,
+                  addressId: addressSnapshot.addressId ?? undefined,
+                  shippingCostToman: addressSnapshot.shippingCostToman,
+                }
+              : {}),
+          },
+        });
+        return { ok: true as const, order: created, selectedCard };
       });
+
+      if (!txResult.ok) {
+        const rec = txResult.rec;
+        if (rec.status === 'OUT_OF_STOCK') {
+          return {
+            status: 'blocked',
+            reason: 'OUT_OF_STOCK',
+            message: fa.salesAgent.orderOutOfStock(rec.shortages),
+          };
+        }
+        if (rec.status === 'PRICE_CHANGED') {
+          // سبد به‌روز می‌شود و منتظر تایید مجدد خریدار می‌مانیم (سفارش با قیمت قدیمی ساخته نشد)
+          const nextCtx: ConversationContext = {
+            ...ctx,
+            cart: rec.cart,
+            appliedDiscount: null,
+          };
+          await this.persistTransition(conversation, 'CART_REVIEW', nextCtx);
+          return {
+            status: 'blocked',
+            reason: 'PRICE_CHANGED',
+            message: fa.salesAgent.orderPriceChanged(rec.changes),
+            cart: rec.cart,
+          };
+        }
+        return {
+          status: 'blocked',
+          reason: 'INVALID_QTY',
+          message: fa.salesAgent.cartInvalidQty,
+        };
+      }
+      order = txResult.order;
+      card = txResult.selectedCard;
       if (card) {
         cardNumber = card.cardNumber;
         ownerName = card.ownerName;
@@ -6412,7 +6503,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     await this.persistTransition(conversation, nextState, ctx, 'createOrder');
 
     return {
-      empty: false,
+      status: 'created',
       order,
       paymentMethod: order.paymentMethod,
       cardNumber,
@@ -6547,8 +6638,29 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       addressSnapshot,
       paymentMethod,
     );
-    if (created.empty) {
+    if (created.status === 'empty') {
       return this.doClarify(conversation, fa.salesAgent.cartEmpty);
+    }
+    if (created.status === 'blocked') {
+      // پیام ثابت (بدون caption تولیدی)؛ برای تغییر قیمت، خلاصه‌ی سبد به‌روز هم نشان داده می‌شود
+      const uiBlocks: UiBlock[] = created.cart
+        ? [
+            {
+              type: 'CART_SUMMARY',
+              items: created.cart,
+              total: this.cartTotal(created.cart),
+            },
+          ]
+        : [];
+      await this.logReply(conversation, created.message, uiBlocks[0]);
+      return {
+        reply: created.message,
+        uiBlocks,
+        state:
+          created.reason === 'PRICE_CHANGED'
+            ? 'CART_REVIEW'
+            : conversation.currentState,
+      };
     }
 
     const shippingLine = addressSnapshot?.shippingCostToman
