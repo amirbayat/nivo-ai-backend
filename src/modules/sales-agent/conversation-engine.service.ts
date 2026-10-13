@@ -265,6 +265,24 @@ search_products را با بهترین خلاصه‌ای که از کل بحث �
 و صریح دعوت به اضافه‌کردن به سبد کن — حتی اگر مشتری دوباره فقط سوال پرسیده. هرگز نگو سوالاتت تموم
 شده یا از جواب‌دادن امتناع نکن؛ فقط مکالمه را به‌سمت یک تصمیم مشخص هدایت کن.`;
 
+// فیدبک کاربر ۱۴۰۵/۰۸/۲۱ — نسخه‌ی معادل OPEN_QUESTION_NUDGE_INSTRUCTION بالا، مخصوص فروشگاه‌های
+// leadCaptureOnly: آن یکی حول search_products/سبد است که این‌جا اصلاً وجود ندارد (دقیقاً همان
+// دلیلی که leadCaptureOnly از nudgeActive بالا مستثنی شده — نگاه کن به توضیح کنار محاسبه‌ی
+// nudgeActive/leadCaptureNudgeActive پایین‌تر). دیده‌شده در ترنسکریپت واقعی: مشتری چندین پیام
+// پشت‌سرهم علاقه/سؤال نشان می‌دهد («آره بگو»، سؤال قیمت) ولی مدل هر بار فقط همان معرفی/ویژگی‌ها را
+// با کلمات کمی متفاوت تکرار می‌کند و هیچ‌وقت واقعاً capture_lead را صدا نمی‌زند یا شماره نمی‌خواهد.
+// این دستورالعمل، بعد از N نوبت بدون پیشرفت واقعی (progressHappened سرور-محور، نه خوداظهاری)،
+// صریحاً یک قدم عملی به سمت بستن فانل را اجباری می‌کند.
+const LEAD_CAPTURE_NUDGE_THRESHOLD = 2;
+
+const LEAD_CAPTURE_NUDGE_INSTRUCTION = `چند نوبت پشت‌سرهم مشتری علاقه/سؤال نشان داده ولی هنوز به
+CTA (گرفتن شماره یا هدایت به لینک ثبت‌نام) نرسیده‌ای — دیگر وقت توضیح‌دادن دوباره‌ی همان ویژگی‌ها یا
+پرسیدن یک سؤال اطلاعاتی تازه تمام شده. در همین پاسخ (بعد از جواب‌دادن به هر سؤال واقعی مشتری طبق
+قانون «اول answer_faq» بالا، اگر چنین سؤالی مطرح شده)، حتماً یک قدم عملی به سمت بستن بردار: اگر
+فروشگاه لینک وبسایت دارد همین الان capture_lead را صدا بزن و مشتری را به دکمه‌ی ثبت‌نام دعوت کن؛ اگر
+ندارد، مستقیم و مؤدبانه شماره تماسش را بخواه. دیگر صرفاً یک سؤال عمومی دیگر («بیشتر پیام‌هاتون از
+دایرکته؟» و مشابه آن) نپرس و فقط ویژگی‌ها را دوباره بازگو نکن.`;
+
 // docs/PRD-sales-agent-tool-calling-architecture.md بخش ۳.۳ — یک محصول کمینه برای facts/ابزارهای
 // FULL_AGENT؛ همون شکلی که seenProducts/uiBlock derivation نیاز دارند
 type CompactProduct = {
@@ -349,8 +367,11 @@ function buildLeadCaptureOnlyInstruction(hasWebsiteUrl: boolean): string {
 صرفاً «ابراز علاقه‌ی کلی». طبق «قوانین حیاتی» بالا باید همین الان (در همین نوبت) answer_faq را با
 همان سؤال صدا بزنی و جوابش را بدهی؛ تنها بعد از آن مسیر زیر را ادامه بده. پیوت مستقیم به CTA
 به‌جای جواب‌دادن، حتی وقتی مشتری آماده‌ی تبدیل به‌نظر می‌رسد، همیشه اشتباه است. «ابراز علاقه‌ی کلی»
-(بدون سؤال مشخص) یعنی چیزهایی مثل «باشه خوبه»، «جالبه»، «آره می‌خوام» — فقط در این حالت‌ها
-می‌توانی مستقیم سراغ CTA بروی:
+(بدون سؤال مشخص) یعنی چیزهایی مثل «باشه خوبه»، «جالبه»، «آره می‌خوام»، و همچنین پاسخ تاییدی ساده به
+پیشنهاد/سؤال قبلی خودِ تو — مثلاً وقتی خودت پرسیده‌ای «دوست دارید بگم چطور شروع می‌شه؟» یا مشابه آن
+و مشتری فقط گفته «آره بگو»/«باشه بگو»/«آره». این نوع پاسخ هم یک سؤال مشخص جدید نیست، پس باید همان‌جا
+یک قدم واقعی به CTA نزدیک‌تر شوی (نه این‌که دوباره فقط توضیح عمومی/ویژگی‌ها را تکرار کنی) — فقط در
+این حالت‌ها می‌توانی مستقیم سراغ CTA بروی:
 ${
   hasWebsiteUrl
     ? `این فروشگاه لینک وبسایت واقعی ثبت کرده؛ هدف نهایی رساندن مشتری به همان لینک است، **نه**
@@ -1729,6 +1750,7 @@ relevantProductIds را خالی بگذار.${
     persuasionEnabled: boolean,
     urgentDiscount: { code: string; expiresAt: Date } | null,
     leadCaptureOnly: boolean,
+    leadCaptureNudgeActive: boolean,
   ): Promise<string> {
     const tone = toneForCategory(conversation.store.category);
     const store = conversation.store;
@@ -1828,7 +1850,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       leadCaptureOnly
         ? `\n\n${buildLeadCaptureOnlyInstruction(!!store.websiteUrl)}`
         : ''
-    }`;
+    }${leadCaptureNudgeActive ? `\n\n${LEAD_CAPTURE_NUDGE_INSTRUCTION}` : ''}`;
   }
 
   // docs/PRD-sales-agent-tool-calling-architecture.md بخش ۳.۴ — نرده‌ی حفاظتی حیاتی: قیمت/
@@ -2079,6 +2101,15 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     const nudgeActive =
       !conversation.store.leadCaptureOnly &&
       conversation.openQuestionStreak >= OPEN_QUESTION_NUDGE_THRESHOLD;
+    // فیدبک کاربر ۱۴۰۵/۰۸/۲۱ — جایگزین همان نادج بالا، مخصوص leadCaptureOnly؛ همان شمارنده‌ی
+    // openQuestionStreak را دوباره استفاده می‌کند (قبلاً برای این فروشگاه‌ها فقط بی‌مصرف بالا
+    // می‌رفت چون progressHappened هیچ‌وقت true نمی‌شد — الان captureLeadTool.execute هم آن را
+    // true می‌کند، پس این شمارنده با اجرای واقعی capture_lead ریست می‌شود، نه با خوداظهاری مدل).
+    // آستانه پایین‌تر از OPEN_QUESTION_NUDGE_THRESHOLD عمدی است: این فانل کوتاه‌تر از مرور
+    // کاتالوگ واقعی است و دیده‌شده مدل بدون این فشار تا بی‌نهایت فقط معرفی را تکرار می‌کند
+    const leadCaptureNudgeActive =
+      conversation.store.leadCaptureOnly &&
+      conversation.openQuestionStreak >= LEAD_CAPTURE_NUDGE_THRESHOLD;
 
     const searchProductsTool = tool({
       description:
@@ -2364,6 +2395,11 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           interest,
         });
         mutationHappened = true;
+        // فیدبک کاربر ۱۴۰۵/۰۸/۲۱ — قبلاً اینجا ست نمی‌شد، پس openQuestionStreak حتی بعد از ثبت
+        // واقعی لید هم فقط افزایش پیدا می‌کرد (چون قبلاً برای leadCaptureOnly اصلاً استفاده
+        // نمی‌شد). حالا که leadCaptureNudgeActive از همین شمارنده استفاده می‌کند، باید دقیقاً مثل
+        // update_cart (پیشرفت سرور-محور، نه خوداظهاری مدل) با اجرای واقعی این ابزار ریست شود
+        progressHappened = true;
         return { done: true };
       },
     });
@@ -2603,6 +2639,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       storePersuasionEnabled,
       urgentDiscount,
       conversation.store.leadCaptureOnly,
+      leadCaptureNudgeActive,
     );
 
     let result;
