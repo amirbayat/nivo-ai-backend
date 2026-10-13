@@ -43,6 +43,9 @@ import { getSalesAgentGlobalConfig } from './sales-agent-global-config.util';
 import { ConflictException, Injectable, Logger } from '@nestjs/common';
 import { OrderStateService } from '../order-lifecycle/order-state.service';
 import { OrderNotificationService } from '../order-lifecycle/order-notification.service';
+import { ReceiptCheckService } from '../order-lifecycle/receipt-check.service';
+import { approvalEtaLabel } from '../order-lifecycle/order-ops.service';
+import { maskPaymentSecrets } from '../../common/utils/payment-secret-mask.util';
 import {
   ORDER_CODE_MAX_ATTEMPTS,
   displayOrderCode,
@@ -610,6 +613,7 @@ export class ConversationEngineService {
     private readonly creditAlerts: CreditAlertService,
     private readonly orderState: OrderStateService,
     private readonly orderNotifications: OrderNotificationService,
+    private readonly receiptChecks: ReceiptCheckService,
   ) {}
 
   // docs/PRD-category-specific-product-pricing-and-attributes.md بخش ۲.۳ — نقطه‌ی مرکزی حل
@@ -4016,7 +4020,11 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     ) as (keyof typeof tools)[];
     const messages = buildChatMessages(history, customerMessage).map((m) =>
       m.role === 'user'
-        ? { role: 'user' as const, content: m.content }
+        ? {
+            role: 'user' as const,
+            content:
+              typeof m.content === 'string' ? maskPaymentSecrets(m.content) : m.content,
+          }
         : { role: 'assistant' as const, content: m.content },
     );
     const generate = (system: string) =>
@@ -7589,8 +7597,11 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       status: 'RECEIPT_SUBMITTED',
       orderCode: displayOrderCode(order),
     };
+    const eta = await approvalEtaLabel(this.prisma, conversation.storeId).catch(
+      () => fa.orderNotify.etaFallback,
+    );
     const reply = await this.caption(
-      fa.salesAgent.receiptReceivedWithCode(displayOrderCode(order)),
+      fa.salesAgent.receiptReceivedWithCode(displayOrderCode(order), eta),
       conversation,
     );
     await this.logReply(conversation, reply, uiBlock);
@@ -7602,28 +7613,14 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۴ گزینه A — خواندن خودکار
       // مبلغ رسید با vision؛ یک‌بار دانلود، هم برای استخراج هم برای ارسال عکس به فروشنده
       const buffer = await this.storage.downloadImage(receiptImageKey);
-      const verification = await this.verifyReceiptAmount(
-        buffer,
-        receiptImageKey,
-        order.totalAmount,
-        order.paymentMethod,
-      );
-      if (verification) {
-        await this.prisma.order.update({
-          where: { id: order.id },
-          data: {
-            receiptExtractedAmountToman: verification.extractedAmountToman,
-            receiptVerifiedMatch: verification.match,
-          },
-        });
-      }
       await this.notifySellerOfReceipt(
         conversation,
         order.id,
         receiptImageKey,
         buffer,
-        verification,
+        null,
       );
+      await this.receiptChecks?.enqueue(order.id);
     } catch (err) {
       this.logger.error(
         `post-receipt processing failed (order=${order.id}) — receipt is saved, buyer gets success`,

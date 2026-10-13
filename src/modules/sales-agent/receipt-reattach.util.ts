@@ -16,6 +16,7 @@ export async function reattachReceiptIfOrderOpen(
   conversationId: string,
   imageKey: string,
   channel: 'WEB' | 'TELEGRAM' = 'WEB',
+  onAttached?: (orderId: string) => void,
 ): Promise<boolean> {
   const order = await prisma.order.findUnique({
     where: { conversationId },
@@ -33,7 +34,8 @@ export async function reattachReceiptIfOrderOpen(
         data: { receiptImageKey: imageKey, receiptType: 'IMAGE' },
       })
       .catch(() => null);
-    return !!r;
+    if (r?.changed) onAttached?.(order.id);
+    return !!r?.changed;
   }
   if (
     order.status === 'PENDING_PAYMENT' ||
@@ -43,6 +45,7 @@ export async function reattachReceiptIfOrderOpen(
       where: { id: order.id },
       data: { receiptImageKey: imageKey },
     });
+    onAttached?.(order.id);
     return true;
   }
   return false;

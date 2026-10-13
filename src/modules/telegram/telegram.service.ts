@@ -29,6 +29,7 @@ import { buildAsrVocabHint } from '../sales-agent/asr-vocab-hint';
 import { buildHistoryEntry } from '../sales-agent/conversation-history.util';
 import { reattachReceiptIfOrderOpen } from '../sales-agent/receipt-reattach.util';
 import { OrderStateService } from '../order-lifecycle/order-state.service';
+import { ReceiptCheckService } from '../order-lifecycle/receipt-check.service';
 import type {
   ConversationContext,
   EngineResult,
@@ -121,6 +122,7 @@ export class TelegramService {
     private readonly storeService: StoreService,
     private readonly storeKbService: StoreKbService,
     private readonly orderState: OrderStateService,
+    private readonly receiptChecks: ReceiptCheckService,
   ) {
     this.botToken = this.config.get<string>('TELEGRAM_BOT_TOKEN');
     this.webhookSecret = this.config.get<string>('TELEGRAM_WEBHOOK_SECRET');
@@ -833,6 +835,7 @@ export class TelegramService {
         conversation.id,
         imageKey,
         'TELEGRAM',
+        (orderId) => void this.receiptChecks.enqueue(orderId),
       );
       await this.prisma.conversationEvent.create({
         data: {

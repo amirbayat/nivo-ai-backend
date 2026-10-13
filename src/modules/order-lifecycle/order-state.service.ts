@@ -11,6 +11,7 @@ import { fa } from '../../i18n/fa';
 import { canTransition, holdsStock } from './order-state.machine';
 import { adjustOrderStock, StockShortage } from './order-stock.util';
 import { OrderNotificationService } from './order-notification.service';
+import { insertRefund } from './refund-tx';
 
 export type TransitionInput = {
   orderId: string;
@@ -27,6 +28,7 @@ export type TransitionInput = {
     receiptImageKey?: string;
     receiptType?: 'IMAGE' | 'MANUAL_INFO';
     receiptManualInfo?: Prisma.InputJsonValue;
+    refundAmountToman?: number | null;
   };
   // اعلان به خریدار ارسال نشود (مثلاً لغو بی‌صدای سفارش‌های خیلی قدیمی)
   silent?: boolean;
@@ -39,8 +41,9 @@ export type TransitionResult = {
   changed: boolean;
   stockWarnings: StockShortage[];
   // بعد از رسید/تایید رد یا لغو شد: پول احتمالاً پرداخت شده و باید بازپرداخت ساخته شود
-  // (3.11، گام ۵ — ساخت OrderRefund هنوز به این سرویس وصل نیست)
   refundRequired: boolean;
+  refundId: string | null;
+  refundAmountToman: number | null;
 };
 
 // docs/PRD-nivo-sales-unified.md 3.2 ⚠️ — تنها مسیر تغییر وضعیت سفارش (REST، بات تلگرام، cron،
@@ -68,6 +71,8 @@ export class OrderStateService {
           to: input.to,
           actor: input.actor,
           reason: input.reason ?? input.data?.rejectReason ?? undefined,
+          refundId: result.refundId,
+          refundAmountToman: result.refundAmountToman,
         });
       } catch (err) {
         this.logger.error(
@@ -97,6 +102,8 @@ export class OrderStateService {
         changed: false,
         stockWarnings: [],
         refundRequired: false,
+        refundId: null,
+        refundAmountToman: null,
       };
     }
     if (!canTransition(from, to)) {
@@ -210,12 +217,30 @@ export class OrderStateService {
     const order = await tx.order.findUniqueOrThrow({ where: { id: orderId } });
     const paidBefore =
       from === 'RECEIPT_SUBMITTED' || from === 'APPROVED' || !!current.receiptImageKey;
+    const refundRequired = (to === 'REJECTED' || to === 'CANCELLED') && paidBefore;
+    let refundId: string | null = null;
+    let refundAmountToman: number | null = null;
+    if (refundRequired) {
+      const reason = to === 'REJECTED' ? 'ORDER_REJECTED' : 'ORDER_CANCELLED';
+      const created = await insertRefund(
+        tx,
+        current,
+        reason,
+        input.actor === 'SELLER' ? 'SELLER' : 'SYSTEM',
+        input.data?.refundAmountToman,
+        input.reason ?? input.data?.rejectReason,
+      );
+      refundId = created?.id ?? null;
+      refundAmountToman = created?.amountToman ?? null;
+    }
     return {
       order,
       from,
       changed: true,
       stockWarnings,
-      refundRequired: (to === 'REJECTED' || to === 'CANCELLED') && paidBefore,
+      refundRequired,
+      refundId,
+      refundAmountToman,
     };
   }
 

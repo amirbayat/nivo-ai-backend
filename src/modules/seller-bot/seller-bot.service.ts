@@ -6,6 +6,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuthService } from '../auth/auth.service';
 import { StoreService } from '../store/store.service';
 import { StoreCreditService } from '../store/store-credit.service';
+import { RefundService } from '../order-lifecycle/refund.service';
 import { SellerBotApiClientService } from './seller-bot-api-client.service';
 import { normalizePhone } from '../../common/utils/normalize-phone';
 import { fa } from '../../i18n/fa';
@@ -67,6 +68,7 @@ export class SellerBotService {
     private readonly storeService: StoreService,
     private readonly storeCreditService: StoreCreditService,
     private readonly api: SellerBotApiClientService,
+    private readonly refunds: RefundService,
   ) {
     this.webhookSecret = this.config.get<string>('SELLER_BOT_WEBHOOK_SECRET');
   }
@@ -161,6 +163,10 @@ export class SellerBotService {
     }
     if (text === '/orders' || text === fa.sellerBot.menuOrdersButton) {
       await this.handleOrders(chatId);
+      return;
+    }
+    if (text === '/refunds') {
+      await this.handleRefunds(chatId);
       return;
     }
     if (text === fa.sellerBot.menuAttentionButton) {
@@ -326,6 +332,38 @@ export class SellerBotService {
     }
   }
 
+  private async handleRefunds(chatId: string): Promise<void> {
+    const store = await this.getLinkedStore(chatId);
+    if (!store) return;
+    const rows = await this.refunds.list(store.sellerId, store.id, 'READY');
+    if (rows.length === 0) {
+      await this.api.sendText(chatId, fa.orderNotify.refundsEmpty);
+      return;
+    }
+    for (const row of rows.slice(0, 8)) {
+      await this.api.sendText(
+        chatId,
+        `${row.orderCode}\n${row.amountToman.toLocaleString('fa-IR')} تومان\n${row.destination ?? row.destinationMasked ?? ''}`,
+        {
+          inline_keyboard: [
+            [{ text: fa.orderNotify.refundMarkPaid, callback_data: `sbrf:${row.id}` }],
+          ],
+        },
+      );
+    }
+  }
+
+  private async handleRefundPaid(chatId: string, refundId: string): Promise<void> {
+    const store = await this.getLinkedStore(chatId);
+    if (!store) return;
+    try {
+      await this.refunds.markPaid(store.sellerId, store.id, refundId);
+      await this.api.sendText(chatId, fa.orderNotify.refundMarkedPaid);
+    } catch {
+      await this.api.sendText(chatId, fa.order.refundNotPayable);
+    }
+  }
+
   private async handleCallback(cq: TelegramCallbackQuery): Promise<void> {
     const chatId = cq.message ? String(cq.message.chat.id) : String(cq.from.id);
     await this.api.answerCallbackQuery(cq.id);
@@ -345,6 +383,10 @@ export class SellerBotService {
     }
     if (data.startsWith('sbrp:')) {
       await this.handleAttentionReplyButton(chatId, data.slice('sbrp:'.length));
+      return;
+    }
+    if (data.startsWith('sbrf:')) {
+      await this.handleRefundPaid(chatId, data.slice('sbrf:'.length));
       return;
     }
   }

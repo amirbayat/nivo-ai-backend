@@ -7,7 +7,11 @@ export type BuyerNotificationTemplate =
   | 'ORDER_APPROVED'
   | 'ORDER_SHIPPED'
   | 'ORDER_REJECTED'
-  | 'ORDER_CANCELLED';
+  | 'ORDER_CANCELLED'
+  | 'REFUND_DESTINATION_REQUEST'
+  | 'REFUND_DONE'
+  | 'RECEIPT_AMOUNT_MISMATCH'
+  | 'DELIVERY_CHECK';
 
 export type BuyerChannel = 'CHAT' | 'SMS';
 
@@ -21,6 +25,10 @@ export const TEMPLATE_CHANNELS: Readonly<
   ORDER_SHIPPED: ['CHAT', 'SMS'],
   ORDER_REJECTED: ['CHAT', 'SMS'],
   ORDER_CANCELLED: ['CHAT', 'SMS'],
+  REFUND_DESTINATION_REQUEST: ['CHAT', 'SMS'],
+  REFUND_DONE: ['CHAT', 'SMS'],
+  RECEIPT_AMOUNT_MISMATCH: ['CHAT'],
+  DELIVERY_CHECK: ['CHAT', 'SMS'],
 };
 
 export type BuyerNotificationData = {
@@ -29,6 +37,12 @@ export type BuyerNotificationData = {
   carrier?: string | null;
   trackingCode?: string | null;
   hoursLeft?: number;
+  refundAmountToman?: number | null;
+  refundId?: string | null;
+  paidRef?: string | null;
+  destinationMasked?: string | null;
+  receiptAmountToman?: number | null;
+  orderAmountToman?: number | null;
 };
 
 export type NotifyBuyerInput = {
@@ -37,6 +51,9 @@ export type NotifyBuyerInput = {
   // dedupe: template + entityId (+ کانال) در ۱۰ دقیقه
   entityId: string;
   data: BuyerNotificationData;
+  // Longer than the 10-minute channel dedupe. Cron passes that still match
+  // (delivery nudge, refund reminder) must set this or they resend every run.
+  dedupe?: { key: string; ttlSeconds: number };
 };
 
 export type NotificationJob = {

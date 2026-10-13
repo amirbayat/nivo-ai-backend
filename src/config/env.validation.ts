@@ -26,6 +26,9 @@ class EnvironmentVariables {
   // می‌شود و رفتار فعلی پروداکشن دست‌نخورده می‌ماند. برگشت به لیارا از هر لحظه = همین یک متغیر.
   @IsOptional() @IsIn(['liara', 'openrouter']) AI_PROVIDER?: string;
   @IsOptional() @IsString() OPENROUTER_API_KEY?: string;
+  // Step 5. Optional until the public order link and refund destination form are turned on.
+  @IsOptional() @IsString() ORDER_LINK_SECRET?: string;
+  @IsOptional() @IsString() REFUND_DEST_KEY?: string;
   @IsOptional()
   @IsUrl({ require_tld: false })
   OPENROUTER_BASE_URL?: string;

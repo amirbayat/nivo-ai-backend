@@ -27,6 +27,12 @@ import {
 import type { StoreKbKind } from '@prisma/client';
 import { ShipOrderDto } from './dto/ship-order.dto';
 import { StoreService } from './store.service';
+import { RefundService } from '../order-lifecycle/refund.service';
+import {
+  CreateRefundDto,
+  MarkRefundPaidDto,
+  RefundDestinationDto,
+} from '../order-lifecycle/dto/order-public.dto';
 import { StoreKbService } from './store-kb.service';
 import { StoreCreditService } from './store-credit.service';
 import { StoreBankCardService } from './store-bank-card.service';
@@ -74,6 +80,7 @@ export class StoreController {
     private readonly storeShippingRuleService: StoreShippingRuleService,
     private readonly storeAdPlacementService: StoreAdPlacementService,
     private readonly productEnrichmentService: ProductEnrichmentService,
+    private readonly refunds: RefundService,
   ) {}
 
   @Get('me')
@@ -418,8 +425,90 @@ export class StoreController {
     @Param('id') id: string,
     @Param('orderId') orderId: string,
     @Body('reason') reason?: string,
+    @Body('refundAmountToman') refundAmountToman?: number,
   ) {
-    return this.storeService.rejectOrder(user.sub, id, orderId, reason);
+    return this.storeService.rejectOrder(
+      user.sub,
+      id,
+      orderId,
+      reason,
+      'WEB',
+      refundAmountToman,
+    );
+  }
+
+  @Post(':id/orders/:orderId/deliver')
+  deliverOrder(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('orderId') orderId: string,
+  ) {
+    return this.storeService.deliverOrder(user.sub, id, orderId);
+  }
+
+  @Get(':id/refunds')
+  listRefunds(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Query('status') status?: 'AWAITING_DESTINATION' | 'READY' | 'DONE',
+  ) {
+    return this.refunds.list(user.sub, id, status);
+  }
+
+  @Get(':id/refunds/summary')
+  refundSummary(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    return this.refunds.summary(user.sub, id);
+  }
+
+  @Post(':id/refunds')
+  createRefund(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: CreateRefundDto,
+  ) {
+    return this.refunds.createManual({
+      sellerId: user.sub,
+      storeId: id,
+      orderId: dto.orderId,
+      amountToman: dto.amountToman,
+      reason: dto.reason,
+      note: dto.note,
+    });
+  }
+
+  @Post(':id/orders/:orderId/refund-overpay')
+  refundOverpay(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('orderId') orderId: string,
+  ) {
+    return this.refunds.createOverpay(user.sub, id, orderId);
+  }
+
+  @Post(':id/refunds/:refundId/paid')
+  markRefundPaid(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('refundId') refundId: string,
+    @Body() dto: MarkRefundPaidDto,
+  ) {
+    return this.refunds.markPaid(user.sub, id, refundId, dto.paidRef);
+  }
+
+  @Post(':id/refunds/:refundId/destination')
+  sellerDestination(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('refundId') refundId: string,
+    @Body() dto: RefundDestinationDto,
+  ) {
+    return this.refunds.sellerSetDestination(
+      user.sub,
+      id,
+      refundId,
+      dto.destination,
+      dto.holderName,
+    );
   }
 
   // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۱۳.۲

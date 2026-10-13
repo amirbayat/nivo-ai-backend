@@ -13,6 +13,7 @@ import {
 } from '../../common/constants/sales-ops.constants';
 import { fa } from '../../i18n/fa';
 import { NotificationJob } from './notification.types';
+import { ensureBuyerOrderLink } from '../order-lifecycle/order-link.util';
 
 type OrderForNotify = {
   id: string;
@@ -74,7 +75,7 @@ export class NotificationDeliveryService {
     order: OrderForNotify,
     customer: { id: string; channel: string; telegramChatId: string | null },
   ): Promise<void> {
-    const text = this.chatText(job, order);
+    const text = await this.withLink(this.chatText(job, order), order.id);
     if (!text) return;
     await this.prisma.conversationEvent.create({
       data: {
@@ -101,7 +102,7 @@ export class NotificationDeliveryService {
     order: OrderForNotify,
     customer: { id: string; phone: string | null; phoneVerifiedAt: Date | null },
   ): Promise<void> {
-    const text = this.smsText(job, order);
+    const text = await this.withLink(this.smsText(job, order), order.id);
     if (!text) return;
     const config = await getSalesAgentGlobalConfig(this.prisma);
     if (!config.orderSmsEnabled) {
@@ -144,9 +145,21 @@ export class NotificationDeliveryService {
       case 'ORDER_SHIPPED':
         return fa.orderNotify.shippedChat(code, d.carrier, d.trackingCode);
       case 'ORDER_REJECTED':
-        return fa.orderNotify.rejectedChat(code, d.reason);
+        return fa.orderNotify.rejectedChat(code, d.reason, d.refundAmountToman);
       case 'ORDER_CANCELLED':
         return fa.orderNotify.cancelledChat(code, d.reason);
+      case 'REFUND_DESTINATION_REQUEST':
+        return d.refundAmountToman ? fa.orderNotify.refundAskChat(d.refundAmountToman) : null;
+      case 'REFUND_DONE':
+        return d.refundAmountToman
+          ? fa.orderNotify.refundDoneChat(d.refundAmountToman, d.destinationMasked, d.paidRef)
+          : null;
+      case 'RECEIPT_AMOUNT_MISMATCH':
+        return d.receiptAmountToman != null && d.orderAmountToman != null
+          ? fa.orderNotify.receiptMismatchChat(d.receiptAmountToman, d.orderAmountToman)
+          : null;
+      case 'DELIVERY_CHECK':
+        return fa.orderNotify.deliveryCheckChat(code);
       default:
         return null;
     }
@@ -174,8 +187,28 @@ export class NotificationDeliveryService {
         return fa.orderNotify.rejectedSms(code, store);
       case 'ORDER_CANCELLED':
         return fa.orderNotify.cancelledSms(code, store);
+      case 'REFUND_DESTINATION_REQUEST':
+        return d.refundAmountToman ? fa.orderNotify.refundAskSms(d.refundAmountToman) : null;
+      case 'REFUND_DONE':
+        return d.refundAmountToman
+          ? fa.orderNotify.refundDoneSms(d.refundAmountToman, d.paidRef)
+          : null;
+      case 'DELIVERY_CHECK':
+        return fa.orderNotify.deliveryCheckSms(code);
       default:
         return null;
+    }
+  }
+
+  private async withLink(text: string | null, orderId: string): Promise<string | null> {
+    if (!text) return null;
+    try {
+      const url = await ensureBuyerOrderLink(this.prisma, orderId);
+      if (!url) return text;
+      return `${text}\n${fa.orderNotify.profileLinkLine(url)}`;
+    } catch (err) {
+      this.logger.warn(`order link footer skipped: ${String(err)}`);
+      return text;
     }
   }
 

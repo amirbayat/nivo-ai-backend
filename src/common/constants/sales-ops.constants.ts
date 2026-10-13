@@ -90,6 +90,39 @@ export const NOTIFICATION_JOB_ATTEMPTS = 3;
 export const NOTIFICATION_SMS_COST_TOMAN = 0;
 
 // 3.5 — شرکت‌های حمل (لیست ثابت)
+// 3.9 — receipt vision. One cheap model, one fallback, no full fallback chain.
+export const RECEIPT_CHECK_TIMEOUT_MS = 15_000;
+export const RECEIPT_CHECK_MAX_IMAGES = 3;
+export const RECEIPT_CHECK_MAX_EDGE_PX = 1024;
+export const RECEIPT_CHECK_JPEG_QUALITY = 80;
+export const RECEIPT_CHECK_MAX_OUTPUT_TOKENS = 200;
+export const RECEIPT_CHECK_BUDGET_USD = 0.002;
+export const RECEIPT_VISION_FALLBACK_MODEL = 'google/gemini-3-flash-preview';
+
+// 3.12 — receipt sitting in RECEIPT_SUBMITTED for 3 Tehran business hours (08–22).
+export const RECEIPT_SLA_BUSINESS_HOURS = 3;
+export const RECEIPT_SLA_DAY_START_HOUR = 8;
+export const RECEIPT_SLA_DAY_END_HOUR = 22;
+export const RECEIPT_SLA_MIN_SAMPLES = 5;
+export const RECEIPT_SLA_LOOKBACK_DAYS = 30;
+
+// 3.11 — buyer destination reminder, seller overdue, purge of the full number.
+export const REFUND_DESTINATION_REMINDER_HOURS = 24;
+export const REFUND_OVERDUE_HOURS = 48;
+export const REFUND_NUDGE_COOLDOWN_HOURS = 24;
+export const REFUND_DESTINATION_PURGE_AFTER_DAYS = 30;
+
+// 4.13 — signed order link. The SMS carries only the short code.
+export const ORDER_LINK_TTL_DAYS = 14;
+export const ORDER_LINK_CODE_LENGTH = 8;
+export const ORDER_LINK_RATE_PER_MINUTE = 30;
+
+// 3.15 — ask the buyer once, 3 days after ship, if they have not confirmed delivery.
+export const DELIVERY_CONFIRM_AFTER_DAYS = 3;
+
+// One cron for receipt SLA, refund reminders, delivery nudge, and destination purge.
+export const ORDER_OPS_CRON = '*/15 * * * *';
+
 export const ORDER_CARRIERS = [
   'پست پیشتاز',
   'تیپاکس',

@@ -36,6 +36,23 @@ export class NotificationService {
 
   // هیچ‌وقت throw نمی‌کند: شکست اعلان نباید انتقال وضعیت/تراکنش اصلی را خراب کند
   async notifyBuyer(input: NotifyBuyerInput): Promise<void> {
+    if (input.dedupe) {
+      try {
+        const first = await this.redis.set(
+          input.dedupe.key,
+          '1',
+          'EX',
+          input.dedupe.ttlSeconds,
+          'NX',
+        );
+        if (first !== 'OK') return;
+      } catch (err) {
+        this.logger.error(
+          `buyer dedupe failed (${input.template}, entity=${input.entityId})`,
+          err as Error,
+        );
+      }
+    }
     for (const channel of TEMPLATE_CHANNELS[input.template]) {
       try {
         const key = `notif:${input.template}:${input.entityId}:${channel}`;

@@ -1555,17 +1555,33 @@ export class StoreService {
     orderId: string,
     reason?: string,
     channel: OrderChannel = 'WEB',
+    refundAmountToman?: number,
   ) {
     await this.getOwnedOrder(sellerId, storeId, orderId);
-    // رد تکراری (مثلاً دکمه‌ی رد قدیمی تلگرام) changed=false می‌گیرد و پیام دوباره نمی‌رود؛
-    // برگشت موجودی/سقف کارت/کد تخفیف و پیام به خریدار داخل OrderStateService است
     const r = await this.orderState.transition({
       orderId,
       to: 'REJECTED',
       actor: 'SELLER',
       actorId: sellerId,
       channel,
-      data: { rejectReason: reason ?? null },
+      data: { rejectReason: reason ?? null, refundAmountToman },
+    });
+    return r.order;
+  }
+
+  async deliverOrder(
+    sellerId: string,
+    storeId: string,
+    orderId: string,
+    channel: OrderChannel = 'WEB',
+  ) {
+    await this.getOwnedOrder(sellerId, storeId, orderId);
+    const r = await this.orderState.transition({
+      orderId,
+      to: 'DELIVERED',
+      actor: 'SELLER',
+      actorId: sellerId,
+      channel,
     });
     return r.order;
   }

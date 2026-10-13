@@ -38,6 +38,7 @@ import { buildAsrVocabHint } from './asr-vocab-hint';
 import { reattachReceiptIfOrderOpen } from './receipt-reattach.util';
 import { SubmitManualReceiptDto } from './dto/submit-manual-receipt.dto';
 import { OrderStateService } from '../order-lifecycle/order-state.service';
+import { ReceiptCheckService } from '../order-lifecycle/receipt-check.service';
 import { CommentsService } from '../comments/comments.service';
 import type { SubmitCommentDto } from './dto/submit-comment.dto';
 import {
@@ -76,6 +77,7 @@ export class SalesAgentService {
     private readonly sms: SmsService,
     private readonly comments: CommentsService,
     private readonly orderState: OrderStateService,
+    private readonly receiptChecks: ReceiptCheckService,
   ) {}
 
   // productId اختیاری — لینک اختصاصی یک محصول (فروشنده در استوری گذاشته)؛ اگر معتبر و
@@ -437,6 +439,7 @@ export class SalesAgentService {
       conversation.id,
       imageKey,
       'WEB',
+      (orderId) => void this.receiptChecks.enqueue(orderId),
     );
     await this.prisma.conversationEvent.create({
       data: {

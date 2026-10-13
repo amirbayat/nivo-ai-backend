@@ -301,6 +301,16 @@ export const fa = {
     expiredReason: 'مهلت پرداخت تمام شد',
     carrierInvalid: 'شرکت حمل معتبر نیست',
     manualReceiptCardLast4Invalid: '۴ رقم آخر کارت مبدا را درست وارد کن',
+    refundAmountInvalid: 'مبلغ بازپرداخت از باقی‌مانده‌ی قابل برگشت بیشتر است',
+    refundDestinationInvalid: 'شماره کارت یا شبا درست نیست',
+    refundHolderInvalid: 'نام صاحب حساب را وارد کن',
+    refundNotFound: 'این بازپرداخت پیدا نشد',
+    refundNotPayable: 'این بازپرداخت الان قابل ثبت واریز نیست',
+    refundKeyMissing: 'ثبت شماره کارت فعلاً ممکن نیست',
+    refundNudgeTooSoon: 'یادآوری بازپرداخت هنوز زود است',
+    linkInvalid: 'این لینک سفارش معتبر نیست',
+    buyerCancelReason: 'لغو توسط خریدار',
+    issueReasonInvalid: 'دلیل مشکل را انتخاب کن',
   },
   orderNotify: {
     placedSms: (
@@ -336,9 +346,12 @@ export const fa = {
       `نیوو: سفارش ${code} از ${storeName} ارسال شد.` +
       (carrier ? ` ${carrier}` : '') +
       (tracking ? ` کد رهگیری: ${tracking}` : ''),
-    rejectedChat: (code: string, reason?: string | null) =>
-      `متأسفانه فروشنده سفارش ${code} رو رد کرد 😔` +
+    rejectedChat: (code: string, reason?: string | null, refundAmount?: number | null) =>
+      `متأسفانه سفارش ${code} رد شد 😔` +
       (reason ? `\nدلیل: ${reason}` : '') +
+      (refundAmount
+        ? `\nمبلغ ${refundAmount.toLocaleString('fa-IR')} تومان برمی‌گرده.`
+        : '') +
       '\nاگه سوالی داری همین‌جا بپرس.',
     rejectedSms: (code: string, storeName: string) =>
       `نیوو: سفارش ${code} از ${storeName} توسط فروشنده رد شد. جزئیات در چت فروشگاه.`,
@@ -348,6 +361,46 @@ export const fa = {
       '\nاگه هنوز می‌خوایش، می‌تونی دوباره سفارش بدی.',
     cancelledSms: (code: string, storeName: string) =>
       `نیوو: سفارش ${code} از ${storeName} لغو شد.`,
+    refundAskChat: (amount: number) =>
+      `برای برگشت ${amount.toLocaleString('fa-IR')} تومان شماره کارت یا شبا و نام صاحب حساب رو وارد کن.`,
+    refundAskSms: (amount: number) =>
+      `نیوو: برای برگشت ${amount.toLocaleString('fa-IR')} تومان شماره کارت یا شبا رو در لینک سفارش وارد کن.`,
+    refundDoneChat: (amount: number, masked?: string | null, paidRef?: string | null) =>
+      `${amount.toLocaleString('fa-IR')} تومان` +
+      (masked ? ` به ${masked}` : '') +
+      ` واریز شد ✅` +
+      (paidRef ? `\nکد پیگیری: ${paidRef}` : ''),
+    refundDoneSms: (amount: number, paidRef?: string | null) =>
+      `نیوو: ${amount.toLocaleString('fa-IR')} تومان واریز شد.` +
+      (paidRef ? ` کد پیگیری: ${paidRef}` : ''),
+    receiptMismatchChat: (receipt: number, order: number) =>
+      `مبلغ رسید ${receipt.toLocaleString('fa-IR')}ه ولی سفارش ${order.toLocaleString('fa-IR')} — درسته؟ می‌تونی رسید دیگه بفرستی یا همین رو برای فروشنده بذاری.`,
+    deliveryCheckChat: (code: string) =>
+      `سفارش ${code} رسید؟ اگر تحویل گرفتی از لینک سفارش تایید کن.`,
+    deliveryCheckSms: (code: string) => `نیوو: سفارش ${code} رسید؟ از لینک سفارش تایید کن.`,
+    profileLinkLine: (url: string) => `جزئیات و پیگیری در پروفایلت 👈 ${url}`,
+    etaFallback: 'چند ساعت',
+    etaHours: (hours: number) => `حدود ${hours.toLocaleString('fa-IR')} ساعت`,
+    receiptOk: (code: string) => `رسید ${code}: مبلغ و کارت مطابق است.`,
+    receiptMismatch: (code: string) => `رسید ${code}: مغایرت مبلغ یا کارت.`,
+    receiptDuplicate: (code: string, other: string) =>
+      `رسید ${code}: رسید تکراری (سفارش ${other}).`,
+    receiptOverpaid: (code: string, extra: number) =>
+      `رسید ${code}: مبلغ بیشتر از سفارش است. مابه‌التفاوت ${extra.toLocaleString('fa-IR')} تومان را می‌توانی بازپرداخت کنی.`,
+    receiptUnreadable: (code: string) => `رسید ${code}: ناخوانا.`,
+    receiptOverdue: (code: string) => `رسید سفارش ${code} هنوز بررسی نشده.`,
+    refundReadySeller: (code: string, amount: number, masked: string) =>
+      `بازپرداخت ${code}: ${amount.toLocaleString('fa-IR')} تومان آماده واریز است. مقصد: ${masked}`,
+    refundOverdue: (code: string, amount: number) =>
+      `بازپرداخت ${code} به مبلغ ${amount.toLocaleString('fa-IR')} تومان بیش از ۴۸ ساعت معوق است.`,
+    refundNudge: (code: string, amount: number) =>
+      `خریدار برای بازپرداخت ${code} (${amount.toLocaleString('fa-IR')} تومان) یادآوری فرستاد.`,
+    sellerOrderCancelled: (code: string) => `خریدار سفارش ${code} را لغو کرد.`,
+    sellerOrderIssue: (code: string, reason: string) =>
+      `مشکل در سفارش ${code}: ${reason}`,
+    refundsEmpty: 'بازپرداخت آماده‌ی واریز نداری.',
+    refundMarkPaid: 'واریز کردم',
+    refundMarkedPaid: 'واریز ثبت شد.',
   },
   salesAgent: {
     invalidSession: 'نشست معتبر نیست',
@@ -441,8 +494,8 @@ export const fa = {
     photosCaption: (productName: string) => `عکس‌های ${productName} 📸`,
     receiptReceived: 'رسید دریافت شد و برای فروشنده ارسال شد — منتظر تایید باش',
     // 3.8 — بعد از ارسال رسید: کد سفارش را هم بگوید
-    receiptReceivedWithCode: (code: string) =>
-      `رسیدت رسید ✅ کد سفارش ${code} — بعد از بررسی فروشنده، تایید می‌شه و همین‌جا خبرت می‌کنم.`,
+    receiptReceivedWithCode: (code: string, eta?: string) =>
+      `رسیدت رسید ✅ کد سفارش ${code} — فروشنده معمولاً تا ${eta ?? 'چند ساعت'} تایید می‌کنه.`,
     // docs/PRD-buyer-payment-method-card-or-snapppay-link.md — پیام ثابت دکمه‌ی
     // PAYMENT_METHOD_PROMPT؛ هم‌الگوی addressChooseSavedPrompt پایین (caption تولیدی ندارد)
     choosePaymentMethodPrompt:

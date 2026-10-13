@@ -35,6 +35,8 @@ export class OrderNotificationService {
     to: OrderStatus;
     actor: OrderActor;
     reason?: string;
+    refundId?: string | null;
+    refundAmountToman?: number | null;
   }): Promise<void> {
     const template = TEMPLATE_BY_STATUS[args.to];
     if (!template) return;
@@ -49,8 +51,21 @@ export class OrderNotificationService {
         reason: args.reason,
         carrier: args.order.carrier,
         trackingCode: args.order.trackingCode,
+        refundAmountToman: args.refundAmountToman,
       },
     });
+    if (args.refundId && args.refundAmountToman) {
+      await this.notifications.notifyBuyer({
+        to: { customerId },
+        template: 'REFUND_DESTINATION_REQUEST',
+        entityId: args.refundId,
+        data: {
+          orderId: args.order.id,
+          refundAmountToman: args.refundAmountToman,
+          refundId: args.refundId,
+        },
+      });
+    }
   }
 
   async onPlaced(order: Pick<Order, 'id' | 'conversationId'>): Promise<void> {

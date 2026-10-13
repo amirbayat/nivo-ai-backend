@@ -2,7 +2,7 @@ import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
 import type { Queue } from 'bull';
 import { AiProviderService } from '../common/services/ai-provider.service';
-import { ORDER_EXPIRY_CRON } from '../common/constants/sales-ops.constants';
+import { ORDER_EXPIRY_CRON, ORDER_OPS_CRON } from '../common/constants/sales-ops.constants';
 
 const FLUSH_CRON = '*/5 * * * *';
 const SUMMARY_CRON = '0 2 * * *';
@@ -68,6 +68,8 @@ export class QueueService implements OnApplicationBootstrap {
     private readonly productEnrichmentReminderQueue: Queue,
     @InjectQueue('order-expiry')
     private readonly orderExpiryQueue: Queue,
+    @InjectQueue('order-ops')
+    private readonly orderOpsQueue: Queue,
     private readonly aiProvider: AiProviderService,
   ) {}
 
@@ -312,5 +314,12 @@ export class QueueService implements OnApplicationBootstrap {
       { repeat: { cron: ORDER_EXPIRY_CRON } },
     );
     this.logger.log(`Order expiry job scheduled: ${ORDER_EXPIRY_CRON}`);
+
+    const orderOpsRepeatables = await this.orderOpsQueue.getRepeatableJobs();
+    for (const job of orderOpsRepeatables) {
+      await this.orderOpsQueue.removeRepeatableByKey(job.key);
+    }
+    await this.orderOpsQueue.add('run', {}, { repeat: { cron: ORDER_OPS_CRON } });
+    this.logger.log(`Order ops job scheduled: ${ORDER_OPS_CRON}`);
   }
 }

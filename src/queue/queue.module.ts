@@ -25,6 +25,8 @@ import { AbandonedCartReminderProcessor } from './processors/abandoned-cart-remi
 import { ProductEnrichmentReminderProcessor } from './processors/product-enrichment-reminder.processor';
 import { OrderNotificationProcessor } from './processors/order-notification.processor';
 import { OrderExpiryProcessor } from './processors/order-expiry.processor';
+import { ReceiptCheckProcessor } from './processors/receipt-check.processor';
+import { OrderOpsProcessor } from './processors/order-ops.processor';
 import { OrderLifecycleModule } from '../modules/order-lifecycle/order-lifecycle.module';
 import { NotificationsModule } from '../modules/notifications/notifications.module';
 import { PrismaModule } from '../prisma/prisma.module';
@@ -97,6 +99,8 @@ import { StoreModule } from '../modules/store/store.module';
     BullModule.registerQueue({ name: 'product-enrichment-reminder' }),
     // docs/PRD-nivo-sales-unified.md 3.10 — cron انقضای سفارش پرداخت‌نشده
     BullModule.registerQueue({ name: 'order-expiry' }),
+    BullModule.registerQueue({ name: 'receipt-check' }),
+    BullModule.registerQueue({ name: 'order-ops' }),
     PrismaModule,
     MessageFeedbackModule,
     CampaignModule,
@@ -149,6 +153,8 @@ import { StoreModule } from '../modules/store/store.module';
     SalesAgentVoiceProcessor,
     OrderNotificationProcessor,
     OrderExpiryProcessor,
+    ReceiptCheckProcessor,
+    OrderOpsProcessor,
     ProductCommentModerationProcessor,
     PostPurchaseFollowUpProcessor,
     AbandonedCartReminderProcessor,
