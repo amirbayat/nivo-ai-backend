@@ -94,6 +94,9 @@ import {
   resolveModel,
   DEFAULT_MODEL_FALLBACK_CHAIN,
   withDefaultModelFallbackChain,
+  pickVariant,
+  pickVoiceVariant,
+  pickResponseStrategy,
 } from './model-variants';
 import { toneForCategory } from './tone-by-category';
 import {
@@ -4945,7 +4948,58 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
   // مسیر قطعی دکمه‌های UiBlock (افزودن به سبد/تایید سبد) — بدون NLU، productId از خودِ
   // دکمه معلوم است؛ فیدبک اول پایلوت: قبلاً این دکمه‌ها یک جمله‌ی فارسی می‌ساختند و دوباره
   // از parseIntent رد می‌شدند (گاهی «نامفهوم» تشخیص داده می‌شد)
+  // 0.13b + تصمیم D-2 — Order.conversationId یکتاست؛ اگر این مکالمه از قبل «هر» سفارشی دارد
+  // (در هر وضعیتی)، «سفارش مجدد» و «افزودن به سبد» نباید روی همان مکالمه سبد بسازند (تایید سبد
+  // سفارش قدیمی را برمی‌گرداند و اقلام جدید گم می‌شوند). مکالمه‌ی قبلی برای پیگیری سفارش
+  // باقی می‌ماند (فقط آرشیو می‌شود) و یک مکالمه‌ی تازه‌ی همان خریدار ساخته می‌شود.
+  // کلاینت وب با switchedConversationId به مکالمه‌ی جدید می‌رود؛ تلگرام خودش مکالمه‌ی
+  // غیرآرشیو را پیدا می‌کند (resolveActiveConversation).
+  private async forkConversationIfOrdered(
+    conversation: ConversationWithStore,
+  ): Promise<ConversationWithStore> {
+    const existing = await this.prisma.order.findUnique({
+      where: { conversationId: conversation.id },
+      select: { id: true },
+    });
+    if (!existing) return conversation;
+    const billingMode = await this.creditService.decideBillingMode(
+      conversation.storeId,
+    );
+    const globalConfig = await getSalesAgentGlobalConfig(this.prisma);
+    return this.prisma.$transaction(async (tx) => {
+      await tx.salesConversation.update({
+        where: { id: conversation.id },
+        data: { archivedAt: conversation.archivedAt ?? new Date() },
+      });
+      return tx.salesConversation.create({
+        data: {
+          storeId: conversation.storeId,
+          customerId: conversation.customerId,
+          abVariant: pickVariant(globalConfig.forcedModelVariant),
+          voiceVariant: pickVoiceVariant(),
+          responseStrategy: pickResponseStrategy(),
+          billingMode,
+        },
+        include: { store: true },
+      });
+    });
+  }
+
   async handleAction(
+    conversation: ConversationWithStore,
+    action: SalesAction,
+  ): Promise<EngineResult> {
+    if (action.type !== 'ADD_TO_CART' && action.type !== 'REORDER') {
+      return this.handleActionInner(conversation, action);
+    }
+    const target = await this.forkConversationIfOrdered(conversation);
+    const result = await this.handleActionInner(target, action);
+    return target.id === conversation.id
+      ? result
+      : { ...result, switchedConversationId: target.id };
+  }
+
+  private async handleActionInner(
     conversation: ConversationWithStore,
     action: SalesAction,
   ): Promise<EngineResult> {
@@ -7076,10 +7130,15 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       return this.doClarify(conversation, fa.salesAgent.noPendingOrder);
     }
 
-    await this.prisma.order.update({
-      where: { id: order.id },
+    // 0.13b — فقط سفارش «در انتظار پرداخت» رسید می‌گیرد؛ قبلاً آپدیت بدون شرط، سفارش
+    // تاییدشده را دوباره RECEIPT_SUBMITTED می‌کرد (دوبار تایید و دوبار کسر موجودی)
+    const claimed = await this.prisma.order.updateMany({
+      where: { id: order.id, status: 'PENDING_PAYMENT' },
       data: { receiptImageKey, status: 'RECEIPT_SUBMITTED' },
     });
+    if (claimed.count === 0) {
+      return this.doClarify(conversation, fa.salesAgent.noPendingOrder);
+    }
 
     const nextState: ConversationState = 'AWAITING_SELLER_APPROVAL';
     await this.persistTransition(
@@ -7100,31 +7159,41 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     );
     await this.logReply(conversation, reply, uiBlock);
 
-    // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۴ گزینه A — خواندن خودکار
-    // مبلغ رسید با vision؛ یک‌بار دانلود، هم برای استخراج هم برای ارسال عکس به فروشنده
-    const buffer = await this.storage.downloadImage(receiptImageKey);
-    const verification = await this.verifyReceiptAmount(
-      buffer,
-      receiptImageKey,
-      order.totalAmount,
-      order.paymentMethod,
-    );
-    if (verification) {
-      await this.prisma.order.update({
-        where: { id: order.id },
-        data: {
-          receiptExtractedAmountToman: verification.extractedAmountToman,
-          receiptVerifiedMatch: verification.match,
-        },
-      });
+    // 0.13c — رسید همین‌جا commit شده؛ هرچه بعد از این می‌آید (دانلود، vision، ارسال به
+    // فروشنده در تلگرام) «بهترین تلاش» است. قبلاً خطای شبکه‌ی تلگرام کل درخواست را 500 می‌کرد:
+    // خریدار خطا می‌دید در حالی که رسید ثبت شده بود و تلاش دوباره می‌گفت «سفارشی نیست».
+    try {
+      // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۴ گزینه A — خواندن خودکار
+      // مبلغ رسید با vision؛ یک‌بار دانلود، هم برای استخراج هم برای ارسال عکس به فروشنده
+      const buffer = await this.storage.downloadImage(receiptImageKey);
+      const verification = await this.verifyReceiptAmount(
+        buffer,
+        receiptImageKey,
+        order.totalAmount,
+        order.paymentMethod,
+      );
+      if (verification) {
+        await this.prisma.order.update({
+          where: { id: order.id },
+          data: {
+            receiptExtractedAmountToman: verification.extractedAmountToman,
+            receiptVerifiedMatch: verification.match,
+          },
+        });
+      }
+      await this.notifySellerOfReceipt(
+        conversation,
+        order.id,
+        receiptImageKey,
+        buffer,
+        verification,
+      );
+    } catch (err) {
+      this.logger.error(
+        `post-receipt processing failed (order=${order.id}) — receipt is saved, buyer gets success`,
+        err as Error,
+      );
     }
-    await this.notifySellerOfReceipt(
-      conversation,
-      order.id,
-      receiptImageKey,
-      buffer,
-      verification,
-    );
     return { reply, uiBlocks: [uiBlock], state: nextState };
   }
 

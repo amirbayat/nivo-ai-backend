@@ -279,7 +279,11 @@ export class SalesAgentService {
       if (!dto.message) throw new BadRequestException(fa.errors.validation);
       result = await this.engine.handleMessage(conversation, dto.message);
     }
-    return this.attachVoicePending(conversationId, result);
+    // 0.13b — اگر اکشن مکالمه‌ی تازه ساخت، پاسخ/وویس مال همان است
+    return this.attachVoicePending(
+      result.switchedConversationId ?? conversationId,
+      result,
+    );
   }
 
   async submitReceipt(
