@@ -116,6 +116,13 @@ function csvEscape(v: unknown): string {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
+// 0.3 — کمبود موجودی هنگام تایید سفارش (به فروشنده هشدار داده می‌شود، نه clamp بی‌صدا)
+export type StockShortage = {
+  name: string;
+  requested: number;
+  available: number;
+};
+
 @Injectable()
 export class StoreService {
   constructor(
@@ -1416,9 +1423,11 @@ export class StoreService {
     db: Prisma.TransactionClient,
     items: Prisma.JsonValue,
     direction: 'DEDUCT' | 'RESTORE',
-  ): Promise<void> {
+  ): Promise<StockShortage[]> {
+    const shortages: StockShortage[] = [];
     for (const item of items as {
       productId: string;
+      name?: string;
       variantId?: string;
       qty: number;
     }[]) {
@@ -1439,12 +1448,25 @@ export class StoreService {
         data: { stock: { decrement: item.qty } },
       });
       if (count === 0) {
+        // 0.3 — قبلاً بی‌صدا به ۰ clamp می‌شد؛ حالا clamp می‌ماند (تایید فروشنده مسدود نمی‌شود،
+        // چون ممکن است موجودی فیزیکی هست و فقط عدد سیستم عقب است) ولی کمبود به فروشنده هشدار
+        // داده می‌شود
+        const live = await (delegate as typeof db.product).findFirst({
+          where,
+          select: { stock: true },
+        });
         await (delegate as typeof db.product).updateMany({
           where,
           data: { stock: 0 },
         });
+        shortages.push({
+          name: item.name ?? '',
+          requested: item.qty,
+          available: Math.max(0, live?.stock ?? 0),
+        });
       }
     }
+    return shortages;
   }
 
   async approveOrder(sellerId: string, storeId: string, orderId: string) {
@@ -1452,11 +1474,21 @@ export class StoreService {
     // فیدبک کاربر — فروشنده باید بتواند بعد از رد اشتباهی یک سفارش، دوباره تاییدش کند
     // (REJECTED -> APPROVED مجاز است)؛ اما اگر از قبل APPROVED بوده، بی‌صدا نادیده می‌گیریم
     // تا totalConfirmedToman دوباره increment نشود و requestReviewFollowUp دوبار پیام نفرستد
-    if (order.status === 'APPROVED') return order;
+    if (order.status === 'APPROVED') return { ...order, stockWarnings: [] };
     // docs/PRD-conversation-history.md — تأیید سفارش یعنی مکالمه واقعاً تمام شده: هم
     // currentState (COMPLETED، تا امروز هیچ‌جا ست نمی‌شد) هم archivedAt پر می‌شود تا هم
     // TERMINAL_STATES فرانت درست کار کند هم مکالمه از «فعال» بودن خارج شود
-    const approved = await this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
+      // 0.13b — claim اتمیک: دو تایید هم‌زمان (دبل‌کلیک، پنل + بات) فقط یکی برنده می‌شود؛
+      // قبلاً هر دو از چک بیرون تراکنش رد می‌شدند و موجودی و سقف کارت دوبار کم/زیاد می‌شد
+      const claimed = await tx.order.updateMany({
+        where: {
+          id: orderId,
+          status: { in: ['PENDING_PAYMENT', 'RECEIPT_SUBMITTED', 'REJECTED'] },
+        },
+        data: { status: 'APPROVED', approvedAt: new Date() },
+      });
+      if (claimed.count === 0) return null;
       // docs/PRD-seller-multi-bank-card-rotation.md بخش ۲ — فقط روی تایید واقعی (نه لحظه‌ی
       // نمایش) به سقف THRESHOLD همان کارت اضافه می‌شود؛ خریدار ممکن است اصلاً پرداخت نکند
       if (order.bankCardId) {
@@ -1465,23 +1497,33 @@ export class StoreService {
           data: { totalConfirmedToman: { increment: order.totalAmount } },
         });
       }
-      await this.adjustOrderStock(tx, order.items, 'DEDUCT');
+      const stockWarnings = await this.adjustOrderStock(
+        tx,
+        order.items,
+        'DEDUCT',
+      );
       await tx.salesConversation.update({
         where: { id: order.conversationId },
         data: { currentState: 'COMPLETED', archivedAt: new Date() },
       });
-      return tx.order.update({
+      const updated = await tx.order.findUniqueOrThrow({
         where: { id: orderId },
-        data: { status: 'APPROVED', approvedAt: new Date() },
       });
+      return { updated, stockWarnings };
     });
+    if (!result) {
+      // تایید هم‌زمان دیگری زودتر انجام شد (یا سفارش در وضعیتی است که تایید ندارد)
+      const current = await this.getOwnedOrder(sellerId, storeId, orderId);
+      return { ...current, stockWarnings: [] };
+    }
+    const { updated: approved, stockWarnings } = result;
     // docs/PRD-order-status-chat-tool-and-fulfillment-delay-reviews.md بخش ۲.۲ — برای
     // سفارش‌های تحویل‌زمان‌بر (عکس/ویدیوی سفارشی و مشابه)، درخواست نظر به لحظه‌ی «ارسال شد»
     // موکول می‌شود (پایین در shipOrder)، نه این‌جا که محصول هنوز آماده نشده
     if (!order.hasFulfillmentDelay) {
       await this.requestReviewFollowUp(order);
     }
-    return approved;
+    return { ...approved, stockWarnings };
   }
 
   // docs/PRD-customer-comments-and-discounts.md بخش الف/۳ — بعد از تایید سفارش، یک پیام

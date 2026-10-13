@@ -1019,8 +1019,18 @@ export class TelegramService {
       return;
     const store = order.conversation.store;
     if (approve) {
-      await this.storeService.approveOrder(store.sellerId, store.id, orderId);
-      await this.sendText(chatId, fa.telegram.orderApprovedFromTelegram);
+      const approved = await this.storeService.approveOrder(
+        store.sellerId,
+        store.id,
+        orderId,
+      );
+      await this.sendText(
+        chatId,
+        fa.telegram.orderApprovedFromTelegram +
+          (approved.stockWarnings.length > 0
+            ? `\n\n${fa.sellerBot.stockShortageWarning(approved.stockWarnings)}`
+            : ''),
+      );
     } else {
       // فیدبک کاربر — رد سفارش دیگر فوری انجام نمی‌شود؛ اول دلیل رد با force_reply گرفته
       // می‌شود (handleSellerRejectReasonMessage پایین)، چون خریدار باید دلیل رو توی چت ببیند

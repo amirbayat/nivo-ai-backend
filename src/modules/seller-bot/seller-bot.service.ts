@@ -358,8 +358,18 @@ export class SellerBotService {
     if (!order || order.storeId !== store.id) return;
 
     if (approve) {
-      await this.storeService.approveOrder(store.sellerId, store.id, orderId);
-      await this.sendMenu(chatId, fa.sellerBot.orderApproved);
+      const approved = await this.storeService.approveOrder(
+        store.sellerId,
+        store.id,
+        orderId,
+      );
+      await this.sendMenu(
+        chatId,
+        fa.sellerBot.orderApproved +
+          (approved.stockWarnings.length > 0
+            ? `\n\n${fa.sellerBot.stockShortageWarning(approved.stockWarnings)}`
+            : ''),
+      );
     } else {
       await this.api.sendForceReply(
         chatId,

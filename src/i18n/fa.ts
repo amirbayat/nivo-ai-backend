@@ -700,6 +700,16 @@ export const fa = {
     orderApproveButton: '✅ تایید',
     orderRejectButton: '❌ رد',
     orderApproved: 'سفارش تایید شد ✅',
+    // 0.3 — موجودی سیستم کمتر از تعداد سفارش بود و صفر شد؛ فروشنده باید موجودی را اصلاح کند
+    stockShortageWarning: (
+      lines: { name: string; requested: number; available: number }[],
+    ) =>
+      `⚠️ موجودی ثبت‌شده برای این اقلام کمتر از سفارش بود و صفر شد:\n${lines
+        .map(
+          (l) =>
+            `• ${l.name}: سفارش ${l.requested}، موجودی ثبت‌شده ${l.available}`,
+        )
+        .join('\n')}\nموجودی واقعی را در پنل اصلاح کنید.`,
     orderRejectReasonPrompt: (orderId: string) =>
       `دلیل رد سفارش رو بنویس (یا فقط «-» بفرست اگه نمی‌خوای دلیل بدی).\nکد سفارش رد: ${orderId}`,
     orderRejectReasonSkipKeyword: '-',
