@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import type { MetadataExtractor } from '@ai-sdk/openai-compatible';
 import { ProxyAgent, fetch as undiciFetch } from 'undici';
+import { guardFetch } from './llm-turn-guard';
 
 export type AiProviderName = 'liara' | 'openrouter';
 
@@ -260,7 +261,8 @@ export class AiProviderService {
       baseURL: this.baseURL,
       apiKey: apiKey ?? this.sharedApiKey,
       ...(this.extraHeaders ? { headers: this.extraHeaders } : {}),
-      ...(this.fetch ? { fetch: this.fetch } : {}),
+      // 2.1 — بیرون از context یک turn موتور فروش، guardFetch فقط call را عبور می‌دهد
+      fetch: guardFetch(this.fetch),
       // قدم ۴ — فقط روی OpenRouter: usage.cost واقعی را از provider بخواه و زیر
       // OPENROUTER_METADATA_KEY در providerMetadata نتیجه در دسترس caller بگذار.
       // همچنین: @ai-sdk/openai-compatible فیلد reasoningEffort را به‌صورت مسطح

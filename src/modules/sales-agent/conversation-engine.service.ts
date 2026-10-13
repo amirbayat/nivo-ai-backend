@@ -119,8 +119,17 @@ import type {
   UiBlock,
 } from './sales-agent.types';
 import { ConversationLockService } from './conversation-lock.service';
-import { CONVERSATION_DRAIN_MAX_ROUNDS } from '../../common/constants/sales-ops.constants';
-import { CART_MAX_QTY_PER_LINE } from '../../common/constants/sales-ops.constants';
+import {
+  CART_MAX_QTY_PER_LINE,
+  CONVERSATION_DRAIN_MAX_ROUNDS,
+  LLM_FALLBACK_MAX_MODELS,
+  LLM_MAX_RETRIES,
+} from '../../common/constants/sales-ops.constants';
+import {
+  LlmSaturatedError,
+  isLlmSaturated,
+  runLlmTurn,
+} from '../../common/services/llm-turn-guard';
 import { isValidCartQty, reconcileCart, lineKey } from './cart-validation.util';
 import type { CatalogLine } from './cart-validation.util';
 
@@ -901,6 +910,7 @@ export class ConversationEngineService {
     outputTokens: number;
   }> {
     const { object, usage } = await generateObject({
+      maxRetries: LLM_MAX_RETRIES,
       model: this.aiProvider.buildClient(undefined, {
         supportsStructuredOutputs: true,
       })(model),
@@ -1061,7 +1071,12 @@ export class ConversationEngineService {
       model: string,
     ) => Promise<{ result: T; inputTokens: number; outputTokens: number }>,
   ): Promise<T | null> {
-    for (const model of DEFAULT_MODEL_FALLBACK_CHAIN) {
+    // 2.1 — حداکثر LLM_FALLBACK_MAX_MODELS مدل (نه کل زنجیره‌ی ۷تایی)؛ هر مدل اضافه یعنی تا ۲۰ ثانیه
+    // انتظار بیشتر و هزینه‌ی بیشتر
+    for (const model of DEFAULT_MODEL_FALLBACK_CHAIN.slice(
+      0,
+      LLM_FALLBACK_MAX_MODELS,
+    )) {
       const started = Date.now();
       try {
         const { result, inputTokens, outputTokens } = await run(model);
@@ -1106,6 +1121,7 @@ export class ConversationEngineService {
   ): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
     const tone = toneForCategory(category);
     const { text, usage } = await generateText({
+      maxRetries: LLM_MAX_RETRIES,
       model: this.aiProvider.buildClient()(model),
       system: `تو دستیار فروش یک فروشگاه در دایرکت اینستاگرام هستی. فقط و فقط از «واقعیت‌های»
 داده‌شده یک پیام فارسی کوتاه (حداکثر ۲-۳ جمله)، دوستانه و محاوره‌ای بساز — هیچ عدد/اسم/شماره‌ی
@@ -1261,6 +1277,7 @@ export class ConversationEngineService {
   }> {
     const tone = toneForCategory(category);
     const { object, usage } = await generateObject({
+      maxRetries: LLM_MAX_RETRIES,
       model: this.aiProvider.buildClient(undefined, {
         supportsStructuredOutputs: true,
       })(model),
@@ -1451,6 +1468,7 @@ export class ConversationEngineService {
   ): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
     const tone = toneForCategory(category);
     const { text, usage } = await generateText({
+      maxRetries: LLM_MAX_RETRIES,
       model: this.aiProvider.buildClient()(model),
       system: `تو دستیار فروش یک فروشگاه در دایرکت اینستاگرام هستی. مشتری یک هدف کلی دارد
 («${needSummary}») ولی هنوز اطلاعات کافی برای پیشنهاد دقیق محصول نداری. فقط بر اساس «واقعیت‌های»
@@ -1766,6 +1784,7 @@ export class ConversationEngineService {
     });
 
     const result = await generateText({
+      maxRetries: LLM_MAX_RETRIES,
       model: client,
       tools: {
         get_product_details: getProductDetails,
@@ -2955,6 +2974,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     let result;
     try {
       result = await generateText({
+        maxRetries: LLM_MAX_RETRIES,
         model: this.aiProvider.buildClient(undefined, {
           supportsStructuredOutputs: true,
         })(model),
@@ -3082,6 +3102,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         );
         try {
           const retryResult = await generateText({
+            maxRetries: LLM_MAX_RETRIES,
             model: this.aiProvider.buildClient(undefined, {
               supportsStructuredOutputs: true,
             })(model),
@@ -3456,6 +3477,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     });
     const run = async (model: string) => {
       const { object, usage } = await generateObject({
+        maxRetries: LLM_MAX_RETRIES,
         model: this.aiProvider.buildClient(undefined, {
           supportsStructuredOutputs: true,
         })(model),
@@ -3972,6 +3994,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     );
     const generate = (system: string) =>
       generateText({
+        maxRetries: LLM_MAX_RETRIES,
         model: this.aiProvider.buildClient(undefined, {
           supportsStructuredOutputs: true,
         })(model),
@@ -4394,7 +4417,37 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     }
   }
 
+  // 2.1 — هر turn یک deadline کل دارد (LLM_TURN_DEADLINE_MS) و call های LLM آن از guardFetch
+  // (timeout هر call + سقف هم‌زمانی پاد) رد می‌شوند؛ در اشباع، پاسخ مهربان بدون هیچ write
   private async handleMessageInner(
+    conversation: ConversationWithStore,
+    text: string,
+  ): Promise<EngineResult> {
+    if (isLlmSaturated()) return this.saturatedResult(conversation);
+    return runLlmTurn(() => this.handleMessageTurn(conversation, text)).catch(
+      (err: unknown) => this.onTurnError(conversation, err),
+    );
+  }
+
+  private saturatedResult(conversation: ConversationWithStore): EngineResult {
+    return {
+      reply: fa.salesAgent.llmSaturated,
+      uiBlocks: [],
+      state: conversation.currentState,
+      busy: true,
+    };
+  }
+
+  private onTurnError(
+    conversation: ConversationWithStore,
+    err: unknown,
+  ): EngineResult {
+    if (err instanceof LlmSaturatedError)
+      return this.saturatedResult(conversation);
+    throw err;
+  }
+
+  private async handleMessageTurn(
     conversation: ConversationWithStore,
     text: string,
   ): Promise<EngineResult> {
@@ -4774,6 +4827,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     outputTokens: number;
   }> {
     const { object, usage } = await generateObject({
+      maxRetries: LLM_MAX_RETRIES,
       model: this.aiProvider.buildClient(undefined, {
         supportsStructuredOutputs: true,
       })(model),
@@ -5118,6 +5172,16 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
   }
 
   private async handleActionInner(
+    conversation: ConversationWithStore,
+    action: SalesAction,
+  ): Promise<EngineResult> {
+    if (isLlmSaturated()) return this.saturatedResult(conversation);
+    return runLlmTurn(() => this.handleActionTurn(conversation, action)).catch(
+      (err: unknown) => this.onTurnError(conversation, err),
+    );
+  }
+
+  private async handleActionTurn(
     conversation: ConversationWithStore,
     action: SalesAction,
   ): Promise<EngineResult> {
@@ -7368,6 +7432,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       model: string,
     ): Promise<{ extractedAmountToman: number; match: boolean } | null> => {
       const { object } = await generateObject({
+        maxRetries: LLM_MAX_RETRIES,
         model: this.aiProvider.buildClient(undefined, {
           supportsStructuredOutputs: true,
         })(model),
@@ -7685,6 +7750,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     const tone = toneForCategory(conversation.store.category);
     const attempt = async (model: string): Promise<string | null> => {
       const { object, usage } = await generateObject({
+        maxRetries: LLM_MAX_RETRIES,
         // فیدبک کاربر ۱۴۰۵/۰۷/۲۱ — بدون supportsStructuredOutputs=true، @ai-sdk/openai-compatible
         // فقط response_format: {type:'json_object'} می‌فرستد؛ بعضی مدل‌ها/provider ها (مثل
         // openai/gpt-6-luna روی Azure) این حالت را رد می‌کنند مگر کلمه‌ی «json» عیناً در پیام‌های
@@ -7758,6 +7824,7 @@ answered=false بده (به‌جای حدس‌زدن).`,
     const tone = toneForCategory(conversation.store.category);
     const attempt = async (model: string): Promise<string | null> => {
       const { object, usage } = await generateObject({
+        maxRetries: LLM_MAX_RETRIES,
         // همون فیکس tryAnswerFromProductDescriptions بالا — بدون supportsStructuredOutputs=true
         // بعضی مدل‌ها/provider های زنجیره‌ی fallback با 400 «must contain the word json» رد می‌شوند
         model: this.aiProvider.buildClient(undefined, {

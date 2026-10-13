@@ -31,3 +31,20 @@ export const CONVERSATION_EVENTS_PAGE_SIZE = 50;
 // 0.7 — سفارش‌های «موفق» برای همه‌ی آمار درآمد/اثبات اجتماعی؛ با «ارسال» سفارش از آمار نمی‌افتد
 // (در فاز ۳ `DELIVERED` اضافه می‌شود)
 export const SUCCESSFUL_ORDER_STATUSES = ['APPROVED', 'SHIPPED'] as const;
+
+// 2.1 — سقف زمان و هم‌زمانی call های LLM در یک turn موتور فروش
+// هر HTTP call به مدل حداکثر این مدت؛ کل turn (همه‌ی stepها، retry اصلاحی و fallback) حداکثر
+// TURN_DEADLINE؛ بعد از آن هر call بلافاصله fail می‌شود و turn با پاسخ degraded تمام می‌شود
+export const LLM_CALL_TIMEOUT_MS = 20_000;
+export const LLM_TURN_DEADLINE_MS = 45_000;
+export const LLM_MAX_RETRIES = 1;
+// مدل A/B → defaultModel → حداکثر این تعداد مدل از زنجیره‌ی fallback (نه ۷ تا)
+export const LLM_FALLBACK_MAX_MODELS = 2;
+// سقف call های هم‌زمان LLM در هر پاد؛ بالاتر از آن در صف می‌ماند و اگر صف هم بلند شد
+// «شلوغ است» برمی‌گردد
+export const LLM_GLOBAL_CONCURRENCY = 100;
+export const LLM_QUEUE_MAX_WAITING = 200;
+
+// 2.1 — Idempotency-Key پیام (clientMessageId): ارسال مجدد همان پیام جواب ذخیره‌شده را برمی‌گرداند
+export const MESSAGE_IDEMPOTENCY_TTL_SECONDS = 300;
+export const MESSAGE_IDEMPOTENCY_PENDING_TTL_SECONDS = 120;
