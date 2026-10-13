@@ -364,27 +364,6 @@ export class VideoEditService {
           data: { userId, title: null },
         });
 
-    const activeJobsCount = await this.prisma.videoEditJob.count({
-      where: {
-        userId,
-        status: { in: [VideoJobStatus.PENDING, VideoJobStatus.PROCESSING] },
-      },
-    });
-    if (activeJobsCount >= config.maxConcurrentJobsPerUser) {
-      throw new BadRequestException(fa.videoEdit.tooManyConcurrentJobs);
-    }
-
-    if (config.maxJobsPerDayPerUser != null) {
-      const since = new Date();
-      since.setHours(since.getHours() - 24);
-      const todayCount = await this.prisma.videoEditJob.count({
-        where: { userId, createdAt: { gte: since } },
-      });
-      if (todayCount >= config.maxJobsPerDayPerUser) {
-        throw new BadRequestException(fa.videoEdit.dailyLimitReached);
-      }
-    }
-
     // preflight محافظه‌کارانه — رقم واقعی فقط بعد از creditsConsumed در پردازشگر صف مشخص
     // می‌شود (بخش ۶.۵ سند)؛ pricePerSecondUsdConfirmed تا وقتی مدل تست نشده null است، پس
     // نرخ رسمی Google/fal ($۰.۱۰) به‌عنوان تخمین محافظه‌کارانه (نه ارزان) استفاده می‌شود
@@ -400,38 +379,96 @@ export class VideoEditService {
     const minBalance = await this.pricing.calcFlatCostToman(
       MIN_VIDEO_BALANCE_USD,
     );
-    const balance = await this.credits.getBalance(userId);
-    if (balance.balanceToman < minBalance.costToman) {
-      const neededCredits = Math.ceil(
-        minBalance.costToman / balance.tomanPerCredit,
-      );
-      throw new BadRequestException({
-        message: fa.videoEdit.insufficientMinBalance(
-          neededCredits,
-          balance.credits,
-        ),
-        code: 'INSUFFICIENT_CREDITS',
-        neededCredits,
-        balanceCredits: balance.credits,
+    // 0.13r — چک سقف هم‌زمانی، چک سقف روزانه، چک موجودی و ساخت job باید یک واحد اتمیک و زیر
+    // قفل ردیف کیف‌پول باشند؛ وگرنه N درخواست هم‌زمان همه از چک‌ها رد می‌شوند و بعد هر کدام
+    // هزینه‌ی کامل را کم می‌کند و کیف‌پول خیلی منفی می‌شود. قفل ردیف، درخواست‌های هم‌زمان
+    // همین کاربر را سریال می‌کند؛ موجودیِ در دسترس = موجودی − (jobهای در جریان × تخمین همین job)
+    // تا هزینه‌ی jobهایی که هنوز کسر نشده‌اند هم حساب شود (رزرو محافظه‌کارانه، بدون ستون جدید)
+    const job = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM wallets WHERE "userId" = ${userId} FOR UPDATE`;
+
+      const activeJobsCount = await tx.videoEditJob.count({
+        where: {
+          userId,
+          status: { in: [VideoJobStatus.PENDING, VideoJobStatus.PROCESSING] },
+        },
       });
-    }
-    if (balance.balanceToman < estimate.costToman) {
-      const neededCredits = Math.ceil(
-        estimate.costToman / balance.tomanPerCredit,
-      );
-      // مبلغ لازم/موجود هم توی بدنه‌ی خطا برمی‌گردد (نه فقط متن ثابت) تا فرانت بتواند دقیقاً
-      // نشان دهد چقدر کم دارد — دقیقاً همون الگوی {message, code} که chat.service.ts هم
-      // برای خطاهای ساختاریافته استفاده می‌کند
-      throw new BadRequestException({
-        message: fa.videoEdit.insufficientCredits(
+      if (activeJobsCount >= config.maxConcurrentJobsPerUser) {
+        throw new BadRequestException(fa.videoEdit.tooManyConcurrentJobs);
+      }
+
+      if (config.maxJobsPerDayPerUser != null) {
+        const since = new Date();
+        since.setHours(since.getHours() - 24);
+        const todayCount = await tx.videoEditJob.count({
+          where: { userId, createdAt: { gte: since } },
+        });
+        if (todayCount >= config.maxJobsPerDayPerUser) {
+          throw new BadRequestException(fa.videoEdit.dailyLimitReached);
+        }
+      }
+
+      const balance = await this.credits.getBalance(userId);
+      const availableToman =
+        balance.balanceToman - activeJobsCount * estimate.costToman;
+      if (availableToman < minBalance.costToman) {
+        const neededCredits = Math.ceil(
+          minBalance.costToman / balance.tomanPerCredit,
+        );
+        throw new BadRequestException({
+          message: fa.videoEdit.insufficientMinBalance(
+            neededCredits,
+            balance.credits,
+          ),
+          code: 'INSUFFICIENT_CREDITS',
           neededCredits,
-          balance.credits,
-        ),
-        code: 'INSUFFICIENT_CREDITS',
-        neededCredits,
-        balanceCredits: balance.credits,
+          balanceCredits: balance.credits,
+        });
+      }
+      if (availableToman < estimate.costToman) {
+        const neededCredits = Math.ceil(
+          estimate.costToman / balance.tomanPerCredit,
+        );
+        // مبلغ لازم/موجود هم توی بدنه‌ی خطا برمی‌گردد (نه فقط متن ثابت) تا فرانت بتواند دقیقاً
+        // نشان دهد چقدر کم دارد — دقیقاً همون الگوی {message, code} که chat.service.ts هم
+        // برای خطاهای ساختاریافته استفاده می‌کند
+        throw new BadRequestException({
+          message: fa.videoEdit.insufficientCredits(
+            neededCredits,
+            balance.credits,
+          ),
+          code: 'INSUFFICIENT_CREDITS',
+          neededCredits,
+          balanceCredits: balance.credits,
+        });
+      }
+
+      const created = await tx.videoEditJob.create({
+        data: schema
+          ? {
+              userId,
+              sessionId: session.id,
+              kieVideoModelId: model.id,
+              mode: dto.mode,
+              prompt: dto.prompt,
+              valuesJson: valuesJson as Prisma.InputJsonValue,
+            }
+          : {
+              userId,
+              sessionId: session.id,
+              kieVideoModelId: model.id,
+              mode: dto.mode,
+              prompt: dto.prompt,
+              referenceImageKeys: dto.referenceImageKeys ?? [],
+              videoKey: dto.videoKey ?? null,
+              videoWindowStartSec: dto.videoWindowStartSec ?? null,
+              videoWindowEndSec: dto.videoWindowEndSec ?? null,
+              aspectRatio: dto.aspectRatio ?? '16:9',
+              resolution: dto.resolution ?? model.resolutions[0] ?? '720p',
+            },
       });
-    }
+      return created;
+    });
 
     const needsTitle = session.title == null;
     if (needsTitle) {
@@ -440,31 +477,6 @@ export class VideoEditService {
         data: { title: dto.prompt.slice(0, 40) },
       });
     }
-
-    const job = await this.prisma.videoEditJob.create({
-      data: schema
-        ? {
-            userId,
-            sessionId: session.id,
-            kieVideoModelId: model.id,
-            mode: dto.mode,
-            prompt: dto.prompt,
-            valuesJson: valuesJson as Prisma.InputJsonValue,
-          }
-        : {
-            userId,
-            sessionId: session.id,
-            kieVideoModelId: model.id,
-            mode: dto.mode,
-            prompt: dto.prompt,
-            referenceImageKeys: dto.referenceImageKeys ?? [],
-            videoKey: dto.videoKey ?? null,
-            videoWindowStartSec: dto.videoWindowStartSec ?? null,
-            videoWindowEndSec: dto.videoWindowEndSec ?? null,
-            aspectRatio: dto.aspectRatio ?? '16:9',
-            resolution: dto.resolution ?? model.resolutions[0] ?? '720p',
-          },
-    });
 
     await this.videoEditQueue.add(
       'render',

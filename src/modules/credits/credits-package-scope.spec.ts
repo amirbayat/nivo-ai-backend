@@ -73,7 +73,10 @@ describe('0.13e — بسته‌ی اعتبار فروشگاه به کیف‌پو
   });
 
   it('confirmBazaarPurchase بسته‌ی NIVO_CAL_BAZAAR عمومی را می‌پذیرد', async () => {
-    const { svc, payments } = makeService({ ...base, scope: 'NIVO_CAL_BAZAAR' });
+    const { svc, payments } = makeService({
+      ...base,
+      scope: 'NIVO_CAL_BAZAAR',
+    });
     await svc.confirmBazaarPurchase('u1', {
       packageId: 'p1',
       purchaseToken: 'tok',
