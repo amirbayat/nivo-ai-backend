@@ -727,12 +727,12 @@ export class ConversationEngineService {
       SELECT item->>'name' AS name, COUNT(DISTINCT orders.id)::bigint AS count
       FROM orders, jsonb_array_elements(items) AS item
       WHERE orders."storeId" = ${storeId}
-        AND orders.status = 'APPROVED'
+        AND orders.status IN ('APPROVED', 'SHIPPED')
         AND (item->>'productId') != ${productId}
         AND orders.id IN (
           SELECT id FROM orders
           WHERE "storeId" = ${storeId}
-            AND status = 'APPROVED'
+            AND status IN ('APPROVED', 'SHIPPED')
             AND items @> ${JSON.stringify([{ productId }])}::jsonb
         )
       GROUP BY item->>'productId', item->>'name'
@@ -764,7 +764,7 @@ export class ConversationEngineService {
     const rows = await this.prisma.$queryRaw<{ count: bigint }[]>`
       SELECT COUNT(*)::bigint AS count FROM orders
       WHERE "storeId" = ${storeId}
-        AND status = 'APPROVED'
+        AND status IN ('APPROVED', 'SHIPPED')
         AND items @> ${JSON.stringify([{ productId }])}::jsonb
     `;
     return Number(rows[0]?.count ?? 0);

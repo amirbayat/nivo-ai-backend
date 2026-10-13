@@ -1,3 +1,4 @@
+import { SUCCESSFUL_ORDER_STATUSES } from '../../common/constants/sales-ops.constants';
 import { PrismaService } from '../../prisma/prisma.service';
 
 // docs/PRD-sales-agent-admin-analytics.md بخش ۴ + docs/PRD-sales-agent-voice.md بخش ۶.۱ —
@@ -91,7 +92,10 @@ export async function computeConversationStats(
   );
 
   const approvedOrders = await prisma.order.findMany({
-    where: { conversationId: { in: conversationIds }, status: 'APPROVED' },
+    where: {
+      conversationId: { in: conversationIds },
+      status: { in: [...SUCCESSFUL_ORDER_STATUSES] },
+    },
     select: { conversationId: true },
   });
   const approvedConversationIds = new Set(

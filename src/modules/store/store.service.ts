@@ -32,6 +32,12 @@ import { UpdateProductDto } from './dto/update-product.dto';
 import { ReplaceProductVariantsDto } from './dto/replace-product-variants.dto';
 import { UpdateStoreDto } from './dto/update-store.dto';
 import { fa } from '../../i18n/fa';
+import { SUCCESSFUL_ORDER_STATUSES } from '../../common/constants/sales-ops.constants';
+import {
+  addTehranDays,
+  startOfTehranDay,
+  tehranDateString,
+} from '../../common/utils/tehran-time.util';
 import { getRecentConversationEvents } from '../../common/utils/conversation-events.util';
 import { computeConversationStats } from '../sales-agent/conversation-stats.util';
 import { TelegramApiClientService } from '../telegram/telegram-api-client.service';
@@ -1724,20 +1730,20 @@ export class StoreService {
   async getDashboard(sellerId: string, storeId: string) {
     await this.getOwned(sellerId, storeId);
 
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    const weekStart = new Date(todayStart);
-    weekStart.setDate(weekStart.getDate() - 6);
-    const monthStart = new Date(todayStart);
-    monthStart.setDate(monthStart.getDate() - 29);
+    // 0.13k — مرز روز با Asia/Tehran (قبلاً UTC: «امروز» از ۰۳:۳۰ تهران شروع می‌شد)
+    const todayStart = startOfTehranDay();
+    const weekStart = addTehranDays(todayStart, -6);
+    const monthStart = addTehranDays(todayStart, -29);
 
     const [approvedOrders, orderCountsByStatus, orderCountsByPaymentMethod] =
       await Promise.all([
         this.prisma.order.findMany({
-          where: { storeId, status: 'APPROVED' },
+          // 0.7 — «ارسال» سفارش را از درآمد حذف نمی‌کرد‌ ولی فقط APPROVED شمرده می‌شد
+          where: { storeId, status: { in: [...SUCCESSFUL_ORDER_STATUSES] } },
           select: {
             totalAmount: true,
             createdAt: true,
+            approvedAt: true,
             items: true,
             conversation: { select: { customerId: true } },
           },
@@ -1754,22 +1760,24 @@ export class StoreService {
         }),
       ]);
 
+    // 0.13k — درآمد بر اساس زمان تایید (approvedAt)، نه ثبت سفارش؛ ردیف‌های قدیمی بدون approvedAt
+    // به createdAt برمی‌گردند
+    const revenueAt = (o: { approvedAt: Date | null; createdAt: Date }) =>
+      o.approvedAt ?? o.createdAt;
     const sumSince = (since: Date) =>
       approvedOrders
-        .filter((o) => o.createdAt >= since)
+        .filter((o) => revenueAt(o) >= since)
         .reduce((sum, o) => sum + o.totalAmount, 0);
 
     const dailyRevenueTrend: { date: string; totalToman: number }[] = [];
     for (let i = 29; i >= 0; i--) {
-      const day = new Date(todayStart);
-      day.setDate(day.getDate() - i);
-      const nextDay = new Date(day);
-      nextDay.setDate(nextDay.getDate() + 1);
+      const day = addTehranDays(todayStart, -i);
+      const nextDay = addTehranDays(day, 1);
       const totalToman = approvedOrders
-        .filter((o) => o.createdAt >= day && o.createdAt < nextDay)
+        .filter((o) => revenueAt(o) >= day && revenueAt(o) < nextDay)
         .reduce((sum, o) => sum + o.totalAmount, 0);
       dailyRevenueTrend.push({
-        date: day.toISOString().slice(0, 10),
+        date: tehranDateString(day),
         totalToman,
       });
     }

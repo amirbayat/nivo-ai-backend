@@ -1,3 +1,4 @@
+import { SUCCESSFUL_ORDER_STATUSES } from '../../common/constants/sales-ops.constants';
 import {
   BadRequestException,
   Injectable,
@@ -1908,7 +1909,7 @@ export class AdminService {
     const recoveredCount = await this.prisma.order.count({
       where: {
         conversationId: { in: conversations.map((c) => c.id) },
-        status: 'APPROVED',
+        status: { in: [...SUCCESSFUL_ORDER_STATUSES] },
       },
     });
 

@@ -27,3 +27,7 @@ export const TELEGRAM_UPDATES_QUEUE_CONCURRENCY = 10;
 
 // 0.6 — تعداد رویداد مکالمه در هر صفحه (جدیدترین‌ها؛ «قدیمی‌تر» با cursor)
 export const CONVERSATION_EVENTS_PAGE_SIZE = 50;
+
+// 0.7 — سفارش‌های «موفق» برای همه‌ی آمار درآمد/اثبات اجتماعی؛ با «ارسال» سفارش از آمار نمی‌افتد
+// (در فاز ۳ `DELIVERED` اضافه می‌شود)
+export const SUCCESSFUL_ORDER_STATUSES = ['APPROVED', 'SHIPPED'] as const;
