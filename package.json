@@ -109,6 +109,10 @@
       "**/*.(t|j)s"
     ],
     "coverageDirectory": "../coverage",
-    "testEnvironment": "node"
+    "testEnvironment": "node",
+    "moduleNameMapper": {
+      "^ai$": "<rootDir>/../test/stubs/esm-only-stub.ts",
+      "^@ai-sdk/.*$": "<rootDir>/../test/stubs/esm-only-stub.ts"
+    }
   }
 }

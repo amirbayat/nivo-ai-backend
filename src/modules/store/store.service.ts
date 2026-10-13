@@ -1000,6 +1000,10 @@ export class StoreService {
     key: string,
   ) {
     const product = await this.getOwnedProduct(sellerId, storeId, productId);
+    // 0.13a — کلید باید واقعاً جزو عکس‌های همین محصول باشد؛ وگرنه فروشنده می‌تواند هر فایل
+    // باکت مشترک (عکس فروشگاه‌های دیگر، رسیدها) را پاک کند
+    if (!product.images.includes(key))
+      throw new NotFoundException(fa.store.productNotFound);
     const remaining = product.images.filter((k) => k !== key);
     await this.storage.deleteObject(key).catch(() => undefined);
     return this.prisma.product.update({
@@ -1100,9 +1104,11 @@ export class StoreService {
     key: string,
   ) {
     const product = await this.getOwnedProduct(sellerId, storeId, productId);
-    const videos = parseProductVideos(product.videos).filter(
-      (v) => v.key !== key,
-    );
+    const existingVideos = parseProductVideos(product.videos);
+    // 0.13a — مثل removeProductImage: کلید بیگانه هرگز از باکت حذف نشود
+    if (!existingVideos.some((v) => v.key === key))
+      throw new NotFoundException(fa.store.productNotFound);
+    const videos = existingVideos.filter((v) => v.key !== key);
     await this.storage.deleteObject(key).catch(() => undefined);
     return this.prisma.product.update({
       where: { id: productId },
