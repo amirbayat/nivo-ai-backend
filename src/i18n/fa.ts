@@ -300,6 +300,7 @@ export const fa = {
     stateChanged: 'وضعیت سفارش همین الان تغییر کرد؛ صفحه را تازه کن',
     expiredReason: 'مهلت پرداخت تمام شد',
     carrierInvalid: 'شرکت حمل معتبر نیست',
+    manualReceiptCardLast4Invalid: '۴ رقم آخر کارت مبدا را درست وارد کن',
   },
   orderNotify: {
     placedSms: (
@@ -648,6 +649,15 @@ export const fa = {
       '⚠️ پرداخت با اسنپ‌پی — خریدار هنوز کد رهگیری رو نفرستاده. قبل از تایید، از خریدار کد رهگیری رو بخواه و در پنل اسنپ‌پی‌ات چک کن.',
     receiptSnapppayTrackingCodeFollowUp: (orderId: string, code: string) =>
       `🔗 کد رهگیری اسنپ‌پی سفارش رسیده (${orderId}): ${code}\nلطفاً در پنل پذیرندگی اسنپ‌پی خودت چک کن.`,
+    // 3.8 — «رسید ندارم»: فروشنده تصویری ندارد و باید در بانک چک کند
+    receiptManualNotification: (
+      code: string,
+      cardLast4: string,
+      approxTime: string,
+      trackingCode?: string | null,
+    ) =>
+      `🧾 سفارش ${code} — بدون عکس رسید (باید در بانک چک کنی)\nچهار رقم آخر کارت مبدا: ${cardLast4}\nساعت تقریبی واریز: ${approxTime}` +
+      (trackingCode ? `\nکد پیگیری: ${trackingCode}` : ''),
     receiptApproveButton: '✅ تایید',
     receiptRejectButton: '❌ رد',
     orderApprovedFromTelegram: 'سفارش تایید شد ✅',

@@ -7444,6 +7444,101 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     );
   }
 
+  // 3.8 — «رسید ندارم»: بدون عکس؛ همان RECEIPT_SUBMITTED با receiptType=MANUAL_INFO
+  async handleManualReceipt(
+    conversation: ConversationWithStore,
+    info: { cardLast4: string; approxTime: string; trackingCode?: string },
+  ): Promise<EngineResult> {
+    return this.runActionLocked(conversation, (fresh) =>
+      this.handleManualReceiptInner(fresh, info),
+    );
+  }
+
+  private async handleManualReceiptInner(
+    conversation: ConversationWithStore,
+    info: { cardLast4: string; approxTime: string; trackingCode?: string },
+  ): Promise<EngineResult> {
+    const order = await this.prisma.order.findUnique({
+      where: { conversationId: conversation.id },
+    });
+    if (
+      !order ||
+      conversation.currentState !== 'AWAITING_PAYMENT' ||
+      order.status !== 'PENDING_PAYMENT'
+    ) {
+      return this.doClarify(conversation, fa.salesAgent.noPendingOrder);
+    }
+    try {
+      const moved = await this.orderState.transition({
+        orderId: order.id,
+        to: 'RECEIPT_SUBMITTED',
+        actor: 'BUYER',
+        channel: await this.orderChannelOf(this.prisma, conversation),
+        data: { receiptType: 'MANUAL_INFO', receiptManualInfo: info },
+      });
+      if (!moved.changed) {
+        return this.doClarify(conversation, fa.salesAgent.noPendingOrder);
+      }
+    } catch (err) {
+      if (err instanceof ConflictException) {
+        return this.doClarify(conversation, fa.salesAgent.noPendingOrder);
+      }
+      throw err;
+    }
+    const nextState: ConversationState = 'AWAITING_SELLER_APPROVAL';
+    await this.persistTransition(
+      conversation,
+      nextState,
+      this.getContext(conversation),
+      'submitReceipt',
+    );
+    const uiBlock: UiBlock = {
+      type: 'ORDER_STATUS',
+      orderId: order.id,
+      status: 'RECEIPT_SUBMITTED',
+      orderCode: displayOrderCode(order),
+    };
+    const reply = fa.salesAgent.receiptReceivedWithCode(
+      displayOrderCode(order),
+    );
+    await this.logReply(conversation, reply, uiBlock);
+    // اعلان به فروشنده (بهترین تلاش؛ رسید همین‌جا commit شده)
+    try {
+      const chatId = conversation.store.sellerBotChatId;
+      if (chatId) {
+        await this.sellerBotApi.sendText(
+          chatId,
+          fa.telegram.receiptManualNotification(
+            displayOrderCode(order),
+            info.cardLast4,
+            info.approxTime,
+            info.trackingCode,
+          ),
+          {
+            inline_keyboard: [
+              [
+                {
+                  text: fa.telegram.receiptApproveButton,
+                  callback_data: `sbap:${order.id}`,
+                },
+                {
+                  text: fa.telegram.receiptRejectButton,
+                  callback_data: `sbrj:${order.id}`,
+                },
+              ],
+            ],
+          },
+        );
+      }
+    } catch (err) {
+      this.logger.error(
+        `manual receipt seller notify failed (order=${order.id})`,
+        err as Error,
+      );
+    }
+    return { reply, uiBlocks: [uiBlock], state: nextState };
+  }
+
   private async handleReceiptUploadInner(
     conversation: ConversationWithStore,
     receiptImageKey: string,

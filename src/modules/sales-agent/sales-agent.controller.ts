@@ -19,6 +19,7 @@ import type { Response } from 'express';
 import { AdminGuard } from '../../common/guards/admin.guard';
 import { JwtGuard } from '../../common/guards/jwt.guard';
 import { SalesAgentService } from './sales-agent.service';
+import { SubmitManualReceiptDto } from './dto/submit-manual-receipt.dto';
 import { SendMessageDto } from './dto/send-message.dto';
 import { SetResponseStrategyDto } from './dto/set-response-strategy.dto';
 import { SendBuyerOtpDto, VerifyBuyerOtpDto } from './dto/register-buyer.dto';
@@ -146,6 +147,20 @@ export class SalesAgentController {
       conversationId,
       sessionToken,
       file,
+    );
+  }
+
+  // docs/PRD-nivo-sales-unified.md 3.8 — «رسید ندارم» (بدون عکس)
+  @Post('chat/:conversationId/receipt-manual')
+  submitManualReceipt(
+    @Param('conversationId') conversationId: string,
+    @Headers('x-session-token') sessionToken: string,
+    @Body() dto: SubmitManualReceiptDto,
+  ) {
+    return this.salesAgentService.submitManualReceipt(
+      conversationId,
+      sessionToken,
+      dto,
     );
   }
 

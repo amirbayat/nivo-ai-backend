@@ -36,6 +36,7 @@ import {
 import { getSalesAgentGlobalConfig } from './sales-agent-global-config.util';
 import { buildAsrVocabHint } from './asr-vocab-hint';
 import { reattachReceiptIfOrderOpen } from './receipt-reattach.util';
+import { SubmitManualReceiptDto } from './dto/submit-manual-receipt.dto';
 import { OrderStateService } from '../order-lifecycle/order-state.service';
 import { CommentsService } from '../comments/comments.service';
 import type { SubmitCommentDto } from './dto/submit-comment.dto';
@@ -376,6 +377,21 @@ export class SalesAgentService {
       conversation.id,
     );
     const result = await this.engine.handleReceiptUpload(conversation, key);
+    return this.attachVoicePending(conversationId, result);
+  }
+
+  // docs/PRD-nivo-sales-unified.md 3.8 — «رسید ندارم»: اطلاعات دستی به‌جای عکس
+  async submitManualReceipt(
+    conversationId: string,
+    sessionToken: string,
+    dto: SubmitManualReceiptDto,
+  ) {
+    const conversation = await this.loadOwned(conversationId, sessionToken);
+    const result = await this.engine.handleManualReceipt(conversation, {
+      cardLast4: dto.cardLast4,
+      approxTime: dto.approxTime.trim(),
+      trackingCode: dto.trackingCode?.trim() || undefined,
+    });
     return this.attachVoicePending(conversationId, result);
   }
 
