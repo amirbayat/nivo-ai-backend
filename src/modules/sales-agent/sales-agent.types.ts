@@ -1,3 +1,4 @@
+import type { SalesMemory } from './sales-machine/sales-machine.types';
 import type { ProductVideoItem } from '../store/product-video.types';
 import type { ProductSpecItem } from '../store/product-specs.types';
 import type { OrderPaymentMethod } from '@prisma/client';
@@ -113,6 +114,9 @@ export type ConversationContext = {
   // snapshot (اگر فروشگاه ارسال داشت) تا جواب برسد همین‌جا نگه داشته می‌شود — عیناً الگوی
   // pendingAddress بالا. null یعنی هیچ آدرسی در کار نبوده (فروش حضوری/دیجیتال)
   pendingOrderAddressSnapshot?: AddressSnapshot | null;
+  // docs/PRD-sales-agent-sales-state-machine.md §۵ — حافظه‌ی ماشین‌حالت فروش؛ نبودنش یعنی
+  // مکالمه قبل از این فیچر شروع شده (loadSalesMemory آن را از customerState/lastShownProducts می‌سازد)
+  sales?: SalesMemory | null;
 };
 
 export type UiBlock =

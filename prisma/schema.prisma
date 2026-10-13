@@ -598,6 +598,8 @@ model SalesAgentGlobalConfig {
   // تازه (startChat/restartConversation در sales-agent.service.ts) فورس می‌کند — مکالمه‌های
   // قدیمی که از قبل abVariant دارند دست‌نخورده می‌مانند.
   forcedModelVariant  String?
+  // docs/PRD-sales-agent-sales-state-machine.md §۱۸ — کلید rollout؛ false = مسیر FULL_AGENT قبلی
+  salesStageMachineEnabled Boolean @default(false)
   updatedAt           DateTime @updatedAt
 
   @@map("sales_agent_global_config")
@@ -2784,6 +2786,10 @@ model SalesConversation {
   // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۰ بند ۲ — یادآوری دوم (۱۸ ساعت بعد از اولی)
   // با کد تخفیف خودکار، فقط اگر فروشگاه از قبل یک StoreDiscountCode فعال داشته باشد
   secondAbandonedCartReminderSentAt DateTime?
+  // docs/PRD-sales-agent-sales-state-machine.md §۵.۵ — مرحله‌ی فروش (جدا از currentState که
+  // مراحل بعد از تصمیم خرید را مدل می‌کند). منبع حقیقت contextData.sales است؛ این ستون فقط
+  // برای فیلتر/گزارش ادمین
+  salesStage                        SalesStage?
   createdAt                         DateTime          @default(now())
   updatedAt                         DateTime          @updatedAt
 
@@ -2792,11 +2798,26 @@ model SalesConversation {
   usageEvents CreditUsageEvent[]
 
   @@index([storeId])
+  @@index([storeId, salesStage])
   @@index([storeId, isMutedForHuman])
   @@index([customerId, createdAt])
   @@index([currentState, abandonedCartReminderSentAt])
   @@index([currentState, secondAbandonedCartReminderSentAt])
   @@map("sales_conversations")
+}
+
+// docs/PRD-sales-agent-sales-state-machine.md §۵.۱ — مرحله‌ی فروش؛ جدا از ConversationState
+enum SalesStage {
+  OPENING
+  DISCOVERY
+  RECOMMENDATION
+  EVALUATION
+  OBJECTION
+  CLOSING
+  CHECKOUT
+  POST_PURCHASE
+  NOT_A_FIT
+  DORMANT
 }
 
 enum BillingMode {

@@ -1,6 +1,47 @@
 import { z } from 'zod';
 import type { ConversationState } from '@prisma/client';
 
+// docs/PRD-sales-agent-sales-state-machine.md §۶.۱ — منبع واحد برچسب‌های buyerNeeds؛ هم این schema هم
+// perceptionSchema (sales-machine) از همین استفاده می‌کنند
+export const BUYER_NEED_TAGS = [
+  'PRODUCT_SPEC',
+  'USAGE_GUIDE',
+  'STOCK_CHECK',
+  'VARIANT_REQUEST',
+  'PRODUCT_COMPARISON',
+  'PRODUCT_RECOMMENDATION',
+  'ASK_REVIEWS',
+  'ASK_AUTHENTICITY',
+  'ASK_SHIPPING',
+  'ASK_PAYMENT_METHODS',
+  'ASK_WARRANTY_RETURN_POLICY',
+  'ASK_STORE_TRUST',
+  'ASK_COMPATIBILITY',
+  'ASK_NAVIGATION_HELP',
+  'ASK_RESTOCK_ETA',
+  'ASK_CASH_ON_DELIVERY',
+  'PURCHASE_HESITATION',
+  'ASK_PRICE',
+  'REQUEST_DISCOUNT',
+  'NEGOTIATE_PRICE',
+  'ASK_BULK_PURCHASE',
+  'ASK_INSTALLMENT',
+  'REQUEST_MORE_PHOTOS',
+  'REQUEST_VIDEO',
+  'IMAGE_SEARCH_REQUEST',
+  'CUSTOM_ORDER_REQUEST',
+  'GIFT_WRAP_REQUEST',
+  'RESTOCK_NOTIFY_REQUEST',
+  'REQUEST_INVOICE',
+  'RESERVATION_PREORDER_REQUEST',
+  'BOT_FRUSTRATION',
+  'POSITIVE_FEEDBACK',
+  'OFF_TOPIC_OR_SPAM',
+  'TALK_TO_SELLER',
+  'PAYMENT_ISSUE',
+  'POST_PURCHASE_SUPPORT',
+] as const;
+
 // docs/PRD-buyer-purchase-intent-taxonomy.md — schema/prompt طبقه‌بندی intent از
 // conversation-engine.service.ts (callParseIntent) استخراج شد تا sales-agent-qa.service.ts
 // (تست دقت intent، بخش ۵.۴ سند) هم بتواند بدون کپی/دریفت همین schema/prompt دقیق را اجرا کند —
@@ -30,48 +71,7 @@ export const intentClassificationSchema = z.object({
   discountCode: z.string().nullable(),
   // بخش ۴.۲ سند — لایه‌ی آنالیتیکس، چندبرچسبی، مستقل از intent بالا (که فقط تعیین می‌کند چه
   // Tool ای اجرا شود)
-  buyerNeeds: z
-    .array(
-      z.enum([
-        'PRODUCT_SPEC',
-        'USAGE_GUIDE',
-        'STOCK_CHECK',
-        'VARIANT_REQUEST',
-        'PRODUCT_COMPARISON',
-        'PRODUCT_RECOMMENDATION',
-        'ASK_REVIEWS',
-        'ASK_AUTHENTICITY',
-        'ASK_SHIPPING',
-        'ASK_PAYMENT_METHODS',
-        'ASK_WARRANTY_RETURN_POLICY',
-        'ASK_STORE_TRUST',
-        'ASK_COMPATIBILITY',
-        'ASK_NAVIGATION_HELP',
-        'ASK_RESTOCK_ETA',
-        'ASK_CASH_ON_DELIVERY',
-        'PURCHASE_HESITATION',
-        'ASK_PRICE',
-        'REQUEST_DISCOUNT',
-        'NEGOTIATE_PRICE',
-        'ASK_BULK_PURCHASE',
-        'ASK_INSTALLMENT',
-        'REQUEST_MORE_PHOTOS',
-        'REQUEST_VIDEO',
-        'IMAGE_SEARCH_REQUEST',
-        'CUSTOM_ORDER_REQUEST',
-        'GIFT_WRAP_REQUEST',
-        'RESTOCK_NOTIFY_REQUEST',
-        'REQUEST_INVOICE',
-        'RESERVATION_PREORDER_REQUEST',
-        'BOT_FRUSTRATION',
-        'POSITIVE_FEEDBACK',
-        'OFF_TOPIC_OR_SPAM',
-        'TALK_TO_SELLER',
-        'PAYMENT_ISSUE',
-        'POST_PURCHASE_SUPPORT',
-      ]),
-    )
-    .nullable(),
+  buyerNeeds: z.array(z.enum(BUYER_NEED_TAGS)).nullable(),
   unmatchedBuyerNeed: z.string().nullable(),
   // docs/PRD-sales-agent-implicit-need-detection.md بخش ۴.۱ — سه سیگنال مستقل، جدا از
   // intent/buyerNeeds بالا؛ هر سه «همیشه پر» هستند (نه nullable)، چون حتی وقتی نیازی نیست
