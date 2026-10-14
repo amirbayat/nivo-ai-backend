@@ -48,3 +48,19 @@ export function normalizeOrderCodeInput(raw: string): string | null {
   for (const ch of body) if (!ORDER_CODE_ALPHABET.includes(ch)) return null;
   return ORDER_CODE_PREFIX + body;
 }
+
+// جست‌وجوی جزئی در پنل فروشنده: فروشنده لازم نیست کل کد را بزند. حروف بزرگ، حذف جداکننده‌ها،
+// پیشوند NV اختیاری؛ اگر حداقل ۲ نویسه از الفبای کد باقی بماند همان را برمی‌گرداند، وگرنه null
+// (مثلاً «علی» یا شماره‌تلفن نباید به جست‌وجوی کد تبدیل شود).
+export function normalizeOrderCodePartialInput(raw: string): string | null {
+  const cleaned = toEnglishDigits(raw ?? '')
+    .toUpperCase()
+    .replace(/[\s\-_.]/g, '');
+  const body =
+    cleaned.startsWith(ORDER_CODE_PREFIX) && cleaned.length > ORDER_CODE_PREFIX.length
+      ? cleaned.slice(ORDER_CODE_PREFIX.length)
+      : cleaned;
+  if (body.length < 2 || body.length > ORDER_CODE_BODY_LENGTH) return null;
+  for (const ch of body) if (!ORDER_CODE_ALPHABET.includes(ch)) return null;
+  return body;
+}

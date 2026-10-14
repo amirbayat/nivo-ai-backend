@@ -67,6 +67,7 @@ import { OrderStateService } from '../order-lifecycle/order-state.service';
 import {
   displayOrderCode,
   normalizeOrderCodeInput,
+  normalizeOrderCodePartialInput,
 } from '../../common/utils/order-code.util';
 import { toEnglishDigits } from '../../common/utils/normalize-digits';
 import { ORDER_CARRIERS } from '../../common/constants/sales-ops.constants';
@@ -1577,13 +1578,19 @@ export class StoreService {
   // docs/PRD-mvp-launch-plan.md گام ۱ — حداقلی، بدون UI: فروشنده باید بتواند سفارش‌های
   // در انتظار تایید را ببیند/تایید/رد کند تا حلقه‌ی سفارش با curl قابل تست باشد؛ صف کامل
   // با نمایش تصویر رسید در پنل موبایل، گام ۳ است.
-  // 3.4/3.5 — `q`: کد سفارش (نرمال‌شده، دقیق)، شماره (دقیق یا ۴ رقم آخر) یا نام خریدار/گیرنده
+  // 3.4/3.5 — `q`: کد سفارش (کامل یا بخشی از آن، حداقل ۲ نویسه؛ پیشوند NV اختیاری)، شماره
+  // (دقیق یا ۴ رقم آخر) یا نام خریدار/گیرنده. جست‌وجو فقط داخل سفارش‌های همین فروشگاه است.
   private buildOrderSearchFilter(q?: string): Prisma.OrderWhereInput {
     const text = q?.trim();
     if (!text) return {};
     const or: Prisma.OrderWhereInput[] = [];
     const code = normalizeOrderCodeInput(text);
-    if (code) or.push({ orderCode: code });
+    if (code) {
+      or.push({ orderCode: code });
+    } else {
+      const partial = normalizeOrderCodePartialInput(text);
+      if (partial) or.push({ orderCode: { contains: partial } });
+    }
     const digits = toEnglishDigits(text).replace(/\D/g, '');
     if (
       digits.length >= 4 &&

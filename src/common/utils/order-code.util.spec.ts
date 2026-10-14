@@ -4,6 +4,7 @@ import {
   formatOrderCode,
   generateOrderCode,
   normalizeOrderCodeInput,
+  normalizeOrderCodePartialInput,
 } from './order-code.util';
 
 describe('order code [3.4]', () => {
@@ -47,5 +48,18 @@ describe('order code [3.4]', () => {
     expect(normalizeOrderCodeInput('NV-12')).toBeNull();
     expect(normalizeOrderCodeInput('NV-K7M2QO')).toBeNull(); // O مجاز نیست
     expect(normalizeOrderCodeInput('NV-K7M2QXX')).toBeNull();
+  });
+
+  it('جست‌وجوی جزئی: بخشی از کد با/بدون پیشوند', () => {
+    expect(normalizeOrderCodePartialInput('k7m')).toBe('K7M');
+    expect(normalizeOrderCodePartialInput('nv-k7')).toBe('K7');
+    expect(normalizeOrderCodePartialInput('K7M2QX')).toBe('K7M2QX');
+  });
+
+  it('جست‌وجوی جزئی: خیلی کوتاه/نامعتبر/نام و شماره → null', () => {
+    expect(normalizeOrderCodePartialInput('k')).toBeNull();
+    expect(normalizeOrderCodePartialInput('علی')).toBeNull();
+    expect(normalizeOrderCodePartialInput('0912')).toBeNull(); // 0 و 1 در الفبا نیستند
+    expect(normalizeOrderCodePartialInput('K7M2QXX')).toBeNull();
   });
 });
