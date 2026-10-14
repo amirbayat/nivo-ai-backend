@@ -90,6 +90,7 @@ export type ConversationContext = {
     | 'name'
     | 'phone'
     | 'province'
+    | 'form'
     | 'address'
     | 'postal'
     | 'confirm'
@@ -181,10 +182,12 @@ export type UiBlock =
   // مرتبط با خودش را پر می‌کند
   | {
       type: 'ADDRESS_PROMPT';
-      mode: 'CHOOSE_SAVED' | 'CHOOSE_PROVINCE' | 'CONFIRM' | 'ASK_SAVE';
+      mode: 'CHOOSE_SAVED' | 'CHOOSE_PROVINCE' | 'CONFIRM' | 'ASK_SAVE' | 'FORM';
       addresses?: { id: string; summary: string }[]; // فقط CHOOSE_SAVED
       // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۲ (فاز ۱.۵) — فقط CHOOSE_PROVINCE
       provinces?: string[];
+      prefillName?: string;
+      prefillPhone?: string;
       summary?: string; // فقط CONFIRM
       shippingCostToman?: number; // فقط CONFIRM
       provinceCovered?: boolean; // فقط CONFIRM — false یعنی فروشنده به این استان ارسال ندارد
@@ -352,6 +355,7 @@ export type SalesAction = {
     | 'CONFIRM_CART'
     | 'SELECT_ADDRESS'
     | 'NEW_ADDRESS'
+    | 'SUBMIT_ADDRESS'
     | 'SELECT_PROVINCE'
     | 'CONFIRM_ADDRESS'
     | 'EDIT_ADDRESS'
@@ -375,6 +379,13 @@ export type SalesAction = {
   addressId?: string;
   // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۲ (فاز ۱.۵) — فقط برای SELECT_PROVINCE
   province?: string;
+  recipientName?: string;
+  recipientPhone?: string;
+  addressText?: string;
+  city?: string;
+  postalCode?: string;
+  plaque?: string;
+  unit?: string;
   orderId?: string; // فقط REORDER
   // فقط SELECT_VARIANT_VALUE — در mode=DIMENSION یک ProductOptionValue.value، در mode=ALTERNATIVES
   // یک ProductVariant.id

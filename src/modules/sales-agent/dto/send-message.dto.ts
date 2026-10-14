@@ -25,6 +25,7 @@ export class SalesActionDto {
     // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۱ — دکمه‌های فلوی آدرس
     'SELECT_ADDRESS',
     'NEW_ADDRESS',
+    'SUBMIT_ADDRESS',
     // بخش ۲ (فاز ۱.۵) — انتخاب استان دکمه‌ای
     'SELECT_PROVINCE',
     'CONFIRM_ADDRESS',
@@ -51,6 +52,7 @@ export class SalesActionDto {
     | 'CONFIRM_CART'
     | 'SELECT_ADDRESS'
     | 'NEW_ADDRESS'
+    | 'SUBMIT_ADDRESS'
     | 'SELECT_PROVINCE'
     | 'CONFIRM_ADDRESS'
     | 'EDIT_ADDRESS'
@@ -84,6 +86,41 @@ export class SalesActionDto {
   @IsOptional()
   @IsIn(IRAN_PROVINCES)
   province?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  recipientName?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  recipientPhone?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  addressText?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  city?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  postalCode?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  plaque?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  unit?: string;
 
   @IsOptional()
   @IsString()

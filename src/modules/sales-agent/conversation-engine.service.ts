@@ -5378,13 +5378,14 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       if (conversation.currentState !== 'ADDRESS_COLLECTION') {
         return this.doClarify(conversation, fa.salesAgent.nothingToConfirm);
       }
-      return this.advanceAddressStep(
-        conversation,
-        ctx,
-        'name',
-        {},
-        fa.salesAgent.addressAskName,
-      );
+      return this.showAddressForm(conversation, ctx);
+    }
+
+    if (action.type === 'SUBMIT_ADDRESS') {
+      if (conversation.currentState !== 'ADDRESS_COLLECTION') {
+        return this.doClarify(conversation, fa.salesAgent.nothingToConfirm);
+      }
+      return this.submitAddressForm(conversation, ctx, action);
     }
 
     if (action.type === 'SELECT_PROVINCE') {
@@ -7151,6 +7152,66 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
 
   // docs/PRD-buyer-saved-addresses.md بخش ۳ — حداکثر ۳ آدرس اخیر + «آدرس جدید»؛ اگر خریدار
   // هیچ آدرسی ندارد، مستقیم اولین سوال (اسم گیرنده) پرسیده می‌شود
+  private async showAddressForm(
+    conversation: ConversationWithStore,
+    ctx: ConversationContext,
+  ): Promise<EngineResult> {
+    const customer = await this.prisma.customer.findUnique({
+      where: { id: conversation.customerId },
+      select: { phone: true, fullName: true },
+    });
+    const nextCtx: ConversationContext = {
+      ...ctx,
+      addressStep: 'form',
+      pendingAddress: ctx.pendingAddress?.fromSavedAddressId ? null : ctx.pendingAddress,
+    };
+    await this.persistTransition(conversation, 'ADDRESS_COLLECTION', nextCtx);
+    const uiBlock: UiBlock = {
+      type: 'ADDRESS_PROMPT',
+      mode: 'FORM',
+      provinces: [...IRAN_PROVINCES],
+      prefillName: ctx.pendingAddress?.recipientName || customer?.fullName || undefined,
+      prefillPhone: ctx.pendingAddress?.recipientPhone || customer?.phone || undefined,
+    };
+    const reply = fa.salesAgent.addressFormPrompt;
+    await this.logReply(conversation, reply, uiBlock);
+    return { reply, uiBlocks: [uiBlock], state: 'ADDRESS_COLLECTION' };
+  }
+
+  private async submitAddressForm(
+    conversation: ConversationWithStore,
+    ctx: ConversationContext,
+    action: SalesAction,
+  ): Promise<EngineResult> {
+    const name = action.recipientName?.trim() ?? '';
+    const phone = toEnglishDigits(action.recipientPhone ?? '').replace(/[\s-]/g, '');
+    const province = action.province ?? '';
+    const city = action.city?.trim() ?? '';
+    const street = action.addressText?.trim() ?? '';
+    const postal = toEnglishDigits(action.postalCode ?? '').replace(/\D/g, '');
+    const plaque = toEnglishDigits(action.plaque ?? '').replace(/\D/g, '');
+    const unit = action.unit?.trim() ?? '';
+    if (!name || !city || !street || !IRAN_PROVINCES.includes(province)) {
+      return this.showAddressForm(conversation, ctx);
+    }
+    if (!/^(\+98|0)?9[0-9]{9}$/.test(phone) || !/^\d{10}$/.test(postal)) {
+      return this.showAddressForm(conversation, ctx);
+    }
+    const address = [
+      city,
+      street,
+      plaque ? `پلاک ${plaque}` : '',
+      unit ? `واحد ${unit}` : '',
+    ].filter(Boolean).join('، ');
+    return this.showAddressConfirm(conversation, ctx, {
+      recipientName: name,
+      recipientPhone: phone,
+      province,
+      address,
+      postalCode: postal,
+    });
+  }
+
   private async beginAddressCollection(
     conversation: ConversationWithStore,
     ctx: ConversationContext,
@@ -7162,13 +7223,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     });
 
     if (addresses.length === 0) {
-      return this.advanceAddressStep(
-        conversation,
-        ctx,
-        'name',
-        {},
-        fa.salesAgent.addressAskName,
-      );
+      return this.showAddressForm(conversation, ctx);
     }
 
     const nextCtx: ConversationContext = {
@@ -7250,6 +7305,8 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     const trimmed = text.trim();
 
     switch (ctx.addressStep) {
+      case 'form':
+        return this.showAddressForm(conversation, ctx);
       case 'name':
         if (!trimmed) {
           return this.doClarify(conversation, fa.salesAgent.addressAskName);
