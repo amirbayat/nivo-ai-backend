@@ -38,6 +38,7 @@ import { buildAsrVocabHint } from './asr-vocab-hint';
 import { reattachReceiptIfOrderOpen } from './receipt-reattach.util';
 import { SubmitManualReceiptDto } from './dto/submit-manual-receipt.dto';
 import { OrderStateService } from '../order-lifecycle/order-state.service';
+import { StoreService } from '../store/store.service';
 import { ReceiptCheckService } from '../order-lifecycle/receipt-check.service';
 import { CommentsService } from '../comments/comments.service';
 import type { SubmitCommentDto } from './dto/submit-comment.dto';
@@ -85,6 +86,7 @@ export class SalesAgentService {
     private readonly comments: CommentsService,
     private readonly orderState: OrderStateService,
     private readonly receiptChecks: ReceiptCheckService,
+    private readonly storeService: StoreService,
   ) {}
 
   // productId اختیاری — لینک اختصاصی یک محصول (فروشنده در استوری گذاشته)؛ اگر معتبر و
@@ -1109,10 +1111,57 @@ export class SalesAgentService {
   async getSavedProductIds(conversationId: string, sessionToken: string) {
     const conversation = await this.loadOwned(conversationId, sessionToken);
     const saved = await this.prisma.savedProduct.findMany({
-      where: { customerId: conversation.customerId },
+      where: {
+        customerId: conversation.customerId,
+        product: { storeId: conversation.storeId },
+      },
       select: { productId: true },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
     });
-    return { productIds: saved.map((s) => s.productId) };
+    const productIds = saved.map((row) => row.productId);
+    if (productIds.length === 0) return { productIds, items: [] };
+    const page = await this.storeService.listPublicProducts(
+      conversation.store.slug,
+      { ids: productIds, page: 1, pageSize: productIds.length },
+    );
+    const byId = new Map(page.items.map((item) => [item.id, item]));
+    return {
+      productIds,
+      items: productIds.flatMap((id) => {
+        const item = byId.get(id);
+        return item ? [item] : [];
+      }),
+    };
+  }
+
+  async toggleSavedProduct(
+    conversationId: string,
+    sessionToken: string,
+    productId: string,
+  ) {
+    const conversation = await this.loadOwned(conversationId, sessionToken);
+    const product = await this.prisma.product.findFirst({
+      where: { id: productId, storeId: conversation.storeId },
+      select: { id: true },
+    });
+    if (!product) throw new NotFoundException(fa.salesAgent.productNotFound);
+    const existing = await this.prisma.savedProduct.findUnique({
+      where: {
+        customerId_productId: {
+          customerId: conversation.customerId,
+          productId,
+        },
+      },
+    });
+    if (existing) {
+      await this.prisma.savedProduct.delete({ where: { id: existing.id } });
+      return { productId, saved: false };
+    }
+    await this.prisma.savedProduct.create({
+      data: { customerId: conversation.customerId, productId },
+    });
+    return { productId, saved: true };
   }
 
   // docs/PRD-sales-agent-response-strategy-ab.md بخش ۹ — سوییچ دستی خریدار (فعلاً فقط برای

@@ -22,6 +22,7 @@ import { SalesAgentService } from './sales-agent.service';
 import { SubmitManualReceiptDto } from './dto/submit-manual-receipt.dto';
 import { SendMessageDto } from './dto/send-message.dto';
 import { SetResponseStrategyDto } from './dto/set-response-strategy.dto';
+import { ToggleSavedProductDto } from './dto/toggle-saved-product.dto';
 import { SendBuyerOtpDto, VerifyBuyerOtpDto } from './dto/register-buyer.dto';
 import { SubmitCommentDto } from './dto/submit-comment.dto';
 import { StoreService } from '../store/store.service';
@@ -325,6 +326,19 @@ export class SalesAgentController {
     return this.salesAgentService.getSavedProductIds(
       conversationId,
       sessionToken,
+    );
+  }
+
+  @Post('chat/:conversationId/saved-products')
+  toggleSavedProduct(
+    @Param('conversationId') conversationId: string,
+    @Headers('x-session-token') sessionToken: string,
+    @Body() dto: ToggleSavedProductDto,
+  ) {
+    return this.salesAgentService.toggleSavedProduct(
+      conversationId,
+      sessionToken,
+      dto.productId,
     );
   }
 

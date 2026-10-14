@@ -5299,6 +5299,29 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           payload: { text: fa.salesAgent.addToCartActionNamed(product.name) },
         },
       });
+      if (action.variantId) {
+        const picked = product.variants.find((item) => item.id === action.variantId);
+        const optionValues = picked
+          ? (picked.optionValues as Record<string, string> | null)
+          : null;
+        if (!picked || !optionValues || picked.stock < (action.qty ?? 1)) {
+          return this.doClarify(conversation, fa.salesAgent.insufficientStock);
+        }
+        return this.applyCartUpdate(
+          conversation,
+          ctx,
+          product,
+          {
+            id: picked.id,
+            optionValues,
+            priceOverride: picked.priceOverride,
+            stock: picked.stock,
+          },
+          action.qty ?? 1,
+          false,
+          'ADD_TO_CART',
+        );
+      }
       // docs/PRD-product-display-focus-and-variations.md §۴.۲ — محصول با گزینه مستقیم به سبد
       // اضافه نمی‌شود، اول باید سایز/رنگ مشخص شود
       if (hasVariantOptions(product)) {

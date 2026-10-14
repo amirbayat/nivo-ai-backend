@@ -126,6 +126,15 @@ function cellToNumber(value: unknown): number | undefined {
 }
 
 // همون الگوی usage-analytics.service.ts's csvEscape — خروجی گزارش فروشنده (بخش ۱.۲)
+function asStringRecord(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const out: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof entry === 'string') out[key] = entry;
+  }
+  return out;
+}
+
 function csvEscape(v: unknown): string {
   const s = String(v ?? '');
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -401,7 +410,7 @@ export class StoreService {
   // و بقیه‌ی فیلدهای داخلی که listProducts بالا برای پنل فروشنده برمی‌گرداند)
   async listPublicProducts(
     slug: string,
-    opts: { q?: string; page: number; pageSize: number },
+    opts: { q?: string; page: number; pageSize: number; ids?: string[] },
   ) {
     const store = await this.prisma.store.findUnique({ where: { slug } });
     if (!store || store.status !== 'ACTIVE')
@@ -410,8 +419,9 @@ export class StoreService {
     const where: Prisma.ProductWhereInput = {
       storeId: store.id,
       ...(opts.q ? { name: { contains: opts.q, mode: 'insensitive' } } : {}),
+      ...(opts.ids ? { id: { in: opts.ids } } : {}),
     };
-    const [items, total] = await Promise.all([
+    const [items, total, shippingRules] = await Promise.all([
       this.prisma.product.findMany({
         where,
         orderBy: { createdAt: 'desc' },
@@ -431,11 +441,33 @@ export class StoreService {
           goldWageType: true,
           goldWageValue: true,
           goldProfitPercent: true,
-          optionTypes: { select: { id: true } },
-          variants: { select: { stock: true } },
+          optionTypes: {
+            orderBy: { position: 'asc' },
+            select: {
+              name: true,
+              values: {
+                orderBy: { position: 'asc' },
+                select: { value: true },
+              },
+            },
+          },
+          variants: {
+            select: {
+              id: true,
+              optionValues: true,
+              stock: true,
+              priceOverride: true,
+            },
+          },
         },
       }),
       this.prisma.product.count({ where }),
+      store.requiresShipping
+        ? this.prisma.storeShippingRule.findMany({
+            where: { storeId: store.id, enabled: true },
+            select: { cost: true },
+          })
+        : Promise.resolve([] as { cost: number }[]),
     ]);
 
     // docs/PRD-category-specific-product-pricing-and-attributes.md بخش ۲.۳/۴.۱ — قیمت محصولات
@@ -448,6 +480,45 @@ export class StoreService {
     const goldItems = hasGoldProducts
       ? (await this.marketPrices.getGoldPrices()).items
       : [];
+    const reviewRows =
+      items.length === 0
+        ? []
+        : await this.prisma.productComment.groupBy({
+            by: ['productId'],
+            where: {
+              storeId: store.id,
+              status: 'ADMIN_APPROVED',
+              productId: { in: items.map((product) => product.id) },
+            },
+            _avg: { rating: true },
+            _count: { _all: true },
+          });
+    const reviewByProduct = new Map(
+      reviewRows.flatMap((row) =>
+        row.productId
+          ? [
+              [
+                row.productId,
+                {
+                  reviewCount: row._count._all,
+                  ratingAvg:
+                    row._avg.rating == null
+                      ? null
+                      : Math.round(Number(row._avg.rating) * 10) / 10,
+                },
+              ] as const,
+            ]
+          : [],
+      ),
+    );
+    const shippingCosts = shippingRules.map((rule) => rule.cost);
+    const shippingEstimate =
+      shippingCosts.length === 0
+        ? null
+        : {
+            minCostToman: Math.min(...shippingCosts),
+            maxCostToman: Math.max(...shippingCosts),
+          };
 
     return {
       items: items.map((p) => {
@@ -510,6 +581,7 @@ export class StoreService {
                 store,
               )
             : null;
+        const reviews = reviewByProduct.get(p.id);
         return {
           ...publicFields,
           videos: parseProductVideos(p.videos),
@@ -519,11 +591,27 @@ export class StoreService {
           goldPricingSummary,
           basePrice: displayPrice,
           priceUnavailable,
+          options: optionTypes.map((option) => ({
+            name: option.name,
+            values: option.values.map((value) => value.value),
+          })),
+          variants: variants.map((variant) => ({
+            id: variant.id,
+            options: asStringRecord(variant.optionValues),
+            stock: variant.stock,
+            price:
+              pricingModel === 'WEIGHT_BASED_FORMULA'
+                ? null
+                : (variant.priceOverride ?? displayPrice),
+          })),
+          ratingAvg: reviews?.ratingAvg ?? null,
+          reviewCount: reviews?.reviewCount ?? 0,
         };
       }),
       total,
       page: opts.page,
       pageSize: opts.pageSize,
+      shippingEstimate,
     };
   }
 
