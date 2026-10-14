@@ -60,7 +60,7 @@ import {
   stepCountIs,
   type UserModelMessage,
 } from 'ai';
-import { generateShopTurn } from './shop-turn-stream';
+import { generateShopTurn, runOutsideShopTurn } from './shop-turn-stream';
 import { z } from 'zod';
 import type {
   ConversationState,
@@ -4402,6 +4402,13 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
 
   // پیام‌های صف‌شده را (تا سقف دور) یکجا پردازش می‌کند؛ توکن قفل (احتمالاً تازه) یا null برمی‌گرداند
   private async drainPendingUnderLock(
+    conversation: ConversationWithStore,
+    token: string,
+  ): Promise<string | null> {
+    return runOutsideShopTurn(() => this.drainPendingBody(conversation, token));
+  }
+
+  private async drainPendingBody(
     conversation: ConversationWithStore,
     token: string,
   ): Promise<string | null> {

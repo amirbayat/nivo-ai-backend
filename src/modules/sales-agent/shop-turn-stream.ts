@@ -14,6 +14,7 @@ export type ShopTurnEvent =
       quickReplies?: string[];
       voiceEventId?: string;
       awaitingReview: boolean;
+      queued?: boolean;
     }
   | { type: 'error' };
 
@@ -31,11 +32,27 @@ type TurnBuf = {
 };
 
 const turns = new Map<string, TurnBuf>();
+const turnTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+// TODO(product): this buffer is process-local. If the Darkube backend app runs
+// more than one replica, move it to Redis pub/sub plus a short list. Do that
+// only after the replica count is known.
+
+function armTurnExpiry(turnId: string) {
+  const existing = turnTimers.get(turnId);
+  if (existing) clearTimeout(existing);
+  const timer = setTimeout(() => {
+    turnTimers.delete(turnId);
+    turns.delete(turnId);
+  }, 120_000);
+  timer.unref?.();
+  turnTimers.set(turnId, timer);
+}
 
 export function openShopTurn(turnId: string, onFirstToken: () => void): Sink {
   const buf: TurnBuf = { events: [], waiters: [], closed: false };
   turns.set(turnId, buf);
-  setTimeout(() => turns.delete(turnId), 120_000).unref?.();
+  armTurnExpiry(turnId);
   let noted = false;
   const sink: Sink = {
     emit(event) {
@@ -54,25 +71,51 @@ export function openShopTurn(turnId: string, onFirstToken: () => void): Sink {
 
 export function closeShopTurn(turnId: string) {
   const buf = turns.get(turnId);
-  if (!buf || buf.closed) return;
-  buf.closed = true;
-  const waiters = buf.waiters.splice(0);
-  for (const wake of waiters) wake();
+  if (!buf) return;
+  const timer = turnTimers.get(turnId);
+  if (timer) clearTimeout(timer);
+  turnTimers.delete(turnId);
+  if (!buf.closed) {
+    buf.closed = true;
+    const waiters = buf.waiters.splice(0);
+    for (const wake of waiters) wake();
+  }
+  armTurnExpiry(turnId);
 }
 
 export async function* listenShopTurn(turnId: string): AsyncGenerator<ShopTurnEvent> {
   const buf = turns.get(turnId);
   if (!buf) return;
   let index = 0;
-  while (true) {
-    while (index < buf.events.length) yield buf.events[index++];
-    if (buf.closed) return;
-    await new Promise<void>((resolve) => buf.waiters.push(resolve));
+  let waiting: (() => void) | null = null;
+  try {
+    while (true) {
+      while (index < buf.events.length) yield buf.events[index++];
+      if (buf.closed) return;
+      await new Promise<void>((resolve) => {
+        waiting = resolve;
+        buf.waiters.push(resolve);
+      });
+      waiting = null;
+    }
+  } finally {
+    if (waiting) {
+      const at = buf.waiters.indexOf(waiting);
+      if (at >= 0) buf.waiters.splice(at, 1);
+    }
   }
 }
 
 export function runWithShopTurn<T>(sink: Sink, fn: () => Promise<T>): Promise<T> {
   return sinkStorage.run(sink, fn);
+}
+
+export function runOutsideShopTurn<T>(fn: () => Promise<T>): Promise<T> {
+  return sinkStorage.exit(fn);
+}
+
+export function isInsideShopTurn(): boolean {
+  return sinkStorage.getStore() != null;
 }
 
 const TOOL_STATUS: Record<string, string> = {

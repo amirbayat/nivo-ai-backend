@@ -7,6 +7,7 @@ import {
   Param,
   Post,
   Query,
+  Req,
   Res,
   UseGuards,
   UploadedFile,
@@ -15,7 +16,7 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { SkipThrottle, Throttle } from '@nestjs/throttler';
 import { CHAT_START_LIMIT_PER_IP_PER_MIN } from '../../common/constants/sales-ops.constants';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { AdminGuard } from '../../common/guards/admin.guard';
 import { JwtGuard } from '../../common/guards/jwt.guard';
 import {
@@ -136,6 +137,7 @@ export class SalesAgentController {
     @Param('conversationId') conversationId: string,
     @Param('turnId') turnId: string,
     @Headers('x-session-token') sessionToken: string,
+    @Req() req: Request,
     @Res() res: Response,
   ) {
     res.setHeader('Content-Type', 'text/event-stream');
@@ -143,18 +145,32 @@ export class SalesAgentController {
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders();
+    let detached = false;
+    req.on('close', () => {
+      detached = true;
+    });
+    const heartbeat = setInterval(() => {
+      if (detached || res.writableEnded) return;
+      res.write(':\n\n');
+    }, 15_000);
+    heartbeat.unref?.();
     try {
       for await (const event of this.salesAgentService.shopTurnEvents(
         conversationId,
         sessionToken,
         turnId,
       )) {
+        if (detached) break;
         res.write(`data: ${JSON.stringify(event)}\n\n`);
       }
     } catch {
-      res.write(`data: ${JSON.stringify({ type: 'error' })}\n\n`);
+      if (!detached && !res.writableEnded) {
+        res.write(`data: ${JSON.stringify({ type: 'error' })}\n\n`);
+      }
+    } finally {
+      clearInterval(heartbeat);
+      if (!detached && !res.writableEnded) res.end();
     }
-    res.end();
   }
 
   @UseGuards(JwtGuard)

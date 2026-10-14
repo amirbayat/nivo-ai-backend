@@ -486,6 +486,7 @@ export class SalesAgentService {
           quickReplies: response.quickReplies,
           voiceEventId: response.voiceEventId,
           awaitingReview: response.awaitingReview,
+          queued: response.queued,
         });
         closeShopTurn(turnId);
       })
