@@ -79,6 +79,7 @@ describe('executeCreateOrder guards [0.2/0.3]', () => {
         amountToman: 100,
       }),
       cardSelector: {
+        hasPayableCard: jest.fn().mockResolvedValue(true),
         selectCard: jest
           .fn()
           .mockResolvedValue({ id: 'c1', cardNumber: '6037', ownerName: 'x' }),
@@ -175,6 +176,17 @@ describe('executeCreateOrder guards [0.2/0.3]', () => {
     expect(data.returnPolicySnapshot).toMatchObject({
       returnPolicyMode: 'NONE',
     });
+  });
+
+  it('کارت‌به‌کارت بدون کارت قابل پرداخت → payment_missing و بدون سفارش [F6]', async () => {
+    const { eng, tx, conversation, ctx } = setup(null);
+    (
+      eng as unknown as { cardSelector: { hasPayableCard: jest.Mock } }
+    ).cardSelector.hasPayableCard.mockResolvedValue(false);
+    const r = await eng.executeCreateOrder(conversation, ctx);
+    expect(r).toEqual({ status: 'payment_missing' });
+    expect(tx.order.create).not.toHaveBeenCalled();
+    expect(tx.$executeRaw).not.toHaveBeenCalled();
   });
 
   it('برخورد کد سفارش: دوباره تولید می‌شود (pre-check)', async () => {
