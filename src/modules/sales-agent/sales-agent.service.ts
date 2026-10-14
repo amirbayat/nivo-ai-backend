@@ -1092,6 +1092,9 @@ export class SalesAgentService {
       shopStreamEnabled: (await getSalesAgentGlobalConfig(this.prisma)).shopStreamEnabled,
       responseStrategy: conversation.responseStrategy,
       awaitingReview: !!awaitingReview,
+      awaitingSatisfactionCheck: !!(
+        conversation.contextData as { awaitingSatisfactionCheck?: boolean } | null
+      )?.awaitingSatisfactionCheck,
       events,
       hasMoreEvents,
     };
