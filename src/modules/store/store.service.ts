@@ -174,6 +174,7 @@ export class StoreService {
   // trialStartedAt آن از این به بعد روی فروشگاه‌های جدید no-op است، برای فروشگاه‌های قدیمی‌تر
   // که از قبل trial نگرفته‌اند همچنان کار می‌کند)
   async create(sellerId: string, dto: CreateStoreDto) {
+    this.assertBankCardPair(dto);
     if (!(await this.isSlugAvailable(dto.slug))) {
       throw new ConflictException(fa.store.slugTaken);
     }
@@ -191,6 +192,40 @@ export class StoreService {
         trialCreditRemainingToman: config.trialCreditToman,
       },
     });
+  }
+
+  async resumeOnboarding(sellerId: string, storeId: string, dto: CreateStoreDto) {
+    this.assertBankCardPair(dto);
+    const store = await this.getOwned(sellerId, storeId);
+    if (dto.slug !== store.slug && !(await this.isSlugAvailable(dto.slug))) {
+      throw new ConflictException(fa.store.slugTaken);
+    }
+    return this.prisma.store.update({
+      where: { id: storeId },
+      data: {
+        name: dto.name,
+        category: dto.category,
+        businessType: dto.businessType,
+        slug: dto.slug,
+        instagramUrl: dto.instagramUrl ?? null,
+        telegramUrl: dto.telegramUrl ?? null,
+        websiteUrl: dto.websiteUrl ?? null,
+        ...(dto.bankCardNumber
+          ? {
+              bankCardNumber: dto.bankCardNumber,
+              bankOwnerName: dto.bankOwnerName,
+            }
+          : {}),
+      },
+    });
+  }
+
+  private assertBankCardPair(dto: CreateStoreDto) {
+    const hasCard = !!dto.bankCardNumber;
+    const hasOwner = !!dto.bankOwnerName;
+    if (hasCard !== hasOwner) {
+      throw new BadRequestException(fa.store.bankCardInvalid);
+    }
   }
 
   // docs/PRD-product-strategy-and-roadmap.md بخش ۳.۲ — فیلدهای ساختاریافته (ارسال/مرجوعی/
@@ -638,6 +673,20 @@ export class StoreService {
   }
 
   // امتیاز کلی فروشگاه (میانگین امتیاز محصولات) + چک‌لیست سه‌موردی صفحه‌ی خانه‌ی پنل
+  private async storeHasPaymentMethod(store: {
+    id: string;
+    bankCardNumber: string | null;
+    bankOwnerName: string | null;
+    snapppayPaymentLink: string | null;
+  }) {
+    if (store.snapppayPaymentLink) return true;
+    if (store.bankCardNumber && store.bankOwnerName) return true;
+    const activeCards = await this.prisma.storeBankCard.count({
+      where: { storeId: store.id, isActive: true },
+    });
+    return activeCards > 0;
+  }
+
   async getCompleteness(sellerId: string, storeId: string) {
     const store = await this.getOwned(sellerId, storeId);
     const products = await this.prisma.product.findMany({
@@ -684,6 +733,7 @@ export class StoreService {
         hasBrandIntro: !!store.brandIntro,
         hasOwnerNotes: !!store.ownerNotes,
         hasWorkingHours: !!(store.workingHoursStart && store.workingHoursEnd),
+        hasPaymentMethod: await this.storeHasPaymentMethod(store),
       },
     };
   }

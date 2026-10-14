@@ -507,6 +507,8 @@ export const fa = {
     // PAYMENT_METHOD_PROMPT؛ هم‌الگوی addressChooseSavedPrompt پایین (caption تولیدی ندارد)
     choosePaymentMethodPrompt:
       'برای پرداخت، کارت‌به‌کارت راحت‌تره یا اسنپ‌پی (پرداخت ۴ قسطه)؟',
+    paymentMethodMissing:
+      'فروشنده تا چند دقیقه‌ی دیگه روش پرداخت رو می‌فرسته. سفارشت همین‌جا می‌مونه.',
     snapppayTrackingCodeInvalid:
       'این متن شبیه کد رهگیری اسنپ‌پی نیست — لطفاً کد رهگیری‌ای که بعد از پرداخت نشون داده شد رو دوباره بفرست',
     snapppayTrackingCodeReceivedAwaitingScreenshot:
@@ -678,6 +680,8 @@ export const fa = {
       `📋 ${staleCount.toLocaleString('fa-IR')} محصول فروشگاه شما مدتی است آپدیت نشده (مثلاً: ${sampleNames}) — بد نیست یک نگاه بندازی و با «تکمیل خودکار همه‌ی محصولات ناقص» توی پنل دوباره enrich‌شون کنی، شاید قیمت بازار یا رقبا عوض شده باشه.`,
     handoffNotification: (customerText: string) =>
       `🔔 یک مشتری نیاز به پاسخ شما داره:\n\n«${customerText}»`,
+    paymentMethodMissingNotification:
+      '⚠️ یک خریدار به پرداخت رسیده، ولی فروشگاه کارت یا لینک اسنپ‌پی ندارد. روش پرداخت را در پنل اضافه کن و بهش جواب بده.',
     handoffReplyButton: '💬 پاسخ بده',
     // فیدبک کاربر ۱۴۰۵/۰۷/۱۷ — برخلاف handoffNotification بالا، این پیام مشخص می‌کند دلیل
     // ارجاع چیست (نه یک سوال سخت، بلکه تمام‌شدن اعتبار) تا فروشنده بداند باید اعتبار بخرد

@@ -6721,6 +6721,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         message: string;
         cart?: CartItem[];
       }
+    | { status: 'payment_missing' }
     | {
         status: 'created';
         order: Order;
@@ -6732,6 +6733,17 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
   > {
     if (ctx.cart.length === 0) {
       return { status: 'empty' };
+    }
+
+    if (
+      paymentMethod === 'CARD_TO_CARD' &&
+      !(await this.prisma.order.findUnique({
+        where: { conversationId: conversation.id },
+        select: { id: true },
+      })) &&
+      !(await this.cardSelector.hasPayableCard(conversation.storeId))
+    ) {
+      return { status: 'payment_missing' };
     }
 
     // idempotent: اگر سفارش این مکالمه از قبل هست، همان را برمی‌گرداند (بدون ساخت تکراری)
@@ -6765,7 +6777,16 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       // 0.3 + 0.4(۴) — خواندن قیمت/موجودی تازه، مصرف کد تخفیف و ساخت سفارش در «یک» تراکنش
       // تعاملی: یا همه با هم یا هیچ. (کد تخفیف قبلاً قبل از order.create مصرف می‌شد و اگر
       // ساخت سفارش fail می‌کرد هدر می‌رفت.)
-      const txResult = await this.prisma.$transaction(async (tx) => {
+      let txResult: {
+        ok: true;
+        order: Order;
+        selectedCard: Awaited<ReturnType<CardSelectorService['selectCard']>>;
+      } | {
+        ok: false;
+        rec: ReturnType<typeof reconcileCart>;
+      };
+      try {
+        txResult = await this.prisma.$transaction(async (tx) => {
         const products = await tx.product.findMany({
           where: {
             id: { in: [...new Set(ctx.cart.map((i) => i.productId))] },
@@ -6837,6 +6858,9 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           paymentMethod === 'CARD_TO_CARD'
             ? await this.cardSelector.selectCard(conversation.storeId)
             : null;
+        if (paymentMethod === 'CARD_TO_CARD' && !selectedCard) {
+          throw new Error('PAYMENT_METHOD_MISSING');
+        }
         // 3.4 — کد سفارش داخل همین تراکنش؛ برخورد با pre-check و retry (۵ بار)
         let orderCode: string | undefined;
         for (let attempt = 0; attempt < ORDER_CODE_MAX_ATTEMPTS; attempt++) {
@@ -6906,6 +6930,12 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         });
         return { ok: true as const, order: created, selectedCard };
       });
+      } catch (err) {
+        if (err instanceof Error && err.message === 'PAYMENT_METHOD_MISSING') {
+          return { status: 'payment_missing' };
+        }
+        throw err;
+      }
 
       if (!txResult.ok) {
         const rec = txResult.rec;
@@ -7078,7 +7108,10 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       });
       if (existingOrder) {
         paymentMethod = existingOrder.paymentMethod;
-      } else if (this.snapppayAvailable(conversation.store)) {
+      } else if (
+        this.snapppayAvailable(conversation.store) &&
+        (await this.cardSelector.hasPayableCard(conversation.storeId))
+      ) {
         // هر دو روش فعال‌اند — عیناً الگوی ADDRESS_PROMPT CHOOSE_SAVED: خودِ Order هنوز ساخته
         // نمی‌شود، snapshot آدرس تا جواب برسد در ctx می‌ماند
         const nextCtx: ConversationContext = {
@@ -7103,6 +7136,13 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         };
       }
     }
+    if (
+      !paymentMethod &&
+      this.snapppayAvailable(conversation.store) &&
+      !(await this.cardSelector.hasPayableCard(conversation.storeId))
+    ) {
+      paymentMethod = 'SNAPPPAY';
+    }
     paymentMethod = paymentMethod ?? 'CARD_TO_CARD';
 
     const created = await this.executeCreateOrder(
@@ -7113,6 +7153,9 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     );
     if (created.status === 'empty') {
       return this.doClarify(conversation, fa.salesAgent.cartEmpty);
+    }
+    if (created.status === 'payment_missing') {
+      return this.paymentMethodMissing(conversation);
     }
     if (created.status === 'blocked') {
       // پیام ثابت (بدون caption تولیدی)؛ برای تغییر قیمت، خلاصه‌ی سبد به‌روز هم نشان داده می‌شود
@@ -8285,6 +8328,38 @@ answered=false بده (به‌جای حدس‌زدن).`,
         data: { clarifyAttempts: 0 },
       });
     }
+  }
+
+  private async paymentMethodMissing(
+    conversation: ConversationWithStore,
+  ): Promise<EngineResult> {
+    const nextState: ConversationState = 'HANDOFF_HUMAN';
+    await this.persistTransition(
+      conversation,
+      nextState,
+      this.getContext(conversation),
+      'PAYMENT_METHOD_MISSING',
+    );
+    const reply = fa.salesAgent.paymentMethodMissing;
+    await this.logReply(conversation, reply, { type: 'NONE' });
+    const chatId = conversation.store.sellerBotChatId;
+    if (chatId) {
+      await this.sellerBotApi.sendText(
+        chatId,
+        fa.telegram.paymentMethodMissingNotification,
+        {
+          inline_keyboard: [
+            [
+              {
+                text: fa.telegram.handoffReplyButton,
+                callback_data: `sbrp:${conversation.id}`,
+              },
+            ],
+          ],
+        },
+      );
+    }
+    return { reply, uiBlocks: [], state: nextState };
   }
 
   private async transitionToHandoff(

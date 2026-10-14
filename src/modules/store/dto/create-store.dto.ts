@@ -4,6 +4,7 @@ import {
   IsString,
   Matches,
   MaxLength,
+  ValidateIf,
 } from 'class-validator';
 import { StoreBusinessType } from '@prisma/client';
 import { fa } from '../../../i18n/fa';
@@ -31,14 +32,18 @@ export class CreateStoreDto {
   @Matches(/^[a-z0-9-]{3,40}$/, { message: fa.store.slugInvalid })
   slug: string;
 
+  @IsOptional()
+  @ValidateIf((_, value) => value != null && value !== '')
   @IsString({ message: fa.validation.required })
   @Matches(/^[0-9]{16}$/, { message: fa.store.bankCardInvalid })
   @EnDigits()
-  bankCardNumber: string;
+  bankCardNumber?: string;
 
+  @IsOptional()
+  @ValidateIf((_, value) => value != null && value !== '')
   @IsString({ message: fa.validation.required })
   @MaxLength(60, { message: fa.validation.stringTooLong })
-  bankOwnerName: string;
+  bankOwnerName?: string;
 
   // فیدبک اول پایلوت — اختیاری، عمداً بدون @IsUrl (فروشنده ممکن است «@nam-shop» یا
   // «t.me/xxx» بدون https:// بنویسد؛ اعتبارسنجی سخت‌گیر فقط ورودی معتبر را رد می‌کند)

@@ -22,7 +22,22 @@ function toSelected(card: StoreBankCard): SelectedBankCard {
 export class CardSelectorService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async selectCard(storeId: string): Promise<SelectedBankCard> {
+  async hasPayableCard(storeId: string): Promise<boolean> {
+    const [store, activeCards] = await Promise.all([
+      this.prisma.store.findUnique({
+        where: { id: storeId },
+        select: { bankCardNumber: true, bankOwnerName: true },
+      }),
+      this.prisma.storeBankCard.count({
+        where: { storeId, isActive: true },
+      }),
+    ]);
+    return (
+      activeCards > 0 || !!(store?.bankCardNumber && store.bankOwnerName)
+    );
+  }
+
+  async selectCard(storeId: string): Promise<SelectedBankCard | null> {
     const store = await this.prisma.store.findUniqueOrThrow({
       where: { id: storeId },
       select: {
@@ -41,12 +56,11 @@ export class CardSelectorService {
     // fallback دفاعی — عملاً نباید پیش بیاید چون migration اولیه هر فروشگاه را با حداقل
     // یک StoreBankCard پر می‌کند، ولی اگر فروشنده همه‌ی کارت‌هایش را غیرفعال کرد نباید کرش کند
     if (cards.length === 0) {
-      // bankCardNumber/bankOwnerName فقط برای فروشگاه REGION=INTL نال است (بدون چک‌اوت)؛
-      // فروشگاه ایرانی همیشه این دو را از DTO ثبت‌نام دارد، پس این متد هرگز با نال برایش صدا زده نمی‌شود
+      if (!store.bankCardNumber || !store.bankOwnerName) return null;
       return {
         id: null,
-        cardNumber: store.bankCardNumber!,
-        ownerName: store.bankOwnerName!,
+        cardNumber: store.bankCardNumber,
+        ownerName: store.bankOwnerName,
       };
     }
     if (cards.length === 1) return toSelected(cards[0]);

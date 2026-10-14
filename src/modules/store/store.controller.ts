@@ -107,6 +107,15 @@ export class StoreController {
 
   // docs/PRD-product-strategy-and-roadmap.md بخش ۳.۲ — ویرایش فیلدهای ساختاریافته‌ی فروشگاه
   // بعد از ثبت‌نام (ارسال/مرجوعی/معرفی برند/ساعت پاسخ‌گویی)
+  @Patch(':id/onboarding')
+  resumeOnboarding(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: CreateStoreDto,
+  ) {
+    return this.storeService.resumeOnboarding(user.sub, id, dto);
+  }
+
   @Patch(':id')
   updateStore(
     @CurrentUser() user: JwtPayload,
