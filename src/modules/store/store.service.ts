@@ -64,7 +64,10 @@ import { CommentsService } from '../comments/comments.service';
 import { safeFetch } from '../../common/utils/safe-fetch.util';
 import { StoreCreditDeductionService } from '../store-credit-engine/store-credit-deduction.service';
 import { OrderStateService } from '../order-lifecycle/order-state.service';
-import { normalizeOrderCodeInput } from '../../common/utils/order-code.util';
+import {
+  displayOrderCode,
+  normalizeOrderCodeInput,
+} from '../../common/utils/order-code.util';
 import { toEnglishDigits } from '../../common/utils/normalize-digits';
 import { ORDER_CARRIERS } from '../../common/constants/sales-ops.constants';
 import {
@@ -2076,6 +2079,105 @@ export class StoreService {
       );
     }
     return lines.join('\n');
+  }
+
+  async listToday(sellerId: string, storeId: string) {
+    await this.getOwned(sellerId, storeId);
+    const take = 20;
+    const overdueBefore = new Date(Date.now() - 48 * 60 * 60 * 1000);
+    const [receipts, toShip, conversations, refunds, issues, products] =
+      await Promise.all([
+        this.prisma.order.findMany({
+          where: { storeId, status: 'RECEIPT_SUBMITTED' },
+          orderBy: { updatedAt: 'desc' },
+          take,
+          select: {
+            id: true,
+            orderCode: true,
+            receiptVerifiedMatch: true,
+          },
+        }),
+        this.prisma.order.findMany({
+          where: { storeId, status: 'APPROVED' },
+          orderBy: { updatedAt: 'desc' },
+          take,
+          select: { id: true, orderCode: true },
+        }),
+        this.prisma.salesConversation.findMany({
+          where: { storeId, isMutedForHuman: true, isTest: false },
+          orderBy: { updatedAt: 'desc' },
+          take,
+          include: { customer: true },
+        }),
+        this.prisma.orderRefund.findMany({
+          where: {
+            storeId,
+            status: { in: ['AWAITING_DESTINATION', 'READY'] },
+            createdAt: { lte: overdueBefore },
+          },
+          orderBy: { createdAt: 'asc' },
+          take,
+          include: { order: { select: { id: true, orderCode: true } } },
+        }),
+        this.prisma.orderIssue.findMany({
+          where: { status: 'OPEN', order: { storeId } },
+          orderBy: { createdAt: 'desc' },
+          take,
+          include: { order: { select: { id: true, orderCode: true } } },
+        }),
+        this.prisma.product.findMany({
+          where: { storeId },
+          select: {
+            id: true,
+            name: true,
+            stock: true,
+            variants: { select: { stock: true } },
+          },
+        }),
+      ]);
+
+    const lowStock = products
+      .map((product) => {
+        const stock =
+          product.variants.length > 0
+            ? Math.min(...product.variants.map((variant) => variant.stock))
+            : product.stock;
+        return { id: product.id, name: product.name, stock };
+      })
+      .filter((product) => product.stock <= 2)
+      .slice(0, take);
+
+    return {
+      receipts: receipts.map((order) => ({
+        id: order.id,
+        orderCode: displayOrderCode(order),
+        receiptVerifiedMatch: order.receiptVerifiedMatch,
+      })),
+      toShip: toShip.map((order) => ({
+        id: order.id,
+        orderCode: displayOrderCode(order),
+      })),
+      conversations: conversations.map((conversation) => ({
+        id: conversation.id,
+        customerLabel:
+          conversation.customer.phone ??
+          conversation.customer.fullName ??
+          'مشتری ناشناس',
+      })),
+      refunds: refunds.map((refund) => ({
+        id: refund.id,
+        orderId: refund.order.id,
+        orderCode: displayOrderCode(refund.order),
+        amountToman: refund.amountToman,
+      })),
+      issues: issues.map((issue) => ({
+        id: issue.id,
+        orderId: issue.order.id,
+        orderCode: displayOrderCode(issue.order),
+        reason: issue.reason,
+      })),
+      lowStock,
+    };
   }
 
   async listNeededAttention(sellerId: string, storeId: string) {

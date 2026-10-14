@@ -805,6 +805,7 @@ export const fa = {
     help: [
       'دستورات:',
       '/orders — سفارش‌های اخیر',
+      '/today — کارهای امروز',
       '/stock <اسم یا کد محصول> — دیدن/تغییر موجودی',
       '/credit — موجودی اعتبار فروشگاه',
       '/logout — خروج',
@@ -818,6 +819,20 @@ export const fa = {
     // همیشه پایین صفحه باشد (force_reply/inline keyboard آن را پاک نمی‌کند، ولی برای اطمینان
     // صریح دوباره می‌فرستیم)
     menuOrdersButton: '📦 سفارش‌ها',
+    menuTodayButton: '📌 کارهای امروز',
+    todayEmpty: 'کار باز امروز نداری ✅',
+    todayReceipts: (n: number) => `رسید منتظر (${n.toLocaleString('fa-IR')})`,
+    todayReceiptMatch: 'بررسی: مطابق',
+    todayReceiptMismatch: 'بررسی: نیاز به نگاه',
+    todayReceiptPending: 'بررسی: در حال انجام',
+    todayToShip: (n: number) => `منتظر ارسال (${n.toLocaleString('fa-IR')})`,
+    todayConversations: (n: number) =>
+      `منتظر جواب (${n.toLocaleString('fa-IR')})`,
+    todayRefunds: (n: number) => `بازپرداخت معوق (${n.toLocaleString('fa-IR')})`,
+    todayIssues: (n: number) => `مشکل سفارش (${n.toLocaleString('fa-IR')})`,
+    todayLowStock: (n: number) => `موجودی کم (${n.toLocaleString('fa-IR')})`,
+    todayLowStockLine: (name: string, stock: number) =>
+      `${name} — ${stock.toLocaleString('fa-IR')}`,
     menuAttentionButton: '💬 گفتگوهای نیازمند توجه',
     menuStockButton: '📋 موجودی محصولات',
     menuCreditButton: '💳 اعتبار فروشگاه',

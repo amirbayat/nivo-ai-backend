@@ -131,6 +131,11 @@ export class StoreController {
     return this.storeService.getCompleteness(user.sub, id);
   }
 
+  @Get(':id/today')
+  listToday(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    return this.storeService.listToday(user.sub, id);
+  }
+
   // بخش ۳.۳/۳.۴ — پیشنهادهای aggregator (موضوعات تکرارشونده‌ی گیرکردن ربات)، برای تب «توجه»
   @Get(':id/attention-suggestions')
   getAttentionSuggestions(

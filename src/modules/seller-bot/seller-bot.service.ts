@@ -36,6 +36,7 @@ const ATTENTION_LIST_MAX = 5;
 // بعد از هر اکشن تمام‌شده دوباره با پیام پایانی فرستاده می‌شود تا همیشه در دسترس باشد
 const MAIN_MENU_KEYBOARD = {
   keyboard: [
+    [{ text: fa.sellerBot.menuTodayButton }],
     [
       { text: fa.sellerBot.menuOrdersButton },
       { text: fa.sellerBot.menuAttentionButton },
@@ -161,6 +162,10 @@ export class SellerBotService {
       await this.sendMenu(chatId, fa.sellerBot.help);
       return;
     }
+    if (text === '/today' || text === fa.sellerBot.menuTodayButton) {
+      await this.handleToday(chatId);
+      return;
+    }
     if (text === '/orders' || text === fa.sellerBot.menuOrdersButton) {
       await this.handleOrders(chatId);
       return;
@@ -274,6 +279,63 @@ export class SellerBotService {
       return null;
     }
     return store;
+  }
+
+  private async handleToday(chatId: string): Promise<void> {
+    const store = await this.requireLinkedStore(chatId);
+    if (!store) return;
+    const today = await this.storeService.listToday(store.sellerId, store.id);
+    const sections: string[] = [];
+    if (today.receipts.length > 0) {
+      sections.push(
+        fa.sellerBot.todayReceipts(today.receipts.length),
+        ...today.receipts.map((order) => {
+          const badge =
+            order.receiptVerifiedMatch === true
+              ? fa.sellerBot.todayReceiptMatch
+              : order.receiptVerifiedMatch === false
+                ? fa.sellerBot.todayReceiptMismatch
+                : fa.sellerBot.todayReceiptPending;
+          return `• ${order.orderCode} — ${badge}`;
+        }),
+      );
+    }
+    if (today.toShip.length > 0) {
+      sections.push(
+        fa.sellerBot.todayToShip(today.toShip.length),
+        ...today.toShip.map((order) => `• ${order.orderCode}`),
+      );
+    }
+    if (today.conversations.length > 0) {
+      sections.push(
+        fa.sellerBot.todayConversations(today.conversations.length),
+        ...today.conversations.map((row) => `• ${row.customerLabel}`),
+      );
+    }
+    if (today.refunds.length > 0) {
+      sections.push(
+        fa.sellerBot.todayRefunds(today.refunds.length),
+        ...today.refunds.map((row) => `• ${row.orderCode}`),
+      );
+    }
+    if (today.issues.length > 0) {
+      sections.push(
+        fa.sellerBot.todayIssues(today.issues.length),
+        ...today.issues.map((row) => `• ${row.orderCode}`),
+      );
+    }
+    if (today.lowStock.length > 0) {
+      sections.push(
+        fa.sellerBot.todayLowStock(today.lowStock.length),
+        ...today.lowStock.map((row) =>
+          fa.sellerBot.todayLowStockLine(row.name, row.stock),
+        ),
+      );
+    }
+    await this.sendMenu(
+      chatId,
+      sections.length > 0 ? sections.join('\n') : fa.sellerBot.todayEmpty,
+    );
   }
 
   private async handleOrders(chatId: string): Promise<void> {
