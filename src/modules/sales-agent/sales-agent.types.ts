@@ -347,6 +347,8 @@ export type EngineResult = {
 export type SalesAction = {
   type:
     | 'ADD_TO_CART'
+    | 'SET_CART_QTY'
+    | 'REMOVE_CART_ITEM'
     | 'CONFIRM_CART'
     | 'SELECT_ADDRESS'
     | 'NEW_ADDRESS'
@@ -367,8 +369,9 @@ export type SalesAction = {
     | 'SELECT_PAYMENT_METHOD'
     // 0.11a — نمایش کارت یک محصول (لینک اختصاصی محصول برای خریدار برگشتی)، بدون LLM
     | 'FOCUS_PRODUCT';
-  productId?: string; // ADD_TO_CART, TOGGLE_SAVE_PRODUCT, FOCUS_PRODUCT
+  productId?: string; // ADD_TO_CART, TOGGLE_SAVE_PRODUCT, FOCUS_PRODUCT, SET_CART_QTY, REMOVE_CART_ITEM
   qty?: number;
+  variantId?: string;
   addressId?: string;
   // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۲ (فاز ۱.۵) — فقط برای SELECT_PROVINCE
   province?: string;

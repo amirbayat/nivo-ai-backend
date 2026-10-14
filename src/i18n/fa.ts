@@ -481,6 +481,7 @@ export const fa = {
         )
         .join('\n')}\nسبد با قیمت جدید به‌روز شد؛ ادامه بدیم؟`,
     cartEmpty: 'سبد خرید خالی است',
+    cartUpdated: (total: number) => `سبد به‌روز شد. جمع ${total.toLocaleString('fa-IR')} تومان.`,
     llmSaturated: 'الان خیلی شلوغم 🙏 چند ثانیه دیگه پیامت رو دوباره بفرست.',
     conversationBusy:
       'یه لحظه، دارم پیام قبلی‌ت رو جواب می‌دم. چند ثانیه دیگه دوباره امتحان کن 🙏',

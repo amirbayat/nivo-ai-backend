@@ -19,6 +19,8 @@ import { ToNumber } from '../../../common/decorators/digits.decorators';
 export class SalesActionDto {
   @IsIn([
     'ADD_TO_CART',
+    'SET_CART_QTY',
+    'REMOVE_CART_ITEM',
     'CONFIRM_CART',
     // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۱ — دکمه‌های فلوی آدرس
     'SELECT_ADDRESS',
@@ -44,6 +46,8 @@ export class SalesActionDto {
   ])
   type:
     | 'ADD_TO_CART'
+    | 'SET_CART_QTY'
+    | 'REMOVE_CART_ITEM'
     | 'CONFIRM_CART'
     | 'SELECT_ADDRESS'
     | 'NEW_ADDRESS'
@@ -68,6 +72,10 @@ export class SalesActionDto {
   @Min(1)
   @ToNumber()
   qty?: number;
+
+  @IsOptional()
+  @IsString()
+  variantId?: string;
 
   @IsOptional()
   @IsString()

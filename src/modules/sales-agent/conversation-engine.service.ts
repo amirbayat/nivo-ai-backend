@@ -5320,6 +5320,10 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       );
     }
 
+    if (action.type === 'SET_CART_QTY' || action.type === 'REMOVE_CART_ITEM') {
+      return this.setCartLine(conversation, ctx, action);
+    }
+
     // docs/PRD-product-display-focus-and-variations.md §۴.۲ — جواب چیپ VARIANT_PROMPT (مسیر
     // دکمه، معادل دکمه‌ای مسیر متنی handleVariantSelectionInput)
     if (action.type === 'SELECT_VARIANT_VALUE') {
@@ -6122,6 +6126,69 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
   // منطق مشترک تغییر سبد — هم از مسیر NLU (doUpdateCart، productQuery/productIndex حدسی)
   // هم از مسیر قطعی دکمه‌ها (handleAction، productId مستقیم) و هم پایان مسیر واریانت
   // (finalizeVariantSelection) صدا زده می‌شود
+  private async setCartLine(
+    conversation: ConversationWithStore,
+    ctx: ConversationContext,
+    action: SalesAction,
+  ): Promise<EngineResult> {
+    const productId = action.productId;
+    const variantId = action.variantId ?? null;
+    if (!productId) return this.doClarify(conversation, fa.salesAgent.nothingToConfirm);
+    const sameLine = (item: CartItem) =>
+      item.productId === productId && (item.variantId ?? null) === variantId;
+    const line = ctx.cart.find(sameLine);
+    if (!line) return this.doClarify(conversation, fa.salesAgent.cartEmpty);
+
+    let cart = ctx.cart.filter((item) => !sameLine(item));
+    if (action.type === 'SET_CART_QTY') {
+      const qty = action.qty ?? 0;
+      if (!isValidCartQty(qty)) return this.doClarify(conversation, fa.salesAgent.insufficientStock);
+      const product = await this.prisma.product.findUnique({
+        where: { id: productId },
+        include: PRODUCT_VARIANT_INCLUDE,
+      });
+      if (!product || product.storeId !== conversation.storeId) {
+        return this.doClarify(conversation, fa.salesAgent.productNotFound);
+      }
+      await this.resolveProductPrices(conversation.storeId, [product]);
+      const variant = variantId
+        ? product.variants.find((item) => item.id === variantId) ?? null
+        : null;
+      if (variantId && !variant) return this.doClarify(conversation, fa.salesAgent.productNotFound);
+      const stock = variant ? variant.stock : product.stock;
+      if (stock < qty) return this.doClarify(conversation, fa.salesAgent.insufficientStock);
+      cart = [...cart, { ...line, qty }];
+    }
+
+    let nextAppliedDiscount = ctx.appliedDiscount;
+    if (ctx.appliedDiscount && cart.length) {
+      const preview = await this.previewDiscount(conversation.storeId, cart, ctx.appliedDiscount.code);
+      nextAppliedDiscount = preview.valid
+        ? { id: preview.id, code: preview.code, amountToman: preview.amountToman }
+        : null;
+    } else if (!cart.length) {
+      nextAppliedDiscount = null;
+    }
+
+    await this.persistTransition(conversation, cart.length ? 'CART_REVIEW' : conversation.currentState, {
+      ...ctx,
+      cart,
+      pendingVariantSelection: null,
+      appliedDiscount: nextAppliedDiscount,
+    });
+    const rawTotal = this.cartTotal(cart);
+    const total = nextAppliedDiscount ? rawTotal - nextAppliedDiscount.amountToman : rawTotal;
+    const uiBlock: UiBlock = { type: 'CART_SUMMARY', items: cart, total };
+    const reply = cart.length ? fa.salesAgent.cartUpdated(total) : fa.salesAgent.cartEmpty;
+    await this.logReply(conversation, reply, uiBlock, undefined, {
+      intent: action.type,
+      handler: 'setCartLine',
+      factsOrPrompt: reply,
+      model: resolveModel(conversation.abVariant),
+    });
+    return { reply, uiBlocks: [uiBlock], state: cart.length ? 'CART_REVIEW' : conversation.currentState };
+  }
+
   private async applyCartUpdate(
     conversation: ConversationWithStore,
     ctx: ConversationContext,
