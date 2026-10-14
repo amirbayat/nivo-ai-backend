@@ -150,6 +150,7 @@ export class SalesAgentService {
       // را روی صفحه‌ی چت نشان می‌دهد؛ قبلاً این صفحه اصلاً نمی‌دانست فروشگاه دموست یا نه
       isDemo: store.isDemo,
       shopStreamEnabled: globalConfig.shopStreamEnabled,
+      shopLandingEnabled: globalConfig.shopLandingEnabled,
       responseStrategy: customer.salesConversations[0].responseStrategy,
       ...(initial
         ? {
@@ -203,6 +204,7 @@ export class SalesAgentService {
       storeLogoKey: conversation.store.logoImageKey,
       isDemo: conversation.store.isDemo,
       shopStreamEnabled: globalConfig.shopStreamEnabled,
+      shopLandingEnabled: globalConfig.shopLandingEnabled,
       responseStrategy: fresh.responseStrategy,
       ...(initial
         ? {
@@ -1083,13 +1085,15 @@ export class SalesAgentService {
     const awaitingReview = (
       conversation.contextData as { awaitingReview?: boolean } | null
     )?.awaitingReview;
+    const globalConfig = await getSalesAgentGlobalConfig(this.prisma);
     return {
       state: conversation.currentState,
       storeId: conversation.storeId,
       storeName: conversation.store.name,
       storeLogoKey: conversation.store.logoImageKey,
       isDemo: conversation.store.isDemo,
-      shopStreamEnabled: (await getSalesAgentGlobalConfig(this.prisma)).shopStreamEnabled,
+      shopStreamEnabled: globalConfig.shopStreamEnabled,
+      shopLandingEnabled: globalConfig.shopLandingEnabled,
       responseStrategy: conversation.responseStrategy,
       awaitingReview: !!awaitingReview,
       awaitingSatisfactionCheck: !!(

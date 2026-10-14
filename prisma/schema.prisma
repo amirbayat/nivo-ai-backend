@@ -610,6 +610,8 @@ model SalesAgentGlobalConfig {
   orderPublicLinkEnabled   Boolean  @default(false)
   // 4.15 — web shop streams the reply only when this is on. Default off.
   shopStreamEnabled        Boolean  @default(false)
+  // 4.6 — first visit shows a template welcome and the product grid. Default off.
+  shopLandingEnabled       Boolean  @default(false)
   updatedAt           DateTime @updatedAt
 
   @@map("sales_agent_global_config")
