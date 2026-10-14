@@ -111,8 +111,16 @@ export class RefundService {
     if (claimed.count !== 1) throw new ConflictException(fa.order.refundNotPayable);
     const order = await this.prisma.order.findUnique({
       where: { id: input.orderId },
-      select: { orderCode: true, id: true },
+      select: { orderCode: true, id: true, conversationId: true },
     });
+    if (order) {
+      await this.markRefundForm(
+        order.conversationId,
+        refund.id,
+        'SAVED',
+        parsed.masked,
+      );
+    }
     await this.notifications.notifySeller({
       storeId: refund.storeId,
       template: 'REFUND_READY',
@@ -185,8 +193,98 @@ export class RefundService {
           },
         });
       }
+      await this.markRefundForm(
+        order.conversationId,
+        refund.id,
+        'PAID',
+        refund.destinationMasked,
+      );
     }
     return { id: refund.id, status: 'DONE' as const, paidAt, paidRef: paid };
+  }
+
+  async setDestinationForConversation(
+    conversationId: string,
+    refundId: string,
+    raw: string,
+    holderName: string,
+  ) {
+    const refund = await this.prisma.orderRefund.findFirst({
+      where: { id: refundId, order: { conversationId } },
+    });
+    if (!refund) throw new NotFoundException(fa.order.refundNotFound);
+    return this.setDestination({
+      refundId: refund.id,
+      orderId: refund.orderId,
+      raw,
+      holderName,
+    });
+  }
+
+  async tryCaptureFromMessage(conversationId: string, text: string) {
+    const parsed = parseDestination(text);
+    if (!parsed) return null;
+    const refund = await this.prisma.orderRefund.findFirst({
+      where: {
+        status: 'AWAITING_DESTINATION',
+        order: { conversationId },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!refund) return null;
+    const saved = await this.setDestination({
+      refundId: refund.id,
+      orderId: refund.orderId,
+      raw: parsed.plain,
+      holderName: holderBesideDestination(text) ?? 'خریدار',
+    });
+    return {
+      reply: fa.orderNotify.refundDestinationSaved(
+        REFUND_OVERDUE_HOURS,
+        saved.destinationMasked,
+      ),
+      masked: saved.destinationMasked,
+      refundId: refund.id,
+      orderId: refund.orderId,
+      amountToman: refund.amountToman,
+    };
+  }
+
+  private async markRefundForm(
+    conversationId: string,
+    refundId: string,
+    status: 'SAVED' | 'PAID',
+    destinationMasked?: string | null,
+  ) {
+    const events = await this.prisma.conversationEvent.findMany({
+      where: { conversationId, type: 'AGENT_REPLY' },
+      orderBy: { createdAt: 'desc' },
+      take: 40,
+      select: { id: true, payload: true },
+    });
+    for (const event of events) {
+      const payload = event.payload as {
+        text?: string;
+        uiBlock?: { type?: string; refundId?: string; status?: string };
+      } | null;
+      const block = payload?.uiBlock;
+      if (block?.type !== 'REFUND_DESTINATION_FORM' || block.refundId !== refundId) {
+        continue;
+      }
+      await this.prisma.conversationEvent.update({
+        where: { id: event.id },
+        data: {
+          payload: {
+            ...payload,
+            uiBlock: {
+              ...block,
+              status,
+              ...(destinationMasked ? { destinationMasked } : {}),
+            },
+          },
+        },
+      });
+    }
   }
 
   async resolveSellerHold(
@@ -321,4 +419,14 @@ export class RefundService {
     });
     return conv?.customerId ?? '';
   }
+}
+
+function holderBesideDestination(text: string): string | null {
+  const lines = text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const name = lines.find((line) => !parseDestination(line));
+  if (!name || name.length < 2 || name.length > 80) return null;
+  return name;
 }

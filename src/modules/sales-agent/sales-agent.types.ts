@@ -177,6 +177,15 @@ export type UiBlock =
   // options همیشه هر دو مقدار را دارد (این بلاک اصلاً ساخته نمی‌شود مگر هر دو فعال باشند)
   | { type: 'PAYMENT_METHOD_PROMPT'; options: OrderPaymentMethod[] }
   | { type: 'ORDER_STATUS'; orderId: string; status: string; orderCode?: string }
+  | {
+      type: 'REFUND_DESTINATION_FORM';
+      refundId: string;
+      orderId: string;
+      amountToman: number;
+      deadlineHours: number;
+      status: 'OPEN' | 'SAVED' | 'PAID';
+      destinationMasked?: string;
+    }
   // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۱ + docs/PRD-buyer-saved-addresses.md —
   // یک نوع بلاک با سه حالت (نه سه نوع جدا) تا سطح UiBlock شلوغ نشود؛ هر حالت فقط فیلدهای
   // مرتبط با خودش را پر می‌کند

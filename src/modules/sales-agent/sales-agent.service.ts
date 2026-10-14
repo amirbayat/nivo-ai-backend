@@ -38,6 +38,8 @@ import { buildAsrVocabHint } from './asr-vocab-hint';
 import { reattachReceiptIfOrderOpen } from './receipt-reattach.util';
 import { SubmitManualReceiptDto } from './dto/submit-manual-receipt.dto';
 import { OrderStateService } from '../order-lifecycle/order-state.service';
+import { RefundService } from '../order-lifecycle/refund.service';
+import { REFUND_OVERDUE_HOURS } from '../../common/constants/sales-ops.constants';
 import { StoreService } from '../store/store.service';
 import { StockAlertService } from '../order-lifecycle/stock-alert.service';
 import { ReceiptCheckService } from '../order-lifecycle/receipt-check.service';
@@ -89,6 +91,7 @@ export class SalesAgentService {
     private readonly receiptChecks: ReceiptCheckService,
     private readonly storeService: StoreService,
     private readonly stockAlerts: StockAlertService,
+    private readonly refunds: RefundService,
   ) {}
 
   // productId اختیاری — لینک اختصاصی یک محصول (فروشنده در استوری گذاشته)؛ اگر معتبر و
@@ -369,6 +372,8 @@ export class SalesAgentService {
     stream = false,
   ): Promise<SendMessageResponse> {
     const conversation = await this.loadOwned(conversationId, sessionToken);
+    const captured = await this.captureRefundCard(conversation, dto);
+    if (captured) return captured;
 
     // 2.1 — Idempotency: همان clientMessageId دوباره آمد → جواب ذخیره‌شده (یا «در حال پردازش»)
     const idemKey = dto.clientMessageId
@@ -502,6 +507,63 @@ export class SalesAgentService {
   async *shopTurnEvents(conversationId: string, sessionToken: string, turnId: string) {
     await this.loadOwned(conversationId, sessionToken);
     yield* listenShopTurn(turnId);
+  }
+
+  async submitRefundDestination(
+    conversationId: string,
+    sessionToken: string,
+    refundId: string,
+    destination: string,
+    holderName: string,
+  ) {
+    const conversation = await this.loadOwned(conversationId, sessionToken);
+    return this.refunds.setDestinationForConversation(
+      conversation.id,
+      refundId,
+      destination,
+      holderName,
+    );
+  }
+
+  private async captureRefundCard(
+    conversation: Awaited<ReturnType<SalesAgentService['loadOwned']>>,
+    dto: SendMessageDto,
+  ): Promise<SendMessageResponse | null> {
+    if (!dto.message || dto.action || !this.refunds) return null;
+    const captured = await this.refunds.tryCaptureFromMessage(
+      conversation.id,
+      dto.message,
+    );
+    if (!captured) return null;
+    const uiBlock = {
+      type: 'REFUND_DESTINATION_FORM' as const,
+      refundId: captured.refundId,
+      orderId: captured.orderId,
+      amountToman: captured.amountToman,
+      deadlineHours: REFUND_OVERDUE_HOURS,
+      status: 'SAVED' as const,
+      destinationMasked: captured.masked,
+    };
+    await this.prisma.conversationEvent.create({
+      data: {
+        conversationId: conversation.id,
+        type: 'CUSTOMER_MESSAGE',
+        payload: { text: captured.masked },
+      },
+    });
+    await this.prisma.conversationEvent.create({
+      data: {
+        conversationId: conversation.id,
+        type: 'AGENT_REPLY',
+        payload: { text: captured.reply, uiBlock },
+      },
+    });
+    return {
+      reply: captured.reply,
+      uiBlocks: [uiBlock],
+      state: conversation.currentState,
+      awaitingReview: false,
+    };
   }
 
   private async processMessage(

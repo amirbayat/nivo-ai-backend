@@ -35,6 +35,7 @@ import { CommentsService } from '../comments/comments.service';
 import { StorageService } from '../../storage/storage.service';
 import { mimeTypeForExt } from '../../common/validators/chat-image.validator';
 import { fa } from '../../i18n/fa';
+import { RefundDestinationDto } from '../order-lifecycle/dto/order-public.dto';
 
 // docs/PRD-mvp-launch-plan.md گام ۱ — بدون JwtGuard: مشتری این فروشگاه یک User نیست،
 // هویتش فقط sessionToken است که خودِ /chat/start صادر می‌کند (سند بخش ۲.۱: Customer ≠ User).
@@ -59,6 +60,22 @@ export class SalesAgentController {
 
   // docs/PRD-conversation-history.md — دکمه‌ی «گفتگوی جدید»؛ همان sessionToken می‌ماند، فقط
   // یک SalesConversation تازه برای همان Customer ساخته می‌شود
+  @Post('chat/:conversationId/refunds/:refundId/destination')
+  submitRefundDestination(
+    @Param('conversationId') conversationId: string,
+    @Param('refundId') refundId: string,
+    @Headers('x-session-token') sessionToken: string,
+    @Body() dto: RefundDestinationDto,
+  ) {
+    return this.salesAgentService.submitRefundDestination(
+      conversationId,
+      sessionToken,
+      refundId,
+      dto.destination,
+      dto.holderName,
+    );
+  }
+
   @Post('chat/:conversationId/restart')
   restart(
     @Param('conversationId') conversationId: string,

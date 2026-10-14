@@ -10,6 +10,7 @@ import {
   NOTIFICATION_SMS_COST_TOMAN,
   NOTIFICATION_SMS_DAILY_CAP_PER_BUYER,
   ORDER_PAYMENT_WINDOW_HOURS,
+  REFUND_OVERDUE_HOURS,
 } from '../../common/constants/sales-ops.constants';
 import { fa } from '../../i18n/fa';
 import { NotificationJob } from './notification.types';
@@ -138,13 +139,30 @@ export class NotificationDeliveryService {
     order: OrderForNotify,
     customer: { id: string; channel: string; telegramChatId: string | null },
   ): Promise<void> {
-    const text = await this.withLink(this.chatText(job, order), order.id);
+    let text = await this.withLink(this.chatText(job, order), order.id);
     if (!text) return;
+    const uiBlock =
+      job.template === 'REFUND_DESTINATION_REQUEST' && job.data.refundId
+        ? {
+            type: 'REFUND_DESTINATION_FORM' as const,
+            refundId: job.data.refundId,
+            orderId: order.id,
+            amountToman: job.data.refundAmountToman ?? 0,
+            deadlineHours: REFUND_OVERDUE_HOURS,
+            status: 'OPEN' as const,
+          }
+        : undefined;
+    if (
+      uiBlock &&
+      (customer.channel === 'TELEGRAM' || customer.channel === 'INSTAGRAM')
+    ) {
+      text = `${text}\n${fa.orderNotify.refundAskInThisChat}`;
+    }
     await this.prisma.conversationEvent.create({
       data: {
         conversationId: order.conversationId,
         type: 'AGENT_REPLY',
-        payload: { text },
+        payload: { text, ...(uiBlock ? { uiBlock } : {}) },
       },
     });
     if (customer.channel === 'TELEGRAM' && customer.telegramChatId) {
