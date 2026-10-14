@@ -2799,6 +2799,8 @@ model SalesConversation {
   // وب / /start تلگرام) تعیین می‌شود و تا آخر عمر مکالمه ثابت می‌ماند (بر خلاف abVariant که
   // فقط انتخاب مدل است، این تعیین می‌کند اصلاً AI صدا زده شود یا نه)
   billingMode                       BillingMode       @default(FREE)
+  // 5.3 — seller test chat. Billed like a real chat, excluded from seller attention and admin lists.
+  isTest                            Boolean           @default(false)
   // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۴ — سبد رهاشده: وقتی مکالمه در
   // CART_REVIEW/AWAITING_PAYMENT بیش از حد بماند، یک یادآوری یک‌باره فرستاده می‌شود؛ این فیلد
   // جلوی تکرار یادآوری برای همان مکالمه را می‌گیرد

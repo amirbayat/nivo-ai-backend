@@ -18,6 +18,10 @@ import { CHAT_START_LIMIT_PER_IP_PER_MIN } from '../../common/constants/sales-op
 import type { Response } from 'express';
 import { AdminGuard } from '../../common/guards/admin.guard';
 import { JwtGuard } from '../../common/guards/jwt.guard';
+import {
+  CurrentUser,
+  type JwtPayload,
+} from '../../common/decorators/current-user.decorator';
 import { SalesAgentService } from './sales-agent.service';
 import { SubmitManualReceiptDto } from './dto/submit-manual-receipt.dto';
 import { SendMessageDto } from './dto/send-message.dto';
@@ -133,6 +137,15 @@ export class SalesAgentController {
       res.write(`data: ${JSON.stringify({ type: 'error' })}\n\n`);
     }
     res.end();
+  }
+
+  @UseGuards(JwtGuard)
+  @Post('stores/:storeId/test-chat')
+  startTestChat(
+    @CurrentUser() user: JwtPayload,
+    @Param('storeId') storeId: string,
+  ) {
+    return this.salesAgentService.startTestChat(user.sub, storeId);
   }
 
   @Post('chat/:conversationId/messages')

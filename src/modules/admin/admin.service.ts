@@ -1230,6 +1230,7 @@ export class AdminService {
     const page = params.page && params.page > 0 ? params.page : 1;
     const pageSize = 20;
     const where = {
+      isTest: false,
       ...(params.storeId ? { storeId: params.storeId } : {}),
       ...(params.state ? { currentState: params.state } : {}),
       ...((params.from ?? params.to)

@@ -93,25 +93,32 @@ export class SalesAgentService {
   // متعلق به همین فروشگاه باشد، اولین پاسخ مکالمه مستقیم همان محصول را نشان می‌دهد
   // (بدون NLU) و در همین پاسخ startChat برمی‌گردد — فرانت مجبور نیست یک کیک‌آف عمومی
   // جدا بفرستد
-  async startChat(slug: string, productId?: string) {
+  async startChat(
+    slug: string,
+    productId?: string,
+    opts?: { isTest?: boolean },
+  ) {
     const store = await this.prisma.store.findUnique({ where: { slug } });
     if (!store || store.status !== 'ACTIVE')
       throw new NotFoundException(fa.store.notFound);
 
-    // 0.10 — سقف per-store (علاوه بر سقف per-IP روی کنترلر): جلوی سیل ساخت مکالمه برای یک فروشگاه
-    const startKey = `rl:chat-start:${store.id}`;
-    const started = await this.redis.incr(startKey);
-    if (started === 1) await this.redis.expire(startKey, 60);
-    if (started > CHAT_START_LIMIT_PER_STORE_PER_MIN) {
-      throw new HttpException(
-        fa.errors.tooManyRequests,
-        HttpStatus.TOO_MANY_REQUESTS,
-      );
-    }
+    const isTest = opts?.isTest === true;
+    if (!isTest) {
+      // 0.10 — سقف per-store (علاوه بر سقف per-IP روی کنترلر): جلوی سیل ساخت مکالمه برای یک فروشگاه
+      const startKey = `rl:chat-start:${store.id}`;
+      const started = await this.redis.incr(startKey);
+      if (started === 1) await this.redis.expire(startKey, 60);
+      if (started > CHAT_START_LIMIT_PER_STORE_PER_MIN) {
+        throw new HttpException(
+          fa.errors.tooManyRequests,
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
+      }
 
-    // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۶.۳ — اگر این اولین چتِ اولین
-    // خریدار همین فروشگاه است، قبل از decideBillingMode دوره‌ی آزمایشی گرنت می‌شود
-    await this.creditService.grantTrialIfFirstChat(store.id);
+      // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۶.۳ — اگر این اولین چتِ اولین
+      // خریدار همین فروشگاه است، قبل از decideBillingMode دوره‌ی آزمایشی گرنت می‌شود
+      await this.creditService.grantTrialIfFirstChat(store.id);
+    }
     // docs/PRD-seller-credit-billing.md — یک‌بار همین‌جا تعیین می‌شود، تا آخر عمر مکالمه ثابت می‌ماند
     const billingMode = await this.creditService.decideBillingMode(store.id);
     const globalConfig = await getSalesAgentGlobalConfig(this.prisma);
@@ -128,6 +135,7 @@ export class SalesAgentService {
             voiceVariant: pickVoiceVariant(),
             responseStrategy: pickResponseStrategy(),
             billingMode,
+            isTest,
           },
         },
       },
@@ -165,6 +173,14 @@ export class SalesAgentService {
     };
   }
 
+  async startTestChat(sellerId: string, storeId: string) {
+    const store = await this.prisma.store.findFirst({
+      where: { id: storeId, sellerId },
+    });
+    if (!store) throw new NotFoundException(fa.store.notFound);
+    return this.startChat(store.slug, undefined, { isTest: true });
+  }
+
   // docs/PRD-conversation-history.md — «گفتگوی جدید»: برخلاف startChat هیچ Customer تازه‌ای
   // ساخته نمی‌شود (پس در سهمیه‌ی روزانه‌ی ۱۰ خریدار جدید هم شمرده نمی‌شود)، همان Customer/
   // sessionToken می‌ماند؛ فقط مکالمه‌ی فعلی آرشیو و یک SalesConversation تازه برایش ساخته می‌شود
@@ -188,6 +204,7 @@ export class SalesAgentService {
           voiceVariant: pickVoiceVariant(),
           responseStrategy: pickResponseStrategy(),
           billingMode,
+          isTest: conversation.isTest,
         },
       });
     });

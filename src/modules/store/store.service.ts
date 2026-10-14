@@ -1995,7 +1995,7 @@ export class StoreService {
   async listNeededAttention(sellerId: string, storeId: string) {
     await this.getOwned(sellerId, storeId);
     const conversations = await this.prisma.salesConversation.findMany({
-      where: { storeId, isMutedForHuman: true },
+      where: { storeId, isMutedForHuman: true, isTest: false },
       orderBy: { updatedAt: 'desc' },
       include: { customer: true, order: true },
     });
