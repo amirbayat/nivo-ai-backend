@@ -25,7 +25,11 @@ export class StoreCreditService {
     const [config, freeQuotaUsedToday] = await Promise.all([
       getSalesAgentGlobalConfig(this.prisma),
       this.prisma.customer.count({
-        where: { storeId, createdAt: { gte: todayStart } },
+        where: {
+          storeId,
+          createdAt: { gte: todayStart },
+          NOT: { sessionToken: { startsWith: 'nivo-test:' } },
+        },
       }),
     ]);
     // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۶ — فقط وقتی واقعاً فعال است

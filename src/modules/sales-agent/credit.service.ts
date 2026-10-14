@@ -176,6 +176,10 @@ export class CreditService {
     tokensOutput?: number;
     costUsdMicros?: number;
   }): Promise<void> {
+    const conversation = await this.prisma.salesConversation.findUnique({
+      where: { id: params.conversationId },
+      select: { isTest: true },
+    });
     const result = await this.deduction.deductSafely({
       storeId: params.storeId,
       rawCostToman: params.costToman,
@@ -186,6 +190,7 @@ export class CreditService {
         kind: params.kind,
         customerId: params.customerId,
         conversationId: params.conversationId,
+        isTest: conversation?.isTest === true,
         tokensInput: params.tokensInput,
         tokensOutput: params.tokensOutput,
         costUsdMicros: params.costUsdMicros,

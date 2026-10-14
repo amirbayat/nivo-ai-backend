@@ -1620,6 +1620,7 @@ export class StoreService {
     const orders = await this.prisma.order.findMany({
       where: {
         storeId,
+        conversation: { isTest: false },
         ...(status ? { status } : {}),
         ...this.buildOrderSearchFilter(q),
       },
@@ -1863,7 +1864,11 @@ export class StoreService {
       await Promise.all([
         this.prisma.order.findMany({
           // 0.7 — «ارسال» سفارش را از درآمد حذف نمی‌کرد‌ ولی فقط APPROVED شمرده می‌شد
-          where: { storeId, status: { in: [...SUCCESSFUL_ORDER_STATUSES] } },
+          where: {
+            storeId,
+            status: { in: [...SUCCESSFUL_ORDER_STATUSES] },
+            conversation: { isTest: false },
+          },
           select: {
             totalAmount: true,
             createdAt: true,
@@ -1874,12 +1879,12 @@ export class StoreService {
         }),
         this.prisma.order.groupBy({
           by: ['status'],
-          where: { storeId },
+          where: { storeId, conversation: { isTest: false } },
           _count: { _all: true },
         }),
         this.prisma.order.groupBy({
           by: ['paymentMethod'],
-          where: { storeId },
+          where: { storeId, conversation: { isTest: false } },
           _count: { _all: true },
         }),
       ]);
@@ -1976,7 +1981,7 @@ export class StoreService {
   async exportOrdersCsv(sellerId: string, storeId: string): Promise<string> {
     await this.getOwned(sellerId, storeId);
     const orders = await this.prisma.order.findMany({
-      where: { storeId },
+      where: { storeId, conversation: { isTest: false } },
       orderBy: { createdAt: 'desc' },
     });
     const lines = [fa.store.csvOrdersHeader.map(csvEscape).join(',')];
@@ -2022,7 +2027,11 @@ export class StoreService {
         include: { optionTypes: { select: { id: true } }, variants: true },
       }),
       this.prisma.order.findMany({
-        where: { storeId, status: 'APPROVED' },
+        where: {
+          storeId,
+          status: 'APPROVED',
+          conversation: { isTest: false },
+        },
         select: { items: true },
       }),
     ]);
@@ -2107,7 +2116,11 @@ export class StoreService {
     const [receipts, toShip, conversations, refunds, issues, products] =
       await Promise.all([
         this.prisma.order.findMany({
-          where: { storeId, status: 'RECEIPT_SUBMITTED' },
+          where: {
+            storeId,
+            status: 'RECEIPT_SUBMITTED',
+            conversation: { isTest: false },
+          },
           orderBy: { updatedAt: 'desc' },
           take,
           select: {
@@ -2117,7 +2130,11 @@ export class StoreService {
           },
         }),
         this.prisma.order.findMany({
-          where: { storeId, status: 'APPROVED' },
+          where: {
+            storeId,
+            status: 'APPROVED',
+            conversation: { isTest: false },
+          },
           orderBy: { updatedAt: 'desc' },
           take,
           select: { id: true, orderCode: true },
@@ -2133,13 +2150,17 @@ export class StoreService {
             storeId,
             status: { in: ['AWAITING_DESTINATION', 'READY'] },
             createdAt: { lte: overdueBefore },
+            order: { conversation: { isTest: false } },
           },
           orderBy: { createdAt: 'asc' },
           take,
           include: { order: { select: { id: true, orderCode: true } } },
         }),
         this.prisma.orderIssue.findMany({
-          where: { status: 'OPEN', order: { storeId } },
+          where: {
+            status: 'OPEN',
+            order: { storeId, conversation: { isTest: false } },
+          },
           orderBy: { createdAt: 'desc' },
           take,
           include: { order: { select: { id: true, orderCode: true } } },

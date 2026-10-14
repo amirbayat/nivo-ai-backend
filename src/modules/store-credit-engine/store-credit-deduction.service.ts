@@ -41,6 +41,7 @@ export interface DeductParams {
     kind: CreditUsageKind;
     customerId?: string | null;
     conversationId?: string | null;
+    isTest?: boolean;
     tokensInput?: number;
     tokensOutput?: number;
     costUsdMicros?: number;
@@ -237,6 +238,7 @@ export class StoreCreditDeductionService {
         breakdown.length > 0
           ? (breakdown as unknown as Prisma.InputJsonValue)
           : undefined,
+      ...(event.isTest ? { meta: { isTest: true } } : {}),
     };
   }
 

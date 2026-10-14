@@ -52,6 +52,7 @@ export async function computeConversationStats(
 
   const conversations = await prisma.salesConversation.findMany({
     where: {
+      isTest: false,
       ...(groupBy === 'variant' ? { abVariant: { not: null } } : {}),
       ...(params.storeId ? { storeId: params.storeId } : {}),
       ...((params.from ?? params.to)

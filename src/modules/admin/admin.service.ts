@@ -1150,7 +1150,7 @@ export class AdminService {
       new Set(failed.map((e) => e.conversationId)),
     );
     const conversations = await this.prisma.salesConversation.findMany({
-      where: { id: { in: conversationIds } },
+      where: { id: { in: conversationIds }, isTest: false },
       select: {
         id: true,
         storeId: true,
@@ -1357,6 +1357,7 @@ export class AdminService {
     const page = params.page && params.page > 0 ? params.page : 1;
     const pageSize = 20;
     const where = {
+      conversation: { isTest: false },
       ...(params.storeId ? { storeId: params.storeId } : {}),
       ...(params.paymentMethod ? { paymentMethod: params.paymentMethod } : {}),
       ...(params.status ? { status: params.status } : {}),
@@ -1411,6 +1412,7 @@ export class AdminService {
   // همان بخش ۹.۲ — «گزارش» تعداد/مجموع مبلغ به تفکیک روش پرداخت که کاربر خواسته بود
   async getOrderPaymentMethodStats(params: { from?: Date; to?: Date }) {
     const where = {
+      conversation: { isTest: false },
       ...((params.from ?? params.to)
         ? {
             createdAt: {
@@ -1657,7 +1659,7 @@ export class AdminService {
       new Set(classificationEvents.map((e) => e.conversationId)),
     );
     const conversations = await this.prisma.salesConversation.findMany({
-      where: { id: { in: conversationIds } },
+      where: { id: { in: conversationIds }, isTest: false },
       select: { id: true, storeId: true, store: { select: { name: true } } },
     });
     const storeIdByConversation = new Map(
@@ -1814,6 +1816,7 @@ export class AdminService {
     const orders = await this.prisma.order.findMany({
       where: {
         satisfactionFollowUpSentAt: { not: null },
+        conversation: { isTest: false },
         ...(params.storeId ? { storeId: params.storeId } : {}),
         ...((params.from ?? params.to)
           ? {
@@ -1889,6 +1892,7 @@ export class AdminService {
   }) {
     const conversations = await this.prisma.salesConversation.findMany({
       where: {
+        isTest: false,
         abandonedCartReminderSentAt: { not: null },
         ...(params.storeId ? { storeId: params.storeId } : {}),
         ...((params.from ?? params.to)

@@ -418,6 +418,9 @@ export const fa = {
   },
   salesAgent: {
     invalidSession: 'نشست معتبر نیست',
+    testChatNoRealOrder:
+      'این گفتگوی آزمایشیه، سفارش واقعی ثبت نمی‌شه. خریدار واقعی اینجا کارت پرداخت با شماره کارتت رو می‌دید.',
+    testChatRateLimited: 'سقف باز کردن چت آزمایشی در این ساعت پر شده',
     streamLooking: 'دارم نگاه می‌کنم…',
     streamSearch: 'دارم بین محصولات می‌گردم…',
     streamStock: 'موجودی را چک می‌کنم…',

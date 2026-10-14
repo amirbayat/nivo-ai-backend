@@ -178,6 +178,15 @@ describe('executeCreateOrder guards [0.2/0.3]', () => {
     });
   });
 
+  it('چت تستی سفارش نمی‌سازد [F4]', async () => {
+    const { eng, tx, conversation, ctx } = setup(null);
+    (conversation as unknown as { isTest: boolean }).isTest = true;
+    const r = await eng.executeCreateOrder(conversation, ctx);
+    expect(r).toEqual({ status: 'test_only' });
+    expect(tx.order.create).not.toHaveBeenCalled();
+    expect(tx.$executeRaw).not.toHaveBeenCalled();
+  });
+
   it('کارت‌به‌کارت بدون کارت قابل پرداخت → payment_missing و بدون سفارش [F6]', async () => {
     const { eng, tx, conversation, ctx } = setup(null);
     (

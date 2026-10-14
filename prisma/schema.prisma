@@ -2916,6 +2916,7 @@ model CreditUsageEvent {
   // فاز ۱ — برای مصرف: [{source, chargedToman, markup}]؛ یک مصرف می‌تواند از چند بخش کسر شود
   // (source='TRIAL' برای بخشی که از اعتبار آزمایشی رفته)
   chargeBreakdown Json?
+  meta           Json?
   createdAt      DateTime           @default(now())
 
   @@index([storeId, createdAt])

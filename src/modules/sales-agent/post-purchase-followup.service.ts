@@ -38,6 +38,7 @@ export class PostPurchaseFollowUpService {
     const dueOrders = await this.prisma.order.findMany({
       where: {
         satisfactionFollowUpSentAt: null,
+        conversation: { isTest: false },
         store: { postPurchaseFollowUpEnabled: true },
         OR: [
           {
@@ -115,6 +116,7 @@ export class PostPurchaseFollowUpService {
     const dueOrders = await this.prisma.order.findMany({
       where: {
         mediaReviewFollowUpSentAt: null,
+        conversation: { isTest: false },
         store: { postPurchaseFollowUpEnabled: true },
         OR: [
           {

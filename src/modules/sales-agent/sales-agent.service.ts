@@ -180,7 +180,68 @@ export class SalesAgentService {
       where: { id: storeId, sellerId },
     });
     if (!store) throw new NotFoundException(fa.store.notFound);
-    return this.startChat(store.slug, undefined, { isTest: true });
+
+    const rateKey = `rl:test-chat:${sellerId}`;
+    const opened = await this.redis.incr(rateKey);
+    if (opened === 1) await this.redis.expire(rateKey, 60 * 60);
+    if (opened > 20) {
+      throw new HttpException(
+        fa.salesAgent.testChatRateLimited,
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
+    const billingMode = await this.creditService.decideBillingMode(store.id);
+    const globalConfig = await getSalesAgentGlobalConfig(this.prisma);
+    const keyPrefix = `nivo-test:${store.id}:`;
+    const sessionToken = `${keyPrefix}${crypto.randomUUID()}`;
+    const existing = await this.prisma.customer.findFirst({
+      where: { storeId: store.id, sessionToken: { startsWith: keyPrefix } },
+      orderBy: { createdAt: 'asc' },
+    });
+    const customer = existing
+      ? await this.prisma.customer.update({
+          where: { id: existing.id },
+          data: { sessionToken },
+        })
+      : await this.prisma.customer.create({
+          data: { storeId: store.id, channel: 'WEB', sessionToken },
+        });
+    const conversation = await this.prisma.salesConversation.create({
+      data: {
+        storeId: store.id,
+        customerId: customer.id,
+        abVariant: pickVariant(globalConfig.forcedModelVariant),
+        voiceVariant: pickVoiceVariant(),
+        responseStrategy: pickResponseStrategy(),
+        billingMode,
+        isTest: true,
+      },
+    });
+    const initial = await this.buildInitialReply(
+      conversation.id,
+      store.id,
+      billingMode,
+    );
+    return {
+      conversationId: conversation.id,
+      sessionToken,
+      storeId: store.id,
+      storeName: store.name,
+      storeLogoKey: store.logoImageKey,
+      isDemo: store.isDemo,
+      shopStreamEnabled: globalConfig.shopStreamEnabled,
+      shopLandingEnabled: globalConfig.shopLandingEnabled,
+      responseStrategy: conversation.responseStrategy,
+      ...(initial
+        ? {
+            initialReply: initial.reply,
+            initialUiBlocks: initial.uiBlocks,
+            initialState: initial.state,
+            initialVoiceEventId: initial.voiceEventId,
+          }
+        : {}),
+    };
   }
 
   // docs/PRD-conversation-history.md — «گفتگوی جدید»: برخلاف startChat هیچ Customer تازه‌ای

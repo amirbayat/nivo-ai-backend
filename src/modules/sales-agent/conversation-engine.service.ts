@@ -6714,6 +6714,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     paymentMethod: OrderPaymentMethod = 'CARD_TO_CARD',
   ): Promise<
     | { status: 'empty' }
+    | { status: 'test_only' }
     | {
         // 0.2/0.3 — سفارش ساخته نشد: تعداد نامعتبر، موجودی ناکافی یا تغییر قیمت (cart = سبد به‌روز)
         status: 'blocked';
@@ -6731,6 +6732,9 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         snapppayLink?: string;
       }
   > {
+    if (conversation.isTest) {
+      return { status: 'test_only' };
+    }
     if (ctx.cart.length === 0) {
       return { status: 'empty' };
     }
@@ -7086,6 +7090,41 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     );
   }
 
+  private async previewTestCheckout(
+    conversation: ConversationWithStore,
+    ctx: ConversationContext,
+    paymentMethod: OrderPaymentMethod,
+    addressSnapshot?: AddressSnapshot,
+  ): Promise<EngineResult> {
+    const amount =
+      this.cartTotal(ctx.cart) + (addressSnapshot?.shippingCostToman ?? 0);
+    const text = fa.salesAgent.testChatNoRealOrder;
+    let uiBlock: UiBlock = { type: 'NONE' };
+    if (paymentMethod === 'SNAPPPAY') {
+      uiBlock = {
+        type: 'SNAPPPAY_PAYMENT_INSTRUCTIONS',
+        link: conversation.store.snapppayPaymentLink ?? '',
+        amount,
+      };
+    } else {
+      const card = await this.cardSelector.selectCard(conversation.storeId);
+      if (card) {
+        uiBlock = {
+          type: 'PAYMENT_INSTRUCTIONS',
+          cardNumber: card.cardNumber,
+          ownerName: card.ownerName,
+          amount,
+        };
+      }
+    }
+    await this.logReply(conversation, text, uiBlock);
+    return {
+      reply: text,
+      uiBlocks: uiBlock.type === 'NONE' ? [] : [uiBlock],
+      state: conversation.currentState,
+    };
+  }
+
   // قبلاً تمام بدنه‌ی doCreateOrder همین بود؛ استخراج شد تا هم از مسیر بدون‌آدرس بالا هم از
   // انتهای فلوی ADDRESS_COLLECTION (finalizeAddressOrder) صدا زده شود. forcedPaymentMethod
   // فقط از handleAction's SELECT_PAYMENT_METHOD پاس داده می‌شود — یعنی خریدار قبلاً انتخاب
@@ -7151,6 +7190,14 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       addressSnapshot,
       paymentMethod,
     );
+    if (created.status === 'test_only') {
+      return this.previewTestCheckout(
+        conversation,
+        ctx,
+        paymentMethod,
+        addressSnapshot,
+      );
+    }
     if (created.status === 'empty') {
       return this.doClarify(conversation, fa.salesAgent.cartEmpty);
     }
