@@ -209,6 +209,8 @@ export class NotificationDeliveryService {
         return fa.orderNotify.shippedChat(code, d.carrier, d.trackingCode);
       case 'ORDER_REJECTED':
         return fa.orderNotify.rejectedChat(code, d.reason, d.refundAmountToman);
+      case 'PAYMENT_NOT_RECEIVED':
+        return fa.orderNotify.paymentNotReceivedChat();
       case 'ORDER_CANCELLED':
         return fa.orderNotify.cancelledChat(code, d.reason);
       case 'REFUND_CANCELLED':
@@ -250,6 +252,8 @@ export class NotificationDeliveryService {
         return fa.orderNotify.shippedSms(code, store, d.carrier, d.trackingCode);
       case 'ORDER_REJECTED':
         return fa.orderNotify.rejectedSms(code, store);
+      case 'PAYMENT_NOT_RECEIVED':
+        return fa.orderNotify.paymentNotReceivedSms();
       case 'ORDER_CANCELLED':
         return fa.orderNotify.cancelledSms(code, store);
       case 'REFUND_CANCELLED':

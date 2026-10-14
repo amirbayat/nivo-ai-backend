@@ -24,7 +24,7 @@ import type {
 // نه دیگر بات قدیم)؛ ایمپورت گروهی محصول با سند/صوت هنوز فقط روی بات قدیم مانده.
 const OTP_PENDING_TTL_MS = 3 * 60 * 1000;
 const STOCK_UPDATE_REF_REGEX = /کد محصول: ([0-9a-fA-F-]{36})/;
-const REJECT_REASON_REF_REGEX = /کد سفارش رد: ([0-9a-fA-F-]{36})/;
+const REJECT_REASON_REF_REGEX = /کد سفارش رد: ([0-9a-fA-F-]{36})(?: پول:(0|1))?/;
 const CONVERSATION_REPLY_REF_REGEX = /کد مکالمه: ([0-9a-fA-F-]{36})/;
 const STOCK_SEARCH_MAX_RESULTS = 5;
 const ORDERS_LIST_MAX = 5;
@@ -95,7 +95,10 @@ export class SellerBotService {
       if (message.text) {
         const rejectOrderId = this.extractRef(message, REJECT_REASON_REF_REGEX);
         if (rejectOrderId) {
-          await this.handleRejectReasonMessage(message, rejectOrderId);
+          const promptText = message.reply_to_message?.text ?? '';
+          const moneyFlag = promptText.match(REJECT_REASON_REF_REGEX)?.[2];
+          const moneyReceived = moneyFlag === undefined ? undefined : moneyFlag === '1';
+          await this.handleRejectReasonMessage(message, rejectOrderId, moneyReceived);
           return;
         }
         const stockProductId = this.extractRef(message, STOCK_UPDATE_REF_REGEX);
@@ -435,6 +438,15 @@ export class SellerBotService {
       await this.handleOrderDecision(chatId, data);
       return;
     }
+    if (data.startsWith('sbrm:')) {
+      const moneyReceived = data[5] === '1';
+      const orderId = data.slice(7);
+      await this.api.sendForceReply(
+        chatId,
+        fa.sellerBot.orderRejectReasonPrompt(orderId, moneyReceived),
+      );
+      return;
+    }
     if (data.startsWith('sbst:')) {
       await this.handleStockSelect(chatId, data.slice('sbst:'.length));
       return;
@@ -490,6 +502,21 @@ export class SellerBotService {
             : ''),
       );
     } else {
+      const needsMoneyAnswer =
+        order.status === 'RECEIPT_SUBMITTED' ||
+        order.status === 'APPROVED' ||
+        !!order.receiptImageKey;
+      if (needsMoneyAnswer) {
+        await this.api.sendText(chatId, fa.sellerBot.orderRejectButton, {
+          inline_keyboard: [
+            [
+              { text: fa.sellerBot.moneyArrivedButton, callback_data: `sbrm:1:${orderId}` },
+              { text: fa.sellerBot.moneyMissingButton, callback_data: `sbrm:0:${orderId}` },
+            ],
+          ],
+        });
+        return;
+      }
       await this.api.sendForceReply(
         chatId,
         fa.sellerBot.orderRejectReasonPrompt(orderId),
@@ -500,6 +527,7 @@ export class SellerBotService {
   private async handleRejectReasonMessage(
     message: TelegramMessage,
     orderId: string,
+    moneyReceived?: boolean,
   ): Promise<void> {
     const chatId = String(message.chat.id);
     const store = await this.getLinkedStore(chatId);
@@ -521,6 +549,8 @@ export class SellerBotService {
         orderId,
         reason,
         'TELEGRAM',
+        undefined,
+        moneyReceived,
       );
     } catch (err) {
       if (err instanceof ConflictException) {

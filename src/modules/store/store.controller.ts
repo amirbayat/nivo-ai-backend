@@ -26,6 +26,8 @@ import {
 } from '../../common/decorators/current-user.decorator';
 import type { StoreKbKind } from '@prisma/client';
 import { ShipOrderDto } from './dto/ship-order.dto';
+import { RejectOrderDto } from './dto/reject-order.dto';
+import { ResolveRefundHoldDto } from './dto/resolve-refund-hold.dto';
 import { StoreService } from './store.service';
 import { RefundService } from '../order-lifecycle/refund.service';
 import {
@@ -438,16 +440,16 @@ export class StoreController {
     @CurrentUser() user: JwtPayload,
     @Param('id') id: string,
     @Param('orderId') orderId: string,
-    @Body('reason') reason?: string,
-    @Body('refundAmountToman') refundAmountToman?: number,
+    @Body() dto: RejectOrderDto,
   ) {
     return this.storeService.rejectOrder(
       user.sub,
       id,
       orderId,
-      reason,
+      dto.reason,
       'WEB',
-      refundAmountToman,
+      dto.refundAmountToman,
+      dto.moneyReceived,
     );
   }
 
@@ -464,9 +466,19 @@ export class StoreController {
   listRefunds(
     @CurrentUser() user: JwtPayload,
     @Param('id') id: string,
-    @Query('status') status?: 'AWAITING_DESTINATION' | 'READY' | 'DONE',
+    @Query('status') status?: 'AWAITING_DESTINATION' | 'AWAITING_SELLER_CONFIRM' | 'READY' | 'DONE',
   ) {
     return this.refunds.list(user.sub, id, status);
+  }
+
+  @Post(':id/refunds/:refundId/seller-hold')
+  resolveRefundHold(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('refundId') refundId: string,
+    @Body() dto: ResolveRefundHoldDto,
+  ) {
+    return this.refunds.resolveSellerHold(user.sub, id, refundId, dto.moneyReceived);
   }
 
   @Get(':id/refunds/summary')

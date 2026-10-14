@@ -37,8 +37,12 @@ export class OrderNotificationService {
     reason?: string;
     refundId?: string | null;
     refundAmountToman?: number | null;
+    refundStatus?: 'AWAITING_DESTINATION' | 'AWAITING_SELLER_CONFIRM' | null;
+    paymentNotReceived?: boolean;
   }): Promise<void> {
-    const template = TEMPLATE_BY_STATUS[args.to];
+    const template = args.paymentNotReceived
+      ? 'PAYMENT_NOT_RECEIVED'
+      : TEMPLATE_BY_STATUS[args.to];
     if (!template) return;
     const customerId = await this.customerIdOf(args.order);
     if (!customerId) return;
@@ -51,10 +55,14 @@ export class OrderNotificationService {
         reason: args.reason,
         carrier: args.order.carrier,
         trackingCode: args.order.trackingCode,
-        refundAmountToman: args.refundAmountToman,
+        refundAmountToman: args.paymentNotReceived ? null : args.refundAmountToman,
       },
     });
-    if (args.refundId && args.refundAmountToman) {
+    if (
+      args.refundId &&
+      args.refundAmountToman &&
+      args.refundStatus === 'AWAITING_DESTINATION'
+    ) {
       await this.notifications.notifyBuyer({
         to: { customerId },
         template: 'REFUND_DESTINATION_REQUEST',

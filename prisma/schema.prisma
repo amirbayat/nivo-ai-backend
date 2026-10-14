@@ -3248,6 +3248,7 @@ enum RefundStatus {
   READY
   DONE
   CANCELLED
+  AWAITING_SELLER_CONFIRM
 }
 
 enum RefundReason {

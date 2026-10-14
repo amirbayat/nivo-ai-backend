@@ -1759,15 +1759,27 @@ export class StoreService {
     reason?: string,
     channel: OrderChannel = 'WEB',
     refundAmountToman?: number,
+    moneyReceived?: boolean,
   ) {
-    await this.getOwnedOrder(sellerId, storeId, orderId);
+    const order = await this.getOwnedOrder(sellerId, storeId, orderId);
+    const needsMoneyAnswer =
+      order.status === 'RECEIPT_SUBMITTED' ||
+      order.status === 'APPROVED' ||
+      !!order.receiptImageKey;
+    if (needsMoneyAnswer && moneyReceived === undefined) {
+      throw new BadRequestException(fa.order.moneyReceivedRequired);
+    }
     const r = await this.orderState.transition({
       orderId,
       to: 'REJECTED',
       actor: 'SELLER',
       actorId: sellerId,
       channel,
-      data: { rejectReason: reason ?? null, refundAmountToman },
+      data: {
+        rejectReason: reason ?? null,
+        ...(refundAmountToman != null ? { refundAmountToman } : {}),
+        ...(moneyReceived !== undefined ? { moneyReceived } : {}),
+      },
     });
     return r.order;
   }

@@ -313,6 +313,47 @@ describeDb('OrderStateService + OrderExpiryService (Postgres واقعی)', () =>
     expect(await statusOf(paid.order.id)).toBe('REJECTED');
   });
 
+  it('رد بدون رسیدن پول refund نمی‌سازد؛ مبلغ جزئی همان است؛ لغو رسید منتظر تایید فروشنده می‌ماند [F2]', async () => {
+    const missing = await newOrder({ status: 'RECEIPT_SUBMITTED', total: 4000 });
+    const rejected = await state.transition({
+      orderId: missing.order.id,
+      to: 'REJECTED',
+      actor: 'SELLER',
+      data: { moneyReceived: false, rejectReason: 'جعلی' },
+    });
+    expect(rejected.paymentNotReceived).toBe(true);
+    expect(rejected.refundId).toBeNull();
+    expect(
+      await prisma.orderRefund.count({ where: { orderId: missing.order.id } }),
+    ).toBe(0);
+
+    const partial = await newOrder({ status: 'RECEIPT_SUBMITTED', total: 4000 });
+    const part = await state.transition({
+      orderId: partial.order.id,
+      to: 'REJECTED',
+      actor: 'SELLER',
+      data: { moneyReceived: true, refundAmountToman: 1500 },
+    });
+    expect(part.refundAmountToman).toBe(1500);
+    expect(
+      (
+        await prisma.orderRefund.findFirstOrThrow({
+          where: { orderId: partial.order.id },
+        })
+      ).amountToman,
+    ).toBe(1500);
+
+    const held = await newOrder({ status: 'RECEIPT_SUBMITTED' });
+    const cancelled = await state.transition({
+      orderId: held.order.id,
+      to: 'CANCELLED',
+      actor: 'BUYER',
+      reason: 'لغو توسط خریدار',
+      data: { refundHoldForSeller: true },
+    });
+    expect(cancelled.refundStatus).toBe('AWAITING_SELLER_CONFIRM');
+  });
+
   it('reject از PENDING_PAYMENT: موجودی دست نمی‌خورد (کم نشده بود)، کد تخفیف آزاد می‌شود', async () => {
     const { order, product, discount } = await newOrder({ withDiscount: true });
     const r = await state.transition({

@@ -303,6 +303,7 @@ export const fa = {
     manualReceiptCardLast4Invalid: '۴ رقم آخر کارت مبدا را درست وارد کن',
     refundAmountInvalid: 'مبلغ بازپرداخت از باقی‌مانده‌ی قابل برگشت بیشتر است',
     refundAlreadyPaid: 'مبلغ این سفارش قبلاً برگشت داده شده',
+    moneyReceivedRequired: 'بگو پول به حسابت رسیده یا نه',
     refundDestinationInvalid: 'شماره کارت یا شبا درست نیست',
     refundHolderInvalid: 'نام صاحب حساب را وارد کن',
     refundNotFound: 'این بازپرداخت پیدا نشد',
@@ -356,6 +357,10 @@ export const fa = {
       '\nاگه سوالی داری همین‌جا بپرس.',
     rejectedSms: (code: string, storeName: string) =>
       `نیوو: سفارش ${code} از ${storeName} توسط فروشنده رد شد. جزئیات در چت فروشگاه.`,
+    paymentNotReceivedChat: () =>
+      'پرداختت به حساب فروشنده نرسیده. اگه واریز کردی، رسید بانکی رو دوباره بفرست یا با فروشنده تماس بگیر.',
+    paymentNotReceivedSms: () =>
+      'نیوو: پرداختت به حساب فروشنده نرسیده. اگه واریز کردی، رسید بانکی رو دوباره بفرست یا با فروشنده تماس بگیر.',
     cancelledChat: (code: string, reason?: string | null) =>
       `سفارش ${code} لغو شد.` +
       (reason ? `\nدلیل: ${reason}` : '') +
@@ -886,8 +891,10 @@ export const fa = {
             `• ${l.name}: سفارش ${l.requested}، موجودی ثبت‌شده ${l.available}`,
         )
         .join('\n')}\nموجودی واقعی را در پنل اصلاح کنید.`,
-    orderRejectReasonPrompt: (orderId: string) =>
-      `دلیل رد سفارش رو بنویس (یا فقط «-» بفرست اگه نمی‌خوای دلیل بدی).\nکد سفارش رد: ${orderId}`,
+    orderRejectReasonPrompt: (orderId: string, moneyReceived?: boolean) =>
+      `دلیل رد سفارش رو بنویس (یا فقط «-» بفرست اگه نمی‌خوای دلیل بدی).\nکد سفارش رد: ${orderId}${moneyReceived === undefined ? '' : ` پول:${moneyReceived ? '1' : '0'}`}`,
+    moneyArrivedButton: 'پول به حسابم نشسته',
+    moneyMissingButton: 'پول نرسیده',
     orderRejectReasonSkipKeyword: '-',
     orderRejected: 'سفارش رد شد ❌',
     stockUsage: 'به این شکل بفرست: /stock <اسم یا کد محصول>',

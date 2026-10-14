@@ -30,6 +30,8 @@ export type TransitionInput = {
     receiptType?: 'IMAGE' | 'MANUAL_INFO';
     receiptManualInfo?: Prisma.InputJsonValue;
     refundAmountToman?: number | null;
+    moneyReceived?: boolean;
+    refundHoldForSeller?: boolean;
   };
   // اعلان به خریدار ارسال نشود (مثلاً لغو بی‌صدای سفارش‌های خیلی قدیمی)
   silent?: boolean;
@@ -45,6 +47,8 @@ export type TransitionResult = {
   refundRequired: boolean;
   refundId: string | null;
   refundAmountToman: number | null;
+  refundStatus: 'AWAITING_DESTINATION' | 'AWAITING_SELLER_CONFIRM' | null;
+  paymentNotReceived: boolean;
   refundsCancelled: number;
   restocked: RestockLine[];
 };
@@ -77,6 +81,8 @@ export class OrderStateService {
           reason: input.reason ?? input.data?.rejectReason ?? undefined,
           refundId: result.refundId,
           refundAmountToman: result.refundAmountToman,
+          refundStatus: result.refundStatus,
+          paymentNotReceived: result.paymentNotReceived,
         });
       } catch (err) {
         this.logger.error(
@@ -128,6 +134,8 @@ export class OrderStateService {
         refundRequired: false,
         refundId: null,
         refundAmountToman: null,
+        refundStatus: null,
+        paymentNotReceived: false,
         refundsCancelled: 0,
         restocked: [],
       };
@@ -254,9 +262,11 @@ export class OrderStateService {
     const order = await tx.order.findUniqueOrThrow({ where: { id: orderId } });
     const paidBefore =
       from === 'RECEIPT_SUBMITTED' || from === 'APPROVED' || !!current.receiptImageKey;
-    const refundRequired = (to === 'REJECTED' || to === 'CANCELLED') && paidBefore;
+    const moneyMissing = input.data?.moneyReceived === false;
+    const refundRequired = (to === 'REJECTED' || to === 'CANCELLED') && paidBefore && !moneyMissing;
     let refundId: string | null = null;
     let refundAmountToman: number | null = null;
+    let refundStatus: 'AWAITING_DESTINATION' | 'AWAITING_SELLER_CONFIRM' | null = null;
     if (refundRequired) {
       const reason = to === 'REJECTED' ? 'ORDER_REJECTED' : 'ORDER_CANCELLED';
       const created = await insertRefund(
@@ -266,9 +276,11 @@ export class OrderStateService {
         input.actor === 'SELLER' ? 'SELLER' : 'SYSTEM',
         input.data?.refundAmountToman,
         input.reason ?? input.data?.rejectReason,
+        input.data?.refundHoldForSeller ? 'AWAITING_SELLER_CONFIRM' : 'AWAITING_DESTINATION',
       );
       refundId = created?.id ?? null;
       refundAmountToman = created?.amountToman ?? null;
+      refundStatus = created?.status ?? null;
     }
     let refundsCancelled = 0;
     if (from === 'REJECTED') {
@@ -290,6 +302,8 @@ export class OrderStateService {
       refundRequired,
       refundId,
       refundAmountToman,
+      refundStatus,
+      paymentNotReceived: moneyMissing,
       refundsCancelled,
       restocked,
     };

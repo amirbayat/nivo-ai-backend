@@ -88,11 +88,11 @@ describe('StoreService.approveOrder/rejectOrder/shipOrder → OrderStateService 
       changed: true,
       order: { ...order, status: 'REJECTED' },
     });
-    await build(transition).rejectOrder('s', 'st1', 'o1', 'ناموجود');
+    await build(transition).rejectOrder('s', 'st1', 'o1', 'ناموجود', 'WEB', undefined, true);
     expect(transition).toHaveBeenCalledWith(
       expect.objectContaining({
         to: 'REJECTED',
-        data: { rejectReason: 'ناموجود' },
+        data: { rejectReason: 'ناموجود', moneyReceived: true },
       }),
     );
   });

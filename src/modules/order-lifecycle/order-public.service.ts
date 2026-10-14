@@ -55,6 +55,9 @@ export class OrderPublicService {
       actor: 'BUYER',
       channel: 'WEB',
       reason: fa.order.buyerCancelReason,
+      ...(order.status === 'RECEIPT_SUBMITTED'
+        ? { data: { refundHoldForSeller: true } }
+        : {}),
     });
     await this.notifications.notifySeller({
       storeId: order.storeId,

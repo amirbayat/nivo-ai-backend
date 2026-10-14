@@ -11,7 +11,8 @@ export async function insertRefund(
   actor: 'SYSTEM' | 'SELLER',
   amountToman?: number | null,
   note?: string | null,
-): Promise<{ id: string; amountToman: number } | null> {
+  status: 'AWAITING_DESTINATION' | 'AWAITING_SELLER_CONFIRM' = 'AWAITING_DESTINATION',
+): Promise<{ id: string; amountToman: number; status: typeof status } | null> {
   const agg = await tx.orderRefund.aggregate({
     where: { orderId: order.id, status: { not: 'CANCELLED' } },
     _sum: { amountToman: true },
@@ -30,9 +31,9 @@ export async function insertRefund(
       amountToman: amount,
       reason,
       note: note ?? null,
-      status: 'AWAITING_DESTINATION',
+      status,
       createdByActor: actor,
     },
   });
-  return { id: row.id, amountToman: amount };
+  return { id: row.id, amountToman: amount, status };
 }

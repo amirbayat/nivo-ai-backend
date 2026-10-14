@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -184,7 +185,40 @@ export class RefundService {
     return { id: updated.id, status: updated.status, paidAt: updated.paidAt, paidRef: updated.paidRef };
   }
 
-  async list(sellerId: string, storeId: string, status?: 'AWAITING_DESTINATION' | 'READY' | 'DONE') {
+  async resolveSellerHold(
+    sellerId: string,
+    storeId: string,
+    refundId: string,
+    moneyReceived: boolean,
+  ) {
+    const refund = await this.ownedRefund(sellerId, storeId, refundId);
+    const next = moneyReceived ? 'AWAITING_DESTINATION' : 'CANCELLED';
+    const updated = await this.prisma.orderRefund.updateMany({
+      where: { id: refund.id, status: 'AWAITING_SELLER_CONFIRM' },
+      data: { status: next },
+    });
+    if (updated.count !== 1) throw new ConflictException(fa.order.stateChanged);
+    if (moneyReceived) {
+      const order = await this.prisma.order.findUnique({
+        where: { id: refund.orderId },
+        select: { id: true, conversationId: true },
+      });
+      if (order) {
+        const customerId = await this.customerId(order.conversationId);
+        if (customerId) {
+          await this.notifications.notifyBuyer({
+            to: { customerId },
+            template: 'REFUND_DESTINATION_REQUEST',
+            entityId: refund.id,
+            data: { orderId: order.id, refundAmountToman: refund.amountToman, refundId: refund.id },
+          });
+        }
+      }
+    }
+    return { status: next };
+  }
+
+  async list(sellerId: string, storeId: string, status?: 'AWAITING_DESTINATION' | 'AWAITING_SELLER_CONFIRM' | 'READY' | 'DONE') {
     await this.ownedStore(sellerId, storeId);
     const rows = await this.prisma.orderRefund.findMany({
       where: { storeId, ...(status ? { status } : { status: { not: 'CANCELLED' } }) },
