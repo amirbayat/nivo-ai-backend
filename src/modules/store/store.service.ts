@@ -34,6 +34,12 @@ import { UpdateProductDto } from './dto/update-product.dto';
 import { ReplaceProductVariantsDto } from './dto/replace-product-variants.dto';
 import { UpdateStoreDto } from './dto/update-store.dto';
 import { fa } from '../../i18n/fa';
+import {
+  csvEscape,
+  parseImportNumber,
+  planVariantSync,
+  variantComboKey,
+} from './seller-catalog.util';
 import { SUCCESSFUL_ORDER_STATUSES } from '../../common/constants/sales-ops.constants';
 import {
   addTehranDays,
@@ -119,13 +125,9 @@ function cellToString(value: unknown): string | undefined {
 }
 
 function cellToNumber(value: unknown): number | undefined {
-  const s = cellToString(value);
-  if (s === undefined) return undefined;
-  const n = Number(s);
-  return Number.isNaN(n) ? undefined : n;
+  return parseImportNumber(value);
 }
 
-// همون الگوی usage-analytics.service.ts's csvEscape — خروجی گزارش فروشنده (بخش ۱.۲)
 function asStringRecord(value: unknown): Record<string, string> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   const out: Record<string, string> = {};
@@ -133,11 +135,6 @@ function asStringRecord(value: unknown): Record<string, string> {
     if (typeof entry === 'string') out[key] = entry;
   }
   return out;
-}
-
-function csvEscape(v: unknown): string {
-  const s = String(v ?? '');
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
 @Injectable()
@@ -946,44 +943,66 @@ export class StoreService {
       if (!valid) {
         throw new BadRequestException(fa.store.variantCombinationInvalid);
       }
-      const comboKey = JSON.stringify(
-        [...keys].sort().map((k) => [k, variant.optionValues[k]]),
-      );
+      const comboKey = variantComboKey(variant.optionValues);
       if (combosSeen.has(comboKey)) {
         throw new BadRequestException(fa.store.variantCombinationDuplicate);
       }
       combosSeen.add(comboKey);
     }
 
-    await this.prisma.$transaction([
-      this.prisma.productVariant.deleteMany({ where: { productId } }),
-      this.prisma.productOptionType.deleteMany({ where: { productId } }),
-      ...dto.optionTypes.map((o, i) =>
-        this.prisma.productOptionType.create({
+    await this.prisma.$transaction(async (tx) => {
+      const existing = await tx.productVariant.findMany({
+        where: { productId },
+        select: { id: true, optionValues: true },
+      });
+      const plan = planVariantSync(existing, dto.variants);
+      await tx.productOptionType.deleteMany({ where: { productId } });
+      for (const [i, option] of dto.optionTypes.entries()) {
+        await tx.productOptionType.create({
           data: {
             productId,
-            name: o.name,
+            name: option.name,
             position: i,
             values: {
-              create: o.values.map((v, j) => ({ value: v, position: j })),
+              create: option.values.map((value, j) => ({ value, position: j })),
             },
           },
-        }),
-      ),
-      ...dto.variants.map((v) =>
-        this.prisma.productVariant.create({
+        });
+      }
+      for (const update of plan.updates) {
+        const variant = dto.variants[update.index];
+        await tx.productVariant.update({
+          where: { id: update.id },
+          data: {
+            optionValues: variant.optionValues,
+            stock: variant.stock,
+            priceOverride: variant.priceOverride ?? null,
+            sku: variant.sku ?? null,
+            weightGrams: variant.weightGrams ?? null,
+            purityKarat: variant.purityKarat ?? null,
+          },
+        });
+      }
+      for (const index of plan.creates) {
+        const variant = dto.variants[index];
+        await tx.productVariant.create({
           data: {
             productId,
-            optionValues: v.optionValues,
-            stock: v.stock,
-            priceOverride: v.priceOverride ?? null,
-            sku: v.sku ?? null,
-            weightGrams: v.weightGrams ?? null,
-            purityKarat: v.purityKarat ?? null,
+            optionValues: variant.optionValues,
+            stock: variant.stock,
+            priceOverride: variant.priceOverride ?? null,
+            sku: variant.sku ?? null,
+            weightGrams: variant.weightGrams ?? null,
+            purityKarat: variant.purityKarat ?? null,
           },
-        }),
-      ),
-    ]);
+        });
+      }
+      if (plan.deleteIds.length > 0) {
+        await tx.productVariant.deleteMany({
+          where: { id: { in: plan.deleteIds } },
+        });
+      }
+    });
 
     return this.prisma.product.findUnique({
       where: { id: productId },
