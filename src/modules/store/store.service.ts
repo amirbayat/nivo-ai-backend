@@ -189,41 +189,67 @@ export class StoreService {
     const trialEndsAt = new Date(
       now.getTime() + config.trialDurationDays * 24 * 60 * 60 * 1000,
     );
-    return this.prisma.store.create({
-      data: {
-        ...dto,
-        sellerId,
-        trialStartedAt: now,
-        trialEndsAt,
-        trialCreditRemainingToman: config.trialCreditToman,
-      },
-    });
+    try {
+      return await this.prisma.store.create({
+        data: {
+          ...dto,
+          sellerId,
+          trialStartedAt: now,
+          trialEndsAt,
+          trialCreditRemainingToman: config.trialCreditToman,
+        },
+      });
+    } catch (err) {
+      if (isSlugUniqueConflict(err)) {
+        throw new ConflictException(fa.store.slugTaken);
+      }
+      throw err;
+    }
   }
 
   async resumeOnboarding(sellerId: string, storeId: string, dto: CreateStoreDto) {
     this.assertBankCardPair(dto);
     const store = await this.getOwned(sellerId, storeId);
-    if (dto.slug !== store.slug && !(await this.isSlugAvailable(dto.slug))) {
-      throw new ConflictException(fa.store.slugTaken);
+    if (dto.slug !== store.slug) {
+      const realConversations = await this.prisma.salesConversation.count({
+        where: { storeId, isTest: false },
+      });
+      if (realConversations > 0) {
+        throw new ConflictException(fa.store.slugLocked);
+      }
+      if (!(await this.isSlugAvailable(dto.slug))) {
+        throw new ConflictException(fa.store.slugTaken);
+      }
     }
-    return this.prisma.store.update({
-      where: { id: storeId },
-      data: {
-        name: dto.name,
-        category: dto.category,
-        businessType: dto.businessType,
-        slug: dto.slug,
-        instagramUrl: dto.instagramUrl ?? null,
-        telegramUrl: dto.telegramUrl ?? null,
-        websiteUrl: dto.websiteUrl ?? null,
-        ...(dto.bankCardNumber
-          ? {
-              bankCardNumber: dto.bankCardNumber,
-              bankOwnerName: dto.bankOwnerName,
-            }
-          : {}),
-      },
-    });
+    try {
+      return await this.prisma.store.update({
+        where: { id: storeId },
+        data: {
+          name: dto.name,
+          category: dto.category,
+          businessType: dto.businessType,
+          slug: dto.slug,
+          ...(dto.instagramUrl !== undefined
+            ? { instagramUrl: dto.instagramUrl }
+            : {}),
+          ...(dto.telegramUrl !== undefined
+            ? { telegramUrl: dto.telegramUrl }
+            : {}),
+          ...(dto.websiteUrl !== undefined ? { websiteUrl: dto.websiteUrl } : {}),
+          ...(dto.bankCardNumber
+            ? {
+                bankCardNumber: dto.bankCardNumber,
+                bankOwnerName: dto.bankOwnerName,
+              }
+            : {}),
+        },
+      });
+    } catch (err) {
+      if (isSlugUniqueConflict(err)) {
+        throw new ConflictException(fa.store.slugTaken);
+      }
+      throw err;
+    }
   }
 
   private assertBankCardPair(dto: CreateStoreDto) {
@@ -2407,4 +2433,14 @@ export class StoreService {
       },
     });
   }
+}
+
+function isSlugUniqueConflict(err: unknown): boolean {
+  if (typeof err !== 'object' || err === null || !('code' in err)) return false;
+  if ((err as { code?: string }).code !== 'P2002') return false;
+  const target = (err as { meta?: { target?: unknown } }).meta?.target;
+  if (Array.isArray(target)) {
+    return target.some((item) => String(item).includes('slug'));
+  }
+  return typeof target === 'string' && target.includes('slug');
 }
