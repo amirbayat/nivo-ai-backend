@@ -93,11 +93,11 @@ export class RefundService {
     const parsed = parseDestination(input.raw);
     if (!parsed) throw new BadRequestException(fa.order.refundDestinationInvalid);
     const refund = await this.prisma.orderRefund.findFirst({
-      where: { id: input.refundId, orderId: input.orderId, status: 'AWAITING_DESTINATION' },
+      where: { id: input.refundId, orderId: input.orderId },
     });
     if (!refund) throw new NotFoundException(fa.order.refundNotFound);
-    await this.prisma.orderRefund.update({
-      where: { id: refund.id },
+    const claimed = await this.prisma.orderRefund.updateMany({
+      where: { id: refund.id, status: 'AWAITING_DESTINATION' },
       data: {
         status: 'READY',
         destinationType: parsed.type,
@@ -108,6 +108,7 @@ export class RefundService {
         destinationAt: new Date(),
       },
     });
+    if (claimed.count !== 1) throw new ConflictException(fa.order.refundNotPayable);
     const order = await this.prisma.order.findUnique({
       where: { id: input.orderId },
       select: { orderCode: true, id: true },
@@ -149,18 +150,21 @@ export class RefundService {
     proofImageKey?: string,
   ) {
     const refund = await this.ownedRefund(sellerId, storeId, refundId);
-    if (refund.status !== 'READY' && refund.status !== 'AWAITING_DESTINATION') {
-      throw new BadRequestException(fa.order.refundNotPayable);
-    }
-    const updated = await this.prisma.orderRefund.update({
-      where: { id: refund.id },
+    const paidAt = new Date();
+    const paid = paidRef?.trim() || null;
+    const claimed = await this.prisma.orderRefund.updateMany({
+      where: {
+        id: refund.id,
+        status: { in: ['READY', 'AWAITING_DESTINATION'] },
+      },
       data: {
         status: 'DONE',
-        paidAt: new Date(),
-        paidRef: paidRef?.trim() || null,
+        paidAt,
+        paidRef: paid,
         proofImageKey: proofImageKey ?? null,
       },
     });
+    if (claimed.count !== 1) throw new ConflictException(fa.order.refundNotPayable);
     const order = await this.prisma.order.findUnique({
       where: { id: refund.orderId },
       select: { id: true, conversationId: true },
@@ -176,13 +180,13 @@ export class RefundService {
             orderId: order.id,
             refundAmountToman: refund.amountToman,
             refundId: refund.id,
-            paidRef: updated.paidRef,
+            paidRef: paid,
             destinationMasked: refund.destinationMasked,
           },
         });
       }
     }
-    return { id: updated.id, status: updated.status, paidAt: updated.paidAt, paidRef: updated.paidRef };
+    return { id: refund.id, status: 'DONE' as const, paidAt, paidRef: paid };
   }
 
   async resolveSellerHold(

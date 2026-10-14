@@ -3,6 +3,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@prisma/client';
 import { ConflictException } from '@nestjs/common';
 import { OrderStateService } from '../src/modules/order-lifecycle/order-state.service';
+import { RefundService } from '../src/modules/order-lifecycle/refund.service';
 import { OrderExpiryService } from '../src/modules/order-lifecycle/order-expiry.service';
 import { StoreService } from '../src/modules/store/store.service';
 
@@ -352,6 +353,58 @@ describeDb('OrderStateService + OrderExpiryService (Postgres واقعی)', () =>
       data: { refundHoldForSeller: true },
     });
     expect(cancelled.refundStatus).toBe('AWAITING_SELLER_CONFIRM');
+  });
+
+  it('markPaid و setDestination هم‌زمان به DONE می‌رسد و واریز یک‌بار اعلام می‌شود؛ کلیک دوم ۴۰۹ است [F3]', async () => {
+    const make = async (status: 'AWAITING_DESTINATION' | 'READY') => {
+      const { order } = await newOrder({ status: 'RECEIPT_SUBMITTED', total: 1000 });
+      return prisma.orderRefund.create({
+        data: {
+          orderId: order.id,
+          storeId,
+          amountToman: 1000,
+          reason: 'ORDER_REJECTED',
+          status,
+          createdByActor: 'SELLER',
+        },
+      });
+    };
+    const paidNotes: string[] = [];
+    const svc = new RefundService(prisma as never, { get: () => 'e2e-refund-key' } as never, {
+      notifyBuyer: jest.fn(async (input: { template: string }) => {
+        paidNotes.push(input.template);
+      }),
+      notifySeller: jest.fn(),
+    } as never);
+    const open = await make('AWAITING_DESTINATION');
+    await Promise.all([
+      svc.markPaid(sellerId, storeId, open.id, '111'),
+      svc
+        .setDestination({
+          refundId: open.id,
+          orderId: open.orderId,
+          raw: '4111111111111111',
+          holderName: 'علی رضایی',
+        })
+        .catch((err: unknown) => {
+          if (!(err instanceof ConflictException)) throw err;
+        }),
+    ]);
+    expect(
+      (await prisma.orderRefund.findUniqueOrThrow({ where: { id: open.id } })).status,
+    ).toBe('DONE');
+    expect(paidNotes.filter((template) => template === 'REFUND_DONE')).toHaveLength(1);
+
+    const ready = await make('READY');
+    const again = await Promise.allSettled([
+      svc.markPaid(sellerId, storeId, ready.id, '222'),
+      svc.markPaid(sellerId, storeId, ready.id, '333'),
+    ]);
+    expect(again.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(again.filter((result) => result.status === 'rejected')).toHaveLength(1);
+    expect(
+      (await prisma.orderRefund.findUniqueOrThrow({ where: { id: ready.id } })).status,
+    ).toBe('DONE');
   });
 
   it('reject از PENDING_PAYMENT: موجودی دست نمی‌خورد (کم نشده بود)، کد تخفیف آزاد می‌شود', async () => {
