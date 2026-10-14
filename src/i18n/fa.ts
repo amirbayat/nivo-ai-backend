@@ -482,6 +482,7 @@ export const fa = {
     // 0.2/0.3 — پیام‌های ثابت ثبت سفارش
     cartInvalidQty:
       'تعداد یکی از اقلام سبد معتبر نیست. لطفاً تعداد را دوباره مشخص کنید.',
+    cartLocked: 'سفارشت ثبت شده و سبد دیگه قابل تغییر نیست',
     orderOutOfStock: (
       lines: { name: string; requested: number; available: number }[],
     ) =>

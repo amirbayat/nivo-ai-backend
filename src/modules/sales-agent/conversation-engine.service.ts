@@ -6037,7 +6037,9 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     ctx: ConversationContext,
     parsed: ParsedIntent,
   ): Promise<EngineResult> {
-    if (!['BROWSING', 'CART_REVIEW'].includes(conversation.currentState)) {
+    if (parsed.intent === 'REMOVE_FROM_CART') {
+      await this.assertCartEditable(conversation);
+    } else if (!['BROWSING', 'CART_REVIEW'].includes(conversation.currentState)) {
       return this.doClarify(conversation, fa.salesAgent.nothingToConfirm);
     }
 
@@ -6150,23 +6152,72 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
   // منطق مشترک تغییر سبد — هم از مسیر NLU (doUpdateCart، productQuery/productIndex حدسی)
   // هم از مسیر قطعی دکمه‌ها (handleAction، productId مستقیم) و هم پایان مسیر واریانت
   // (finalizeVariantSelection) صدا زده می‌شود
+  private async assertCartEditable(
+    conversation: ConversationWithStore,
+  ): Promise<void> {
+    const editable =
+      conversation.currentState === 'GREETING' ||
+      conversation.currentState === 'BROWSING' ||
+      conversation.currentState === 'CART_REVIEW';
+    if (!editable) {
+      throw new ConflictException(fa.salesAgent.cartLocked);
+    }
+    const existing = await this.prisma.order.findUnique({
+      where: { conversationId: conversation.id },
+      select: { id: true },
+    });
+    if (existing) {
+      throw new ConflictException(fa.salesAgent.cartLocked);
+    }
+  }
+
+  private async replaceLatestCartSummary(
+    conversationId: string,
+    reply: string,
+    uiBlock: UiBlock,
+  ): Promise<boolean> {
+    const events = await this.prisma.conversationEvent.findMany({
+      where: { conversationId, type: 'AGENT_REPLY' },
+      orderBy: { createdAt: 'desc' },
+      take: 40,
+      select: { id: true, payload: true },
+    });
+    const hit = events.find((event) => {
+      const payload = event.payload as { uiBlock?: { type?: string } } | null;
+      return payload?.uiBlock?.type === 'CART_SUMMARY';
+    });
+    if (!hit) return false;
+    const payload = (hit.payload ?? {}) as Record<string, unknown>;
+    await this.prisma.conversationEvent.update({
+      where: { id: hit.id },
+      data: {
+        payload: { ...payload, text: reply, uiBlock } as Prisma.InputJsonValue,
+      },
+    });
+    return true;
+  }
+
   private async setCartLine(
     conversation: ConversationWithStore,
     ctx: ConversationContext,
     action: SalesAction,
   ): Promise<EngineResult> {
+    await this.assertCartEditable(conversation);
     const productId = action.productId;
     const variantId = action.variantId ?? null;
     if (!productId) return this.doClarify(conversation, fa.salesAgent.nothingToConfirm);
     const sameLine = (item: CartItem) =>
       item.productId === productId && (item.variantId ?? null) === variantId;
-    const line = ctx.cart.find(sameLine);
-    if (!line) return this.doClarify(conversation, fa.salesAgent.cartEmpty);
+    const index = ctx.cart.findIndex(sameLine);
+    if (index < 0) return this.doClarify(conversation, fa.salesAgent.cartEmpty);
+    const line = ctx.cart[index];
 
-    let cart = ctx.cart.filter((item) => !sameLine(item));
+    let cart: CartItem[];
     if (action.type === 'SET_CART_QTY') {
       const qty = action.qty ?? 0;
-      if (!isValidCartQty(qty)) return this.doClarify(conversation, fa.salesAgent.insufficientStock);
+      if (!isValidCartQty(qty)) {
+        return this.doClarify(conversation, fa.salesAgent.cartInvalidQty);
+      }
       const product = await this.prisma.product.findUnique({
         where: { id: productId },
         include: PRODUCT_VARIANT_INCLUDE,
@@ -6181,7 +6232,13 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       if (variantId && !variant) return this.doClarify(conversation, fa.salesAgent.productNotFound);
       const stock = variant ? variant.stock : product.stock;
       if (stock < qty) return this.doClarify(conversation, fa.salesAgent.insufficientStock);
-      cart = [...cart, { ...line, qty }];
+      const unitPrice = variant
+        ? (variant.priceOverride ?? product.basePrice)
+        : product.basePrice;
+      cart = ctx.cart.slice();
+      cart[index] = { ...line, qty, unitPrice };
+    } else {
+      cart = ctx.cart.filter((_, itemIndex) => itemIndex !== index);
     }
 
     let nextAppliedDiscount = ctx.appliedDiscount;
@@ -6204,12 +6261,15 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     const total = nextAppliedDiscount ? rawTotal - nextAppliedDiscount.amountToman : rawTotal;
     const uiBlock: UiBlock = { type: 'CART_SUMMARY', items: cart, total };
     const reply = cart.length ? fa.salesAgent.cartUpdated(total) : fa.salesAgent.cartEmpty;
-    await this.logReply(conversation, reply, uiBlock, undefined, {
-      intent: action.type,
-      handler: 'setCartLine',
-      factsOrPrompt: reply,
-      model: resolveModel(conversation.abVariant),
-    });
+    const replaced = await this.replaceLatestCartSummary(conversation.id, reply, uiBlock);
+    if (!replaced) {
+      await this.logReply(conversation, reply, uiBlock, undefined, {
+        intent: action.type,
+        handler: 'setCartLine',
+        factsOrPrompt: reply,
+        model: resolveModel(conversation.abVariant),
+      });
+    }
     return { reply, uiBlocks: [uiBlock], state: cart.length ? 'CART_REVIEW' : conversation.currentState };
   }
 
