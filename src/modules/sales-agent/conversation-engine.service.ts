@@ -60,6 +60,7 @@ import {
   stepCountIs,
   type UserModelMessage,
 } from 'ai';
+import { generateShopTurn } from './shop-turn-stream';
 import { z } from 'zod';
 import type {
   ConversationState,
@@ -2885,6 +2886,11 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     // واقعی) می‌سازد — پس وقتی خاموش است، این فیلدها اصلاً در schema نیستند، نه فقط optional
     const respondBaseShape = {
       text: z.string().describe('متن فارسی کوتاه (حداکثر ۲-۳ جمله) برای مشتری'),
+      quickReplies: z
+        .array(z.string())
+        .max(3)
+        .optional()
+        .describe('حداکثر ۳ پیشنهاد کوتاه برای قدم بعد خریدار؛ تپ یعنی همان متن ارسال شود'),
       relevantProductIds: z
         .array(z.string())
         .describe(
@@ -3004,7 +3010,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
 
     let result;
     try {
-      result = await generateText({
+      result = await generateShopTurn({
         maxRetries: LLM_MAX_RETRIES,
         model: this.aiProvider.buildClient(undefined, {
           supportsStructuredOutputs: true,
@@ -3064,6 +3070,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     type RespondToCustomerCall = {
       input: {
         text: string;
+        quickReplies?: string[];
         relevantProductIds: string[];
         persuasionTechniquesUsed?: PersuasionTechnique[];
         usedGeneralKnowledge?: boolean;
@@ -3132,7 +3139,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           `FULL_AGENT self-report contradiction (${reason}), retrying once: conversation=${conversation.id}`,
         );
         try {
-          const retryResult = await generateText({
+          const retryResult = await generateShopTurn({
             maxRetries: LLM_MAX_RETRIES,
             model: this.aiProvider.buildClient(undefined, {
               supportsStructuredOutputs: true,
@@ -3293,6 +3300,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         reply: text,
         uiBlocks: [uiBlock],
         state: conversation.currentState,
+        quickReplies: [...new Set((finalCall.input.quickReplies ?? []).map((q) => q.trim()).filter((q) => q.length > 0 && q.length <= 48))].slice(0, 3),
       },
       inputTokens: usedInputTokens,
       outputTokens: usedOutputTokens,

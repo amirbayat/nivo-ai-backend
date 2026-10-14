@@ -332,6 +332,8 @@ export type EngineResult = {
   queued?: boolean;
   // 0.4 — قفل اکشن در بازه‌ی انتظار آزاد نشد (کاربر چند لحظه بعد دوباره امتحان کند)
   busy?: boolean;
+  // 4.15 — POST returns immediately; tokens arrive on the turn event stream
+  turnId?: string;
 };
 
 // دکمه‌های UiBlock (افزودن به سبد/تایید سبد) دیگر جمله‌ی فارسی نمی‌سازند تا از مسیر

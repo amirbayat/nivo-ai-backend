@@ -608,6 +608,8 @@ model SalesAgentGlobalConfig {
   orderSmsEnabled          Boolean  @default(false)
   // Step 5 (4.13) — public order links in buyer status messages. Off until enabled.
   orderPublicLinkEnabled   Boolean  @default(false)
+  // 4.15 — web shop streams the reply only when this is on. Default off.
+  shopStreamEnabled        Boolean  @default(false)
   updatedAt           DateTime @updatedAt
 
   @@map("sales_agent_global_config")

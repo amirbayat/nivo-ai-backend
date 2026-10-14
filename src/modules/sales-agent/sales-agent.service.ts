@@ -47,7 +47,14 @@ import {
 } from './conversation-history.util';
 import { fa } from '../../i18n/fa';
 import { getRecentConversationEvents } from '../../common/utils/conversation-events.util';
+import { randomUUID } from 'crypto';
 import type { SendMessageDto } from './dto/send-message.dto';
+import {
+  closeShopTurn,
+  listenShopTurn,
+  openShopTurn,
+  runWithShopTurn,
+} from './shop-turn-stream';
 import type { EngineResult } from './sales-agent.types';
 import {
   MESSAGE_IDEMPOTENCY_PENDING_TTL_SECONDS,
@@ -142,6 +149,7 @@ export class SalesAgentService {
       // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md — فرانت با این فلگ نوار دمو
       // را روی صفحه‌ی چت نشان می‌دهد؛ قبلاً این صفحه اصلاً نمی‌دانست فروشگاه دموست یا نه
       isDemo: store.isDemo,
+      shopStreamEnabled: globalConfig.shopStreamEnabled,
       responseStrategy: customer.salesConversations[0].responseStrategy,
       ...(initial
         ? {
@@ -194,6 +202,7 @@ export class SalesAgentService {
       storeName: conversation.store.name,
       storeLogoKey: conversation.store.logoImageKey,
       isDemo: conversation.store.isDemo,
+      shopStreamEnabled: globalConfig.shopStreamEnabled,
       responseStrategy: fresh.responseStrategy,
       ...(initial
         ? {
@@ -273,6 +282,7 @@ export class SalesAgentService {
     conversationId: string,
     sessionToken: string,
     dto: SendMessageDto,
+    stream = false,
   ): Promise<SendMessageResponse> {
     const conversation = await this.loadOwned(conversationId, sessionToken);
 
@@ -280,6 +290,12 @@ export class SalesAgentService {
     const idemKey = dto.clientMessageId
       ? `idem:msg:${conversation.id}:${dto.clientMessageId}`
       : null;
+    if (stream) {
+      const cfg = await getSalesAgentGlobalConfig(this.prisma);
+      if (cfg.shopStreamEnabled) {
+        return this.startStreamedMessage(conversation, conversationId, dto, idemKey);
+      }
+    }
     if (!idemKey) return this.processMessage(conversation, conversationId, dto);
 
     const claimed = await this.redis.set(
@@ -321,6 +337,87 @@ export class SalesAgentService {
       await this.redis.del(idemKey).catch(() => undefined);
       throw err;
     }
+  }
+
+  private async startStreamedMessage(
+    conversation: Awaited<ReturnType<SalesAgentService['loadOwned']>>,
+    conversationId: string,
+    dto: SendMessageDto,
+    idemKey: string | null,
+  ): Promise<SendMessageResponse> {
+    if (idemKey) {
+      const claimed = await this.redis.set(
+        idemKey,
+        MESSAGE_IDEMPOTENCY_PENDING_MARK,
+        'EX',
+        MESSAGE_IDEMPOTENCY_PENDING_TTL_SECONDS,
+        'NX',
+      );
+      if (claimed !== 'OK') {
+        const existing = await this.redis.get(idemKey);
+        if (existing && existing !== MESSAGE_IDEMPOTENCY_PENDING_MARK) {
+          return JSON.parse(existing) as SendMessageResponse;
+        }
+        return {
+          reply: '',
+          uiBlocks: [],
+          state: conversation.currentState,
+          queued: true,
+          awaitingReview: false,
+        };
+      }
+    }
+    const turnId = randomUUID();
+    const started = Date.now();
+    const sink = openShopTurn(turnId, () => {
+      void this.prisma.productEvent
+        .create({
+          data: {
+            name: 'chat_first_token_ms',
+            storeId: conversation.storeId,
+            conversationId: conversation.id,
+            props: { ms: Date.now() - started },
+          },
+        })
+        .catch((err) => {
+          this.logger.error(`chat_first_token_ms write failed (${conversation.id})`, err as Error);
+        });
+    });
+    sink.emit({ type: 'status', text: fa.salesAgent.streamLooking });
+    void runWithShopTurn(sink, () => this.processMessage(conversation, conversationId, dto))
+      .then(async (response) => {
+        if (idemKey) {
+          await this.redis.set(idemKey, JSON.stringify(response), 'EX', MESSAGE_IDEMPOTENCY_TTL_SECONDS);
+        }
+        sink.emit({
+          type: 'done',
+          reply: response.reply,
+          uiBlocks: response.uiBlocks,
+          state: response.state,
+          quickReplies: response.quickReplies,
+          voiceEventId: response.voiceEventId,
+          awaitingReview: response.awaitingReview,
+        });
+        closeShopTurn(turnId);
+      })
+      .catch(async (err) => {
+        if (idemKey) await this.redis.del(idemKey).catch(() => undefined);
+        this.logger.error(`streamed shop turn failed (${conversation.id})`, err as Error);
+        sink.emit({ type: 'error' });
+        closeShopTurn(turnId);
+      });
+    return {
+      turnId,
+      reply: '',
+      uiBlocks: [],
+      state: conversation.currentState,
+      awaitingReview: false,
+    };
+  }
+
+  async *shopTurnEvents(conversationId: string, sessionToken: string, turnId: string) {
+    await this.loadOwned(conversationId, sessionToken);
+    yield* listenShopTurn(turnId);
   }
 
   private async processMessage(
@@ -992,6 +1089,7 @@ export class SalesAgentService {
       storeName: conversation.store.name,
       storeLogoKey: conversation.store.logoImageKey,
       isDemo: conversation.store.isDemo,
+      shopStreamEnabled: (await getSalesAgentGlobalConfig(this.prisma)).shopStreamEnabled,
       responseStrategy: conversation.responseStrategy,
       awaitingReview: !!awaitingReview,
       events,

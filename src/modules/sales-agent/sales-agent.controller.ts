@@ -108,11 +108,38 @@ export class SalesAgentController {
     return this.salesAgentService.getCustomerHistory(slug, sessionToken);
   }
 
+  @Get('chat/:conversationId/turns/:turnId/events')
+  async turnEvents(
+    @Param('conversationId') conversationId: string,
+    @Param('turnId') turnId: string,
+    @Headers('x-session-token') sessionToken: string,
+    @Res() res: Response,
+  ) {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+    try {
+      for await (const event of this.salesAgentService.shopTurnEvents(
+        conversationId,
+        sessionToken,
+        turnId,
+      )) {
+        res.write(`data: ${JSON.stringify(event)}\n\n`);
+      }
+    } catch {
+      res.write(`data: ${JSON.stringify({ type: 'error' })}\n\n`);
+    }
+    res.end();
+  }
+
   @Post('chat/:conversationId/messages')
   async sendMessage(
     @Param('conversationId') conversationId: string,
     @Headers('x-session-token') sessionToken: string,
     @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @Headers('accept-stream') acceptStream: string | undefined,
     @Body() dto: SendMessageDto,
     @Res({ passthrough: true }) res: Response,
   ) {
@@ -128,6 +155,7 @@ export class SalesAgentController {
       safeKey && !dto.clientMessageId
         ? { ...dto, clientMessageId: safeKey }
         : dto,
+      acceptStream === '1',
     );
     // 0.4 — پیام در صف رفت (مکالمه مشغول turn قبلی است)؛ فرانت با polling جواب را می‌گیرد
     if ('queued' in result && result.queued) res.status(202);

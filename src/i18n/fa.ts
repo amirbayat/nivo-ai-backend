@@ -404,6 +404,11 @@ export const fa = {
   },
   salesAgent: {
     invalidSession: 'نشست معتبر نیست',
+    streamLooking: 'دارم نگاه می‌کنم…',
+    streamSearch: 'دارم بین محصولات می‌گردم…',
+    streamStock: 'موجودی را چک می‌کنم…',
+    streamCart: 'به سبدت اضافه کردم ✅',
+    streamDetails: 'جزئیاتش را می‌آورم…',
     conversationNotFound: 'مکالمه یافت نشد',
     orderNotFound: 'سفارش یافت نشد',
     // docs/PRD-buyer-phone-otp-registration.md
