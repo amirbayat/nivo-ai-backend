@@ -28,6 +28,7 @@ import { SendMessageDto } from './dto/send-message.dto';
 import { SetResponseStrategyDto } from './dto/set-response-strategy.dto';
 import { ToggleSavedProductDto } from './dto/toggle-saved-product.dto';
 import { SendBuyerOtpDto, VerifyBuyerOtpDto } from './dto/register-buyer.dto';
+import { SubscribeStockAlertDto } from './dto/subscribe-stock-alert.dto';
 import { SubmitCommentDto } from './dto/submit-comment.dto';
 import { StoreService } from '../store/store.service';
 import { CommentsService } from '../comments/comments.service';
@@ -285,6 +286,20 @@ export class SalesAgentController {
   }
 
   // docs/PRD-buyer-phone-otp-registration.md — ثبت‌نام اختیاری خریدار با شماره+OTP
+  @Post('chat/:conversationId/stock-alerts')
+  subscribeStockAlert(
+    @Param('conversationId') conversationId: string,
+    @Headers('x-session-token') sessionToken: string,
+    @Body() dto: SubscribeStockAlertDto,
+  ) {
+    return this.salesAgentService.subscribeStockAlert(
+      conversationId,
+      sessionToken,
+      dto.productId,
+      dto.variantId,
+    );
+  }
+
   @Post('chat/:conversationId/register/send-otp')
   sendBuyerOtp(
     @Param('conversationId') conversationId: string,

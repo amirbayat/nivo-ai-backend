@@ -11,6 +11,7 @@ import { ReceiptCheckService, RECEIPT_CHECK_QUEUE } from './receipt-check.servic
 import { OrderOpsService } from './order-ops.service';
 import { OrderPublicService } from './order-public.service';
 import { OrderPublicController } from './order-public.controller';
+import { StockAlertService } from './stock-alert.service';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { OrderPublicController } from './order-public.controller';
     ReceiptCheckService,
     OrderOpsService,
     OrderPublicService,
+    StockAlertService,
   ],
   exports: [
     OrderStateService,
@@ -36,6 +38,7 @@ import { OrderPublicController } from './order-public.controller';
     RefundService,
     ReceiptCheckService,
     OrderOpsService,
+    StockAlertService,
   ],
 })
 export class OrderLifecycleModule {}

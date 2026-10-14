@@ -39,6 +39,7 @@ import { reattachReceiptIfOrderOpen } from './receipt-reattach.util';
 import { SubmitManualReceiptDto } from './dto/submit-manual-receipt.dto';
 import { OrderStateService } from '../order-lifecycle/order-state.service';
 import { StoreService } from '../store/store.service';
+import { StockAlertService } from '../order-lifecycle/stock-alert.service';
 import { ReceiptCheckService } from '../order-lifecycle/receipt-check.service';
 import { CommentsService } from '../comments/comments.service';
 import type { SubmitCommentDto } from './dto/submit-comment.dto';
@@ -87,6 +88,7 @@ export class SalesAgentService {
     private readonly orderState: OrderStateService,
     private readonly receiptChecks: ReceiptCheckService,
     private readonly storeService: StoreService,
+    private readonly stockAlerts: StockAlertService,
   ) {}
 
   // productId اختیاری — لینک اختصاصی یک محصول (فروشنده در استوری گذاشته)؛ اگر معتبر و
@@ -819,6 +821,22 @@ export class SalesAgentService {
     });
 
     return { message: fa.salesAgent.registerSuccess };
+  }
+
+  async subscribeStockAlert(
+    conversationId: string,
+    sessionToken: string,
+    productId: string,
+    variantId?: string,
+  ) {
+    const conversation = await this.loadOwned(conversationId, sessionToken);
+    return this.stockAlerts.subscribe({
+      storeId: conversation.storeId,
+      productId,
+      variantId,
+      customerId: conversation.customerId,
+      conversationId: conversation.id,
+    });
   }
 
   // docs/PRD-sales-agent-voice.md بخش ۱.۲ — بعد از هر پاسخ، اگر همان پاسخ (تازه لاگ‌شده)

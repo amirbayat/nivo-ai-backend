@@ -39,6 +39,10 @@ export class NotificationDeliveryService {
   ) {}
 
   async deliver(job: NotificationJob): Promise<void> {
+    if (job.template === 'BACK_IN_STOCK') {
+      await this.deliverBackInStock(job);
+      return;
+    }
     const order = await this.prisma.order.findUnique({
       where: { id: job.data.orderId },
       select: {
@@ -68,6 +72,65 @@ export class NotificationDeliveryService {
     } else {
       await this.deliverSms(job, order, customer);
     }
+  }
+
+  private async deliverBackInStock(job: NotificationJob): Promise<void> {
+    const name = job.data.productName?.trim();
+    if (!name) return;
+    const customer = await this.prisma.customer.findUnique({
+      where: { id: job.customerId },
+      select: { id: true, phone: true, phoneVerifiedAt: true, channel: true, telegramChatId: true },
+    });
+    if (!customer) return;
+    const text =
+      job.channel === 'SMS'
+        ? fa.orderNotify.backInStockSms(name, job.data.productUrl)
+        : fa.orderNotify.backInStockChat(name, job.data.productUrl);
+    if (job.channel === 'CHAT') {
+      if (!job.data.conversationId) return;
+      await this.prisma.conversationEvent.create({
+        data: {
+          conversationId: job.data.conversationId,
+          type: 'AGENT_REPLY',
+          payload: { text },
+        },
+      });
+      if (customer.channel === 'TELEGRAM' && customer.telegramChatId) {
+        try {
+          await this.telegramApi.sendText(customer.telegramChatId, text);
+        } catch (err) {
+          await this.log(job, 'TELEGRAM', `customer:${customer.id}`, 'FAILED', String(err));
+          throw err;
+        }
+        await this.log(job, 'TELEGRAM', `customer:${customer.id}`, 'SENT');
+      }
+      await this.log(job, 'CHAT', `customer:${customer.id}`, 'SENT');
+      return;
+    }
+    const config = await getSalesAgentGlobalConfig(this.prisma);
+    if (!config.orderSmsEnabled) {
+      await this.log(job, 'SMS', `customer:${customer.id}`, 'SKIPPED_DISABLED');
+      return;
+    }
+    const phone = customer.phoneVerifiedAt ? customer.phone : null;
+    if (!phone) {
+      await this.log(job, 'SMS', `customer:${customer.id}`, 'SKIPPED_NO_PHONE');
+      return;
+    }
+    const capKey = `notif:smscap:${phone}:${tehranDateString(startOfTehranDay())}`;
+    const count = await this.redis.incr(capKey);
+    if (count === 1) await this.redis.expire(capKey, 36 * 3600);
+    if (count > NOTIFICATION_SMS_DAILY_CAP_PER_BUYER) {
+      await this.log(job, 'SMS', phone, 'SKIPPED_CAP');
+      return;
+    }
+    try {
+      await this.sms.sendFreeText(phone, text);
+    } catch (err) {
+      await this.log(job, 'SMS', phone, 'FAILED', String(err));
+      throw err;
+    }
+    await this.log(job, 'SMS', phone, 'SENT', undefined, NOTIFICATION_SMS_COST_TOMAN);
   }
 
   private async deliverChat(

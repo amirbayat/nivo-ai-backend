@@ -41,6 +41,7 @@ import {
   variantComboKey,
 } from './seller-catalog.util';
 import { SUCCESSFUL_ORDER_STATUSES } from '../../common/constants/sales-ops.constants';
+import { StockAlertService } from '../order-lifecycle/stock-alert.service';
 import {
   addTehranDays,
   startOfTehranDay,
@@ -152,6 +153,7 @@ export class StoreService {
     private readonly comments: CommentsService,
     private readonly creditDeduction: StoreCreditDeductionService,
     private readonly orderState: OrderStateService,
+    private readonly stockAlerts: StockAlertService,
   ) {}
 
   list(sellerId: string) {
@@ -422,8 +424,10 @@ export class StoreService {
       },
     });
     const kbCountByProduct = await this.relatedKbEntryCounts(storeId);
+    const stockAlertCounts = await this.stockAlerts.openCountsByProduct(storeId);
     return products.map((product) => ({
       ...product,
+      stockAlertCount: stockAlertCounts.get(product.id) ?? 0,
       completeness: computeProductCompleteness(
         {
           ...product,
@@ -925,6 +929,20 @@ export class StoreService {
       where: { id: productId },
       data: { ...rest, ...(specs !== undefined ? { specs } : {}) },
     });
+    if (dto.stock !== undefined && before.stock <= 0 && updated.stock > 0) {
+      void this.stockAlerts
+        .notifyRestocked([
+          {
+            productId,
+            variantId: null,
+            previous: before.stock,
+            next: updated.stock,
+          },
+        ])
+        .catch((err) =>
+          this.logger.error(`stock alert failed (product=${productId})`, err),
+        );
+    }
     // docs/PRD-seller-guide-assistant-modal.md بخش ۱.۳
     const textFieldChanges = (['name', 'description', 'ownerNotes'] as const)
       .filter((f) => rest[f] !== undefined && rest[f] !== before[f])
@@ -1000,10 +1018,10 @@ export class StoreService {
       combosSeen.add(comboKey);
     }
 
-    await this.prisma.$transaction(async (tx) => {
+    const restocked = await this.prisma.$transaction(async (tx) => {
       const existing = await tx.productVariant.findMany({
         where: { productId },
-        select: { id: true, optionValues: true },
+        select: { id: true, optionValues: true, stock: true },
       });
       const plan = planVariantSync(existing, dto.variants);
       await tx.productOptionType.deleteMany({ where: { productId } });
@@ -1052,7 +1070,25 @@ export class StoreService {
           where: { id: { in: plan.deleteIds } },
         });
       }
+      return plan.updates.flatMap((update) => {
+        const before = existing.find((row) => row.id === update.id);
+        const variant = dto.variants[update.index];
+        if (!before) return [];
+        return [
+          {
+            productId,
+            variantId: update.id,
+            previous: before.stock,
+            next: variant.stock,
+          },
+        ];
+      });
     });
+    void this.stockAlerts
+      .notifyRestocked(restocked)
+      .catch((err) =>
+        this.logger.error(`stock alert failed (product=${productId})`, err),
+      );
 
     return this.prisma.product.findUnique({
       where: { id: productId },

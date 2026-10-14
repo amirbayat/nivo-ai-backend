@@ -129,7 +129,10 @@ describeDb('OrderStateService + OrderExpiryService (Postgres واقعی)', () =>
     await prisma.store.create({
       data: { id: storeId, sellerId, slug: storeId, name: storeId },
     });
-    state = new OrderStateService(prisma as never, notifications as never);
+    state = new OrderStateService(prisma as never, notifications as never, {
+      collectRestoreLines: async () => [],
+      notifyRestocked: async () => undefined,
+    } as never);
     expiry = new OrderExpiryService(
       prisma as never,
       state,

@@ -11,7 +11,8 @@ export type BuyerNotificationTemplate =
   | 'REFUND_DESTINATION_REQUEST'
   | 'REFUND_DONE'
   | 'RECEIPT_AMOUNT_MISMATCH'
-  | 'DELIVERY_CHECK';
+  | 'DELIVERY_CHECK'
+  | 'BACK_IN_STOCK';
 
 export type BuyerChannel = 'CHAT' | 'SMS';
 
@@ -29,6 +30,7 @@ export const TEMPLATE_CHANNELS: Readonly<
   REFUND_DONE: ['CHAT', 'SMS'],
   RECEIPT_AMOUNT_MISMATCH: ['CHAT'],
   DELIVERY_CHECK: ['CHAT', 'SMS'],
+  BACK_IN_STOCK: ['CHAT', 'SMS'],
 };
 
 export type BuyerNotificationData = {
@@ -43,6 +45,9 @@ export type BuyerNotificationData = {
   destinationMasked?: string | null;
   receiptAmountToman?: number | null;
   orderAmountToman?: number | null;
+  productName?: string;
+  conversationId?: string;
+  productUrl?: string;
 };
 
 export type NotifyBuyerInput = {

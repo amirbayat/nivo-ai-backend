@@ -2237,6 +2237,7 @@ model Store {
   updatedAt                      DateTime          @updatedAt
 
   products                 Product[]
+  stockAlerts              ProductStockAlert[]
   customers                Customer[]
   conversations            SalesConversation[]
   orders                   Order[]
@@ -2412,6 +2413,7 @@ model Product {
   // محصول بدون این دو رابطه (اکثریت امروز) دست‌نخورده می‌ماند، basePrice/stock همان معنی قبلی را دارند
   optionTypes ProductOptionType[]
   variants    ProductVariant[]
+  stockAlerts ProductStockAlert[]
 
   // docs/PRD-customer-comments-and-discounts.md بخش ۱۳ — کدهای تخفیف محدود به این محصول
   discountCodes StoreDiscountCode[]
@@ -2463,9 +2465,31 @@ model ProductVariant {
   weightGrams   Float?
   purityKarat   Int?
 
+  stockAlerts ProductStockAlert[]
+
   @@unique([productId, optionValues])
   @@index([productId])
   @@map("product_variants")
+}
+
+model ProductStockAlert {
+  id             String    @id @default(uuid())
+  storeId        String
+  store          Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  productId      String
+  product        Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variantId      String?
+  variant        ProductVariant? @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  customerId     String
+  customer       Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  conversationId String?
+  phone          String?
+  createdAt      DateTime  @default(now())
+  notifiedAt     DateTime?
+
+  @@index([storeId, notifiedAt])
+  @@index([productId, notifiedAt])
+  @@map("product_stock_alerts")
 }
 
 // docs/PRD-seller-knowledge-base.md بخش ۲.۴ — لایه‌ی مشترک بین مستأجرها؛ هرگز قیمت/موجودی/
@@ -2630,6 +2654,7 @@ model Customer {
   // آرشیوشده داشته باشد («گفتگوی جدید» یا رسیدن به COMPLETED/REJECTED، بدون ساخت Customer تازه)
   salesConversations SalesConversation[]
   comments           ProductComment[]
+  stockAlerts        ProductStockAlert[]
   // docs/PRD-buyer-saved-addresses.md — دفترچه‌آدرس per-Customer (یعنی per-store، طبق
   // بخش ۱ همان سند: هنوز هویت یکپارچه‌ی خریدار بین فروشگاه‌ها وجود ندارد)
   addresses          CustomerAddress[]

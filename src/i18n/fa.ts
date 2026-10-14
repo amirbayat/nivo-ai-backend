@@ -378,6 +378,10 @@ export const fa = {
     deliveryCheckChat: (code: string) =>
       `سفارش ${code} رسید؟ اگر تحویل گرفتی از لینک سفارش تایید کن.`,
     deliveryCheckSms: (code: string) => `نیوو: سفارش ${code} رسید؟ از لینک سفارش تایید کن.`,
+    backInStockChat: (name: string, url?: string) =>
+      `${name} موجود شد` + (url ? `\n${url}` : ''),
+    backInStockSms: (name: string, url?: string) =>
+      `نیوو: ${name} موجود شد.` + (url ? ` ${url}` : ''),
     profileLinkLine: (url: string) => `جزئیات و پیگیری در پروفایلت 👈 ${url}`,
     etaFallback: 'چند ساعت',
     etaHours: (hours: number) => `حدود ${hours.toLocaleString('fa-IR')} ساعت`,

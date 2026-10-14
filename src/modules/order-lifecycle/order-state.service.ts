@@ -12,6 +12,7 @@ import { canTransition, holdsStock } from './order-state.machine';
 import { adjustOrderStock, StockShortage } from './order-stock.util';
 import { OrderNotificationService } from './order-notification.service';
 import { insertRefund } from './refund-tx';
+import { RestockLine, StockAlertService } from './stock-alert.service';
 
 export type TransitionInput = {
   orderId: string;
@@ -44,6 +45,7 @@ export type TransitionResult = {
   refundRequired: boolean;
   refundId: string | null;
   refundAmountToman: number | null;
+  restocked: RestockLine[];
 };
 
 // docs/PRD-nivo-sales-unified.md 3.2 ⚠️ — تنها مسیر تغییر وضعیت سفارش (REST، بات تلگرام، cron،
@@ -56,6 +58,7 @@ export class OrderStateService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications: OrderNotificationService,
+    private readonly stockAlerts: StockAlertService,
   ) {}
 
   async transition(input: TransitionInput): Promise<TransitionResult> {
@@ -77,6 +80,16 @@ export class OrderStateService {
       } catch (err) {
         this.logger.error(
           `order notification failed (order=${input.orderId} → ${input.to}) — transition is committed`,
+          err as Error,
+        );
+      }
+    }
+    if (result.restocked.length > 0) {
+      try {
+        await this.stockAlerts.notifyRestocked(result.restocked);
+      } catch (err) {
+        this.logger.error(
+          `stock alert failed (order=${input.orderId}) — transition is committed`,
           err as Error,
         );
       }
@@ -104,6 +117,7 @@ export class OrderStateService {
         refundRequired: false,
         refundId: null,
         refundAmountToman: null,
+        restocked: [],
       };
     }
     if (!canTransition(from, to)) {
@@ -143,6 +157,7 @@ export class OrderStateService {
 
     // ── اثرهای جانبی ───────────────────────────────────────────────────────────
     let stockWarnings: StockShortage[] = [];
+    let restocked: RestockLine[] = [];
     const holdsBefore = holdsStock(from);
     const holdsAfter = holdsStock(to);
     if (!holdsBefore && holdsAfter) {
@@ -163,6 +178,7 @@ export class OrderStateService {
           WHERE id = ${current.bankCardId}
         `;
       }
+      restocked = await this.stockAlerts.collectRestoreLines(tx, current.items);
       await adjustOrderStock(tx, current.items, 'RESTORE');
     }
     if (from === 'REJECTED' && current.discountCodeId) {
@@ -241,6 +257,7 @@ export class OrderStateService {
       refundRequired,
       refundId,
       refundAmountToman,
+      restocked,
     };
   }
 
