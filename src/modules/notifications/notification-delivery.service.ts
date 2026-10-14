@@ -211,6 +211,8 @@ export class NotificationDeliveryService {
         return fa.orderNotify.rejectedChat(code, d.reason, d.refundAmountToman);
       case 'ORDER_CANCELLED':
         return fa.orderNotify.cancelledChat(code, d.reason);
+      case 'REFUND_CANCELLED':
+        return fa.orderNotify.refundCancelledChat(code);
       case 'REFUND_DESTINATION_REQUEST':
         return d.refundAmountToman ? fa.orderNotify.refundAskChat(d.refundAmountToman) : null;
       case 'REFUND_DONE':
@@ -250,6 +252,8 @@ export class NotificationDeliveryService {
         return fa.orderNotify.rejectedSms(code, store);
       case 'ORDER_CANCELLED':
         return fa.orderNotify.cancelledSms(code, store);
+      case 'REFUND_CANCELLED':
+        return fa.orderNotify.refundCancelledSms(code);
       case 'REFUND_DESTINATION_REQUEST':
         return d.refundAmountToman ? fa.orderNotify.refundAskSms(d.refundAmountToman) : null;
       case 'REFUND_DONE':

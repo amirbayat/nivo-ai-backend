@@ -302,6 +302,7 @@ export const fa = {
     carrierInvalid: 'شرکت حمل معتبر نیست',
     manualReceiptCardLast4Invalid: '۴ رقم آخر کارت مبدا را درست وارد کن',
     refundAmountInvalid: 'مبلغ بازپرداخت از باقی‌مانده‌ی قابل برگشت بیشتر است',
+    refundAlreadyPaid: 'مبلغ این سفارش قبلاً برگشت داده شده',
     refundDestinationInvalid: 'شماره کارت یا شبا درست نیست',
     refundHolderInvalid: 'نام صاحب حساب را وارد کن',
     refundNotFound: 'این بازپرداخت پیدا نشد',
@@ -361,6 +362,10 @@ export const fa = {
       '\nاگه هنوز می‌خوایش، می‌تونی دوباره سفارش بدی.',
     cancelledSms: (code: string, storeName: string) =>
       `نیوو: سفارش ${code} از ${storeName} لغو شد.`,
+    refundCancelledChat: (code: string) =>
+      `سفارش ${code} دوباره تایید شد، پس بازپرداختی در کار نیست.`,
+    refundCancelledSms: (code: string) =>
+      `نیوو: سفارش ${code} دوباره تایید شد، پس بازپرداختی در کار نیست.`,
     refundAskChat: (amount: number) =>
       `برای برگشت ${amount.toLocaleString('fa-IR')} تومان شماره کارت یا شبا و نام صاحب حساب رو وارد کن.`,
     refundAskSms: (amount: number) =>

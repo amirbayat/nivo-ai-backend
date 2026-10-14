@@ -45,6 +45,7 @@ export type TransitionResult = {
   refundRequired: boolean;
   refundId: string | null;
   refundAmountToman: number | null;
+  refundsCancelled: number;
   restocked: RestockLine[];
 };
 
@@ -84,6 +85,16 @@ export class OrderStateService {
         );
       }
     }
+    if (result.changed && !input.silent && result.refundsCancelled > 0) {
+      try {
+        await this.notifications.onRefundCancelled(result.order);
+      } catch (err) {
+        this.logger.error(
+          `refund-cancelled notification failed (order=${input.orderId}) — transition is committed`,
+          err as Error,
+        );
+      }
+    }
     if (result.restocked.length > 0) {
       try {
         await this.stockAlerts.notifyRestocked(result.restocked);
@@ -117,11 +128,21 @@ export class OrderStateService {
         refundRequired: false,
         refundId: null,
         refundAmountToman: null,
+        refundsCancelled: 0,
         restocked: [],
       };
     }
     if (!canTransition(from, to)) {
       throw new ConflictException(fa.order.invalidTransition);
+    }
+
+    if (from === 'REJECTED') {
+      const paidBack = await tx.orderRefund.count({
+        where: { orderId, status: 'DONE' },
+      });
+      if (paidBack > 0) {
+        throw new ConflictException(fa.order.refundAlreadyPaid);
+      }
     }
 
     const now = new Date();
@@ -249,6 +270,18 @@ export class OrderStateService {
       refundId = created?.id ?? null;
       refundAmountToman = created?.amountToman ?? null;
     }
+    let refundsCancelled = 0;
+    if (from === 'REJECTED') {
+      const cancelled = await tx.orderRefund.updateMany({
+        where: {
+          orderId,
+          status: { in: ['AWAITING_DESTINATION', 'READY'] },
+          reason: { in: ['ORDER_REJECTED', 'ORDER_CANCELLED'] },
+        },
+        data: { status: 'CANCELLED' },
+      });
+      refundsCancelled = cancelled.count;
+    }
     return {
       order,
       from,
@@ -257,6 +290,7 @@ export class OrderStateService {
       refundRequired,
       refundId,
       refundAmountToman,
+      refundsCancelled,
       restocked,
     };
   }

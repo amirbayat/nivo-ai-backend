@@ -68,6 +68,17 @@ export class OrderNotificationService {
     }
   }
 
+  async onRefundCancelled(order: Order): Promise<void> {
+    const customerId = await this.customerIdOf(order);
+    if (!customerId) return;
+    await this.notifications.notifyBuyer({
+      to: { customerId },
+      template: 'REFUND_CANCELLED',
+      entityId: order.id,
+      data: { orderId: order.id },
+    });
+  }
+
   async onPlaced(order: Pick<Order, 'id' | 'conversationId'>): Promise<void> {
     const customerId = await this.customerIdOf(order);
     if (!customerId) return;

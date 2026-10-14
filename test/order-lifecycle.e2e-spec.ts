@@ -28,6 +28,9 @@ describeDb('OrderStateService + OrderExpiryService (Postgres واقعی)', () =>
       notified.push({ kind: 'reminder', args });
     }),
     onPlaced: jest.fn(),
+    onRefundCancelled: jest.fn(async (...args: unknown[]) => {
+      notified.push({ kind: 'refund-cancelled', args });
+    }),
   };
 
   type NewOrder = {
@@ -268,6 +271,46 @@ describeDb('OrderStateService + OrderExpiryService (Postgres واقعی)', () =>
         })
       ).totalConfirmedToman,
     ).toBe(2000);
+  });
+
+  it('رد بعد از رسید، تایید دوباره refund باز را لغو می‌کند؛ refund پرداخت‌شده تایید دوباره را رد می‌کند [F1]', async () => {
+    const { order } = await newOrder({ status: 'RECEIPT_SUBMITTED' });
+    await state.transition({
+      orderId: order.id,
+      to: 'REJECTED',
+      actor: 'SELLER',
+    });
+    const openBefore = await prisma.orderRefund.count({
+      where: {
+        orderId: order.id,
+        status: { in: ['AWAITING_DESTINATION', 'READY'] },
+      },
+    });
+    expect(openBefore).toBe(1);
+    await approve(order.id);
+    const openAfter = await prisma.orderRefund.count({
+      where: {
+        orderId: order.id,
+        status: { in: ['AWAITING_DESTINATION', 'READY'] },
+      },
+    });
+    expect(openAfter).toBe(0);
+    expect(notified.filter((n) => n.kind === 'refund-cancelled')).toHaveLength(1);
+
+    const paid = await newOrder({ status: 'RECEIPT_SUBMITTED' });
+    await state.transition({
+      orderId: paid.order.id,
+      to: 'REJECTED',
+      actor: 'SELLER',
+    });
+    await prisma.orderRefund.updateMany({
+      where: { orderId: paid.order.id },
+      data: { status: 'DONE' },
+    });
+    await expect(approve(paid.order.id)).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    expect(await statusOf(paid.order.id)).toBe('REJECTED');
   });
 
   it('reject از PENDING_PAYMENT: موجودی دست نمی‌خورد (کم نشده بود)، کد تخفیف آزاد می‌شود', async () => {
