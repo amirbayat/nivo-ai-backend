@@ -28,9 +28,11 @@ export class CreateStoreDto {
   businessType?: StoreBusinessType;
 
   // انگلیسی، انتخاب خود فروشنده — بخش nivo.ai/chat/<slug> (بخش ۱.۱ سند)
+  // SP-2 — اختیاری؛ اگر نیامد یا گرفته بود، سرور آزادترین گزینه را خودش انتخاب می‌کند
+  @IsOptional()
   @IsString({ message: fa.validation.required })
   @Matches(/^[a-z0-9-]{3,40}$/, { message: fa.store.slugInvalid })
-  slug: string;
+  slug?: string;
 
   @IsOptional()
   @ValidateIf((_, value) => value != null && value !== '')

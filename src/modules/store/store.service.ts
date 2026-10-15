@@ -34,6 +34,8 @@ import { UpdateProductDto } from './dto/update-product.dto';
 import { ReplaceProductVariantsDto } from './dto/replace-product-variants.dto';
 import { UpdateStoreDto } from './dto/update-store.dto';
 import { fa } from '../../i18n/fa';
+import { ProductEventService } from '../../common/analytics/product-event.service';
+import { slugFromName, suggestSlug, type SlugSuggestion } from '../../common/utils/slug-from-name';
 import {
   csvEscape,
   parseImportNumber,
@@ -83,6 +85,8 @@ import {
 } from './product-pricing.util';
 
 // docs/PRD-product-strategy-and-roadmap.md بخش ۳.۱ — چک‌لیست سطح فروشگاه
+// SP-2 §4.11.5 — نسخه‌ی متن شرایط استفاده که با ساخت فروشگاه پذیرفته می‌شود (R3.7 متن را می‌سازد)
+const TERMS_VERSION = '1404-07';
 const MIN_STORE_KB_ENTRIES = 3;
 // R2.1 — همان آستانه‌ی نشان «توجه» در نوار پنل (قبلاً در فرانت)
 const LOW_STOCK_BADGE_THRESHOLD = 3;
@@ -164,6 +168,7 @@ export class StoreService {
     private readonly creditDeduction: StoreCreditDeductionService,
     private readonly orderState: OrderStateService,
     private readonly stockAlerts: StockAlertService,
+    private readonly productEvents: ProductEventService,
   ) {}
 
   list(sellerId: string) {
@@ -185,6 +190,20 @@ export class StoreService {
   // می‌دادند. حالا همان‌جا گرنت می‌شود؛ grantTrialIfFirstChat دست‌نخورده می‌ماند (guard
   // trialStartedAt آن از این به بعد روی فروشگاه‌های جدید no-op است، برای فروشگاه‌های قدیمی‌تر
   // که از قبل trial نگرفته‌اند همچنان کار می‌کند)
+  // SP-2 §4.2 — base: slug درخواستی (اگر معتبر) وگرنه ترجمه‌ی نام؛ همان الگوریتم پیشنهاد
+  async suggestSlug(
+    name?: string,
+    slug?: string,
+    alsoTaken: ReadonlySet<string> = new Set(),
+  ): Promise<SlugSuggestion> {
+    const requested = slug && /^[a-z0-9-]{3,40}$/.test(slug) ? slug : '';
+    const base = requested || slugFromName(name ?? '');
+    return suggestSlug(
+      base,
+      async (s) => alsoTaken.has(s) || !(await this.isSlugAvailable(s)),
+    );
+  }
+
   async create(sellerId: string, dto: CreateStoreDto) {
     this.assertBankCardPair(dto);
     // R3.5 / D-1 — هر فروشنده یک فروشگاه واقعی؛ فروشگاه نمایشی (isDemo) جدا حساب می‌شود
@@ -194,36 +213,62 @@ export class StoreService {
     if (existingReal > 0) {
       throw new ConflictException(fa.store.alreadyHasStore);
     }
-    if (!(await this.isSlugAvailable(dto.slug))) {
-      throw new ConflictException(fa.store.slugTaken);
-    }
     const config = await getSalesAgentGlobalConfig(this.prisma);
     const now = new Date();
     const trialEndsAt = new Date(
       now.getTime() + config.trialDurationDays * 24 * 60 * 60 * 1000,
     );
+    // هیچ‌وقت ۴۰۹ برای تداخل slug نمی‌دهیم: اگر بین پیشنهاد و create کسی slug را گرفت (P2002)،
+    // با گزینه‌ی بعدی تا ۵ بار تکرار می‌شود
+    const triedSlugs = new Set<string>();
+    let suggestion = await this.suggestSlug(dto.name, dto.slug);
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const store = await this.prisma.store.create({
+          data: {
+            ...dto,
+            slug: suggestion.slug,
+            sellerId,
+            trialStartedAt: now,
+            trialEndsAt,
+            trialCreditRemainingToman: config.trialCreditToman,
+          },
+        });
+        this.productEvents.log(
+          'store_created',
+          { storeId: store.id, userId: sellerId },
+          { category: dto.category ?? null, hasCustomSlug: !!dto.slug && dto.slug === store.slug },
+        );
+        void this.recordTermsAcceptance(sellerId, now);
+        return store;
+      } catch (err) {
+        if (!isSlugUniqueConflict(err) || attempt >= 5) {
+          if (isSlugUniqueConflict(err)) throw new ConflictException(fa.store.slugTaken);
+          throw err;
+        }
+        triedSlugs.add(suggestion.slug);
+        suggestion = await this.suggestSlug(dto.name, dto.slug, triedSlugs);
+      }
+    }
+  }
+
+  // SP-2 §4.11.5 — «با زدن بساز شرایط را می‌پذیری»؛ بهترین‌تلاش و بی‌صدا، تا اگر SQL ستون‌ها هنوز
+  // اجرا نشده باشد ساخت فروشگاه نشکند
+  private async recordTermsAcceptance(userId: string, at: Date): Promise<void> {
     try {
-      return await this.prisma.store.create({
-        data: {
-          ...dto,
-          sellerId,
-          trialStartedAt: now,
-          trialEndsAt,
-          trialCreditRemainingToman: config.trialCreditToman,
-        },
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: { termsAcceptedAt: at, termsVersion: TERMS_VERSION },
       });
     } catch (err) {
-      if (isSlugUniqueConflict(err)) {
-        throw new ConflictException(fa.store.slugTaken);
-      }
-      throw err;
+      this.logger.warn(`terms acceptance not recorded: ${(err as Error).message}`);
     }
   }
 
   async resumeOnboarding(sellerId: string, storeId: string, dto: CreateStoreDto) {
     this.assertBankCardPair(dto);
     const store = await this.getOwned(sellerId, storeId);
-    if (dto.slug !== store.slug) {
+    if (dto.slug && dto.slug !== store.slug) {
       const realConversations = await this.prisma.salesConversation.count({
         where: { storeId, isTest: false },
       });
@@ -241,7 +286,7 @@ export class StoreService {
           name: dto.name,
           category: dto.category,
           businessType: dto.businessType,
-          slug: dto.slug,
+          ...(dto.slug ? { slug: dto.slug } : {}),
           ...(dto.instagramUrl !== undefined
             ? { instagramUrl: dto.instagramUrl }
             : {}),
@@ -278,6 +323,18 @@ export class StoreService {
   async update(sellerId: string, storeId: string, dto: UpdateStoreDto) {
     const before = await this.getOwned(sellerId, storeId);
     const { source, ...data } = dto;
+    // SP-2 §4.9 — تغییر slug فقط تا قبل از اولین گفتگوی واقعی (همان قاعده‌ی resumeOnboarding)
+    if (data.slug !== undefined && data.slug !== before.slug) {
+      const realConversations = await this.prisma.salesConversation.count({
+        where: { storeId, isTest: false },
+      });
+      if (realConversations > 0) {
+        throw new ConflictException(fa.store.slugLocked);
+      }
+      if (!(await this.isSlugAvailable(data.slug))) {
+        throw new ConflictException(fa.store.slugTaken);
+      }
+    }
     // docs/PRD-leadgen-store-rich-brand-intro.md — فروشگاه‌های leadCaptureOnly کاتالوگ ندارند،
     // پس برندینترو تنها جای همیشه-حاضر برای یک اسکریپت فروش واقعی است؛ برای بقیه‌ی فروشگاه‌ها
     // همان سقف قبلی (۳۰۰) می‌ماند تا هزینه‌ی توکن هر نوبت برای اکثریت فروشگاه‌ها بالا نرود
@@ -304,10 +361,18 @@ export class StoreService {
         throw new BadRequestException(fa.store.shippingDaysInvalid);
       }
     }
-    const updated = await this.prisma.store.update({
-      where: { id: storeId },
-      data,
-    });
+    let updated;
+    try {
+      updated = await this.prisma.store.update({
+        where: { id: storeId },
+        data,
+      });
+    } catch (err) {
+      if (isSlugUniqueConflict(err)) {
+        throw new ConflictException(fa.store.slugTaken);
+      }
+      throw err;
+    }
     // docs/PRD-seller-guide-assistant-modal.md بخش ۱.۳ — فقط فیلدهای متنی/توصیفی تراکینگ می‌شوند
     await this.changeLog.logMany(
       (

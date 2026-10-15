@@ -17,6 +17,9 @@ model User {
   name      String?
   role      Role     @default(USER)
   isActive  Boolean  @default(true)
+  // SP-2 §4.11.5 — پذیرش شرایط استفاده هنگام ساخت فروشگاه (بدون چک‌باکس)
+  termsAcceptedAt DateTime?
+  termsVersion    String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

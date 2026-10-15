@@ -9,6 +9,7 @@ import {
   Max,
   Min,
   MaxLength,
+  MinLength,
 } from 'class-validator';
 import { ContentChangeSource, GoldWageType } from '@prisma/client';
 import { fa } from '../../../i18n/fa';
@@ -20,6 +21,34 @@ import {
 // docs/PRD-product-strategy-and-roadmap.md بخش ۳.۲ — فیلدهای ساختاریافته‌ی سطح فروشگاه،
 // همه اختیاری (partial update، هیچ فیلدی اجباری برای پرکردن نیست)
 export class UpdateStoreDto {
+  // SP-2 §4.9 «/store/info» — نام و لینک فروشگاه؛ قفل بودن slug بعد از اولین مشتری واقعی در
+  // StoreService.update چک می‌شود
+  @IsOptional()
+  @IsString()
+  @MinLength(2, { message: fa.validation.required })
+  @MaxLength(60, { message: fa.validation.stringTooLong })
+  name?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^[a-z0-9-]{3,40}$/, { message: fa.store.slugInvalid })
+  slug?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200, { message: fa.validation.stringTooLong })
+  instagramUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200, { message: fa.validation.stringTooLong })
+  telegramUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200, { message: fa.validation.stringTooLong })
+  websiteUrl?: string;
+
   // docs/PRD-seller-guide-assistant-modal.md بخش ۱.۲ — قبلاً فقط در CreateStoreDto بود؛ برای
   // اعمال‌کردن پیشنهاد دسته‌بندی از تحلیل یادداشت خام، باید بعد از ثبت‌نام هم قابل ویرایش باشد
   @IsOptional()

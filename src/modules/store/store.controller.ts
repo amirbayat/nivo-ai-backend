@@ -96,6 +96,12 @@ export class StoreController {
     return { available: await this.storeService.isSlugAvailable(slug) };
   }
 
+  // SP-2 §4.2 — لینکی که سرور برای این نام می‌گذارد (بدون :id؛ قبل از مسیرهای :id)
+  @Get('slug-suggest')
+  slugSuggest(@Query('name') name?: string, @Query('slug') slug?: string) {
+    return this.storeService.suggestSlug(name, slug);
+  }
+
   // docs/PRD-ai-assisted-business-setup.md — قدم ۱ ویزارد، قبل از ساخت فروشگاه (بدون :id)؛
   // باید قبل از مسیرهای :id تعریف شود تا با آن‌ها اشتباه گرفته نشود (مثل slug-available بالا)
   @Post('classify-business-setup')
