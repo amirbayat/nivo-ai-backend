@@ -1,3 +1,4 @@
+import { CreateSegmentDto, CreateTopicDto, UpdateSegmentDto, UpdateTopicDto } from './dto/segment-topic.dto';
 import {
   Body,
   Controller,
@@ -125,26 +126,13 @@ export class UsageAnalyticsController {
 
   @Post('segments')
   createSegment(
-    @Body()
-    body: {
-      label: string;
-      minMessagesPerDay?: number | null;
-      maxMessagesPerDay?: number | null;
-      minTokensPerDay?: number | null;
-      maxTokensPerDay?: number | null;
-      color?: string | null;
-      sortOrder?: number;
-      isActive?: boolean;
-    },
+    @Body() body: CreateSegmentDto,
   ) {
     return this.analytics.createSegment(body as never);
   }
 
   @Patch('segments/:id')
-  updateSegment(
-    @Param('id') id: string,
-    @Body() body: Record<string, unknown>,
-  ) {
+  updateSegment(@Param('id') id: string, @Body() body: UpdateSegmentDto) {
     return this.analytics.updateSegment(id, body);
   }
 
@@ -165,20 +153,12 @@ export class TopicController {
   }
 
   @Post()
-  create(
-    @Body()
-    body: {
-      name: string;
-      keywords: string[];
-      color?: string;
-      sortOrder?: number;
-    },
-  ) {
+  create(@Body() body: CreateTopicDto) {
     return this.topics.create(body);
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() body: Record<string, unknown>) {
+  update(@Param('id') id: string, @Body() body: UpdateTopicDto) {
     return this.topics.update(id, body);
   }
 

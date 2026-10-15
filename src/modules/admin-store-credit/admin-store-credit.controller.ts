@@ -14,6 +14,7 @@ import { AdminGuard } from '../../common/guards/admin.guard';
 import { parseDateRange } from '../usage-analytics/usage-analytics.service';
 import { StoreCreditDeductionService } from '../store-credit-engine/store-credit-deduction.service';
 import { CurrentUser, JwtPayload } from '../../common/decorators/current-user.decorator';
+import { LeadCaptureOnlyDto } from './dto/lead-capture-only.dto';
 import { SetStoreStatusDto } from './dto/set-store-status.dto';
 import { AdjustCreditDto } from './dto/adjust-credit.dto';
 import { AdminStoreCreditService } from './admin-store-credit.service';
@@ -60,7 +61,7 @@ export class AdminStoreCreditController {
   @Patch(':id/lead-capture-only')
   setLeadCaptureOnly(
     @Param('id') id: string,
-    @Body() body: { enabled: boolean },
+    @Body() body: LeadCaptureOnlyDto,
   ) {
     return this.service.setLeadCaptureOnly(id, body.enabled);
   }

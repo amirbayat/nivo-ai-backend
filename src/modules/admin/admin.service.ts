@@ -672,16 +672,45 @@ export class AdminService {
     };
   }
 
-  async updateUser(
+  async setUserRole(
     userId: string,
-    data: { isActive?: boolean; role?: 'USER' | 'ADMIN' },
+    role: 'USER' | 'ADMIN',
+    reason: string,
+    adminId: string,
   ) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException(fa.admin.userNotFound);
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const row = await tx.user.update({
+        where: { id: userId },
+        data: { role },
+        select: { id: true, phone: true, name: true, role: true, isActive: true },
+      });
+      await this.audit.record(
+        {
+          adminId,
+          action: 'USER_ROLE_CHANGE',
+          targetType: 'USER',
+          targetId: userId,
+          before: { role: user.role },
+          after: { role },
+          reason,
+        },
+        tx,
+      );
+      return row;
+    });
+    return { message: fa.admin.userUpdated, user: updated };
+  }
+
+  async updateUser(userId: string, data: { isActive?: boolean }) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException(fa.admin.userNotFound);
 
     const updated = await this.prisma.user.update({
       where: { id: userId },
-      data,
+      // فقط isActive (DTO whitelist)؛ نقش از setUserRole
+      data: { isActive: data.isActive },
       select: { id: true, phone: true, name: true, role: true, isActive: true },
     });
 

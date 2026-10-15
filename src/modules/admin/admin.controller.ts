@@ -23,6 +23,9 @@ import { AdminGuard } from '../../common/guards/admin.guard';
 import { AdminService } from './admin.service';
 import { TicketsService } from '../tickets/tickets.service';
 import { UpdateTicketStatusDto } from '../tickets/dto/update-ticket-status.dto';
+import { UpdateAdminUserDto } from './dto/update-admin-user.dto';
+import { SetUserRoleDto } from './dto/set-user-role.dto';
+import { ChangeUserPlanDto, EnrichmentDraftDto, SetManualLimitDto, TicketReplyDto } from './dto/admin-misc.dto';
 import { CreateModelDto } from './dto/create-model.dto';
 import { UpdateModelDto } from './dto/update-model.dto';
 import { UpdateSalesAgentGlobalConfigDto } from './dto/update-sales-agent-global-config.dto';
@@ -66,11 +69,18 @@ export class AdminController {
   }
 
   @Patch('users/:id')
-  updateUser(
-    @Param('id') id: string,
-    @Body() body: { isActive?: boolean; role?: 'USER' | 'ADMIN' },
-  ) {
+  updateUser(@Param('id') id: string, @Body() body: UpdateAdminUserDto) {
     return this.adminService.updateUser(id, body);
+  }
+
+  // R1.5 — تغییر نقش فقط از اینجا، با دلیل و ممیزی
+  @Patch('users/:id/role')
+  setUserRole(
+    @Param('id') id: string,
+    @Body() body: SetUserRoleDto,
+    @CurrentUser() admin: JwtPayload,
+  ) {
+    return this.adminService.setUserRole(id, body.role, body.reason.trim(), admin.sub);
   }
 
   @Get('token-stats')
@@ -96,7 +106,7 @@ export class AdminController {
   @Post('users/:id/limit')
   setLimit(
     @Param('id') id: string,
-    @Body() body: { type: 'daily' | '1h' | '3h' | '6h'; reason?: string },
+    @Body() body: SetManualLimitDto,
   ) {
     return this.adminService.setManualLimit(id, body.type, body.reason);
   }
@@ -112,7 +122,7 @@ export class AdminController {
   }
 
   @Patch('users/:id/plan')
-  changePlan(@Param('id') id: string, @Body() body: { planId: string }) {
+  changePlan(@Param('id') id: string, @Body() body: ChangeUserPlanDto) {
     return this.adminService.changeUserPlan(id, body.planId);
   }
 
@@ -137,7 +147,7 @@ export class AdminController {
   @Post('tickets/:id/reply')
   addTicketReply(
     @Param('id') id: string,
-    @Body() body: { body: string; adminNote?: string },
+    @Body() body: TicketReplyDto,
   ) {
     return this.ticketsService.addAdminReply(id, body.body, body.adminNote);
   }
@@ -387,8 +397,7 @@ export class AdminController {
   createEnrichmentDraft(
     @CurrentUser() user: JwtPayload,
     @Param('productId') productId: string,
-    @Body()
-    body: { source: 'WEB_SEARCH' | 'ADMIN_RESOURCE'; resourceText?: string },
+    @Body() body: EnrichmentDraftDto,
   ) {
     const opts =
       body.source === 'ADMIN_RESOURCE'

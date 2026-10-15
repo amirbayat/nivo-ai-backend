@@ -1,3 +1,4 @@
+import { CreateCampaignDto, UpdateCampaignDto } from './dto/campaign.dto';
 import {
   Body,
   Controller,
@@ -53,7 +54,7 @@ export class AdminCampaignController {
   }
 
   @Post()
-  create(@Body() body: Record<string, unknown>) {
+  create(@Body() body: CreateCampaignDto) {
     return this.campaign.createCampaign(body as never);
   }
 
@@ -64,8 +65,8 @@ export class AdminCampaignController {
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() body: Record<string, unknown>) {
-    return this.campaign.updateCampaign(id, body);
+  update(@Param('id') id: string, @Body() body: UpdateCampaignDto) {
+    return this.campaign.updateCampaign(id, { ...body });
   }
 
   @Post(':id/close')
