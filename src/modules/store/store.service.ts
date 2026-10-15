@@ -1073,7 +1073,7 @@ export class StoreService {
           where: { id: update.id },
           data: {
             optionValues: variant.optionValues,
-            stock: variant.stock,
+            ...(variant.stock === undefined ? {} : { stock: variant.stock }),
             priceOverride: variant.priceOverride ?? null,
             sku: variant.sku ?? null,
             weightGrams: variant.weightGrams ?? null,
@@ -1087,7 +1087,7 @@ export class StoreService {
           data: {
             productId,
             optionValues: variant.optionValues,
-            stock: variant.stock,
+            stock: variant.stock ?? 0,
             priceOverride: variant.priceOverride ?? null,
             sku: variant.sku ?? null,
             weightGrams: variant.weightGrams ?? null,
@@ -1103,7 +1103,9 @@ export class StoreService {
       return plan.updates.flatMap((update) => {
         const before = existing.find((row) => row.id === update.id);
         const variant = dto.variants[update.index];
-        if (!before) return [];
+        if (!before || variant.stock === undefined || before.stock === variant.stock) {
+          return [];
+        }
         return [
           {
             productId,

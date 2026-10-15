@@ -36,10 +36,11 @@ export class ProductVariantInputDto {
   @IsObject()
   optionValues: Record<string, string>;
 
+  @IsOptional()
   @IsInt()
   @Min(0)
   @ToNumber()
-  stock: number;
+  stock?: number;
 
   @IsOptional()
   @IsInt()
