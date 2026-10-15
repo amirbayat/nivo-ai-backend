@@ -517,6 +517,12 @@ export const fa = {
     cartEmpty: 'سبد خرید خالی است',
     cartUpdated: (total: number) => `سبد به‌روز شد. جمع ${total.toLocaleString('fa-IR')} تومان.`,
     addressFormPrompt: 'آدرس را یک‌جا بنویس. هزینه ارسال بعد از تایید استان نشان داده می‌شود.',
+    addressFieldName: 'اسم گیرنده را بنویس.',
+    addressFieldPhone: 'شماره موبایل را درست بنویس (مثلاً ۰۹۱۲xxxxxxx).',
+    addressFieldProvince: 'استان را از فهرست انتخاب کن.',
+    addressFieldCity: 'شهر را بنویس.',
+    addressFieldStreet: 'خیابان و آدرس را بنویس.',
+    addressFieldPostal: 'کد پستی باید ۱۰ رقم باشد.',
     llmSaturated: 'الان خیلی شلوغم 🙏 چند ثانیه دیگه پیامت رو دوباره بفرست.',
     conversationBusy:
       'یه لحظه، دارم پیام قبلی‌ت رو جواب می‌دم. چند ثانیه دیگه دوباره امتحان کن 🙏',

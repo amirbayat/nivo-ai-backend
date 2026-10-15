@@ -197,6 +197,19 @@ export type UiBlock =
       provinces?: string[];
       prefillName?: string;
       prefillPhone?: string;
+      fieldErrors?: Partial<
+        Record<'name' | 'phone' | 'province' | 'city' | 'street' | 'postal', string>
+      >;
+      values?: {
+        recipientName: string;
+        recipientPhone: string;
+        province: string;
+        city: string;
+        addressText: string;
+        postalCode: string;
+        plaque: string;
+        unit: string;
+      };
       summary?: string; // فقط CONFIRM
       shippingCostToman?: number; // فقط CONFIRM
       provinceCovered?: boolean; // فقط CONFIRM — false یعنی فروشنده به این استان ارسال ندارد

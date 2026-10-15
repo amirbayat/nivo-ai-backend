@@ -79,6 +79,11 @@ import { mimeTypeForExt } from '../../common/validators/chat-image.validator';
 import { AiProviderService } from '../../common/services/ai-provider.service';
 import { IRAN_PROVINCES } from '../../common/constants/iran-provinces';
 import { toEnglishDigits } from '../../common/utils/normalize-digits';
+import {
+  validateAddressForm,
+  normalizeIranMobile,
+  type AddressFormResult,
+} from '../../common/utils/address-form.util';
 import { StoreKbService } from '../store/store-kb.service';
 import { CardSelectorService } from '../store/card-selector.service';
 import { MarketPricesService } from '../market-prices/market-prices.service';
@@ -7351,6 +7356,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
   private async showAddressForm(
     conversation: ConversationWithStore,
     ctx: ConversationContext,
+    checked?: AddressFormResult,
   ): Promise<EngineResult> {
     const customer = await this.prisma.customer.findUnique({
       where: { id: conversation.customerId },
@@ -7366,8 +7372,18 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       type: 'ADDRESS_PROMPT',
       mode: 'FORM',
       provinces: [...IRAN_PROVINCES],
-      prefillName: ctx.pendingAddress?.recipientName || customer?.fullName || undefined,
-      prefillPhone: ctx.pendingAddress?.recipientPhone || customer?.phone || undefined,
+      prefillName:
+        checked?.values.recipientName ||
+        ctx.pendingAddress?.recipientName ||
+        customer?.fullName ||
+        undefined,
+      prefillPhone:
+        checked?.values.recipientPhone ||
+        ctx.pendingAddress?.recipientPhone ||
+        customer?.phone ||
+        undefined,
+      fieldErrors: checked && !checked.ok ? checked.errors : undefined,
+      values: checked?.values,
     };
     const reply = fa.salesAgent.addressFormPrompt;
     await this.logReply(conversation, reply, uiBlock);
@@ -7379,32 +7395,23 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     ctx: ConversationContext,
     action: SalesAction,
   ): Promise<EngineResult> {
-    const name = action.recipientName?.trim() ?? '';
-    const phone = toEnglishDigits(action.recipientPhone ?? '').replace(/[\s-]/g, '');
-    const province = action.province ?? '';
-    const city = action.city?.trim() ?? '';
-    const street = action.addressText?.trim() ?? '';
-    const postal = toEnglishDigits(action.postalCode ?? '').replace(/\D/g, '');
-    const plaque = toEnglishDigits(action.plaque ?? '').replace(/\D/g, '');
-    const unit = action.unit?.trim() ?? '';
-    if (!name || !city || !street || !IRAN_PROVINCES.includes(province)) {
-      return this.showAddressForm(conversation, ctx);
+    const checked = validateAddressForm(action);
+    if (!checked.ok || !checked.phone || !checked.postal) {
+      return this.showAddressForm(conversation, ctx, checked);
     }
-    if (!/^(\+98|0)?9[0-9]{9}$/.test(phone) || !/^\d{10}$/.test(postal)) {
-      return this.showAddressForm(conversation, ctx);
-    }
+    const { recipientName, province, city, addressText, plaque, unit } = checked.values;
     const address = [
       city,
-      street,
+      addressText,
       plaque ? `پلاک ${plaque}` : '',
       unit ? `واحد ${unit}` : '',
     ].filter(Boolean).join('، ');
     return this.showAddressConfirm(conversation, ctx, {
-      recipientName: name,
-      recipientPhone: phone,
+      recipientName,
+      recipientPhone: checked.phone,
       province,
       address,
-      postalCode: postal,
+      postalCode: checked.postal,
     });
   }
 
@@ -7515,8 +7522,8 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           fa.salesAgent.addressAskPhone,
         );
       case 'phone': {
-        const digits = toEnglishDigits(trimmed).replace(/[\s-]/g, '');
-        if (!/^(\+98|0)?9[0-9]{9}$/.test(digits)) {
+        const phone = normalizeIranMobile(trimmed);
+        if (!phone) {
           return this.doClarify(
             conversation,
             fa.salesAgent.addressPhoneInvalid,
@@ -7524,7 +7531,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         }
         return this.promptProvinceSelection(conversation, ctx, {
           ...pending,
-          recipientPhone: digits,
+          recipientPhone: phone,
         });
       }
       case 'province':
