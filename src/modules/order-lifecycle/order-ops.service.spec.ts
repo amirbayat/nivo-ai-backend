@@ -13,10 +13,12 @@ describe('OrderOpsService reminders [F19]', () => {
     }));
     const findMany = jest.fn(async (args: {
       take?: number;
-      cursor?: { id: string };
+      where?: { id?: { gt: string } };
       orderBy?: { id: 'asc' };
     }) => {
-      const start = args.cursor ? ids.indexOf(args.cursor.id) + 1 : 0;
+      // سطرهای پردازش‌شده ممکن است دیگر با where نخوانند؛ صفحه‌بندی فقط با id > آخرین id
+      const after = args.where?.id?.gt;
+      const start = after ? ids.indexOf(after) + 1 : 0;
       return rows.slice(start, start + (args.take ?? rows.length));
     });
     const notifySeller = jest.fn(async () => undefined);
@@ -35,6 +37,10 @@ describe('OrderOpsService reminders [F19]', () => {
     Object.assign(svc, { prisma, notifications: { notifySeller, notifyBuyer: jest.fn() } });
     await svc.receiptSla(NOW);
     expect(findMany.mock.calls[0][0].orderBy).toEqual({ id: 'asc' });
+    for (const [args] of findMany.mock.calls) {
+      expect(args).not.toHaveProperty('cursor');
+      expect(args).not.toHaveProperty('skip');
+    }
     expect(notifySeller).toHaveBeenCalledTimes(201);
     expect(notifySeller).toHaveBeenCalledWith(
       expect.objectContaining({

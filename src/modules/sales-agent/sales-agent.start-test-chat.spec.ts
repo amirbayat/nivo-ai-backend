@@ -19,17 +19,15 @@ describe('startTestChat [F4]', () => {
         }),
       },
       customer: {
-        findFirst: jest.fn(async () => customers[0] ?? null),
-        create: jest.fn(async ({ data }: { data: { sessionToken: string } }) => {
-          const row = { id: 'customer-1', sessionToken: data.sessionToken };
-          customers.push(row);
-          return row;
-        }),
-        update: jest.fn(
-          async ({ data }: { data: { sessionToken: string } }) => {
-            const current = customers[0];
-            if (!current) throw new Error('missing test customer');
-            customers[0] = { ...current, sessionToken: data.sessionToken };
+        upsert: jest.fn(
+          async ({
+            create,
+          }: {
+            create: { sessionToken: string };
+          }) => {
+            if (!customers[0]) {
+              customers.push({ id: 'customer-1', sessionToken: create.sessionToken });
+            }
             return customers[0];
           },
         ),
@@ -63,13 +61,22 @@ describe('startTestChat [F4]', () => {
     return { svc, prisma, redis, customers, createdConversations };
   };
 
-  it('پنج بار باز کردن فقط یک Customer می‌سازد', async () => {
+  it('پنج بار باز کردن یک Customer با توکن ثابت می‌دهد، تب قبلی ۴۰۳ نمی‌گیرد [R0.14]', async () => {
     const { svc, prisma, createdConversations } = setup();
+    const tokens = new Set<string>();
     for (let i = 0; i < 5; i++) {
-      await svc.startTestChat('seller-1', 'store-1');
+      const started = await svc.startTestChat('seller-1', 'store-1');
+      tokens.add(started.sessionToken);
     }
-    expect(prisma.customer.create).toHaveBeenCalledTimes(1);
-    expect(prisma.customer.update).toHaveBeenCalledTimes(4);
+    expect([...tokens]).toEqual(['nivo-test:store-1']);
+    expect(prisma.customer.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          storeId_sessionToken: { storeId: 'store-1', sessionToken: 'nivo-test:store-1' },
+        },
+        update: {},
+      }),
+    );
     expect(prisma.salesConversation.create).toHaveBeenCalledTimes(5);
     expect(createdConversations[0]?.isTest).toBe(true);
   });
@@ -80,6 +87,6 @@ describe('startTestChat [F4]', () => {
     await expect(svc.startTestChat('seller-1', 'store-1')).rejects.toBeInstanceOf(
       HttpException,
     );
-    expect(prisma.customer.create).not.toHaveBeenCalled();
+    expect(prisma.customer.upsert).not.toHaveBeenCalled();
   });
 });

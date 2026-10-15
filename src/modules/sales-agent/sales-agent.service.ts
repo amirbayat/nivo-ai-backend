@@ -198,20 +198,13 @@ export class SalesAgentService {
 
     const billingMode = await this.creditService.decideBillingMode(store.id);
     const globalConfig = await getSalesAgentGlobalConfig(this.prisma);
-    const keyPrefix = `nivo-test:${store.id}:`;
-    const sessionToken = `${keyPrefix}${crypto.randomUUID()}`;
-    const existing = await this.prisma.customer.findFirst({
-      where: { storeId: store.id, sessionToken: { startsWith: keyPrefix } },
-      orderBy: { createdAt: 'asc' },
+    // توکن مشتری تستی ثابت است تا تب/گفتگوی قبلی با باز کردن تست جدید ۴۰۳ نگیرد [R0.14]
+    const sessionToken = `nivo-test:${store.id}`;
+    const customer = await this.prisma.customer.upsert({
+      where: { storeId_sessionToken: { storeId: store.id, sessionToken } },
+      update: {},
+      create: { storeId: store.id, channel: 'WEB', sessionToken },
     });
-    const customer = existing
-      ? await this.prisma.customer.update({
-          where: { id: existing.id },
-          data: { sessionToken },
-        })
-      : await this.prisma.customer.create({
-          data: { storeId: store.id, channel: 'WEB', sessionToken },
-        });
     const conversation = await this.prisma.salesConversation.create({
       data: {
         storeId: store.id,

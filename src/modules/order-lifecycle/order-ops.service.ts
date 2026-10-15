@@ -38,11 +38,10 @@ export class OrderOpsService {
     let cursor: string | undefined;
     for (;;) {
       const rows = await this.prisma.order.findMany({
-        where: { status: 'RECEIPT_SUBMITTED' },
+        where: { status: 'RECEIPT_SUBMITTED', ...(cursor ? { id: { gt: cursor } } : {}) },
         select: { id: true, storeId: true, orderCode: true },
         orderBy: { id: 'asc' },
         take: OPS_PAGE,
-        ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
       });
       if (rows.length === 0) break;
       const events = await this.prisma.orderStatusEvent.findMany({
@@ -83,13 +82,13 @@ export class OrderOpsService {
             { status: 'AWAITING_DESTINATION', destinationRemindedAt: null },
             { status: 'READY' },
           ],
+          ...(cursor ? { id: { gt: cursor } } : {}),
         },
         include: {
           order: { select: { id: true, orderCode: true, conversationId: true, totalAmount: true } },
         },
         orderBy: { id: 'asc' },
         take: OPS_PAGE,
-        ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
       });
       if (rows.length === 0) break;
       for (const row of rows) {
@@ -138,11 +137,15 @@ export class OrderOpsService {
     let cursor: string | undefined;
     for (;;) {
       const rows = await this.prisma.order.findMany({
-        where: { status: 'SHIPPED', shippedAt: { lte: cutoff }, deliveryCheckSentAt: null },
+        where: {
+          status: 'SHIPPED',
+          shippedAt: { lte: cutoff },
+          deliveryCheckSentAt: null,
+          ...(cursor ? { id: { gt: cursor } } : {}),
+        },
         select: { id: true, conversationId: true },
         orderBy: { id: 'asc' },
         take: OPS_PAGE,
-        ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
       });
       if (rows.length === 0) break;
       for (const row of rows) {
