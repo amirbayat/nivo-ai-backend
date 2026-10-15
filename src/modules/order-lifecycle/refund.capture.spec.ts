@@ -3,7 +3,8 @@ import { RefundService } from './refund.service';
 describe('tryCaptureFromMessage [F7]', () => {
   it('یک کارت معتبر در چت، بازپرداخت منتظر مقصد را READY می‌کند', async () => {
     const updateMany = jest.fn(async () => ({ count: 1 }));
-    const prisma = {
+    const prisma: Record<string, unknown> = {
+      $queryRaw: jest.fn(async () => []),
       orderRefund: {
         findFirst: jest.fn(async () => ({
           id: 'refund-1',
@@ -25,6 +26,7 @@ describe('tryCaptureFromMessage [F7]', () => {
         findMany: jest.fn(async () => []),
       },
     };
+    prisma.$transaction = async (fn: (tx: unknown) => unknown) => fn(prisma);
     const notifications = { notifySeller: jest.fn(async () => undefined) };
     const svc = Object.create(RefundService.prototype) as RefundService;
     Object.assign(svc, {

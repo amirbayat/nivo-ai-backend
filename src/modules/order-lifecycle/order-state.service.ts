@@ -145,8 +145,15 @@ export class OrderStateService {
     }
 
     if (from === 'REJECTED') {
+      // قفل refundهای همین سفارش قبل از چک DONE؛ markPaid هم ردیف سفارش را قفل می‌گیرد، پس یا
+      // قبل از ما commit شده و اینجا DONE می‌بینیم، یا بعد از ما می‌آید و refund لغوشده را می‌بیند
+      await tx.$queryRaw`SELECT id FROM order_refunds WHERE "orderId" = ${orderId} FOR UPDATE`;
       const paidBack = await tx.orderRefund.count({
-        where: { orderId, status: 'DONE' },
+        where: {
+          orderId,
+          status: 'DONE',
+          reason: { in: ['ORDER_REJECTED', 'ORDER_CANCELLED'] },
+        },
       });
       if (paidBack > 0) {
         throw new ConflictException(fa.order.refundAlreadyPaid);

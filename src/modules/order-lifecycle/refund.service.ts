@@ -96,17 +96,22 @@ export class RefundService {
       where: { id: input.refundId, orderId: input.orderId },
     });
     if (!refund) throw new NotFoundException(fa.order.refundNotFound);
-    const claimed = await this.prisma.orderRefund.updateMany({
-      where: { id: refund.id, status: 'AWAITING_DESTINATION' },
-      data: {
-        status: 'READY',
-        destinationType: parsed.type,
-        destinationEnc: encryptSecret(parsed.plain, this.key()),
-        destinationMasked: parsed.masked,
-        holderName: holder,
-        bankName: parsed.bankName,
-        destinationAt: new Date(),
-      },
+    const destinationEnc = encryptSecret(parsed.plain, this.key());
+    // قفل سفارش: با انتقال وضعیت سفارش (تایید دوباره که refund را لغو می‌کند) سریال می‌شود
+    const claimed = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM orders WHERE id = ${refund.orderId} FOR UPDATE`;
+      return tx.orderRefund.updateMany({
+        where: { id: refund.id, status: 'AWAITING_DESTINATION' },
+        data: {
+          status: 'READY',
+          destinationType: parsed.type,
+          destinationEnc,
+          destinationMasked: parsed.masked,
+          holderName: holder,
+          bankName: parsed.bankName,
+          destinationAt: new Date(),
+        },
+      });
     });
     if (claimed.count !== 1) throw new ConflictException(fa.order.refundNotPayable);
     const order = await this.prisma.order.findUnique({
@@ -161,17 +166,21 @@ export class RefundService {
     const refund = await this.ownedRefund(sellerId, storeId, refundId);
     const paidAt = new Date();
     const paid = paidRef?.trim() || null;
-    const claimed = await this.prisma.orderRefund.updateMany({
-      where: {
-        id: refund.id,
-        status: { in: ['READY', 'AWAITING_DESTINATION'] },
-      },
-      data: {
-        status: 'DONE',
-        paidAt,
-        paidRef: paid,
-        proofImageKey: proofImageKey ?? null,
-      },
+    // قفل سفارش: با تایید دوباره‌ی سفارش ردشده سریال می‌شود (وگرنه سفارش تایید می‌شد با refund پرداخت‌شده)
+    const claimed = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM orders WHERE id = ${refund.orderId} FOR UPDATE`;
+      return tx.orderRefund.updateMany({
+        where: {
+          id: refund.id,
+          status: { in: ['READY', 'AWAITING_DESTINATION'] },
+        },
+        data: {
+          status: 'DONE',
+          paidAt,
+          paidRef: paid,
+          proofImageKey: proofImageKey ?? null,
+        },
+      });
     });
     if (claimed.count !== 1) throw new ConflictException(fa.order.refundNotPayable);
     const order = await this.prisma.order.findUnique({

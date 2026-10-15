@@ -407,6 +407,38 @@ describeDb('OrderStateService + OrderExpiryService (Postgres واقعی)', () =>
     ).toBe('DONE');
   });
 
+  it('تایید دوباره و «واریز کردم» هم‌زمان: هرگز «تایید موفق + refund پرداخت‌شده» نمی‌شود [R0.1]', async () => {
+    const svc = new RefundService(prisma as never, { get: () => 'e2e-refund-key' } as never, {
+      notifyBuyer: jest.fn(),
+      notifySeller: jest.fn(),
+    } as never);
+    const outcomes = { approvedCancelled: 0, rejectedDone: 0 };
+    for (let i = 0; i < 20; i++) {
+      const { order } = await newOrder({ status: 'RECEIPT_SUBMITTED', total: 1000 });
+      await state.transition({ orderId: order.id, to: 'REJECTED', actor: 'SELLER' });
+      const refund = await prisma.orderRefund.findFirstOrThrow({
+        where: { orderId: order.id },
+      });
+      await Promise.allSettled([
+        approve(order.id),
+        svc.markPaid(sellerId, storeId, refund.id, `ref${i}`),
+      ]);
+      const status = await statusOf(order.id);
+      const refundStatus = (
+        await prisma.orderRefund.findUniqueOrThrow({ where: { id: refund.id } })
+      ).status;
+      if (status === 'APPROVED') {
+        expect(refundStatus).toBe('CANCELLED');
+        outcomes.approvedCancelled++;
+      } else {
+        expect(status).toBe('REJECTED');
+        expect(refundStatus).toBe('DONE');
+        outcomes.rejectedDone++;
+      }
+    }
+    expect(outcomes.approvedCancelled + outcomes.rejectedDone).toBe(20);
+  });
+
   it('reject از PENDING_PAYMENT: موجودی دست نمی‌خورد (کم نشده بود)، کد تخفیف آزاد می‌شود', async () => {
     const { order, product, discount } = await newOrder({ withDiscount: true });
     const r = await state.transition({
