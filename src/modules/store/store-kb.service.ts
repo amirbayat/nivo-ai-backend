@@ -204,7 +204,7 @@ export interface KbExtractResult {
 // فیدبک کاربر ۱۴۰۵/۰۷/۱۵ — همان شکلی که generateProductOptionsFromText برمی‌گرداند (§۴.۱.۱)،
 // به‌علاوه‌ی stock اختیاری هر مقدار؛ وقتی متن تعداد هر حالت را هم می‌گوید («سایز M سه تا»)
 // دسته‌هایی از BUSINESS_CATEGORIES که محصولشان معمولاً سایز/رنگ/مدل دارد
-const VARIANT_PRONE_CATEGORIES = new Set([
+export const VARIANT_PRONE_CATEGORIES = new Set([
   'پوشاک',
   'کیف و کفش',
   'کودک و نوزاد',

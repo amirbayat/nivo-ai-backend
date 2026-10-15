@@ -20,6 +20,7 @@ import { StoreShippingRuleService } from './store-shipping-rule.service';
 import { StoreAdPlacementService } from './store-ad-placement.service';
 import { CardSelectorService } from './card-selector.service';
 import { ProductEnrichmentService } from './product-enrichment.service';
+import { ProductAiFillService } from './product-ai-fill.service';
 import { ProductEnrichmentReminderService } from './product-enrichment-reminder.service';
 import { ContentChangeLogService } from './content-change-log.service';
 
@@ -61,6 +62,7 @@ import { ContentChangeLogService } from './content-change-log.service';
     ProductEnrichmentService,
     ProductEnrichmentReminderService,
     ContentChangeLogService,
+    ProductAiFillService,
   ],
   // docs/PRD-seller-guide-assistant-modal.md بخش ۱.۳ — ContentChangeLogService هم از
   // AdminModule لازم است (endpoint مشاهده‌ی لاگ تغییرات محتوا)

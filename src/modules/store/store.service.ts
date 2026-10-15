@@ -89,6 +89,7 @@ import {
 // docs/PRD-product-strategy-and-roadmap.md بخش ۳.۱ — چک‌لیست سطح فروشگاه
 // SP-2 §4.11.5 — نسخه‌ی متن شرایط استفاده که با ساخت فروشگاه پذیرفته می‌شود (R3.7 متن را می‌سازد)
 const TERMS_VERSION = '1404-07';
+export type ListableProductStatus = 'ACTIVE' | 'DRAFT' | 'HIDDEN';
 const MIN_STORE_KB_ENTRIES = 3;
 // R2.1 — همان آستانه‌ی نشان «توجه» در نوار پنل (قبلاً در فرانت)
 const LOW_STOCK_BADGE_THRESHOLD = 3;
@@ -579,9 +580,14 @@ export class StoreService {
   }
 
   // کل کاتالوگ (انتخاب‌گرهای پنل، بات فروشنده)؛ لیست صفحه‌ی محصولات از listProductsPage می‌آید
-  async listProducts(sellerId: string, storeId: string) {
+  // SP-3/S5 — بدون status: فعال + مخفی (پیش‌نویس/آرشیو در انتخاب‌گرها نمی‌آید)؛ با status: همان یکی
+  async listProducts(sellerId: string, storeId: string, status?: ListableProductStatus) {
     await this.getOwned(sellerId, storeId);
-    return this.findProductsWithCompleteness(storeId);
+    return this.findProductsWithCompleteness(
+      storeId,
+      undefined,
+      status ? [status] : ['ACTIVE', 'HIDDEN'],
+    );
   }
 
   // R3.2 — cursor pagination برای صفحه‌ی لیست محصولات
@@ -589,23 +595,37 @@ export class StoreService {
     sellerId: string,
     storeId: string,
     page: { cursor?: string; limit: number },
+    status: ListableProductStatus = 'ACTIVE',
   ) {
     await this.getOwned(sellerId, storeId);
-    const rows = await this.findProductsWithCompleteness(storeId, page);
+    const [rows, grouped] = await Promise.all([
+      this.findProductsWithCompleteness(storeId, page, [status]),
+      this.prisma.product.groupBy({
+        by: ['status'],
+        where: { storeId, status: { in: ['ACTIVE', 'DRAFT', 'HIDDEN'] } },
+        _count: { _all: true },
+      }),
+    ]);
+    const counts = { ACTIVE: 0, DRAFT: 0, HIDDEN: 0 };
+    for (const g of grouped) {
+      if (g.status in counts) counts[g.status as ListableProductStatus] = g._count._all;
+    }
     const items = rows.slice(0, page.limit);
     return {
       items,
       nextCursor:
         rows.length > page.limit ? items[items.length - 1].id : null,
+      counts,
     };
   }
 
   private async findProductsWithCompleteness(
     storeId: string,
     page?: { cursor?: string; limit: number },
+    statuses: ListableProductStatus[] = ['ACTIVE', 'HIDDEN'],
   ) {
     const products = await this.prisma.product.findMany({
-      where: { storeId },
+      where: { storeId, status: { in: statuses } },
       orderBy: page
         ? [{ createdAt: 'desc' }, { id: 'desc' }]
         : { createdAt: 'desc' },
@@ -1226,6 +1246,117 @@ export class StoreService {
         : []),
     ]);
     return { ...updated, isFirstActiveProduct };
+  }
+
+  // SP-5/S4 — انتشار گروهی پیش‌نویس‌ها؛ هر محصول مستقل (یکی ناقص بقیه را نمی‌گیرد)
+  async publishProducts(sellerId: string, storeId: string, ids: string[]) {
+    await this.getOwned(sellerId, storeId);
+    const unique = [...new Set(ids)].slice(0, 50);
+    const rows = await this.prisma.product.findMany({
+      where: { id: { in: unique }, storeId },
+      include: { _count: { select: { variants: true } } },
+    });
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    const published: string[] = [];
+    const failed: { id: string; missing: string[] }[] = [];
+    let activeCount = await this.countActiveProducts(storeId);
+    for (const id of unique) {
+      const row = byId.get(id);
+      if (!row) {
+        failed.push({ id, missing: ['not_found'] });
+        continue;
+      }
+      if (row.status === 'ACTIVE') {
+        published.push(id);
+        continue;
+      }
+      if (row.status === 'ARCHIVED') {
+        failed.push({ id, missing: ['not_found'] });
+        continue;
+      }
+      const missing = missingForPublish({
+        name: row.name,
+        basePrice: row.basePrice,
+        pricingModel: row.pricingModel,
+        trackStock: row.trackStock,
+        hasVariants: row._count.variants > 0,
+        stockSetAt: row.stockSetAt,
+      });
+      if (missing.length > 0) {
+        failed.push({ id, missing });
+        continue;
+      }
+      await this.prisma.product.update({ where: { id }, data: { status: 'ACTIVE' } });
+      this.productEvents.log(
+        'product_published',
+        { storeId, userId: sellerId },
+        { via: 'batch', first: activeCount === 0 },
+      );
+      activeCount++;
+      published.push(id);
+    }
+    return { published, failed };
+  }
+
+  // SP-5/§4.12.3 — «یکی مثل این بساز»: پیش‌نویس تازه با همان مشخصات (بدون عکس/ویدیو/نظرات/کد/sku)
+  async duplicateProduct(sellerId: string, storeId: string, productId: string) {
+    await this.getOwnedProduct(sellerId, storeId, productId);
+    const src = await this.prisma.product.findUnique({
+      where: { id: productId },
+      include: {
+        optionTypes: { orderBy: { position: 'asc' }, include: { values: { orderBy: { position: 'asc' } } } },
+        variants: true,
+      },
+    });
+    if (!src) throw new NotFoundException(fa.store.productNotFound);
+    const copy = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.product.create({
+        data: {
+          storeId,
+          name: `${src.name} (کپی)`.slice(0, 200),
+          basePrice: src.basePrice,
+          pricingModel: src.pricingModel,
+          weightGrams: src.weightGrams,
+          purityKarat: src.purityKarat,
+          goldWageType: src.goldWageType,
+          goldWageValue: src.goldWageValue,
+          goldProfitPercent: src.goldProfitPercent,
+          description: src.description,
+          specs: src.specs ?? Prisma.DbNull,
+          trackStock: src.trackStock,
+          persuasionTechniquesEnabled: src.persuasionTechniquesEnabled,
+          hasFulfillmentDelay: src.hasFulfillmentDelay,
+          status: 'DRAFT',
+          stock: 0,
+          stockSetAt: null,
+        },
+      });
+      for (const [i, option] of src.optionTypes.entries()) {
+        await tx.productOptionType.create({
+          data: {
+            productId: created.id,
+            name: option.name,
+            position: i,
+            values: { create: option.values.map((v, j) => ({ value: v.value, position: j })) },
+          },
+        });
+      }
+      for (const v of src.variants) {
+        await tx.productVariant.create({
+          data: {
+            productId: created.id,
+            optionValues: v.optionValues as Prisma.InputJsonValue,
+            stock: 0,
+            priceOverride: v.priceOverride,
+            weightGrams: v.weightGrams,
+            purityKarat: v.purityKarat,
+          },
+        });
+      }
+      return created;
+    });
+    this.productEvents.log('product_duplicated', { storeId, userId: sellerId }, { from: productId });
+    return copy;
   }
 
   // docs/PRD-product-display-focus-and-variations.md §۴.۱ — همیشه جایگزین کامل (نه patch

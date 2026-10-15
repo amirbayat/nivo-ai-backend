@@ -68,6 +68,9 @@ import { GenerateProductDescriptionDto } from './dto/generate-product-descriptio
 import { GenerateProductOptionsDto } from './dto/generate-product-options.dto';
 import { AnalyzeOwnerNotesDto } from './dto/analyze-owner-notes.dto';
 import { fa } from '../../i18n/fa';
+import { ProductAiFillService } from './product-ai-fill.service';
+import { PublishProductsDto } from './dto/publish-products.dto';
+import { AiFillProductDto } from './dto/ai-fill-product.dto';
 import { parsePageQuery } from '../../common/utils/page-query.util';
 
 // docs/PRD-mvp-launch-plan.md گام ۰ — ثبت‌نام فروشنده و ساخت فروشگاه
@@ -84,6 +87,7 @@ export class StoreController {
     private readonly storeAdPlacementService: StoreAdPlacementService,
     private readonly productEnrichmentService: ProductEnrichmentService,
     private readonly refunds: RefundService,
+    private readonly productAiFill: ProductAiFillService,
   ) {}
 
   @Get('me')
@@ -196,16 +200,45 @@ export class StoreController {
     @Param('id') id: string,
     @Query('cursor') cursor?: string,
     @Query('limit') limit?: string,
+    @Query('status') status?: string,
   ) {
-    // R3.2 — با cursor/limit ← صفحه‌ای ({items, nextCursor})؛ بدون آن ← کل کاتالوگ (انتخاب‌گرها)
+    const st =
+      status === 'DRAFT' || status === 'HIDDEN' || status === 'ACTIVE' ? status : undefined;
+    // R3.2 — با cursor/limit ← صفحه‌ای ({items, nextCursor, counts}); بدون آن ← کل کاتالوگ (انتخاب‌گرها)
     if (cursor !== undefined || limit !== undefined) {
-      return this.storeService.listProductsPage(
-        user.sub,
-        id,
-        parsePageQuery(cursor, limit),
-      );
+      return this.storeService.listProductsPage(user.sub, id, parsePageQuery(cursor, limit), st);
     }
-    return this.storeService.listProducts(user.sub, id);
+    return this.storeService.listProducts(user.sub, id, st);
+  }
+
+  // SP-5 — انتشار گروهی پیش‌نویس‌ها (تا ۵۰ شناسه)
+  @Post(':id/products/publish')
+  publishProducts(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: PublishProductsDto,
+  ) {
+    return this.storeService.publishProducts(user.sub, id, dto.ids);
+  }
+
+  @Post(':id/products/:productId/duplicate')
+  duplicateProduct(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('productId') productId: string,
+  ) {
+    return this.storeService.duplicateProduct(user.sub, id, productId);
+  }
+
+  // SP-4 — «عکس + یک جمله ← فیلدها»؛ چیزی ذخیره نمی‌کند
+  @Post(':id/products/:productId/ai-fill')
+  aiFillProduct(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('productId') productId: string,
+    @Body() dto: AiFillProductDto,
+  ) {
+    return this.productAiFill.fill(user.sub, id, productId, dto.text);
   }
 
   // docs/PRD-category-specific-product-pricing-and-attributes.md بخش ۳.۲ — پیش‌نمایش زنده‌ی

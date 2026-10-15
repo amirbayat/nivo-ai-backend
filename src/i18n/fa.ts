@@ -129,6 +129,8 @@ export const fa = {
   },
   store: {
     csvUnlimited: 'نامحدود',
+    aiFillRateLimited: 'امروز زیاد استفاده کردی؛ فردا دوباره امتحان کن',
+    aiFillFailed: 'الان نشد، دوباره بزن',
     importBlankStockNote: 'موجودی خالی بود ← همیشه موجود',
     productNotReady: 'محصول هنوز آماده‌ی انتشار نیست',
     productBackToDraft: 'محصول منتشرشده دیگر به پیش‌نویس برنمی‌گردد؛ از «مخفی کن» استفاده کن',
