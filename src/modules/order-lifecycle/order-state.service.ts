@@ -144,7 +144,9 @@ export class OrderStateService {
       throw new ConflictException(fa.order.invalidTransition);
     }
 
-    if (from === 'REJECTED') {
+    // تایید (حتی بعد از رسید تازه که وضعیت RECEIPT_SUBMITTED است) و هر خروج از REJECTED با refundها درگیر است
+    const reopens = from === 'REJECTED' || to === 'APPROVED';
+    if (reopens) {
       // قفل refundهای همین سفارش قبل از چک DONE؛ markPaid هم ردیف سفارش را قفل می‌گیرد، پس یا
       // قبل از ما commit شده و اینجا DONE می‌بینیم، یا بعد از ما می‌آید و refund لغوشده را می‌بیند
       await tx.$queryRaw`SELECT id FROM order_refunds WHERE "orderId" = ${orderId} FOR UPDATE`;
@@ -283,18 +285,23 @@ export class OrderStateService {
         input.actor === 'SELLER' ? 'SELLER' : 'SYSTEM',
         input.data?.refundAmountToman,
         input.reason ?? input.data?.rejectReason,
-        input.data?.refundHoldForSeller ? 'AWAITING_SELLER_CONFIRM' : 'AWAITING_DESTINATION',
+        // فقط «پول رسیده» صریح فروشنده refund آماده‌ی پرداخت می‌سازد؛ بدون جواب (لغو cron،
+        // لغو خریدار، رسید رسیده بین چک و قفل) منتظر تایید فروشنده می‌ماند [R0.2]
+        input.data?.moneyReceived === true && !input.data?.refundHoldForSeller
+          ? 'AWAITING_DESTINATION'
+          : 'AWAITING_SELLER_CONFIRM',
       );
       refundId = created?.id ?? null;
       refundAmountToman = created?.amountToman ?? null;
       refundStatus = created?.status ?? null;
     }
     let refundsCancelled = 0;
-    if (from === 'REJECTED') {
+    // رسید تازه (REJECTED → RECEIPT_SUBMITTED) refund را لغو نمی‌کند؛ فقط تایید واقعی [R0.9]
+    if (to === 'APPROVED') {
       const cancelled = await tx.orderRefund.updateMany({
         where: {
           orderId,
-          status: { in: ['AWAITING_DESTINATION', 'READY'] },
+          status: { in: ['AWAITING_DESTINATION', 'AWAITING_SELLER_CONFIRM', 'READY'] },
           reason: { in: ['ORDER_REJECTED', 'ORDER_CANCELLED'] },
         },
         data: { status: 'CANCELLED' },

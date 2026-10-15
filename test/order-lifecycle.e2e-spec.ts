@@ -280,6 +280,7 @@ describeDb('OrderStateService + OrderExpiryService (Postgres واقعی)', () =>
       orderId: order.id,
       to: 'REJECTED',
       actor: 'SELLER',
+      data: { moneyReceived: true },
     });
     const openBefore = await prisma.orderRefund.count({
       where: {
@@ -405,6 +406,50 @@ describeDb('OrderStateService + OrderExpiryService (Postgres واقعی)', () =>
     expect(
       (await prisma.orderRefund.findUniqueOrThrow({ where: { id: ready.id } })).status,
     ).toBe('DONE');
+  });
+
+  it('لغو سفارشی که رسید دارد بدون جواب فروشنده → refund منتظر تایید فروشنده [R0.2]', async () => {
+    const { order } = await newOrder({ status: 'RECEIPT_SUBMITTED' });
+    const r = await state.transition({
+      orderId: order.id,
+      to: 'CANCELLED',
+      actor: 'SYSTEM',
+      channel: 'CRON',
+    });
+    expect(r.refundStatus).toBe('AWAITING_SELLER_CONFIRM');
+    expect(
+      await prisma.orderRefund.count({
+        where: { orderId: order.id, status: 'AWAITING_DESTINATION' },
+      }),
+    ).toBe(0);
+  });
+
+  it('رسید تازه در REJECTED، refund را لغو نمی‌کند؛ فقط تایید واقعی لغو می‌کند [R0.9]', async () => {
+    const { order } = await newOrder({ status: 'RECEIPT_SUBMITTED' });
+    await state.transition({
+      orderId: order.id,
+      to: 'REJECTED',
+      actor: 'SELLER',
+      data: { moneyReceived: true },
+    });
+    const resubmit = await state.transition({
+      orderId: order.id,
+      to: 'RECEIPT_SUBMITTED',
+      actor: 'BUYER',
+    });
+    expect(resubmit.refundsCancelled).toBe(0);
+    expect(
+      await prisma.orderRefund.count({
+        where: { orderId: order.id, status: 'AWAITING_DESTINATION' },
+      }),
+    ).toBe(1);
+    const approved = await approve(order.id);
+    expect(approved.refundsCancelled).toBe(1);
+    expect(
+      await prisma.orderRefund.count({
+        where: { orderId: order.id, status: 'CANCELLED' },
+      }),
+    ).toBe(1);
   });
 
   it('تایید دوباره و «واریز کردم» هم‌زمان: هرگز «تایید موفق + refund پرداخت‌شده» نمی‌شود [R0.1]', async () => {
