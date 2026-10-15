@@ -56,7 +56,7 @@ export function publicOrderUrl(code: string): string {
   return `${base}/o/${code}`;
 }
 
-// Reuse an unexpired short code, or create one. Null when the flag or secret is off.
+// Reuse an unexpired short code, or create one. Null when the flag, secret or APP_URL is off.
 export async function ensureBuyerOrderLink(
   prisma: PrismaService,
   orderId: string,
@@ -65,6 +65,8 @@ export async function ensureBuyerOrderLink(
   if (!config.orderPublicLinkEnabled) return null;
   const secret = orderLinkSecret();
   if (!secret) return null;
+  // R3.8 — بدون APP_URL لینک نسبی (/o/CODE) ساخته می‌شد که در پیامک/چت بی‌معناست
+  if (!process.env.APP_URL?.trim()) return null;
   const now = new Date();
   const existing = await prisma.shortLink.findFirst({
     where: { orderId, expiresAt: { gt: now } },
