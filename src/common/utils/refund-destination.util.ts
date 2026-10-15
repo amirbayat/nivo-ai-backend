@@ -117,8 +117,12 @@ export type ParsedDestination =
 
 export function parseDestination(raw: string): ParsedDestination | null {
   const compact = toEnglishDigits(raw).replace(/[\s-]/g, '');
-  if (/^IR/i.test(compact)) {
-    const iban = compact.toUpperCase();
+  const iban = /^IR/i.test(compact)
+    ? compact.toUpperCase()
+    : /^\d{24}$/.test(compact)
+      ? `IR${compact}`
+      : null;
+  if (iban) {
     if (!ibanOk(iban)) return null;
     return {
       type: 'SHEBA',

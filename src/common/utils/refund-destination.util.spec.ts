@@ -24,6 +24,16 @@ describe('refund destination', () => {
     expect(bankNameForSheba('IR060170000000000000000000')).toBe('بانک ملی');
   });
 
+  it('adds IR to a 24-digit SHEBA [F21]', () => {
+    const parsed = parseDestination('060170000000000000000000');
+    expect(parsed?.type).toBe('SHEBA');
+    expect(parsed?.plain).toBe('IR060170000000000000000000');
+    expect(parseDestination('۰۶۰۱۷۰۰۰۰۰۰۰۰۰۰۰۰۰۰۰۰۰۰۰')?.plain).toBe(
+      'IR060170000000000000000000',
+    );
+    expect(parseDestination('060170000000000000000001')).toBeNull();
+  });
+
   it('parseDestination never returns the raw value for an invalid number', () => {
     expect(parseDestination('4111-1111-1111-1111')?.plain).toBe('4111111111111111');
     expect(parseDestination('not-a-card')).toBeNull();
