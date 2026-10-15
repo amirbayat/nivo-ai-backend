@@ -6,6 +6,8 @@ import { fa } from '../../i18n/fa';
 export type ShopTurnEvent =
   | { type: 'status'; text: string }
   | { type: 'delta'; text: string }
+  // R1.4 — گارد قیمت متن نهایی را عوض کرد؛ فرانت متن حباب را جایگزین می‌کند
+  | { type: 'replace'; text: string }
   | {
       type: 'done';
       reply: string;
@@ -114,6 +116,11 @@ export function runWithShopTurn<T>(sink: Sink, fn: () => Promise<T>): Promise<T>
 
 export function runOutsideShopTurn<T>(fn: () => Promise<T>): Promise<T> {
   return sinkStorage.exit(fn);
+}
+
+// فقط داخل turn استریم اثر دارد؛ بیرون از آن بی‌صدا رد می‌شود
+export function emitShopReplace(text: string): void {
+  sinkStorage.getStore()?.emit({ type: 'replace', text });
 }
 
 export function isInsideShopTurn(): boolean {

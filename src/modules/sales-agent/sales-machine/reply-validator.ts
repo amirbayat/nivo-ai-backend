@@ -1,5 +1,6 @@
 // docs/PRD-sales-agent-sales-state-machine.md §۱۱ — اعتبارسنجی قطعی پاسخ قبل از ارسال. خالص است؛
 // retry اصلاحی در engine انجام می‌شود (فقط وقتی جهشی رخ نداده)
+import { findUnauthorizedAmounts } from '../../../common/utils/fa-amounts.util';
 import { BANNED_OPENERS, BANNED_PHRASES } from './sales-playbook';
 import type {
   ReplyContract,
@@ -47,19 +48,12 @@ export function normalizeFa(input: string): string {
     .toLowerCase();
 }
 
-// همان منطق findSuspiciousPriceClaims قبلی engine — حالا تخلف است، نه فقط لاگ
+// R1.4 — پارسر مشترک مبلغ فارسی (تومان/هزار/میلیون/ریال، ارقام فارسی و جداکننده‌ها)
 export function findSuspiciousPriceClaims(
   text: string,
   knownAmounts: Set<number>,
 ): number[] {
-  const normalized = toWesternDigits(text).replace(/[,٬]/g, '');
-  const matches = normalized.matchAll(/(\d{3,})\s*تومان/g);
-  const suspicious = new Set<number>();
-  for (const m of matches) {
-    const amount = Number(m[1]);
-    if (!knownAmounts.has(amount)) suspicious.add(amount);
-  }
-  return [...suspicious];
+  return findUnauthorizedAmounts(text, knownAmounts);
 }
 
 // همه‌ی اعداد ≥۳ رقمی یک متن (فارسی‌رقم و جداکننده نرمال می‌شود) — engine از اعداد داخل
@@ -247,7 +241,7 @@ function violationLine(v: Violation): string {
     case 'MARKDOWN':
       return 'از ** و # استفاده نکن؛ متن ساده بنویس.';
     case 'SUSPICIOUS_PRICE':
-      return `این مبالغ در هیچ داده‌ی واقعی نیست: ${v.amounts.join('، ')} — فقط قیمت‌های واقعی ابزارها را بگو.`;
+      return `مبلغ ${v.amounts.join('، ')} در داده نیست؛ فقط از قیمت‌های ابزار استفاده کن.`;
     case 'REJECTED_PRODUCT_RECOMMENDED':
       return 'محصولی که مشتری رد کرده بود را دوباره پیشنهاد دادی؛ محصول دیگری انتخاب کن.';
   }

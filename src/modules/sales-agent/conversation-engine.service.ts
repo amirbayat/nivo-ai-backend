@@ -62,6 +62,7 @@ import {
 } from 'ai';
 import {
   currentShopTurnId,
+  emitShopReplace,
   generateShopTurn,
   runOutsideShopTurn,
 } from './shop-turn-stream';
@@ -155,6 +156,7 @@ import {
   runLlmTurn,
 } from '../../common/services/llm-turn-guard';
 import { setLogCtx } from '../../common/logging/log-context';
+import { stripUnauthorizedPriceSentences } from '../../common/utils/fa-amounts.util';
 import { isValidCartQty, reconcileCart, lineKey } from './cart-validation.util';
 import type { CatalogLine } from './cart-validation.util';
 
@@ -3204,34 +3206,76 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       .filter((c) => c.toolName !== 'respond_to_customer')
       .map((c) => ({ name: c.toolName, args: c.input }));
 
-    const text = finalCall.input.text.trim();
+    let text = finalCall.input.text.trim();
     const relevantProductIds = finalCall.input.relevantProductIds ?? [];
 
     // بخش ۴/۱۱ docs/PRD-full-agent-engineering-review.md — جمع تمام مبلغ‌های واقعی این نوبت
-    // (قیمت محصولات دیده‌شده، جمع/تک‌تک آیتم‌های سبد، مبلغ سفارش، مبلغ تخفیف) برای چک سبک پایین
-    const knownAmounts = new Set<number>();
-    for (const p of rt.seenProducts.values()) knownAmounts.add(p.basePrice);
-    for (const item of rt.ctx.cart) {
-      knownAmounts.add(item.unitPrice);
-      knownAmounts.add(item.unitPrice * item.qty);
-    }
-    knownAmounts.add(this.cartTotal(rt.ctx.cart));
-    // نکته‌ی TS: چون rt.cartResult/rt.orderResult فقط داخل closure ابزارها reassign می‌شوند، کامپایلر
-    // تایپ آن‌ها را در این نقطه (خارج از closure) فقط «null» می‌بیند و هر narrowing مستقیم را به
-    // never می‌رساند — cast صریح به تایپ اعلان‌شده این مشکل را دور می‌زند
-    const cartResultTotal = rt.cartResult?.total;
-    if (cartResultTotal !== undefined) knownAmounts.add(cartResultTotal);
-    const orderResultAmount = rt.orderResult?.amount;
-    if (orderResultAmount !== undefined) knownAmounts.add(orderResultAmount);
-    if (rt.ctx.appliedDiscount)
-      knownAmounts.add(rt.ctx.appliedDiscount.amountToman);
-    const suspiciousPriceClaims = findSuspiciousPriceClaims(text, knownAmounts);
-    if (suspiciousPriceClaims.length) {
+    // (قیمت محصولات دیده‌شده، جمع/تک‌تک آیتم‌های سبد، مبلغ سفارش، مبلغ تخفیف، اعداد خود پرامپت)
+    const allowedAmounts = () => {
+      const known = new Set<number>(extractNumbers(systemPrompt));
+      for (const p of rt.seenProducts.values()) known.add(p.basePrice);
+      for (const item of rt.ctx.cart) {
+        known.add(item.unitPrice);
+        known.add(item.unitPrice * item.qty);
+      }
+      known.add(this.cartTotal(rt.ctx.cart));
+      // نکته‌ی TS: rt.cartResult/rt.orderResult فقط داخل closure ابزارها reassign می‌شوند
+      const cartResultTotal = rt.cartResult?.total;
+      if (cartResultTotal !== undefined) known.add(cartResultTotal);
+      const orderResultAmount = rt.orderResult?.amount;
+      if (orderResultAmount !== undefined) known.add(orderResultAmount);
+      if (rt.ctx.appliedDiscount) known.add(rt.ctx.appliedDiscount.amountToman);
+      return known;
+    };
+    let priceRetries = 0;
+    let suspiciousPriceClaims = findSuspiciousPriceClaims(text, allowedAmounts());
+    if (suspiciousPriceClaims.length && !rt.mutationHappened) {
+      priceRetries = 1;
       this.logger.warn(
-        `suspicious price claim in FULL_AGENT reply: conversation ${conversation.id}, ` +
-          `amounts=[${suspiciousPriceClaims.join(', ')}], text="${text}"`,
+        `FULL_AGENT price guard retry: amounts=[${suspiciousPriceClaims.join(', ')}] conversation=${conversation.id}`,
       );
+      try {
+        const retryResult = await generateShopTurn({
+          maxRetries: LLM_MAX_RETRIES,
+          model: this.aiProvider.buildClient(undefined, {
+            supportsStructuredOutputs: true,
+          })(model),
+          tools,
+          stopWhen: stepCountIs(6),
+          system: `${systemPrompt}\n\n${buildCorrectiveInstruction([
+            { code: 'SUSPICIOUS_PRICE', amounts: suspiciousPriceClaims },
+          ])}`,
+          prompt: customerMessage,
+          temperature: 0.3,
+        });
+        usedInputTokens += retryResult.usage.inputTokens ?? 0;
+        usedOutputTokens += retryResult.usage.outputTokens ?? 0;
+        const retryShortCircuit = rt.handoffResult ?? rt.flowResult;
+        if (retryShortCircuit) {
+          return {
+            engineResult: retryShortCircuit,
+            inputTokens: usedInputTokens,
+            outputTokens: usedOutputTokens,
+          };
+        }
+        const retryFinalCall = retryResult.toolCalls.find(
+          (c) => c.toolName === 'respond_to_customer',
+        ) as RespondToCustomerCall | undefined;
+        if (retryFinalCall) {
+          result = retryResult;
+          finalCall = retryFinalCall;
+          text = finalCall.input.text.trim();
+          suspiciousPriceClaims = findSuspiciousPriceClaims(text, allowedAmounts());
+        }
+      } catch (err) {
+        this.logger.error(
+          `price guard retry failed, stripping instead: conversation=${conversation.id}`,
+          err as Error,
+        );
+      }
     }
+    // هنوز مبلغ غیرمجاز مانده (یا retry ممکن نبود) ← جمله‌ی حاوی مبلغ حذف + «قیمت دقیق روی کارت»
+    text = await this.applyPriceGuard(conversation, text, allowedAmounts(), priceRetries);
 
     const uiBlock = this.deriveFullAgentUiBlock({
       orderResult: rt.orderResult,
@@ -4155,6 +4199,18 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     for (const b of [mem.slots.budgetMaxToman, mem.slots.budgetMinToman]) {
       if (b !== null) knownAmounts.add(b);
     }
+    const allowedAmounts = () => {
+      const k = new Set(knownAmounts);
+      for (const item of rt.ctx.cart) {
+        k.add(item.unitPrice);
+        k.add(item.unitPrice * item.qty);
+      }
+      k.add(this.cartTotal(rt.ctx.cart));
+      if (rt.cartResult) k.add(rt.cartResult.total);
+      if (rt.orderResult) k.add(rt.orderResult.amount);
+      if (rt.ctx.appliedDiscount) k.add(rt.ctx.appliedDiscount.amountToman);
+      return k;
+    };
     const validate = (call: SalesRespondCall) =>
       validateReply({
         text: call.input.text.trim(),
@@ -4163,18 +4219,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         contract,
         mem,
         lastAgentMessage,
-        knownAmounts: (() => {
-          const k = new Set(knownAmounts);
-          for (const item of rt.ctx.cart) {
-            k.add(item.unitPrice);
-            k.add(item.unitPrice * item.qty);
-          }
-          k.add(this.cartTotal(rt.ctx.cart));
-          if (rt.cartResult) k.add(rt.cartResult.total);
-          if (rt.orderResult) k.add(rt.orderResult.amount);
-          if (rt.ctx.appliedDiscount) k.add(rt.ctx.appliedDiscount.amountToman);
-          return k;
-        })(),
+        knownAmounts: allowedAmounts(),
         catalogSize: facts.catalogSize,
         mutationShortCircuited: false,
         askedQuestion: call.input.askedQuestion,
@@ -4227,7 +4272,13 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       );
     }
 
-    const text = finalCall.input.text.trim();
+    // R1.4 — بعد از retry اصلاحی هنوز مبلغ غیرمجاز مانده؟ جمله حذف + «قیمت دقیق روی کارت»
+    const text = await this.applyPriceGuard(
+      conversation,
+      finalCall.input.text.trim(),
+      allowedAmounts(),
+      correctiveRetry && allViolations.some((v) => v.code === 'SUSPICIOUS_PRICE') ? 1 : 0,
+    );
     const relevantProductIds = finalCall.input.relevantProductIds ?? [];
     const askedQuestion = finalCall.input.askedQuestion?.trim() || null;
     const uiBlock = this.deriveFullAgentUiBlock({
@@ -4502,6 +4553,39 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         (err: unknown) => this.onTurnError(conversation, err),
       ),
     );
+  }
+
+  // R1.4 — گارد قیمت در مسیر زنده. اگر هنوز مبلغ غیرمجاز در متن مانده، جمله‌ی حاوی آن حذف و
+  // «قیمت دقیق رو روی کارت محصول ببین» اضافه می‌شود؛ در استریم رویداد `replace` با متن نهایی
+  // می‌رود. هر بار که گارد وارد عمل شد (retry یا حذف) ProductEvent `price_guard_triggered` ثبت می‌شود.
+  private async applyPriceGuard(
+    conversation: ConversationWithStore,
+    text: string,
+    allowed: Set<number>,
+    retries: number,
+  ): Promise<string> {
+    const stripped = stripUnauthorizedPriceSentences(
+      text,
+      allowed,
+      fa.salesAgent.priceSeeCard,
+    );
+    if (stripped.changed) emitShopReplace(stripped.text);
+    if (retries > 0 || stripped.changed) {
+      this.logger.warn(
+        `price guard: retries=${retries} stripped=${stripped.changed} conversation=${conversation.id}`,
+      );
+      await this.prisma.productEvent
+        .create({
+          data: {
+            name: 'price_guard_triggered',
+            storeId: conversation.storeId,
+            conversationId: conversation.id,
+            props: { retries, stripped: stripped.changed },
+          },
+        })
+        .catch(() => undefined);
+    }
+    return stripped.text;
   }
 
   // R1.2 — فروشگاه معلق: پیام ثابت، بدون هیچ call مدل و بدون سفارش جدید. kill switch AI
