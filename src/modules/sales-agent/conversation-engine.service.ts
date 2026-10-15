@@ -135,9 +135,11 @@ import type {
   UiBlock,
 } from './sales-agent.types';
 import { ConversationLockService } from './conversation-lock.service';
+import { NotificationService } from '../notifications/notification.service';
 import {
   CART_MAX_QTY_PER_LINE,
   CONVERSATION_DRAIN_MAX_ROUNDS,
+  CREDIT_ALERT_DEDUPE_TTL_SECONDS,
   LLM_FALLBACK_MAX_MODELS,
   LLM_MAX_RETRIES,
   ORDER_PAYMENT_WINDOW_HOURS,
@@ -619,6 +621,7 @@ export class ConversationEngineService {
     private readonly orderState: OrderStateService,
     private readonly orderNotifications: OrderNotificationService,
     private readonly receiptChecks: ReceiptCheckService,
+    private readonly notifications: NotificationService,
   ) {}
 
   // docs/PRD-category-specific-product-pricing-and-attributes.md بخش ۲.۳ — نقطه‌ی مرکزی حل
@@ -8485,6 +8488,18 @@ answered=false بده (به‌جای حدس‌زدن).`,
           ],
         },
       );
+    } else {
+      await this.notifications.notifySeller({
+        storeId: conversation.storeId,
+        template: 'PAYMENT_METHOD_MISSING',
+        entityId: conversation.storeId,
+        botText: fa.telegram.paymentMethodMissingSms,
+        smsText: fa.telegram.paymentMethodMissingSms,
+        dedupe: {
+          key: `payment-method-missing:${conversation.storeId}`,
+          ttlSeconds: CREDIT_ALERT_DEDUPE_TTL_SECONDS,
+        },
+      });
     }
     return { reply, uiBlocks: [], state: nextState };
   }
