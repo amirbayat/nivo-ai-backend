@@ -405,13 +405,18 @@ export class SellerBotService {
       await this.api.sendText(chatId, fa.orderNotify.refundsEmpty);
       return;
     }
+    const base = (this.config.get<string>('APP_URL') ?? '').replace(/\/$/, '');
+    const panelUrl = base ? `${base}/seller/panel/refunds` : '';
     for (const row of rows.slice(0, 8)) {
       await this.api.sendText(
         chatId,
-        `${row.orderCode}\n${row.amountToman.toLocaleString('fa-IR')} تومان\n${row.destination ?? row.destinationMasked ?? ''}`,
+        `${row.orderCode}\n${row.amountToman.toLocaleString('fa-IR')} تومان\n${row.destinationMasked ?? ''}`,
         {
           inline_keyboard: [
             [{ text: fa.orderNotify.refundMarkPaid, callback_data: `sbrf:${row.id}` }],
+            ...(panelUrl
+              ? [[{ text: fa.orderNotify.refundCopyInPanel, url: panelUrl }]]
+              : []),
           ],
         },
       );

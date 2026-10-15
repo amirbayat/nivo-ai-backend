@@ -62,7 +62,7 @@ export interface TelegramUpdate {
 }
 
 export interface TelegramInlineKeyboard {
-  inline_keyboard: { text: string; callback_data: string }[][];
+  inline_keyboard: { text: string; callback_data?: string; url?: string }[][];
 }
 
 // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۲ — Reply Keyboard واقعی تلگرام (جای کیبرد

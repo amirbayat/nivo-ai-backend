@@ -429,6 +429,7 @@ export const fa = {
     sellerOrderIssueSms: (code: string) => `نیوو: خریدار برای سفارش ${code} مشکل ثبت کرد. از پنل ببین.`,
     refundsEmpty: 'بازپرداخت آماده‌ی واریز نداری.',
     refundMarkPaid: 'واریز کردم',
+    refundCopyInPanel: 'کپی در پنل',
     refundMarkedPaid: 'واریز ثبت شد.',
   },
   salesAgent: {

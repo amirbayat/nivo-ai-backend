@@ -349,7 +349,7 @@ export class RefundService {
       note: r.note,
       status: r.status,
       destinationMasked: r.destinationMasked,
-      destination: this.decryptIf(r.destinationEnc),
+      destination: r.status === 'READY' ? this.decryptIf(r.destinationEnc) : null,
       destinationType: r.destinationType,
       holderName: r.holderName,
       bankName: r.bankName,
