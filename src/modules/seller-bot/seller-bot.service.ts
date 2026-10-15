@@ -1,4 +1,9 @@
-import { ConflictException, Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  Logger,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { safeEqual } from '../../common/utils/safe-equal.util';
 import type { Store } from '@prisma/client';
@@ -550,14 +555,7 @@ export class SellerBotService {
         order.status === 'APPROVED' ||
         !!order.receiptImageKey;
       if (needsMoneyAnswer) {
-        await this.api.sendText(chatId, fa.sellerBot.orderRejectButton, {
-          inline_keyboard: [
-            [
-              { text: fa.sellerBot.moneyArrivedButton, callback_data: `sbrm:1:${orderId}` },
-              { text: fa.sellerBot.moneyMissingButton, callback_data: `sbrm:0:${orderId}` },
-            ],
-          ],
-        });
+        await this.sendMoneyQuestion(chatId, orderId);
         return;
       }
       await this.api.sendForceReply(
@@ -565,6 +563,17 @@ export class SellerBotService {
         fa.sellerBot.orderRejectReasonPrompt(orderId),
       );
     }
+  }
+
+  private async sendMoneyQuestion(chatId: string, orderId: string): Promise<void> {
+    await this.api.sendText(chatId, fa.sellerBot.orderRejectButton, {
+      inline_keyboard: [
+        [
+          { text: fa.sellerBot.moneyArrivedButton, callback_data: `sbrm:1:${orderId}` },
+          { text: fa.sellerBot.moneyMissingButton, callback_data: `sbrm:0:${orderId}` },
+        ],
+      ],
+    });
   }
 
   private async handleRejectReasonMessage(
@@ -598,6 +607,14 @@ export class SellerBotService {
     } catch (err) {
       if (err instanceof ConflictException) {
         await this.sendMenu(chatId, err.message);
+        return;
+      }
+      // پیام جواب به پرامپت قدیمی (بدون فلگ پول) ← دوباره بپرس «پول نشسته/نرسیده» [R0.13]
+      if (
+        err instanceof BadRequestException &&
+        err.message === fa.order.moneyReceivedRequired
+      ) {
+        await this.sendMoneyQuestion(chatId, orderId);
         return;
       }
       throw err;
