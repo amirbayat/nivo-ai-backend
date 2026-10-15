@@ -2141,7 +2141,7 @@ export class StoreService {
     await this.getOwned(sellerId, storeId);
     const take = 20;
     const overdueBefore = new Date(Date.now() - 48 * 60 * 60 * 1000);
-    const [receipts, toShip, conversations, refunds, issues, products] =
+    const [receipts, toShip, conversations, refunds, issues, lowStockRows, waitingRows] =
       await Promise.all([
         this.prisma.order.findMany({
           where: {
@@ -2193,27 +2193,45 @@ export class StoreService {
           take,
           include: { order: { select: { id: true, orderCode: true } } },
         }),
-        this.prisma.product.findMany({
-          where: { storeId },
-          select: {
-            id: true,
-            name: true,
-            stock: true,
-            variants: { select: { stock: true } },
-          },
+        this.prisma.$queryRaw<{ id: string; name: string; stock: number }[]>`
+          SELECT p.id, p.name,
+            (CASE WHEN COUNT(v.id) = 0 THEN p.stock ELSE MIN(v.stock) END)::int AS stock
+          FROM products p
+          LEFT JOIN product_variants v ON v."productId" = p.id
+          WHERE p."storeId" = ${storeId}
+          GROUP BY p.id, p.name, p.stock
+          HAVING (COUNT(v.id) = 0 AND p.stock <= 2)
+              OR (COUNT(v.id) > 0 AND MIN(v.stock) <= 2)
+          ORDER BY stock ASC, p.name ASC
+          LIMIT ${take}
+        `,
+        this.prisma.productStockAlert.groupBy({
+          by: ['productId'],
+          where: { storeId, notifiedAt: null },
+          _count: { _all: true },
         }),
       ]);
 
-    const lowStock = products
-      .map((product) => {
-        const stock =
-          product.variants.length > 0
-            ? Math.min(...product.variants.map((variant) => variant.stock))
-            : product.stock;
-        return { id: product.id, name: product.name, stock };
-      })
-      .filter((product) => product.stock <= 2)
+    const waitingIds = waitingRows
+      .sort((a, b) => b._count._all - a._count._all)
       .slice(0, take);
+    const waitingProducts = waitingIds.length
+      ? await this.prisma.product.findMany({
+          where: { id: { in: waitingIds.map((row) => row.productId) } },
+          select: { id: true, name: true },
+        })
+      : [];
+    const waitingName = new Map(waitingProducts.map((row) => [row.id, row.name]));
+    const lowStock = lowStockRows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      stock: Number(row.stock),
+    }));
+    const awaitingRestock = waitingIds.map((row) => ({
+      id: row.productId,
+      name: waitingName.get(row.productId) ?? '',
+      openAlerts: row._count._all,
+    }));
 
     return {
       receipts: receipts.map((order) => ({
@@ -2245,6 +2263,7 @@ export class StoreService {
         reason: issue.reason,
       })),
       lowStock,
+      awaitingRestock,
     };
   }
 
