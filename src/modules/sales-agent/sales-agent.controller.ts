@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Headers,
+  Ip,
   NotFoundException,
   Param,
   Post,
@@ -338,11 +339,13 @@ export class SalesAgentController {
     @Param('conversationId') conversationId: string,
     @Headers('x-session-token') sessionToken: string,
     @Body() dto: SendBuyerOtpDto,
+    @Ip() ip: string,
   ) {
     return this.salesAgentService.sendBuyerOtp(
       conversationId,
       sessionToken,
       dto.phone,
+      ip,
     );
   }
 

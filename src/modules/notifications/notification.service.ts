@@ -53,7 +53,7 @@ export class NotificationService {
         );
       }
     }
-    for (const channel of TEMPLATE_CHANNELS[input.template]) {
+    for (const channel of input.channels ?? TEMPLATE_CHANNELS[input.template]) {
       try {
         const key = `notif:${input.template}:${input.entityId}:${channel}`;
         const first = await this.redis.set(
@@ -95,6 +95,7 @@ export class NotificationService {
     entityId?: string;
     botText: string;
     smsText?: string;
+    botKeyboard?: { inline_keyboard: { text: string; callback_data?: string; url?: string }[][] };
     dedupe?: { key: string; ttlSeconds: number };
   }): Promise<void> {
     try {
@@ -114,8 +115,14 @@ export class NotificationService {
       });
       if (!store) return;
       if (store.sellerBotChatId) {
-        await this.sellerBotApi
-          .sendText(store.sellerBotChatId, input.botText)
+        const send = input.botKeyboard
+          ? this.sellerBotApi.sendText(
+              store.sellerBotChatId,
+              input.botText,
+              input.botKeyboard,
+            )
+          : this.sellerBotApi.sendText(store.sellerBotChatId, input.botText);
+        await send
           .then(() => this.log(input, 'BOT', store.sellerBotChatId!, 'SENT'))
           .catch((err) => {
             this.logger.error(

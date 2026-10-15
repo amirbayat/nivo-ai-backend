@@ -57,16 +57,26 @@ export class StockAlertService {
       },
     });
     if (!existing) {
-      await this.prisma.productStockAlert.create({
-        data: {
-          storeId: input.storeId,
-          productId: product.id,
-          variantId,
-          customerId: input.customerId,
-          conversationId: input.conversationId,
-          phone: customer.phone,
-        },
-      });
+      try {
+        await this.prisma.productStockAlert.create({
+          data: {
+            storeId: input.storeId,
+            productId: product.id,
+            variantId,
+            customerId: input.customerId,
+            conversationId: input.conversationId,
+            phone: customer.phone,
+          },
+        });
+      } catch (err) {
+        if (
+          err instanceof Prisma.PrismaClientKnownRequestError &&
+          err.code === 'P2002'
+        ) {
+          return { status: 'subscribed' };
+        }
+        throw err;
+      }
     }
     return { status: 'subscribed' };
   }
@@ -80,6 +90,7 @@ export class StockAlertService {
           variantId: line.variantId,
           notifiedAt: null,
         },
+        orderBy: { createdAt: 'asc' },
         include: {
           product: {
             select: { name: true, store: { select: { slug: true } } },
@@ -87,7 +98,11 @@ export class StockAlertService {
         },
       });
       const base = (process.env.APP_URL ?? '').replace(/\/$/, '');
-      for (const alert of alerts) {
+      // TODO(product): texting every waiter on a popular restock gets expensive.
+      // The first 200 get SMS and chat. Everyone after that only gets the chat message.
+      const RESTOCK_SMS_CAP = 200;
+      for (let i = 0; i < alerts.length; i++) {
+        const alert = alerts[i];
         const productUrl = base
           ? `${base}/shop/${alert.product.store.slug}?product=${alert.productId}`
           : '';
@@ -95,6 +110,7 @@ export class StockAlertService {
           to: { customerId: alert.customerId },
           template: 'BACK_IN_STOCK',
           entityId: alert.id,
+          channels: i < RESTOCK_SMS_CAP ? undefined : ['CHAT'],
           data: {
             orderId: alert.id,
             productName: alert.product.name,

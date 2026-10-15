@@ -15,6 +15,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { RedisService } from '../../redis/redis.service';
 import { SmsService } from '../../sms/sms.service';
 import { normalizePhone } from '../../common/utils/normalize-phone';
+import { buyerOtpSendBlock } from '../../common/utils/buyer-otp-limit';
 import { StorageService } from '../../storage/storage.service';
 import { mimeTypeForExt } from '../../common/validators/chat-image.validator';
 import { MediaTranscodeService } from '../../common/services/media-transcode.service';
@@ -891,15 +892,21 @@ export class SalesAgentService {
     conversationId: string,
     sessionToken: string,
     rawPhone: string,
+    ip?: string,
   ): Promise<{ message: string }> {
     const conversation = await this.loadOwned(conversationId, sessionToken);
     const phone = normalizePhone(rawPhone);
-
-    const rateKey = this.otpRateKey(conversation.storeId, phone);
-    const sends = await this.redis.incr(rateKey);
-    if (sends === 1) await this.redis.expire(rateKey, 600);
-    if (sends > 3) {
+    const blocked = await buyerOtpSendBlock(
+      this.redis,
+      conversation.storeId,
+      phone,
+      ip,
+    );
+    if (blocked === 'store') {
       throw new HttpException(fa.auth.otpTooManyRequests(10), 429);
+    }
+    if (blocked) {
+      throw new HttpException(fa.auth.otpTooManyRequests(60), 429);
     }
 
     const code = Math.floor(100000 + Math.random() * 900000).toString();

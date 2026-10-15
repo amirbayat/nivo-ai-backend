@@ -60,6 +60,8 @@ export type NotifyBuyerInput = {
   // dedupe: template + entityId (+ کانال) در ۱۰ دقیقه
   entityId: string;
   data: BuyerNotificationData;
+  // Omit to use TEMPLATE_CHANNELS. Stock alerts pass ['CHAT'] past the SMS cap.
+  channels?: readonly BuyerChannel[];
   // Longer than the 10-minute channel dedupe. Cron passes that still match
   // (delivery nudge, refund reminder) must set this or they resend every run.
   dedupe?: { key: string; ttlSeconds: number };
