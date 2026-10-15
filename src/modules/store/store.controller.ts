@@ -133,6 +133,12 @@ export class StoreController {
     return this.storeService.getCompleteness(user.sub, id);
   }
 
+  // R2.1 — شمارنده‌های سبک نوار پنل
+  @Get(':id/badges')
+  getBadges(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    return this.storeService.getBadges(user.sub, id);
+  }
+
   @Get(':id/today')
   listToday(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     return this.storeService.listToday(user.sub, id);

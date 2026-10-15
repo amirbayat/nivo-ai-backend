@@ -80,6 +80,8 @@ import {
 
 // docs/PRD-product-strategy-and-roadmap.md بخش ۳.۱ — چک‌لیست سطح فروشگاه
 const MIN_STORE_KB_ENTRIES = 3;
+// R2.1 — همان آستانه‌ی نشان «توجه» در نوار پنل (قبلاً در فرانت)
+const LOW_STOCK_BADGE_THRESHOLD = 3;
 
 // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۳.۳ — کش aggregator پیشنهاد
 // تکمیل پروفایل: ۲۴ ساعت بین دو فراخوان LLM کافی است (این داده به‌کندی تغییر می‌کند)
@@ -2135,6 +2137,62 @@ export class StoreService {
       );
     }
     return lines.join('\n');
+  }
+
+  // R2.1 — شمارنده‌های سبک برای نشان‌های نوار پنل (جایگزین بار کردن کل لیست محصولات/مکالمه‌ها فقط برای شمردن)
+  async getBadges(sellerId: string, storeId: string) {
+    await this.getOwned(sellerId, storeId);
+    const overdueBefore = new Date(Date.now() - 48 * 60 * 60 * 1000);
+    const [receipts, conversations, issues, refundsOverdue, lowStockRows, weightProducts] =
+      await Promise.all([
+        this.prisma.order.count({
+          where: {
+            storeId,
+            status: 'RECEIPT_SUBMITTED',
+            conversation: { isTest: false },
+          },
+        }),
+        this.prisma.salesConversation.count({
+          where: { storeId, isMutedForHuman: true, isTest: false },
+        }),
+        this.prisma.orderIssue.count({
+          where: {
+            status: 'OPEN',
+            order: { storeId, conversation: { isTest: false } },
+          },
+        }),
+        this.prisma.orderRefund.count({
+          where: {
+            storeId,
+            status: { in: ['AWAITING_DESTINATION', 'READY'] },
+            createdAt: { lte: overdueBefore },
+            order: { conversation: { isTest: false } },
+          },
+        }),
+        this.prisma.$queryRaw<{ count: number }[]>`
+          SELECT COUNT(*)::int AS count FROM (
+            SELECT p.id
+            FROM products p
+            LEFT JOIN product_variants v ON v."productId" = p.id
+            WHERE p."storeId" = ${storeId}
+            GROUP BY p.id, p.stock
+            HAVING (COUNT(v.id) = 0 AND p.stock <= ${LOW_STOCK_BADGE_THRESHOLD})
+                OR (COUNT(v.id) > 0 AND MIN(v.stock) <= ${LOW_STOCK_BADGE_THRESHOLD})
+          ) t
+        `,
+        // نوار قیمت طلا فقط وقتی لازم است که محصول وزنی داشته باشد؛ با pagination لیست محصولات دیگر از روی لیست قابل تشخیص نیست
+        this.prisma.product.count({
+          where: { storeId, pricingModel: 'WEIGHT_BASED_FORMULA' },
+        }),
+      ]);
+    return {
+      receipts,
+      attention: conversations,
+      issues,
+      refundsOverdue,
+      lowStock: Number(lowStockRows[0]?.count ?? 0),
+      hasWeightProducts: weightProducts > 0,
+    };
   }
 
   async listToday(sellerId: string, storeId: string) {
