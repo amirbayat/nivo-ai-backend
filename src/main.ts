@@ -7,10 +7,13 @@ import type { NestExpressApplication } from '@nestjs/platform-express';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { configureBodyParsers } from './common/http/body-parsers';
+import { CtxLogger } from './common/logging/ctx-logger';
+import { shutdownGuard } from './common/http/shutdown-guard';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     bodyParser: false,
+    logger: new CtxLogger(),
   });
   // 0.10 — پشت ingress همروش؛ با trust proxy تعداد hopهای مورداعتماد، req.ip آدرس واقعی
   // کلاینت می‌شود و X-Forwarded-For جعلی سقف rate limit را دور نمی‌زند. اگر پشت Cloudflare
@@ -25,6 +28,9 @@ async function bootstrap() {
       crossOriginResourcePolicy: { policy: 'cross-origin' },
     }),
   );
+  // R1.3 — SIGTERM: turnهای در جریان تمام می‌شوند، درخواست تغییردهنده‌ی تازه ۵۰۳ می‌گیرد
+  app.enableShutdownHooks();
+  app.use(shutdownGuard);
   configureBodyParsers(app);
 
   // مسیرهای مقالات عمداً بدون پیشوند api/v1 هستند — این‌ها آدرس‌های عمومی SEO

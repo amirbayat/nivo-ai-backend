@@ -15,6 +15,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { RedisService } from '../../redis/redis.service';
 import { SmsService } from '../../sms/sms.service';
 import { normalizePhone } from '../../common/utils/normalize-phone';
+import { setLogCtx } from '../../common/logging/log-context';
 import { maskSensitiveNumbers } from '../../common/utils/refund-destination.util';
 import { buyerOtpSendBlock } from '../../common/utils/buyer-otp-limit';
 import { StorageService } from '../../storage/storage.service';
@@ -358,6 +359,7 @@ export class SalesAgentService {
     if (!sessionToken || conversation.customer.sessionToken !== sessionToken) {
       throw new ForbiddenException(fa.salesAgent.invalidSession);
     }
+    setLogCtx({ conversationId: conversation.id, storeId: conversation.storeId });
     return conversation;
   }
 

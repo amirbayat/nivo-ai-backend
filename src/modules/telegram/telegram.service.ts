@@ -30,6 +30,7 @@ import { buildHistoryEntry } from '../sales-agent/conversation-history.util';
 import { reattachReceiptIfOrderOpen } from '../sales-agent/receipt-reattach.util';
 import { OrderStateService } from '../order-lifecycle/order-state.service';
 import { ReceiptCheckService } from '../order-lifecycle/receipt-check.service';
+import { setLogCtx } from '../../common/logging/log-context';
 import { RefundService } from '../order-lifecycle/refund.service';
 import {
   looksLikeDestinationMessage,
@@ -1381,13 +1382,17 @@ export class TelegramService {
     return this.loadConversation(withConv[0].id);
   }
 
-  private loadConversation(
+  private async loadConversation(
     conversationId: string,
   ): Promise<ConversationWithStore | null> {
-    return this.prisma.salesConversation.findUnique({
+    const conversation = await this.prisma.salesConversation.findUnique({
       where: { id: conversationId },
       include: { store: true },
     });
+    if (conversation) {
+      setLogCtx({ conversationId: conversation.id, storeId: conversation.storeId });
+    }
+    return conversation;
   }
 
   // فیدبک کاربر ۱۴۰۵/۰۷/۱۴ — قبلاً اینجا فقط یک URL (محصول/لوگو/ویدیو) ساخته می‌شد و به

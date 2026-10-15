@@ -28,13 +28,45 @@ interface LlmTurnContext {
 
 const storage = new AsyncLocalStorage<LlmTurnContext>();
 
+// R1.3 — تعداد turnهای در جریان (فقط بیرونی‌ترین)؛ روی SIGTERM تا ۳۰ ثانیه صبر می‌کنیم تا
+// جواب‌های در راه ذخیره شوند
+let activeTurns = 0;
+const drainWaiters: Array<() => void> = [];
+
+export function getActiveLlmTurns(): number {
+  return activeTurns;
+}
+
+// true = همه تمام شدند؛ false = timeout
+export function waitForLlmTurnsToDrain(timeoutMs: number): Promise<boolean> {
+  if (activeTurns === 0) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      const i = drainWaiters.indexOf(waiter);
+      if (i >= 0) drainWaiters.splice(i, 1);
+      resolve(false);
+    }, timeoutMs);
+    const waiter = () => {
+      clearTimeout(timer);
+      resolve(true);
+    };
+    drainWaiters.push(waiter);
+  });
+}
+
 export function runLlmTurn<T>(
   fn: () => Promise<T>,
   deadlineMs = LLM_TURN_DEADLINE_MS,
 ): Promise<T> {
   // turn تودرتو (مثلاً drain داخل handleMessage) deadline بیرونی را نگه می‌دارد
   if (storage.getStore()) return fn();
-  return storage.run({ deadlineAt: Date.now() + deadlineMs }, fn);
+  activeTurns++;
+  return storage
+    .run({ deadlineAt: Date.now() + deadlineMs }, fn)
+    .finally(() => {
+      activeTurns--;
+      if (activeTurns === 0) drainWaiters.splice(0).forEach((w) => w());
+    });
 }
 
 export class Semaphore {

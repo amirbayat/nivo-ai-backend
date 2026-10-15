@@ -154,6 +154,7 @@ import {
   isLlmSaturated,
   runLlmTurn,
 } from '../../common/services/llm-turn-guard';
+import { setLogCtx } from '../../common/logging/log-context';
 import { isValidCartQty, reconcileCart, lineKey } from './cart-validation.util';
 import type { CatalogLine } from './cart-validation.util';
 
@@ -4395,6 +4396,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     text: string,
     opts?: { clientMessageId?: string },
   ): Promise<EngineResult> {
+    setLogCtx({ conversationId: conversation.id, storeId: conversation.storeId });
     let token = await this.lock.acquire(conversation.id);
     if (!token) {
       await this.lock.enqueue(conversation.id, text);
@@ -5293,6 +5295,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     conversation: ConversationWithStore,
     action: SalesAction,
   ): Promise<EngineResult> {
+    setLogCtx({ conversationId: conversation.id, storeId: conversation.storeId });
     return this.runActionLocked(conversation, async (fresh) => {
       if (action.type !== 'ADD_TO_CART' && action.type !== 'REORDER') {
         return this.handleActionInner(fresh, action);
