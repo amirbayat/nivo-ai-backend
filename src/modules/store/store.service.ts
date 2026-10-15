@@ -187,6 +187,13 @@ export class StoreService {
   // که از قبل trial نگرفته‌اند همچنان کار می‌کند)
   async create(sellerId: string, dto: CreateStoreDto) {
     this.assertBankCardPair(dto);
+    // R3.5 / D-1 — هر فروشنده یک فروشگاه واقعی؛ فروشگاه نمایشی (isDemo) جدا حساب می‌شود
+    const existingReal = await this.prisma.store.count({
+      where: { sellerId, isDemo: false },
+    });
+    if (existingReal > 0) {
+      throw new ConflictException(fa.store.alreadyHasStore);
+    }
     if (!(await this.isSlugAvailable(dto.slug))) {
       throw new ConflictException(fa.store.slugTaken);
     }

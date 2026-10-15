@@ -86,6 +86,9 @@ describe('onboarding slug [F5]', () => {
 
   it('برخورد یکتایی slug پیام گرفته‌شدن آدرس می‌دهد', async () => {
     const { svc, prisma } = setup(0);
+    (prisma.store as unknown as { count: jest.Mock }).count = jest
+      .fn()
+      .mockResolvedValue(0);
     prisma.store.create.mockRejectedValue({ code: 'P2002', meta: { target: ['slug'] } });
     Object.assign(svc, {
       isSlugAvailable: jest.fn(async () => true),
