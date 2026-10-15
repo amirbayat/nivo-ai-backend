@@ -186,25 +186,31 @@ export async function approvalEtaLabel(
   const hit = etaCache.get(storeId);
   if (hit && Date.now() - hit.at < 24 * HOUR_MS) return hit.label;
   const since = new Date(Date.now() - RECEIPT_SLA_LOOKBACK_DAYS * DAY_MS);
-  const events = await prisma.orderStatusEvent.findMany({
-    where: { to: 'APPROVED', createdAt: { gte: since }, order: { storeId } },
-    select: { orderId: true, createdAt: true },
-    take: 400,
-  });
-  const durations: number[] = [];
-  for (const ev of events) {
-    const prev = await prisma.orderStatusEvent.findFirst({
-      where: { orderId: ev.orderId, to: 'RECEIPT_SUBMITTED', createdAt: { lte: ev.createdAt } },
-      orderBy: { createdAt: 'desc' },
-      select: { createdAt: true },
-    });
-    if (prev) durations.push(ev.createdAt.getTime() - prev.createdAt.getTime());
-  }
+  const rows = await prisma.$queryRaw<{ samples: number; median_seconds: number | null }[]>`
+    SELECT COUNT(*)::int AS samples,
+      percentile_cont(0.5) WITHIN GROUP (
+        ORDER BY EXTRACT(EPOCH FROM (approved."createdAt" - submitted.submitted_at))
+      ) AS median_seconds
+    FROM order_status_events approved
+    JOIN orders o ON o.id = approved."orderId"
+    JOIN LATERAL (
+      SELECT s."createdAt" AS submitted_at
+      FROM order_status_events s
+      WHERE s."orderId" = approved."orderId"
+        AND s.to = 'RECEIPT_SUBMITTED'
+        AND s."createdAt" <= approved."createdAt"
+      ORDER BY s."createdAt" DESC
+      LIMIT 1
+    ) submitted ON true
+    WHERE approved.to = 'APPROVED'
+      AND approved."createdAt" >= ${since}
+      AND o."storeId" = ${storeId}
+  `;
+  const samples = Number(rows[0]?.samples ?? 0);
+  const medianSeconds = Number(rows[0]?.median_seconds ?? 0);
   let label: string = fa.orderNotify.etaFallback;
-  if (durations.length >= RECEIPT_SLA_MIN_SAMPLES) {
-    durations.sort((a, b) => a - b);
-    const mid = durations[Math.floor(durations.length / 2)];
-    const hours = Math.max(1, Math.round(mid / HOUR_MS));
+  if (samples >= RECEIPT_SLA_MIN_SAMPLES && medianSeconds > 0) {
+    const hours = Math.max(1, Math.round(medianSeconds / 3600));
     label = fa.orderNotify.etaHours(hours);
   }
   etaCache.set(storeId, { at: Date.now(), label });
