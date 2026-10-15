@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   Headers,
   HttpCode,
+  Get,
   Logger,
   Post,
 } from '@nestjs/common';
@@ -18,6 +19,14 @@ export class SellerBotController {
   private readonly logger = new Logger(SellerBotController.name);
 
   constructor(private readonly sellerBot: SellerBotService) {}
+
+  // R2.3 — نام بات از کانفیگ بک‌اند (نه env بیلد فرانت)؛ عمومی و بی‌خطر چون username خود بات
+  // عمومی است. بدون env مقدار null می‌دهد و فرانت دکمه‌ی اتصال را نشان نمی‌دهد.
+  @SkipThrottle()
+  @Get('info')
+  info(): { username: string | null } {
+    return { username: this.sellerBot.getBotUsername() };
+  }
 
   @SkipThrottle()
   @Post('webhook')

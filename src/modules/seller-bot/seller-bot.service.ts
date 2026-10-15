@@ -65,6 +65,7 @@ interface PendingOtp {
 export class SellerBotService {
   private readonly logger = new Logger(SellerBotService.name);
   private readonly webhookSecret?: string;
+  private readonly botUsername: string | null;
   private readonly pendingOtp = new Map<string, PendingOtp>();
 
   constructor(
@@ -77,6 +78,13 @@ export class SellerBotService {
     private readonly refunds: RefundService,
   ) {
     this.webhookSecret = this.config.get<string>('SELLER_BOT_WEBHOOK_SECRET');
+    this.botUsername =
+      this.config.get<string>('SELLER_BOT_USERNAME')?.replace(/^@/, '').trim() ||
+      null;
+  }
+
+  getBotUsername(): string | null {
+    return this.botUsername;
   }
 
   verifySecret(secret: string | undefined): boolean {
