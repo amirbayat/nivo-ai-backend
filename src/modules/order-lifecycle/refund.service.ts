@@ -130,6 +130,7 @@ export class RefundService {
         refund.amountToman,
         parsed.masked,
       ),
+      smsText: fa.orderNotify.refundReadySms(displayOrderCode(order ?? { id: input.orderId })),
     });
     return { status: 'READY' as const, destinationMasked: parsed.masked, bankName: parsed.bankName };
   }

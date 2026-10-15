@@ -87,8 +87,8 @@ export class NotificationService {
     }
   }
 
-  // اعلان فروشنده (بات تلگرام فروشنده + SMS به شماره‌ی حساب). dedupeKey اختیاری: اگر داده شود
-  // با TTL داده‌شده فقط یک‌بار می‌رود.
+  // Seller alert: Telegram when the store bot is connected, otherwise SMS.
+  // dedupe, when set, sends at most once per key for ttlSeconds.
   async notifySeller(input: {
     storeId: string;
     template: string;
@@ -124,8 +124,7 @@ export class NotificationService {
             );
             return this.log(input, 'BOT', store.sellerBotChatId!, 'FAILED', String(err));
           });
-      }
-      if (input.smsText && store.seller.phone) {
+      } else if (input.smsText && store.seller.phone) {
         await this.sms
           .sendFreeText(store.seller.phone, input.smsText)
           .then(() => this.log(input, 'SMS', store.seller.phone!, 'SENT'))

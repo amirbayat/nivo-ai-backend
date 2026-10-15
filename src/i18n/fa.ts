@@ -408,15 +408,24 @@ export const fa = {
       `رسید ${code}: مبلغ بیشتر از سفارش است. مابه‌التفاوت ${extra.toLocaleString('fa-IR')} تومان را می‌توانی بازپرداخت کنی.`,
     receiptUnreadable: (code: string) => `رسید ${code}: ناخوانا.`,
     receiptOverdue: (code: string) => `رسید سفارش ${code} هنوز بررسی نشده.`,
+    receiptOverdueSms: (code: string) => `نیوو: رسید سفارش ${code} هنوز بررسی نشده.`,
+    receiptCheckSms: (code: string) => `نیوو: نتیجه بررسی رسید سفارش ${code} آماده است. از پنل ببین.`,
+    receiptNewSms: (code: string) => `نیوو: رسید جدید برای سفارش ${code} ثبت شد. از پنل بررسی کن.`,
     refundReadySeller: (code: string, amount: number, masked: string) =>
       `بازپرداخت ${code}: ${amount.toLocaleString('fa-IR')} تومان آماده واریز است. مقصد: ${masked}`,
     refundOverdue: (code: string, amount: number) =>
       `بازپرداخت ${code} به مبلغ ${amount.toLocaleString('fa-IR')} تومان بیش از ۴۸ ساعت معوق است.`,
+    refundOverdueSms: (code: string) => `نیوو: بازپرداخت سفارش ${code} بیش از ۴۸ ساعت معوق است.`,
+    refundReadySms: (code: string) =>
+      `نیوو: بازپرداخت سفارش ${code} آماده واریز است. مقصد را از پنل کپی کن.`,
     refundNudge: (code: string, amount: number) =>
       `خریدار برای بازپرداخت ${code} (${amount.toLocaleString('fa-IR')} تومان) یادآوری فرستاد.`,
+    refundNudgeSms: (code: string) => `نیوو: خریدار برای بازپرداخت سفارش ${code} یادآوری فرستاد.`,
     sellerOrderCancelled: (code: string) => `خریدار سفارش ${code} را لغو کرد.`,
+    sellerOrderCancelledSms: (code: string) => `نیوو: خریدار سفارش ${code} را لغو کرد.`,
     sellerOrderIssue: (code: string, reason: string) =>
       `مشکل در سفارش ${code}: ${reason}`,
+    sellerOrderIssueSms: (code: string) => `نیوو: خریدار برای سفارش ${code} مشکل ثبت کرد. از پنل ببین.`,
     refundsEmpty: 'بازپرداخت آماده‌ی واریز نداری.',
     refundMarkPaid: 'واریز کردم',
     refundMarkedPaid: 'واریز ثبت شد.',
@@ -703,6 +712,7 @@ export const fa = {
       `📋 ${staleCount.toLocaleString('fa-IR')} محصول فروشگاه شما مدتی است آپدیت نشده (مثلاً: ${sampleNames}) — بد نیست یک نگاه بندازی و با «تکمیل خودکار همه‌ی محصولات ناقص» توی پنل دوباره enrich‌شون کنی، شاید قیمت بازار یا رقبا عوض شده باشه.`,
     handoffNotification: (customerText: string) =>
       `🔔 یک مشتری نیاز به پاسخ شما داره:\n\n«${customerText}»`,
+    handoffSms: 'نیوو: یک مشتری منتظر جواب شماست. از پنل فروشنده جواب بده.',
     paymentMethodMissingNotification:
       '⚠️ یک خریدار به پرداخت رسیده، ولی فروشگاه کارت یا لینک اسنپ‌پی ندارد. روش پرداخت را در پنل اضافه کن و بهش جواب بده.',
     paymentMethodMissingSms:

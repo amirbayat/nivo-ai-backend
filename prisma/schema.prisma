@@ -3166,6 +3166,8 @@ model Order {
   trackingCode                String?
   deliveredAt                 DateTime?
   cancelledAt                 DateTime?
+  // Step 6.5 F19. The "did it arrive?" nudge is sent at most once.
+  deliveryCheckSentAt         DateTime?
   // 3.1 — یادداشت داخلی فروشنده (فاز ۵)
   sellerNote                  String?            @db.Text
   // 3.9 — نتیجه‌ی بررسی خودکار رسید و اثرانگشت تصویر (فاز ۵؛ ستون‌ها از همین فاز آماده‌اند)
@@ -3286,8 +3288,10 @@ model OrderRefund {
   paidRef           String?
   proofImageKey     String?
   createdByActor    String
-  createdAt         DateTime               @default(now())
-  updatedAt         DateTime               @updatedAt
+  // Step 6.5 F19. The refund-card reminder is sent at most once.
+  destinationRemindedAt DateTime?
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
 
   @@index([storeId, status, createdAt])
   @@index([orderId])

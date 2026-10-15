@@ -16,6 +16,7 @@ import { addTehranBusinessHours } from './tehran-business-hours.util';
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
+const OPS_PAGE = 100;
 
 @Injectable()
 export class OrderOpsService {
@@ -34,87 +35,136 @@ export class OrderOpsService {
   }
 
   async receiptSla(now: Date): Promise<void> {
-    const rows = await this.prisma.order.findMany({
-      where: { status: 'RECEIPT_SUBMITTED' },
-      select: { id: true, storeId: true, orderCode: true, updatedAt: true },
-      take: 200,
-    });
-    for (const row of rows) {
-      const due = addTehranBusinessHours(row.updatedAt, RECEIPT_SLA_BUSINESS_HOURS);
-      if (due > now) continue;
-      await this.notifications.notifySeller({
-        storeId: row.storeId,
-        template: 'SELLER_RECEIPT_OVERDUE',
-        entityId: row.id,
-        botText: fa.orderNotify.receiptOverdue(displayOrderCode(row)),
-        dedupe: { key: `receipt-overdue:${row.id}`, ttlSeconds: 7 * 24 * 3600 },
+    let cursor: string | undefined;
+    for (;;) {
+      const rows = await this.prisma.order.findMany({
+        where: { status: 'RECEIPT_SUBMITTED' },
+        select: { id: true, storeId: true, orderCode: true },
+        orderBy: { id: 'asc' },
+        take: OPS_PAGE,
+        ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
       });
+      if (rows.length === 0) break;
+      const events = await this.prisma.orderStatusEvent.findMany({
+        where: { orderId: { in: rows.map((row) => row.id) }, to: 'RECEIPT_SUBMITTED' },
+        orderBy: { createdAt: 'desc' },
+        select: { orderId: true, createdAt: true },
+      });
+      const submittedAt = new Map<string, Date>();
+      for (const event of events) {
+        if (!submittedAt.has(event.orderId)) submittedAt.set(event.orderId, event.createdAt);
+      }
+      for (const row of rows) {
+        const at = submittedAt.get(row.id);
+        if (!at) continue;
+        const due = addTehranBusinessHours(at, RECEIPT_SLA_BUSINESS_HOURS);
+        if (due > now) continue;
+        const code = displayOrderCode(row);
+        await this.notifications.notifySeller({
+          storeId: row.storeId,
+          template: 'SELLER_RECEIPT_OVERDUE',
+          entityId: row.id,
+          botText: fa.orderNotify.receiptOverdue(code),
+          smsText: fa.orderNotify.receiptOverdueSms(code),
+          dedupe: { key: `receipt-overdue:${row.id}`, ttlSeconds: 7 * 24 * 3600 },
+        });
+      }
+      cursor = rows[rows.length - 1].id;
+      if (rows.length < OPS_PAGE) break;
     }
   }
 
   async refundReminders(now: Date): Promise<void> {
-    const rows = await this.prisma.orderRefund.findMany({
-      where: { status: { in: ['AWAITING_DESTINATION', 'READY'] } },
-      include: {
-        order: { select: { id: true, orderCode: true, conversationId: true, totalAmount: true } },
-      },
-      take: 200,
-    });
-    for (const row of rows) {
-      const ageH = (now.getTime() - row.createdAt.getTime()) / HOUR_MS;
-      if (row.status === 'AWAITING_DESTINATION' && ageH >= REFUND_DESTINATION_REMINDER_HOURS) {
-        const conv = await this.prisma.salesConversation.findUnique({
-          where: { id: row.order.conversationId },
-          select: { customerId: true },
-        });
-        if (!conv) continue;
-        await this.notifications.notifyBuyer({
-          to: { customerId: conv.customerId },
-          template: 'REFUND_DESTINATION_REQUEST',
-          entityId: `${row.id}:reminder`,
-          data: {
-            orderId: row.order.id,
-            refundAmountToman: row.amountToman,
-            refundId: row.id,
-          },
-          dedupe: { key: `refund-dest-reminder:${row.id}`, ttlSeconds: 24 * 3600 },
-        });
+    let cursor: string | undefined;
+    for (;;) {
+      const rows = await this.prisma.orderRefund.findMany({
+        where: {
+          OR: [
+            { status: 'AWAITING_DESTINATION', destinationRemindedAt: null },
+            { status: 'READY' },
+          ],
+        },
+        include: {
+          order: { select: { id: true, orderCode: true, conversationId: true, totalAmount: true } },
+        },
+        orderBy: { id: 'asc' },
+        take: OPS_PAGE,
+        ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
+      });
+      if (rows.length === 0) break;
+      for (const row of rows) {
+        const ageH = (now.getTime() - row.createdAt.getTime()) / HOUR_MS;
+        if (row.status === 'AWAITING_DESTINATION' && ageH >= REFUND_DESTINATION_REMINDER_HOURS) {
+          const conv = await this.prisma.salesConversation.findUnique({
+            where: { id: row.order.conversationId },
+            select: { customerId: true },
+          });
+          if (!conv) continue;
+          const claimed = await this.prisma.orderRefund.updateMany({
+            where: { id: row.id, status: 'AWAITING_DESTINATION', destinationRemindedAt: null },
+            data: { destinationRemindedAt: now },
+          });
+          if (claimed.count !== 1) continue;
+          await this.notifications.notifyBuyer({
+            to: { customerId: conv.customerId },
+            template: 'REFUND_DESTINATION_REQUEST',
+            entityId: `${row.id}:reminder`,
+            data: {
+              orderId: row.order.id,
+              refundAmountToman: row.amountToman,
+              refundId: row.id,
+            },
+          });
+        }
+        if (row.status === 'READY' && ageH >= REFUND_OVERDUE_HOURS) {
+          const code = displayOrderCode(row.order);
+          await this.notifications.notifySeller({
+            storeId: row.storeId,
+            template: 'SELLER_REFUND_OVERDUE',
+            entityId: row.id,
+            botText: fa.orderNotify.refundOverdue(code, row.amountToman),
+            smsText: fa.orderNotify.refundOverdueSms(code),
+            dedupe: { key: `refund-overdue:${row.id}`, ttlSeconds: 7 * 24 * 3600 },
+          });
+        }
       }
-      if (row.status === 'READY' && ageH >= REFUND_OVERDUE_HOURS) {
-        await this.notifications.notifySeller({
-          storeId: row.storeId,
-          template: 'SELLER_REFUND_OVERDUE',
-          entityId: row.id,
-          botText: fa.orderNotify.refundOverdue(
-            displayOrderCode(row.order),
-            row.amountToman,
-          ),
-          dedupe: { key: `refund-overdue:${row.id}`, ttlSeconds: 7 * 24 * 3600 },
-        });
-      }
+      cursor = rows[rows.length - 1].id;
+      if (rows.length < OPS_PAGE) break;
     }
   }
 
   async deliveryNudge(now: Date): Promise<void> {
     const cutoff = new Date(now.getTime() - DELIVERY_CONFIRM_AFTER_DAYS * DAY_MS);
-    const rows = await this.prisma.order.findMany({
-      where: { status: 'SHIPPED', shippedAt: { lte: cutoff } },
-      select: { id: true, conversationId: true },
-      take: 200,
-    });
-    for (const row of rows) {
-      const conv = await this.prisma.salesConversation.findUnique({
-        where: { id: row.conversationId },
-        select: { customerId: true },
+    let cursor: string | undefined;
+    for (;;) {
+      const rows = await this.prisma.order.findMany({
+        where: { status: 'SHIPPED', shippedAt: { lte: cutoff }, deliveryCheckSentAt: null },
+        select: { id: true, conversationId: true },
+        orderBy: { id: 'asc' },
+        take: OPS_PAGE,
+        ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
       });
-      if (!conv) continue;
-      await this.notifications.notifyBuyer({
-        to: { customerId: conv.customerId },
-        template: 'DELIVERY_CHECK',
-        entityId: row.id,
-        data: { orderId: row.id },
-        dedupe: { key: `delivery-nudge:${row.id}`, ttlSeconds: 7 * 24 * 3600 },
-      });
+      if (rows.length === 0) break;
+      for (const row of rows) {
+        const conv = await this.prisma.salesConversation.findUnique({
+          where: { id: row.conversationId },
+          select: { customerId: true },
+        });
+        if (!conv) continue;
+        const claimed = await this.prisma.order.updateMany({
+          where: { id: row.id, status: 'SHIPPED', deliveryCheckSentAt: null },
+          data: { deliveryCheckSentAt: now },
+        });
+        if (claimed.count !== 1) continue;
+        await this.notifications.notifyBuyer({
+          to: { customerId: conv.customerId },
+          template: 'DELIVERY_CHECK',
+          entityId: row.id,
+          data: { orderId: row.id },
+        });
+      }
+      cursor = rows[rows.length - 1].id;
+      if (rows.length < OPS_PAGE) break;
     }
   }
 

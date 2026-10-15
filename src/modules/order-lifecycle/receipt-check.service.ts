@@ -335,6 +335,7 @@ export class ReceiptCheckService {
       template: 'RECEIPT_CHECK',
       entityId: order.id,
       botText: `${line}${hint}`,
+      smsText: fa.orderNotify.receiptCheckSms(code),
       dedupe: { key: `receipt-check:${order.id}:${match}`, ttlSeconds: 3600 },
     });
   }

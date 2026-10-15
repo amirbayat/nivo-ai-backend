@@ -64,6 +64,7 @@ export class OrderPublicService {
       template: 'ORDER_CANCELLED',
       entityId: order.id,
       botText: fa.orderNotify.sellerOrderCancelled(displayOrderCode(order)),
+      smsText: fa.orderNotify.sellerOrderCancelledSms(displayOrderCode(order)),
     });
     return { status: r.order.status };
   }
@@ -97,6 +98,7 @@ export class OrderPublicService {
       template: 'SELLER_ORDER_ISSUE',
       entityId: issue.id,
       botText: fa.orderNotify.sellerOrderIssue(displayOrderCode(order), reason),
+      smsText: fa.orderNotify.sellerOrderIssueSms(displayOrderCode(order)),
     });
     return { id: issue.id, status: issue.status };
   }
@@ -120,6 +122,7 @@ export class OrderPublicService {
       template: 'SELLER_REFUND_OVERDUE',
       entityId: refund.id,
       botText: fa.orderNotify.refundNudge(displayOrderCode(order ?? { id: orderId }), refund.amountToman),
+      smsText: fa.orderNotify.refundNudgeSms(displayOrderCode(order ?? { id: orderId })),
     });
     return { ok: true };
   }

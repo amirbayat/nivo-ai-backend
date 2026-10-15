@@ -8032,7 +8032,22 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     verification: { extractedAmountToman: number; match: boolean } | null,
   ): Promise<void> {
     const chatId = conversation.store.sellerBotChatId;
-    if (!chatId) return;
+    if (!chatId) {
+      const order = await this.prisma.order.findUnique({
+        where: { id: orderId },
+        select: { id: true, orderCode: true },
+      });
+      const code = order ? displayOrderCode(order) : orderId.slice(0, 8);
+      await this.notifications.notifySeller({
+        storeId: conversation.storeId,
+        template: 'SELLER_RECEIPT_NEW',
+        entityId: orderId,
+        botText: fa.orderNotify.receiptNewSms(code),
+        smsText: fa.orderNotify.receiptNewSms(code),
+        dedupe: { key: `receipt-new:${orderId}`, ttlSeconds: 24 * 3600 },
+      });
+      return;
+    }
     const ext = receiptImageKey.split('.').pop() ?? 'jpg';
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
@@ -8650,7 +8665,17 @@ answered=false بده (به‌جای حدس‌زدن).`,
     }
 
     const chatId = conversation.store.sellerBotChatId;
-    if (!chatId) return;
+    if (!chatId) {
+      await this.notifications.notifySeller({
+        storeId: conversation.storeId,
+        template: 'SELLER_HANDOFF',
+        entityId: conversation.id,
+        botText: fa.telegram.handoffSms,
+        smsText: fa.telegram.handoffSms,
+        dedupe: { key: `handoff:${conversation.id}`, ttlSeconds: 5 * 60 },
+      });
+      return;
+    }
 
     const lastCustomerMessage = await this.prisma.conversationEvent.findFirst({
       where: { conversationId: conversation.id, type: 'CUSTOMER_MESSAGE' },
