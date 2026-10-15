@@ -1,3 +1,4 @@
+import { BUYER_VISIBLE } from '../store/product-visibility';
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { generateObject, generateText } from 'ai';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -100,13 +101,14 @@ export class SalesAgentQaService {
     if (!store) throw new NotFoundException(fa.store.notFound);
 
     const products = await this.prisma.product.findMany({
-      where: { storeId },
+      where: { storeId, ...BUYER_VISIBLE },
       orderBy: { createdAt: 'desc' },
       take: 5,
       select: {
         name: true,
         basePrice: true,
         stock: true,
+        trackStock: true,
         description: true,
         optionTypes: { select: { id: true } },
         variants: { select: { stock: true } },
@@ -133,7 +135,7 @@ export class SalesAgentQaService {
       ? `محصولات فروشگاه: ${products
           .map(
             (p) =>
-              `${p.name} (${p.basePrice} تومان)${(p.optionTypes.length > 0 ? p.variants.reduce((n, v) => n + v.stock, 0) : p.stock) === 0 ? ' — فعلاً ناموجود' : ''}${p.description ? ` — توضیحات: ${p.description}` : ''}`,
+              `${p.name} (${p.basePrice} تومان)${(p.trackStock && (p.optionTypes.length > 0 ? p.variants.reduce((n, v) => n + v.stock, 0) : p.stock) === 0) ? ' — فعلاً ناموجود' : ''}${p.description ? ` — توضیحات: ${p.description}` : ''}`,
           )
           .join('، ')}`
       : '';

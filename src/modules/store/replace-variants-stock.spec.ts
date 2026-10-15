@@ -23,6 +23,7 @@ describe('replaceProductVariants stock [F13]', () => {
         deleteMany: jest.fn(),
         create: jest.fn(),
       },
+      product: { update: jest.fn().mockResolvedValue({}) },
     };
     const notifyRestocked = jest.fn().mockResolvedValue(undefined);
     const service = Object.create(StoreService.prototype) as {

@@ -34,6 +34,8 @@ import { UpdateProductDto } from './dto/update-product.dto';
 import { ReplaceProductVariantsDto } from './dto/replace-product-variants.dto';
 import { UpdateStoreDto } from './dto/update-store.dto';
 import { fa } from '../../i18n/fa';
+import { BUYER_VISIBLE, UNLIMITED_STOCK } from './product-visibility';
+import { missingForPublish, type PublishCandidate } from './product-publish.util';
 import { ProductEventService } from '../../common/analytics/product-event.service';
 import { slugFromName, suggestSlug, type SlugSuggestion } from '../../common/utils/slug-from-name';
 import {
@@ -427,11 +429,54 @@ export class StoreService {
     );
     // عیناً الگوی updateProduct پایین‌تر — specs یک فیلد Prisma.Json است، null خام قابل‌پاس
     // به create نیست (باید Prisma.DbNull باشد)
-    const { specs: rawSpecs, ...rest } = dto;
+    const { specs: rawSpecs, via, status: rawStatus, ...rest } = dto;
+    const status = rawStatus ?? 'ACTIVE';
     const specs = clampProductSpecs(rawSpecs ?? undefined) ?? Prisma.DbNull;
-    return this.prisma.product.create({
-      data: { ...rest, specs, storeId },
+    const trackStock = rest.trackStock ?? true;
+    // stockSetAt: فقط وقتی موجودی صریحاً فرستاده شد (فرق «۰ واقعی» با «هنوز ننوشته»)
+    const stockSetAt = rest.stock !== undefined ? new Date() : null;
+    if (status === 'ACTIVE') {
+      this.assertReadyToPublish({
+        name: rest.name ?? '',
+        basePrice: rest.basePrice ?? 0,
+        pricingModel: rest.pricingModel ?? 'FIXED',
+        trackStock,
+        hasVariants: false,
+        stockSetAt,
+      });
+    }
+    const isFirstActiveProduct =
+      status === 'ACTIVE' && (await this.countActiveProducts(storeId)) === 0;
+    const created = await this.prisma.product.create({
+      data: { ...rest, specs, storeId, status, stockSetAt },
     });
+    if (status === 'DRAFT') {
+      this.productEvents.log('product_draft_created', { storeId, userId: sellerId }, { via: via ?? 'single' });
+    } else {
+      this.productEvents.log(
+        'product_published',
+        { storeId, userId: sellerId },
+        { via: via ?? 'legacy', first: isFirstActiveProduct },
+      );
+    }
+    return { ...created, isFirstActiveProduct };
+  }
+
+  private countActiveProducts(storeId: string): Promise<number> {
+    return this.prisma.product.count({ where: { storeId, status: 'ACTIVE' } });
+  }
+
+  // SP-3 — {code:'PRODUCT_NOT_READY', missing[]}؛ فرانت فیلدهای ناقص را فارسی نشان می‌دهد
+  private assertReadyToPublish(candidate: PublishCandidate): void {
+    const missing = missingForPublish(candidate);
+    if (missing.length > 0) {
+      throw new BadRequestException({
+        statusCode: 400,
+        code: 'PRODUCT_NOT_READY',
+        missing,
+        message: fa.store.productNotReady,
+      });
+    }
   }
 
   // docs/PRD-category-specific-product-pricing-and-attributes.md بخش ۳.۲ — پیش‌نمایش زنده‌ی
@@ -590,6 +635,7 @@ export class StoreService {
           ...product,
           hasVariants: product.optionTypes.length > 0,
           hasZeroStockVariants:
+            product.trackStock &&
             product.optionTypes.length > 0 &&
             product.variants.every((v) => v.stock === 0),
         },
@@ -611,6 +657,7 @@ export class StoreService {
 
     const where: Prisma.ProductWhereInput = {
       storeId: store.id,
+      ...BUYER_VISIBLE,
       ...(opts.q ? { name: { contains: opts.q, mode: 'insensitive' } } : {}),
       ...(opts.ids ? { id: { in: opts.ids } } : {}),
     };
@@ -625,6 +672,7 @@ export class StoreService {
           name: true,
           basePrice: true,
           stock: true,
+          trackStock: true,
           images: true,
           videos: true,
           description: true,
@@ -723,11 +771,17 @@ export class StoreService {
           goldWageValue,
           goldProfitPercent,
           optionTypes,
-          variants,
+          trackStock,
+          variants: rawVariants,
           ...publicFields
         } = p;
+        // SP-3 — «همیشه موجود»: همه‌ی مدل‌ها موجودند و عددی نمایش داده نمی‌شود (فرانت فقط stock>0 می‌بیند)
+        const variants = trackStock
+          ? rawVariants
+          : rawVariants.map((v) => ({ ...v, stock: UNLIMITED_STOCK }));
+        if (!trackStock) publicFields.stock = UNLIMITED_STOCK;
         // محصول واریانت‌دار: موجودی واقعی جمع ترکیب‌هاست، Product.stock معنی ندارد
-        if (optionTypes.length > 0) {
+        else if (optionTypes.length > 0) {
           publicFields.stock = variants.reduce((n, v) => n + v.stock, 0);
         }
         let displayPrice = p.basePrice;
@@ -855,11 +909,12 @@ export class StoreService {
   async getCompleteness(sellerId: string, storeId: string) {
     const store = await this.getOwned(sellerId, storeId);
     const products = await this.prisma.product.findMany({
-      where: { storeId },
+      where: { storeId, status: 'ACTIVE' },
       select: {
         id: true,
         images: true,
         description: true,
+        trackStock: true,
         optionTypes: { select: { id: true } },
         variants: { select: { stock: true } },
       },
@@ -872,6 +927,7 @@ export class StoreService {
             ...p,
             hasVariants: p.optionTypes.length > 0,
             hasZeroStockVariants:
+              p.trackStock &&
               p.optionTypes.length > 0 &&
               p.variants.every((v) => v.stock === 0),
           },
@@ -1088,10 +1144,39 @@ export class StoreService {
       rawSpecs !== undefined
         ? (clampProductSpecs(rawSpecs ?? undefined) ?? Prisma.DbNull)
         : undefined;
+    // SP-3 — انتقال وضعیت: برگشت به DRAFT مجاز نیست؛ هر انتقال به ACTIVE اعتبارسنجی انتشار دارد
+    let isFirstActiveProduct = false;
+    if (dto.status === 'DRAFT' && before.status !== 'DRAFT') {
+      throw new BadRequestException(fa.store.productBackToDraft);
+    }
+    const becomingActive = dto.status === 'ACTIVE' && before.status !== 'ACTIVE';
+    if (becomingActive) {
+      const variantCount = await this.prisma.productVariant.count({ where: { productId } });
+      this.assertReadyToPublish({
+        name: dto.name ?? before.name,
+        basePrice: dto.basePrice ?? before.basePrice,
+        pricingModel: dto.pricingModel ?? before.pricingModel,
+        trackStock: dto.trackStock ?? before.trackStock,
+        hasVariants: variantCount > 0,
+        stockSetAt: dto.stock !== undefined ? new Date() : before.stockSetAt,
+      });
+      isFirstActiveProduct = (await this.countActiveProducts(storeId)) === 0;
+    }
     const updated = await this.prisma.product.update({
       where: { id: productId },
-      data: { ...rest, ...(specs !== undefined ? { specs } : {}) },
+      data: {
+        ...rest,
+        ...(specs !== undefined ? { specs } : {}),
+        ...(dto.stock !== undefined ? { stockSetAt: new Date() } : {}),
+      },
     });
+    if (becomingActive) {
+      this.productEvents.log(
+        'product_published',
+        { storeId, userId: sellerId },
+        { via: 'single', first: isFirstActiveProduct },
+      );
+    }
     if (dto.stock !== undefined && before.stock <= 0 && updated.stock > 0) {
       void this.stockAlerts
         .notifyRestocked([
@@ -1140,7 +1225,7 @@ export class StoreService {
           ]
         : []),
     ]);
-    return updated;
+    return { ...updated, isFirstActiveProduct };
   }
 
   // docs/PRD-product-display-focus-and-variations.md §۴.۱ — همیشه جایگزین کامل (نه patch
@@ -1233,6 +1318,11 @@ export class StoreService {
           where: { id: { in: plan.deleteIds } },
         });
       }
+      // SP-3 — موجودی مدل‌ها نوشته شد؛ برای اعتبارسنجی انتشار
+      await tx.product.update({
+        where: { id: productId },
+        data: { stockSetAt: new Date() },
+      });
       return plan.updates.flatMap((update) => {
         const before = existing.find((row) => row.id === update.id);
         const variant = dto.variants[update.index];
@@ -1699,6 +1789,7 @@ export class StoreService {
 
     let created = 0;
     const errors: { row: number; message: string }[] = [];
+    const notes: { row: number; message: string }[] = [];
 
     for (let i = 0; i < rows.length; i++) {
       const rowNumber = i + 2; // ردیف ۱ هدر است
@@ -1724,16 +1815,30 @@ export class StoreService {
       try {
         // ستون‌های اکسل هیچ‌وقت specs نمی‌سازند (headerMap فقط name/basePrice/stock/description
         // را می‌شناسد)؛ specs:undefined فقط برای رضایت تایپ Prisma.Json است (مثل نبودِ کلید)
+        // SP-3 — خانه‌ی موجودی خالی ← «همیشه موجود» (نه ۰ بی‌صدا که محصول را غیرقابل‌فروش می‌کرد)
+        const blankStock = instance.stock === undefined || instance.stock === null || Number.isNaN(instance.stock);
         await this.prisma.product.create({
-          data: { ...instance, specs: undefined, storeId },
+          data: {
+            ...instance,
+            stock: blankStock ? 0 : instance.stock,
+            trackStock: !blankStock,
+            stockSetAt: blankStock ? null : new Date(),
+            status: 'ACTIVE',
+            specs: undefined,
+            storeId,
+          },
         });
+        if (blankStock) notes.push({ row: rowNumber, message: fa.store.importBlankStockNote });
         created++;
       } catch {
         errors.push({ row: rowNumber, message: 'خطا در ذخیره‌سازی این ردیف' });
       }
     }
 
-    return { created, errors };
+    if (created > 0) {
+      this.productEvents.log('product_published', { storeId, userId: sellerId }, { via: 'import', first: false, count: created });
+    }
+    return { created, errors, notes };
   }
 
   // docs/PRD-mvp-launch-plan.md گام ۱ — حداقلی، بدون UI: فروشنده باید بتواند سفارش‌های
@@ -2220,7 +2325,7 @@ export class StoreService {
     await this.getOwned(sellerId, storeId);
     const [products, approvedOrders] = await Promise.all([
       this.prisma.product.findMany({
-        where: { storeId },
+        where: { storeId, status: { in: ['ACTIVE', 'HIDDEN'] } },
         include: { optionTypes: { select: { id: true } }, variants: true },
       }),
       this.prisma.order.findMany({
@@ -2262,7 +2367,7 @@ export class StoreService {
               product.name,
               variantLabel(v.optionValues),
               (v.priceOverride ?? product.basePrice).toLocaleString('fa-IR'),
-              v.stock,
+              product.trackStock ? v.stock : fa.store.csvUnlimited,
               soldQty.get(`${product.id}:${v.id}`) ?? 0,
             ])
           : [
@@ -2270,7 +2375,7 @@ export class StoreService {
                 product.name,
                 '',
                 product.basePrice.toLocaleString('fa-IR'),
-                product.stock,
+                product.trackStock ? product.stock : fa.store.csvUnlimited,
                 soldQty.get(product.id) ?? 0,
               ],
             ];
@@ -2342,6 +2447,7 @@ export class StoreService {
             FROM products p
             LEFT JOIN product_variants v ON v."productId" = p.id
             WHERE p."storeId" = ${storeId}
+              AND p.status = 'ACTIVE' AND p."trackStock" = true
             GROUP BY p.id, p.stock
             HAVING (COUNT(v.id) = 0 AND p.stock <= ${LOW_STOCK_BADGE_THRESHOLD})
                 OR (COUNT(v.id) > 0 AND MIN(v.stock) <= ${LOW_STOCK_BADGE_THRESHOLD})
@@ -2349,7 +2455,7 @@ export class StoreService {
         `,
         // نوار قیمت طلا فقط وقتی لازم است که محصول وزنی داشته باشد؛ با pagination لیست محصولات دیگر از روی لیست قابل تشخیص نیست
         this.prisma.product.count({
-          where: { storeId, pricingModel: 'WEIGHT_BASED_FORMULA' },
+          where: { storeId, status: 'ACTIVE', pricingModel: 'WEIGHT_BASED_FORMULA' },
         }),
       ]);
     return {
@@ -2424,6 +2530,7 @@ export class StoreService {
           FROM products p
           LEFT JOIN product_variants v ON v."productId" = p.id
           WHERE p."storeId" = ${storeId}
+            AND p.status = 'ACTIVE' AND p."trackStock" = true
           GROUP BY p.id, p.name, p.stock
           HAVING (COUNT(v.id) = 0 AND p.stock <= 2)
               OR (COUNT(v.id) > 0 AND MIN(v.stock) <= 2)

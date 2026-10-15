@@ -24,6 +24,12 @@ export async function adjustOrderStock(
     qty: number;
   }[]) {
     if (!(item.qty > 0)) continue;
+    // SP-3 — «همیشه موجود»: نه کسر، نه بازگشت، و هرگز کمبود گزارش نمی‌شود
+    const tracking = await db.product.findUnique({
+      where: { id: item.productId },
+      select: { trackStock: true },
+    });
+    if (tracking && tracking.trackStock === false) continue;
     const delegate = item.variantId ? db.productVariant : db.product;
     const where = item.variantId
       ? { id: item.variantId, productId: item.productId }

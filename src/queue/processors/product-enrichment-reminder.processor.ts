@@ -13,4 +13,10 @@ export class ProductEnrichmentReminderProcessor {
     await this.reminder.sendDueReminders();
     this.logger.log('Product enrichment reminder pass completed');
   }
+
+  // SP-3 — پاک‌سازی روزانه‌ی پیش‌نویس‌های خالی
+  @Process('cleanup-drafts')
+  async cleanupDrafts() {
+    await this.reminder.cleanupEmptyDrafts();
+  }
 }

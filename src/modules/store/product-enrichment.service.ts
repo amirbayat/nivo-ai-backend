@@ -36,7 +36,7 @@ export class ProductEnrichmentService {
   async adminListLowCompleteness(opts: { storeId?: string; page?: number }) {
     const page = opts.page && opts.page > 0 ? opts.page : 1;
     const products = await this.prisma.product.findMany({
-      where: opts.storeId ? { storeId: opts.storeId } : undefined,
+      where: { status: 'ACTIVE', ...(opts.storeId ? { storeId: opts.storeId } : {}) },
       include: { store: { select: { id: true, name: true } } },
       orderBy: { createdAt: 'desc' },
     });
@@ -194,7 +194,7 @@ export class ProductEnrichmentService {
   async sellerListLowCompleteness(sellerId: string, storeId: string) {
     await this.storeService.getOwned(sellerId, storeId);
     const products = await this.prisma.product.findMany({
-      where: { storeId },
+      where: { storeId, status: 'ACTIVE' },
       orderBy: { createdAt: 'desc' },
     });
     const kbCounts = await this.prisma.storeKbEntry.groupBy({

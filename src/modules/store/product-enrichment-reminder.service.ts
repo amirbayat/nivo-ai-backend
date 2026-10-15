@@ -20,6 +20,23 @@ export class ProductEnrichmentReminderService {
     private readonly telegramApi: TelegramApiClientService,
   ) {}
 
+  // SP-3 §4.3 — پیش‌نویس کاملاً خالی (بدون اسم/عکس/ویدیو/مدل) که بیش از ۲۴ ساعت از ساختش گذشته
+  // حذف می‌شود؛ پیش‌نویسی که هر محتوایی دارد می‌ماند. روزانه از همین صف/پردازنده صدا زده می‌شود
+  async cleanupEmptyDrafts(now: Date = new Date()): Promise<number> {
+    const { count } = await this.prisma.product.deleteMany({
+      where: {
+        status: 'DRAFT',
+        name: '',
+        images: { isEmpty: true },
+        videos: { equals: [] },
+        variants: { none: {} },
+        createdAt: { lt: new Date(now.getTime() - 24 * 60 * 60 * 1000) },
+      },
+    });
+    if (count > 0) this.logger.log(`empty product drafts removed: ${count}`);
+    return count;
+  }
+
   // queue.module.ts (ProductEnrichmentReminderProcessor) این را هفتگی صدا می‌زند — فقط
   // فروشگاه‌هایی که تلگرام فروشنده‌شان وصل است می‌توانند نوتیف بگیرند، چون کانال دیگری
   // برای پوش به فروشنده وجود ندارد (بدون زیرساخت نوتیف جدید، طبق PRD)
@@ -45,7 +62,7 @@ export class ProductEnrichmentReminderService {
     for (const store of eligibleStores) {
       try {
         const staleProducts = await this.prisma.product.findMany({
-          where: { storeId: store.id, updatedAt: { lt: staleThreshold } },
+          where: { storeId: store.id, status: 'ACTIVE', updatedAt: { lt: staleThreshold } },
           select: { name: true },
           orderBy: { updatedAt: 'asc' },
           take: SAMPLE_NAMES_COUNT,
@@ -53,7 +70,7 @@ export class ProductEnrichmentReminderService {
         if (staleProducts.length === 0) continue;
 
         const staleCount = await this.prisma.product.count({
-          where: { storeId: store.id, updatedAt: { lt: staleThreshold } },
+          where: { storeId: store.id, status: 'ACTIVE', updatedAt: { lt: staleThreshold } },
         });
         const sampleNames = staleProducts.map((p) => p.name).join('، ');
 

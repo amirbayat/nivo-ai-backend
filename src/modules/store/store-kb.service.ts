@@ -1638,8 +1638,9 @@ assumptions بنویس. اگر متن هیچ محصول قابل‌تشخیصی 
       experimental_repairText: this.repairStructuredOutput(),
     });
 
+    // SP-3 — فقط DRAFT از «به‌روزرسانی موجود» کنار گذاشته می‌شود (بی‌نام/ناقص است)
     const existing = await this.prisma.product.findMany({
-      where: { storeId },
+      where: { storeId, status: { not: 'DRAFT' } },
       select: { id: true, name: true, code: true },
     });
     const normalize = (s: string) => s.trim().toLowerCase();

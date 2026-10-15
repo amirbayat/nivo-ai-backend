@@ -128,6 +128,10 @@ export const fa = {
     tooManyRequests: 'تعداد درخواست‌ها بیش از حد مجاز است',
   },
   store: {
+    csvUnlimited: 'نامحدود',
+    importBlankStockNote: 'موجودی خالی بود ← همیشه موجود',
+    productNotReady: 'محصول هنوز آماده‌ی انتشار نیست',
+    productBackToDraft: 'محصول منتشرشده دیگر به پیش‌نویس برنمی‌گردد؛ از «مخفی کن» استفاده کن',
     alreadyHasStore: 'هر فروشنده فقط یک فروشگاه دارد؛ از پنل فروشگاه فعلی را مدیریت کن',
     shippingDaysInvalid:
       'بازه‌ی روز ارسال باید هر دو عدد (حداقل و حداکثر) باشد، بین ۱ تا ۶۰ و حداقل از حداکثر بزرگ‌تر نباشد',
@@ -502,11 +506,18 @@ export const fa = {
       'تعداد یکی از اقلام سبد معتبر نیست. لطفاً تعداد را دوباره مشخص کنید.',
     cartLocked: 'سفارشت ثبت شده و سبد دیگه قابل تغییر نیست',
     orderOutOfStock: (
-      lines: { name: string; requested: number; available: number }[],
+      lines: {
+        name: string;
+        requested: number;
+        available: number;
+        unavailable?: boolean;
+      }[],
     ) =>
       `متاسفانه موجودی بعضی اقلام تغییر کرده و سفارش ثبت نشد:\n${lines
         .map((l) =>
-          l.available > 0
+          l.unavailable
+            ? `• ${l.name}: این محصول الان فروشی نیست`
+            : l.available > 0
             ? `• ${l.name}: ${l.requested} عدد خواستید، ${l.available} عدد موجود است`
             : `• ${l.name}: دیگر موجود نیست`,
         )
@@ -935,6 +946,9 @@ export const fa = {
     orderRejectReasonSkipKeyword: '-',
     orderRejected: 'سفارش رد شد ❌',
     stockUsage: 'به این شکل بفرست: /stock <اسم یا کد محصول>',
+    alwaysInStockShort: 'همیشه موجود',
+    alwaysInStockNotice:
+      'این محصول همیشه موجوده؛ برای شمردن موجودی از پنل خاموشش کن',
     stockSearchEmpty: 'محصولی با این اسم/کد پیدا نشد.',
     stockSearchHeader: '🔎 یکی رو انتخاب کن:',
     stockPrompt: (

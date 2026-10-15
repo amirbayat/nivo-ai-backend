@@ -1,3 +1,4 @@
+import { BUYER_VISIBLE } from '../store/product-visibility';
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -26,10 +27,12 @@ export class StockAlertService {
     conversationId: string;
   }): Promise<{ status: 'subscribed' | 'needs_phone' | 'in_stock' }> {
     const product = await this.prisma.product.findFirst({
-      where: { id: input.productId, storeId: input.storeId },
-      select: { id: true, stock: true },
+      where: { id: input.productId, storeId: input.storeId, ...BUYER_VISIBLE },
+      select: { id: true, stock: true, trackStock: true },
     });
     if (!product) throw new NotFoundException(fa.store.notFound);
+    // SP-3 — «همیشه موجود» هیچ‌وقت ناموجود نمی‌شود، پس اشتراک «موجود شد» معنی ندارد
+    if (product.trackStock === false) return { status: 'in_stock' };
     let stock = product.stock;
     if (input.variantId) {
       const variant = await this.prisma.productVariant.findFirst({
@@ -149,9 +152,9 @@ export class StockAlertService {
       if (item.variantId) {
         const row = await tx.productVariant.findFirst({
           where: { id: item.variantId, productId: item.productId },
-          select: { stock: true },
+          select: { stock: true, product: { select: { trackStock: true } } },
         });
-        if (!row) continue;
+        if (!row || row.product.trackStock === false) continue;
         lines.push({
           productId: item.productId,
           variantId: item.variantId,
@@ -161,9 +164,9 @@ export class StockAlertService {
       } else {
         const row = await tx.product.findUnique({
           where: { id: item.productId },
-          select: { stock: true },
+          select: { stock: true, trackStock: true },
         });
-        if (!row) continue;
+        if (!row || row.trackStock === false) continue;
         lines.push({
           productId: item.productId,
           variantId: null,

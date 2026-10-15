@@ -7,21 +7,21 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(uuid())
+  id              String    @id @default(uuid())
   // docs/PRD-instagram-smart-dm-and-ir-intl-split.md بخش ۳/۷.۱ — فروشنده‌ی REGION=INTL با
   // ایمیل+کد ثبت‌نام می‌کند، نه شماره؛ phone نال‌پذیر شد تا این کاربرها بدون شماره ساخته شوند
   // (دیتابیس INTL از ایران کاملاً جداست — بخش ۳.۱ — پس در عمل این دو هیچ‌وقت در یک ردیف قاطی
   // نمی‌شوند؛ نال‌پذیری فقط چون schema مشترک بین دو دیپلوی است). دقیقاً یکی از phone/email همیشه ست است
-  phone     String?  @unique
-  email     String?  @unique
-  name      String?
-  role      Role     @default(USER)
-  isActive  Boolean  @default(true)
+  phone           String?   @unique
+  email           String?   @unique
+  name            String?
+  role            Role      @default(USER)
+  isActive        Boolean   @default(true)
   // SP-2 §4.11.5 — پذیرش شرایط استفاده هنگام ساخت فروشگاه (بدون چک‌باکس)
   termsAcceptedAt DateTime?
   termsVersion    String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   // docs/PRD-growth-traction-features.md بخش ۳.۲ — denormalized، هر پیام (نه فقط امروز) اینکریمنت می‌شود
   lifetimeMessageCount Int       @default(0)
@@ -584,28 +584,28 @@ model CreditConfig {
 // sales-agent (نه قاطی با CreditConfig بالا که مال ویجت نیوو/nivoai.ir است). جایگزین دو
 // ثابت هاردکدشده‌ی قبلی (FREE_DAILY_QUOTA در credit.service.ts و store-credit.service.ts)
 model SalesAgentGlobalConfig {
-  id                  String   @id @default("singleton")
-  freeDailyQuota      Int      @default(10)
-  trialDurationDays   Int      @default(14)
-  trialCreditToman    Int      @default(300000)
+  id                       String   @id @default("singleton")
+  freeDailyQuota           Int      @default(10)
+  trialDurationDays        Int      @default(14)
+  trialCreditToman         Int      @default(300000)
   // فیدبک کاربر ۱۴۰۵/۰۷/۱۷ — هزینه‌ی خام AI (COGS) قبل از کسر از اعتبار فروشگاه در این ضریب
   // ضرب می‌شود. buyerCostMarkup روی مصرف خریدار (TEXT_REPLY/VOICE_TTS در credit.service.ts)،
   // sellerCostMarkup روی مصرف خودِ فروشنده در پنل (PRODUCT_ENRICHMENT/NOTES_ANALYSIS/
   // GUIDE_ASSISTANT). اعتبار آزمایشی ۳۰۰هزارتومانی (trialCreditToman بالا) خودش دست‌نخورده
   // می‌ماند — این ضرایب فقط روی نرخ مصرف از آن بودجه اثر می‌گذارند، نه روی مبلغ گرنت.
-  buyerCostMarkup     Float    @default(2)
-  sellerCostMarkup    Float    @default(1.5)
+  buyerCostMarkup          Float    @default(2)
+  sellerCostMarkup         Float    @default(1.5)
   // فیدبک کاربر ۱۴۰۵/۰۷/۱۷ — صرفاً برای برآورد نمایشی «حدود N چت» روی کارت‌های خرید اعتبار
   // (SellerCreditPage.tsx)؛ در محاسبه‌ی واقعی کسر اعتبار استفاده نمی‌شود
-  avgCostPerChatToman Int      @default(10000)
+  avgCostPerChatToman      Int      @default(10000)
   // فیدبک کاربر ۱۴۰۵/۰۷/۱۷ — برای مقایسه‌ی دستی هزینه/کیفیت بین مدل‌ها. null = رفتار قبلی
   // (pickVariant() در model-variants.ts یکی از MODEL_VARIANTS را رندوم انتخاب می‌کند). مقدار
   // غیر-null باید یکی از کلیدهای MODEL_VARIANTS باشد و همان کلید را برای همه‌ی مکالمه‌های
   // تازه (startChat/restartConversation در sales-agent.service.ts) فورس می‌کند — مکالمه‌های
   // قدیمی که از قبل abVariant دارند دست‌نخورده می‌مانند.
-  forcedModelVariant  String?
+  forcedModelVariant       String?
   // docs/PRD-sales-agent-sales-state-machine.md §۱۸ — کلید rollout؛ false = مسیر FULL_AGENT قبلی
-  salesStageMachineEnabled Boolean @default(false)
+  salesStageMachineEnabled Boolean  @default(false)
   // docs/PRD-nivo-sales-unified.md 3.6 — کلید rollout پیامک‌های وضعیت سفارش به خریدار؛ false =
   // فقط پیام چت/تلگرام (هزینه‌ی SMS با پلتفرم است، D-7)
   orderSmsEnabled          Boolean  @default(false)
@@ -617,7 +617,7 @@ model SalesAgentGlobalConfig {
   aiEnabled                Boolean  @default(true)
   // 4.6 — first visit shows a template welcome and the product grid. Default off.
   shopLandingEnabled       Boolean  @default(false)
-  updatedAt           DateTime @updatedAt
+  updatedAt                DateTime @updatedAt
 
   @@map("sales_agent_global_config")
 }
@@ -2094,17 +2094,17 @@ model VideoEditJob {
 // sellerId عمداً @unique نیست (بر خلاف Wallet/Subscription) چون یک User می‌تواند چند
 // فروشگاه بزند — دقیقاً الگوی رابطه‌ی Project (بالا)، نه Wallet.
 model Store {
-  id                             String            @id @default(uuid())
+  id                             String               @id @default(uuid())
   sellerId                       String
-  seller                         User              @relation(fields: [sellerId], references: [id], onDelete: Cascade)
-  slug                           String            @unique // بخش nivo.ai/chat/<slug> — انگلیسی، توسط خود فروشنده انتخاب می‌شود (بخش ۱.۱ سند)
+  seller                         User                 @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  slug                           String               @unique // بخش nivo.ai/chat/<slug> — انگلیسی، توسط خود فروشنده انتخاب می‌شود (بخش ۱.۱ سند)
   name                           String // نام فارسی فروشگاه، فقط نمایشی
   category                       String?
   // docs/PRD-business-types-and-appointment-booking.md بخش ۴ — بعد جدا از category: شکل
   // بنیادی تراکنش (کالا در برابر وقت)، نه برچسب نمایشی. فقط PRODUCT_SALES رفتار واقعی دارد؛
   // APPOINTMENT_BOOKING فعلاً فقط ذخیره می‌شود تا تقاضای واقعی سنجیده شود — ماشین‌حالت/پنل/
   // مدل داده‌ی نوبت‌دهی هنوز ساخته نشده (فاز جدا، تأیید نشده).
-  businessType                   StoreBusinessType @default(PRODUCT_SALES)
+  businessType                   StoreBusinessType    @default(PRODUCT_SALES)
   // docs/PRD-instagram-smart-dm-and-ir-intl-split.md بخش ۳ — فروشنده‌ی REGION=INTL فاز ۱ اصلاً
   // کارت بانکی ندارد (چک‌اوت در فاز ۱ وجود ندارد)؛ در DTO ثبت‌نام ایرانی (CreateStoreDto) همچنان
   // required است — این نال‌پذیری فقط در سطح دیتابیس است، نه تغییر رفتار ویزارد فعلی ایران
@@ -2124,14 +2124,14 @@ model Store {
   // دیپ‌لینک یک‌بارمصرف (telegramConnectToken) ست می‌شود؛ وقتی ست باشد، اعلان handoff/رسید
   // برای همین chat_id پوش می‌شود
   ownerTelegramChatId            String?
-  telegramConnectToken           String?           @unique
+  telegramConnectToken           String?              @unique
   telegramConnectTokenExpiresAt  DateTime?
   // docs/PRD-instagram-smart-dm-and-ir-intl-split.md بخش ۴.۱ — «Instagram API with Instagram
   // Login» (بدون نیاز به فیس‌بوک پیج)؛ آینه‌ی سه فیلد telegramConnectToken بالا ولی برای OAuth
   // استاندارد (نه دیپ‌لینک یک‌بارمصرف). instagramAccessToken توکن long-lived است (~۶۰ روز، نیاز
   // به refresh دوره‌ای)؛ instagramBusinessId همان IG User ID است که وبهوک با آن match می‌شود
-  instagramBusinessId            String?           @unique
-  instagramAccessToken           String?           @db.Text
+  instagramBusinessId            String?              @unique
+  instagramAccessToken           String?              @db.Text
   instagramTokenExpiresAt        DateTime?
   instagramConnectedAt           DateTime?
   // docs/PRD-seller-telegram-management-bot.md — بات دوم و جدا (توکن/وبهوک جدا) برای مدیریت
@@ -2139,18 +2139,23 @@ model Store {
   // عمداً فیلد جدا از ownerTelegramChatId بالا (که فقط برای اعلان‌رسانی/پاسخ‌دهی روی بات
   // مشترک مشتری‌محور است)، چون این یکی گیت ورود به اکشن‌های مدیریتی (تایید/رد سفارش، تغییر
   // موجودی) است و نیاز به اطمینان بیشتری از هویت فروشنده دارد
-  sellerBotChatId                String?           @unique
+  sellerBotChatId                String?              @unique
   sellerBotLinkedAt              DateTime?
+  // SP-3/S9 — توکن یک‌بارمصرف اتصال با یک تپ (t.me/<bot>?start=c_<token>)، TTL ۱۵ دقیقه
+  sellerBotConnectToken          String?              @unique
+  sellerBotConnectTokenExpiresAt DateTime?
+  // SP-3/S6 — اولین بار که فروشنده لینک فروشگاه را به اشتراک گذاشت (کارت «۳ قدم تا اولین فروش»)
+  launchSharedAt                 DateTime?
   // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۹ (غنی‌سازی دوره‌ای) — آخرین بار
   // که برای این فروشگاه یادآوری «محصولات قدیمی‌نشده» تلگرام فرستاده شد؛ cron فقط فروشگاه‌هایی
   // که این فیلدشان خالی یا قدیمی‌تر از cooldown است را دوباره نوتیف می‌کند (جلوگیری از اسپم)
   lastEnrichmentNudgeAt          DateTime?
-  status                         StoreStatus       @default(ACTIVE)
+  status                         StoreStatus          @default(ACTIVE)
   // R1.2 — دلیل تعلیق (بنر پنل فروشنده)؛ با رفع تعلیق null می‌شود
   suspendedReason                String?
   // docs/PRD-seller-credit-billing.md بخش ۱/۵ — اعتبار AI فروشگاه به تومان؛ بعد از تمام‌شدن
   // سهمیه‌ی رایگان روزانه، مصرف واقعی هر فراخوانی AI از همین فیلد کم می‌شود
-  creditBalanceToman             Int               @default(0)
+  creditBalanceToman             Int                  @default(0)
   // فاز ۱ — تفکیک creditBalanceToman به‌ازای منبع (Σ بخش‌ها = creditBalanceToman)
   creditBuckets                  StoreCreditBucket[]
   // فیدبک کاربر ۱۴۰۵/۰۷/۱۲ — برای فروشنده‌ای که هنوز اعتبار نخریده (billingMode!==PAID)،
@@ -2158,23 +2163,23 @@ model Store {
   // وویس **در روز** می‌گیرند؛ با اولین وویسِ هر مکالمه‌ی تازه زیاد می‌شود، نیمه‌شب با
   // freeVoiceQuotaResetAt به‌صورت تنبل (lazy، بدون cron) صفر می‌شود
   // (conversation-engine.service.ts's logReply/reserveFreeVoiceConversationSlot)
-  freeVoiceConversationsUsed     Int               @default(0)
+  freeVoiceConversationsUsed     Int                  @default(0)
   freeVoiceQuotaResetAt          DateTime?
   // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۶ — از اولین چتِ اولین خریدار
   // همین فروشگاه فقط یک‌بار گرنت می‌شود (CreditService.grantTrialIfFirstChat)؛ trialEndsAt
   // snapshot لحظه‌ی گرنت است (تغییر بعدی تنظیمات ادمین روی فروشگاه‌های در-حال-اجرا اثر ندارد)
   trialStartedAt                 DateTime?
   trialEndsAt                    DateTime?
-  trialCreditRemainingToman      Int               @default(0)
+  trialCreditRemainingToman      Int                  @default(0)
   // docs/PRD-seller-multi-bank-card-rotation.md — سیاست انتخاب کارت وقتی چند StoreBankCard
   // فعال دارد؛ lastCardIndex فقط برای EQUAL (round-robin واقعی، نه رندوم)
-  cardDisplayPolicy              CardDisplayPolicy @default(EQUAL)
-  lastCardIndex                  Int               @default(0)
+  cardDisplayPolicy              CardDisplayPolicy    @default(EQUAL)
+  lastCardIndex                  Int                  @default(0)
   // docs/PRD-product-strategy-and-roadmap.md بخش ۳.۲ — فیلدهای ساختاریافته‌ی سطح فروشگاه،
   // همیشه در دسترس ایجنت بدون نیاز به retrieval روی باکس دانش (tryAnswerFromStoreProfile).
   // shippingInfo/returnPolicy هم بخشی از چک‌لیست تکمیل‌بودن فروشگاه هستند (بخش ۳.۱).
-  shippingInfo                   String?           @db.Text
-  returnPolicy                   String?           @db.Text
+  shippingInfo                   String?              @db.Text
+  returnPolicy                   String?              @db.Text
   // R3.3 — بازه‌ی روز کاری ارسال؛ هر دو یا هیچ‌کدام
   shippingDaysMin                Int?
   shippingDaysMax                Int?
@@ -2183,11 +2188,11 @@ model Store {
   returnWindowDays               Int                  @default(7)
   returnShippingPaidBy           ReturnShippingPaidBy @default(BUYER)
   // معرفی کوتاه برند (۱-۲ جمله) — برای سؤالات عمومی نامرتبط با یک محصول خاص
-  brandIntro                     String?           @db.Text
+  brandIntro                     String?              @db.Text
   // docs/PRD-seller-guide-assistant-modal.md بخش ۱.۲ — متن خام فروشنده (از راهنمای پرامپت
   // ChatGPT یا تایپ دستی)، append-only و هرگز خلاصه/overwrite نمی‌شود؛ منبع تحلیل خودکار
   // برای پیشنهاد brandIntro/shippingInfo/returnPolicy/category/باکس‌دانش
-  ownerNotes                     String?           @db.Text
+  ownerNotes                     String?              @db.Text
   // ساعت پاسخ‌گویی به قالب "HH:mm" — وقتی هر دو خالی باشند یعنی محدودیتی نیست (۲۴ساعته)؛
   // در transitionToHandoff برای انتخاب پیام «الان»/«فردا» استفاده می‌شود
   workingHoursStart              String?
@@ -2195,17 +2200,17 @@ model Store {
   // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۰ بند ۴ — سوئیچ فروشنده برای خاموش‌کردن
   // پیام‌های خودکار (دغدغه‌ی برند/اسپم)؛ دو فیلد جدا چون دو پایپ‌لاین کاملاً مستقل‌اند
   // (PostPurchaseFollowUpService / AbandonedCartReminderService)
-  postPurchaseFollowUpEnabled    Boolean           @default(true)
-  abandonedCartReminderEnabled   Boolean           @default(true)
+  postPurchaseFollowUpEnabled    Boolean              @default(true)
+  abandonedCartReminderEnabled   Boolean              @default(true)
   // docs/PRD-sales-agent-persuasion-principles.md بخش ۶ — کلید کلی فروشنده برای ۶ اصل
   // متقاعدسازی (Cialdini) در FULL_AGENT؛ هم‌خانواده‌ی دو سوئیچ بالا. effective یک محصول =
   // این AND Product.persuasionTechniquesEnabled خودش
-  persuasionTechniquesEnabled    Boolean           @default(true)
+  persuasionTechniquesEnabled    Boolean              @default(true)
   // فیدبک کاربر ۱۴۰۵/۰۷/۱۸ — هر وویس ۱۰۰۰-۲۰۰۰ تومان هزینه‌ی واقعی دارد (sales-agent-voice.processor.ts
   // کرایت واقعی Kie.ai)؛ کاربر صریحاً خواست فروشنده خودش روشن/خاموش کند، دیفالت اولیه خاموش
   // (برخلاف pickVoiceVariant() در model-variants.ts که فعلاً همیشه 'ON' برمی‌گرداند — این سوئیچ
   // جدید قبل از آن چک می‌شود و در صورت false کلاً وویس را رد می‌کند، conversation-engine.service.ts logReply)
-  voiceRepliesEnabled            Boolean           @default(false)
+  voiceRepliesEnabled            Boolean              @default(false)
   // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۴ — عکس پروفایل فروشگاه؛ همون الگوی
   // Product.images (کلید MinIO، نه URL مستقیم) — در چت وب بالای هدر و در پیام /start تلگرام
   // نمایش داده می‌شود. برخلاف images محصول، تک‌فیلد است نه آرایه (یک فروشگاه یک لوگو دارد)
@@ -2213,13 +2218,13 @@ model Store {
   // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۱ — فروش حضوری/دیجیتال نیازی
   // به آدرس ندارد؛ وقتی false باشد، ADDRESS_COLLECTION کلاً رد می‌شود (doCreateOrder همان
   // فلوی قدیمی مستقیم به AWAITING_PAYMENT را طی می‌کند)
-  requiresShipping               Boolean           @default(true)
+  requiresShipping               Boolean              @default(true)
   // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۱۶ — فقط ادمین این فیلد را
   // عوض می‌کند (هیچ endpoint فروشنده‌ای آن را در whitelist خودش ندارد)؛ وقتی true باشد،
   // conversation-engine به‌جای create_order از capture_lead استفاده می‌کند — یعنی هیچ‌وقت Order
   // واقعی برای این فروشگاه ساخته نمی‌شود، فقط یک LeadProfile. مخصوص فروشگاه دموی خودِ فروشنده
   // (امیر) برای معرفی محصول نرم‌افزاری، نه فروشگاه‌های واقعی مشتری‌ها
-  leadCaptureOnly                Boolean           @default(false)
+  leadCaptureOnly                Boolean              @default(false)
   // docs/PRD-category-specific-product-pricing-and-attributes.md بخش ۲.۲/۳.۳ — اجرت/سود/مالیات
   // برای محصولات با pricingModel=WEIGHT_BASED_FORMULA؛ یک‌بار در سطح فروشگاه تنظیم می‌شود،
   // نه به‌ازای هر محصول. goldVatPercent پیش‌فرض ۱۰ (نرخ مالیات طلای ۱۴۰۴)، چون قانون مالیاتی
@@ -2227,24 +2232,24 @@ model Store {
   goldWageType                   GoldWageType?
   goldWageValue                  Float?
   goldProfitPercent              Float?
-  goldVatPercent                 Float             @default(10)
+  goldVatPercent                 Float                @default(10)
   // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۵.۱ — فروشگاه «قالب»:
   // دستی seed می‌شود، هیچ‌وقت مستقیم به بازدیدکننده نشان داده نمی‌شود، فقط منبع کپی است
-  isDemoTemplate                 Boolean           @default(false)
+  isDemoTemplate                 Boolean              @default(false)
   // همان بخش — کپی شخصی هر بازدیدکننده‌ی لینک /demo/...؛ همیشه leadCaptureOnly=true
   // (هیچ‌وقت Order واقعی نمی‌سازد) تا نیازی به کارت بانکی/تسویه‌ی واقعی نباشد
-  isDemo                         Boolean           @default(false)
+  isDemo                         Boolean              @default(false)
   clonedFromStoreId              String?
-  clonedFromStore                Store?            @relation("StoreClones", fields: [clonedFromStoreId], references: [id], onDelete: SetNull)
-  clones                         Store[]           @relation("StoreClones")
+  clonedFromStore                Store?               @relation("StoreClones", fields: [clonedFromStoreId], references: [id], onDelete: SetNull)
+  clones                         Store[]              @relation("StoreClones")
   // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۳.۳ — خروجی کش‌شده‌ی
   // aggregator موضوعات تکرارشونده‌ی AGENT_STUCK/SUPPORT_NEEDED/CUSTOMER_REQUESTED (تب «توجه»)؛
   // چون تولیدش یک فراخوان LLM است، هر بازدید صفحه دوباره محاسبه نمی‌شود — فقط بعد از گذشتن
   // TTL (نگاه کن به store.service.ts getAttentionSuggestions)
   attentionSuggestions           Json?
   attentionSuggestionsComputedAt DateTime?
-  createdAt                      DateTime          @default(now())
-  updatedAt                      DateTime          @updatedAt
+  createdAt                      DateTime             @default(now())
+  updatedAt                      DateTime             @updatedAt
 
   products                 Product[]
   stockAlerts              ProductStockAlert[]
@@ -2290,6 +2295,15 @@ enum StoreBusinessType {
 // docs/PRD-category-specific-product-pricing-and-attributes.md بخش ۲.۲ — نحوه‌ی محاسبه‌ی
 // قیمت واحد کالا، مستقل از category/businessType (یک محصول طلا هنوز PRODUCT_SALES است،
 // فقط basePrice آن نادیده گرفته می‌شود و قیمت at-request-time از فرمول محاسبه می‌شود)
+// SP-3 — وضعیت محصول: DRAFT فقط برای فروشنده، HIDDEN موقتاً از فروش خارج (برای خریدار مثل DRAFT)،
+// ARCHIVED برای E3.4 (UI ندارد)
+enum ProductStatus {
+  DRAFT
+  ACTIVE
+  HIDDEN
+  ARCHIVED
+}
+
 enum PricingModel {
   FIXED
   WEIGHT_BASED_FORMULA
@@ -2395,6 +2409,13 @@ model Product {
   // برای سفارش‌های حاوی این محصول به‌جای لحظه‌ی تایید سفارش، به لحظه‌ی «ارسال شد» موکول می‌شود
   hasFulfillmentDelay         Boolean       @default(false)
 
+  // SP-3 — ردیف‌های قدیمی ACTIVE و trackStock=true می‌مانند تا رفتار عوض نشود
+  status     ProductStatus @default(ACTIVE)
+  // false = «همیشه موجود»: همه‌ی چک‌های موجودی پاس، کسر/بازگشت موجودی ندارد، عددی نشان داده نمی‌شود
+  trackStock Boolean       @default(true)
+  // آخرین باری که موجودی (محصول یا مدل‌ها) صریحاً نوشته شد؛ برای اعتبارسنجی انتشار
+  stockSetAt DateTime?
+
   kbEntries StoreKbEntry[]
 
   // docs/PRD-seller-knowledge-base.md بخش ۲.۴ — پایگاه دانش مشترک بین فروشگاه‌های مشابه؛
@@ -2429,6 +2450,7 @@ model Product {
   discountCodes StoreDiscountCode[]
 
   @@unique([storeId, code])
+  @@index([storeId, status])
   @@index([storeId])
   @@index([canonicalProductId])
   @@map("products")
@@ -2483,18 +2505,18 @@ model ProductVariant {
 }
 
 model ProductStockAlert {
-  id             String    @id @default(uuid())
+  id             String          @id @default(uuid())
   storeId        String
-  store          Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  store          Store           @relation(fields: [storeId], references: [id], onDelete: Cascade)
   productId      String
-  product        Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  product        Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
   variantId      String?
   variant        ProductVariant? @relation(fields: [variantId], references: [id], onDelete: Cascade)
   customerId     String
-  customer       Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  customer       Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
   conversationId String?
   phone          String?
-  createdAt      DateTime  @default(now())
+  createdAt      DateTime        @default(now())
   notifiedAt     DateTime?
 
   @@index([storeId, notifiedAt])
@@ -2902,32 +2924,32 @@ enum ResponseStrategy {
 // یک ردیف به‌ازای هر فراخوان واقعی AI (متن/وویس/ASR) + هر شارژ اعتبار — لاگ مصرف به تفکیک
 // فروشگاه+خریدار+مدل (docs/PRD-seller-credit-billing.md بخش ۱)
 model CreditUsageEvent {
-  id             String             @id @default(uuid())
-  storeId        String
-  store          Store              @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  customerId     String?
-  conversationId String?
-  conversation   SalesConversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
-  model          String
-  kind           CreditUsageKind
-  costToman      Int // هزینه‌ی خام AI (COGS)، بدون ضریب — برای TOPUP: مبلغ شارژشده
+  id              String             @id @default(uuid())
+  storeId         String
+  store           Store              @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  customerId      String?
+  conversationId  String?
+  conversation    SalesConversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  model           String
+  kind            CreditUsageKind
+  costToman       Int // هزینه‌ی خام AI (COGS)، بدون ضریب — برای TOPUP: مبلغ شارژشده
   // فیدبک کاربر ۱۴۰۵/۰۷/۱۷ — مبلغی که واقعاً از اعتبار فروشگاه کم شده (costToman × buyerCostMarkup
   // یا sellerCostMarkup، بسته به منبع مصرف). برای TOPUP همیشه برابر costToman (بدون ضریب، چون
   // شارژ است نه هزینه). پیش از این فیدبک صفر بود (فیلد قدیمی)
-  chargedToman   Int                @default(0)
-  isFreeQuota    Boolean            @default(false) // true یعنی جزو سهمیه‌ی رایگان بوده، balance کم نشده
+  chargedToman    Int                @default(0)
+  isFreeQuota     Boolean            @default(false) // true یعنی جزو سهمیه‌ی رایگان بوده، balance کم نشده
   // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۷.۱ — داده‌ی واقعی توکن/هزینه‌ی
   // دلاری هر مصرف، برای جایگزینی تخمین هزینه‌ی هر «چت» با عدد اندازه‌گیری‌شده‌ی واقعی
-  tokensInput    Int                @default(0)
-  tokensOutput   Int                @default(0)
-  costUsdMicros  Int                @default(0) // دلار × ۱٬۰۰۰٬۰۰۰ — مستقل از نوسان نرخ ارز
+  tokensInput     Int                @default(0)
+  tokensOutput    Int                @default(0)
+  costUsdMicros   Int                @default(0) // دلار × ۱٬۰۰۰٬۰۰۰ — مستقل از نوسان نرخ ارز
   // فاز ۱ (مشخصات ج ۲۳.۱) — فقط برای TOPUP: منبع (درگاه) شارژ
   source          CreditSource?
   // فاز ۱ — برای مصرف: [{source, chargedToman, markup}]؛ یک مصرف می‌تواند از چند بخش کسر شود
   // (source='TRIAL' برای بخشی که از اعتبار آزمایشی رفته)
   chargeBreakdown Json?
-  meta           Json?
-  createdAt      DateTime           @default(now())
+  meta            Json?
+  createdAt       DateTime           @default(now())
 
   @@index([storeId, createdAt])
   @@index([customerId])
@@ -3280,24 +3302,24 @@ enum RefundDestinationType {
 
 // 3.11 — جدول آماده است؛ منطق ساخت/مسیر بازپرداخت در گام ۵ (RefundService)
 model OrderRefund {
-  id                String                 @id @default(uuid())
-  orderId           String
-  order             Order                  @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  storeId           String
-  amountToman       Int
-  reason            RefundReason
-  note              String?
-  status            RefundStatus
-  destinationType   RefundDestinationType?
-  destinationEnc    String?
-  destinationMasked String?
-  holderName        String?
-  bankName          String?
-  destinationAt     DateTime?
-  paidAt            DateTime?
-  paidRef           String?
-  proofImageKey     String?
-  createdByActor    String
+  id                    String                 @id @default(uuid())
+  orderId               String
+  order                 Order                  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  storeId               String
+  amountToman           Int
+  reason                RefundReason
+  note                  String?
+  status                RefundStatus
+  destinationType       RefundDestinationType?
+  destinationEnc        String?
+  destinationMasked     String?
+  holderName            String?
+  bankName              String?
+  destinationAt         DateTime?
+  paidAt                DateTime?
+  paidRef               String?
+  proofImageKey         String?
+  createdByActor        String
   // Step 6.5 F19. The refund-card reminder is sent at most once.
   destinationRemindedAt DateTime?
   createdAt             DateTime               @default(now())

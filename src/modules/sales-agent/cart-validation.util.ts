@@ -16,14 +16,21 @@ export function isValidCartQty(qty: unknown): qty is number {
 export type CatalogLine = {
   // قیمت واحد فعلی (واریانت اگر دارد، وگرنه محصول) و موجودی فعلی؛ null = محصول/واریانت دیگر وجود ندارد
   unitPrice: number;
-  stock: number;
+  // null = «همیشه موجود» (trackStock=false)
+  stock: number | null;
 } | null;
 
 export type CartReconciliation =
   | { status: 'INVALID_QTY' }
   | {
       status: 'OUT_OF_STOCK';
-      shortages: { name: string; requested: number; available: number }[];
+      shortages: {
+        name: string;
+        requested: number;
+        available: number;
+        // محصول/مدل دیگر برای فروش نیست (پنهان/پیش‌نویس/حذف) — پیام «الان فروشی نیست»
+        unavailable?: boolean;
+      }[];
     }
   | {
       status: 'PRICE_CHANGED';
@@ -44,15 +51,26 @@ export function reconcileCart(
     return { status: 'INVALID_QTY' };
 
   // یک محصول ممکن است در چند خط باشد (واریانت‌های مختلف)؛ موجودی هر ردیف جدا چک می‌شود
-  const shortages: { name: string; requested: number; available: number }[] =
-    [];
+  const shortages: {
+    name: string;
+    requested: number;
+    available: number;
+    unavailable?: boolean;
+  }[] = [];
   for (const item of cart) {
     const live = catalog.get(lineKey(item));
-    if (!live || live.stock < item.qty) {
+    if (!live) {
       shortages.push({
         name: item.name,
         requested: item.qty,
-        available: live ? Math.max(0, live.stock) : 0,
+        available: 0,
+        unavailable: true,
+      });
+    } else if (live.stock !== null && live.stock < item.qty) {
+      shortages.push({
+        name: item.name,
+        requested: item.qty,
+        available: Math.max(0, live.stock),
       });
     }
   }

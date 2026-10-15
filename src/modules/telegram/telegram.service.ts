@@ -1,3 +1,4 @@
+import { BUYER_VISIBLE } from '../store/product-visibility';
 import { ConflictException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { safeEqual } from '../../common/utils/safe-equal.util';
@@ -316,7 +317,7 @@ export class TelegramService {
         where: { telegramShortCode: payload.slice('p_'.length) },
         include: { store: true },
       });
-      if (!product || product.store.status !== 'ACTIVE') {
+      if (!product || product.status !== 'ACTIVE' || product.store.status !== 'ACTIVE') {
         await this.sendText(chatId, fa.store.notFound);
         return;
       }
@@ -591,6 +592,7 @@ export class TelegramService {
       const matchedIds = nameOrCategoryMatches.map((s) => s.id);
       const productMatches = await this.prisma.product.findMany({
         where: {
+          ...BUYER_VISIBLE,
           name: { contains: q, mode: 'insensitive' },
           store: { status: 'ACTIVE', id: { notIn: matchedIds } },
         },
@@ -945,7 +947,7 @@ export class TelegramService {
           `handleVoice conversation=${conversation.id} extractAudio ogg→mp3 bytes=${oggBuffer.length}→${mp3Buffer.length}`,
         );
         const products = await this.prisma.product.findMany({
-          where: { storeId: conversation.storeId },
+          where: { storeId: conversation.storeId, ...BUYER_VISIBLE },
           select: { name: true },
           take: 8,
         });

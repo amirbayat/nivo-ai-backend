@@ -1,3 +1,4 @@
+import { BUYER_VISIBLE } from '../store/product-visibility';
 import {
   BadRequestException,
   ForbiddenException,
@@ -319,7 +320,7 @@ export class SalesAgentService {
       return this.attachVoicePending(conversationId, blocked);
     }
     const product = await this.prisma.product.findUnique({
-      where: { id: productId },
+      where: { id: productId, ...BUYER_VISIBLE },
       include: PRODUCT_VARIANT_INCLUDE,
     });
     if (product && product.storeId === storeId) {
@@ -1069,7 +1070,7 @@ export class SalesAgentService {
         `submitVoiceMessage conversation=${conversationId} extractAudio bytes=${file.buffer.length}→${mp3Buffer.length}`,
       );
       const products = await this.prisma.product.findMany({
-        where: { storeId: conversation.storeId },
+        where: { storeId: conversation.storeId, ...BUYER_VISIBLE },
         select: { name: true },
         take: 8,
       });
@@ -1324,7 +1325,7 @@ export class SalesAgentService {
   ) {
     const conversation = await this.loadOwned(conversationId, sessionToken);
     const product = await this.prisma.product.findFirst({
-      where: { id: productId, storeId: conversation.storeId },
+      where: { id: productId, storeId: conversation.storeId, ...BUYER_VISIBLE },
       select: { id: true },
     });
     if (!product) throw new NotFoundException(fa.salesAgent.productNotFound);

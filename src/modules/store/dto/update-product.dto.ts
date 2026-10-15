@@ -2,6 +2,7 @@ import {
   IsArray,
   IsBoolean,
   IsEnum,
+  IsIn,
   IsInt,
   IsNumber,
   IsOptional,
@@ -117,4 +118,13 @@ export class UpdateProductDto {
   @IsOptional()
   @IsBoolean()
   hasFulfillmentDelay?: boolean;
+
+  // SP-3 — ARCHIVED اینجا قابل‌تنظیم نیست (E3.4)؛ ACTIVE/HIDDEN → DRAFT در سرویس ۴۰۰ می‌شود
+  @IsOptional()
+  @IsIn(['DRAFT', 'ACTIVE', 'HIDDEN'])
+  status?: 'DRAFT' | 'ACTIVE' | 'HIDDEN';
+
+  @IsOptional()
+  @IsBoolean()
+  trackStock?: boolean;
 }

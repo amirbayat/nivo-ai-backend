@@ -75,6 +75,11 @@ import type {
   Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import {
+  BUYER_VISIBLE,
+  applyUntrackedStock,
+  availableQty,
+} from '../store/product-visibility';
 import { ProductEventService } from '../../common/analytics/product-event.service';
 import { StorageService } from '../../storage/storage.service';
 import { mimeTypeForExt } from '../../common/validators/chat-image.validator';
@@ -171,6 +176,8 @@ type ProductLike = {
   name: string;
   basePrice: number;
   stock: number;
+  // SP-3 — false = «همیشه موجود»؛ resolveProductPrices موجودی را به UNLIMITED_STOCK می‌برد
+  trackStock?: boolean;
   // docs/PRD-category-specific-product-pricing-and-attributes.md بخش ۲.۳ — basePrice برای
   // WEIGHT_BASED_FORMULA نادیده گرفته می‌شود؛ resolveProductPrices قبل از هر مصرف این را
   // با قیمت محاسبه‌شده‌ی لحظه‌ای overwrite می‌کند. اختیاری چون بعضی select های محدود
@@ -645,6 +652,9 @@ export class ConversationEngineService {
   private async resolveProductPrices<
     T extends ProductLike & { variants?: ProductVariantRow[] },
   >(storeId: string, products: T[]): Promise<void> {
+    // SP-3 — همه‌ی مسیرهای بارگذاری محصول از این نقطه رد می‌شوند؛ محصول «همیشه موجود» همین‌جا
+    // برای چک‌های عددی (سبد، کارت، کاندیدهای واریانت) موجودی نامحدود می‌گیرد
+    for (const p of products) applyUntrackedStock(p);
     const goldProducts = products.filter(
       (p) => p.pricingModel === 'WEIGHT_BASED_FORMULA',
     );
@@ -1638,7 +1648,7 @@ export class ConversationEngineService {
     // جستجوی نام امتحان می‌شود؛ اگر دقیقاً مچ شد، فقط همان یکی برگردانده می‌شود
     if (query) {
       const exact = await this.prisma.product.findFirst({
-        where: { storeId, code: { equals: query, mode: 'insensitive' } },
+        where: { storeId, ...BUYER_VISIBLE, code: { equals: query, mode: 'insensitive' } },
         include: PRODUCT_VARIANT_INCLUDE,
       });
       if (exact) {
@@ -1647,7 +1657,7 @@ export class ConversationEngineService {
       }
     }
     const results = await this.prisma.product.findMany({
-      where: {
+      where: { ...BUYER_VISIBLE,
         storeId,
         ...(query ? { name: { contains: query, mode: 'insensitive' } } : {}),
       },
@@ -1665,7 +1675,7 @@ export class ConversationEngineService {
   // استفاده می‌کنند و نباید رفتارشان بی‌سروصدا عوض شود
   private async searchProductsForConsultation(storeId: string, query: string) {
     const exact = await this.prisma.product.findFirst({
-      where: { storeId, code: { equals: query, mode: 'insensitive' } },
+      where: { storeId, ...BUYER_VISIBLE, code: { equals: query, mode: 'insensitive' } },
       include: PRODUCT_VARIANT_INCLUDE,
     });
     if (exact) {
@@ -1674,7 +1684,7 @@ export class ConversationEngineService {
     }
 
     const literalMatches = await this.prisma.product.findMany({
-      where: {
+      where: { ...BUYER_VISIBLE,
         storeId,
         OR: [
           { name: { contains: query, mode: 'insensitive' } },
@@ -1698,7 +1708,7 @@ export class ConversationEngineService {
     // آستانه‌ای نشسته که PRD-sales-agent-implicit-need-detection.md گفته بود باید بازبینی شود؛
     // بدون این لاگ هیچ راهی برای فهمیدن این‌که یک فروشگاه واقعی از این سقف رد شده نبود.
     const totalActive = await this.prisma.product.count({
-      where: { storeId },
+      where: { storeId, ...BUYER_VISIBLE },
     });
     if (totalActive > CONSULTATION_FULL_CATALOG_FALLBACK_CAP) {
       this.logger.warn(
@@ -1707,7 +1717,7 @@ export class ConversationEngineService {
       );
     }
     const fallback = await this.prisma.product.findMany({
-      where: { storeId },
+      where: { storeId, ...BUYER_VISIBLE },
       orderBy: { createdAt: 'desc' },
       take: CONSULTATION_FULL_CATALOG_FALLBACK_CAP,
       include: PRODUCT_VARIANT_INCLUDE,
@@ -1773,7 +1783,7 @@ export class ConversationEngineService {
       inputSchema: z.object({ productId: z.string() }),
       execute: async ({ productId }: { productId: string }) => {
         const product = await this.prisma.product.findUnique({
-          where: { id: productId },
+          where: { id: productId, ...BUYER_VISIBLE },
           include: PRODUCT_VARIANT_INCLUDE,
         });
         if (!product || product.storeId !== storeId) {
@@ -2364,7 +2374,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       inputSchema: z.object({ productId: z.string() }),
       execute: async ({ productId }: { productId: string }) => {
         const product = await this.prisma.product.findUnique({
-          where: { id: productId },
+          where: { id: productId, ...BUYER_VISIBLE },
           include: PRODUCT_VARIANT_INCLUDE,
         });
         if (!product || product.storeId !== storeId) {
@@ -2430,7 +2440,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           return { error: fa.salesAgent.cartLocked };
         }
         const product = await this.prisma.product.findUnique({
-          where: { id: productId },
+          where: { id: productId, ...BUYER_VISIBLE },
           include: PRODUCT_VARIANT_INCLUDE,
         });
         if (!product || product.storeId !== storeId) {
@@ -2713,7 +2723,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       inputSchema: z.object({ productId: z.string() }),
       execute: async ({ productId }: { productId: string }) => {
         const product = await this.prisma.product.findUnique({
-          where: { id: productId },
+          where: { id: productId, ...BUYER_VISIBLE },
         });
         if (
           !product ||
@@ -2743,7 +2753,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       }),
       execute: async ({ productIds }: { productIds: string[] }) => {
         const products = await this.prisma.product.findMany({
-          where: { id: { in: productIds }, storeId },
+          where: { id: { in: productIds }, storeId, ...BUYER_VISIBLE },
           include: PRODUCT_VARIANT_INCLUDE,
         });
         await this.resolveProductPrices(storeId, products);
@@ -3524,7 +3534,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     ctx: ConversationContext,
   ): Promise<ServerFacts> {
     const catalogSize = await this.prisma.product.count({
-      where: { storeId: conversation.storeId },
+      where: { storeId: conversation.storeId, ...BUYER_VISIBLE },
     });
     return {
       conversationState: conversation.currentState,
@@ -3848,7 +3858,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     }
     if (ids.length === 0) return { text: null, ids: [] };
     const products = await this.prisma.product.findMany({
-      where: { id: { in: ids }, storeId },
+      where: { id: { in: ids }, storeId, ...BUYER_VISIBLE },
       include: PRODUCT_VARIANT_INCLUDE,
     });
     await this.resolveProductPrices(storeId, products);
@@ -3926,7 +3936,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     );
     if (focusProductId) {
       const product = await this.prisma.product.findFirst({
-        where: { id: focusProductId, storeId: conversation.storeId },
+        where: { id: focusProductId, storeId: conversation.storeId, ...BUYER_VISIBLE },
       });
       if (product) {
         if (product.description) {
@@ -4898,7 +4908,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       !parsed.productQuery
     ) {
       const anchoredProduct = await this.prisma.product.findUnique({
-        where: { id: ctx.anchoredProductId },
+        where: { id: ctx.anchoredProductId, ...BUYER_VISIBLE },
         include: PRODUCT_VARIANT_INCLUDE,
       });
       if (anchoredProduct && anchoredProduct.storeId === conversation.storeId) {
@@ -4949,7 +4959,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
   ): Promise<EngineResult | null> {
     const ref = this.resolveProductRef(ctx, parsed);
     const product = ref
-      ? await this.prisma.product.findUnique({ where: { id: ref.id } })
+      ? await this.prisma.product.findUnique({ where: { id: ref.id, ...BUYER_VISIBLE } })
       : parsed.productQuery
         ? (
             await this.searchProducts(conversation.storeId, parsed.productQuery)
@@ -5429,7 +5439,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     if (action.type === 'FOCUS_PRODUCT') {
       const product = action.productId
         ? await this.prisma.product.findUnique({
-            where: { id: action.productId },
+            where: { id: action.productId, ...BUYER_VISIBLE },
             include: PRODUCT_VARIANT_INCLUDE,
           })
         : null;
@@ -5442,7 +5452,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     if (action.type === 'ADD_TO_CART') {
       const product = action.productId
         ? await this.prisma.product.findUnique({
-            where: { id: action.productId },
+            where: { id: action.productId, ...BUYER_VISIBLE },
             include: PRODUCT_VARIANT_INCLUDE,
           })
         : null;
@@ -5625,7 +5635,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     if (action.type === 'TOGGLE_SAVE_PRODUCT') {
       const product = action.productId
         ? await this.prisma.product.findUnique({
-            where: { id: action.productId },
+            where: { id: action.productId, ...BUYER_VISIBLE },
           })
         : null;
       if (!product || product.storeId !== conversation.storeId) {
@@ -5738,7 +5748,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       let anyAdded = false;
       for (const item of order.items as CartItem[]) {
         const product = await this.prisma.product.findUnique({
-          where: { id: item.productId },
+          where: { id: item.productId, ...BUYER_VISIBLE },
         });
         if (!product || product.storeId !== conversation.storeId) continue;
         await this.resolveProductPrices(conversation.storeId, [product]);
@@ -5874,7 +5884,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     });
     if (!active?.productId) return '';
     const product = await this.prisma.product.findUnique({
-      where: { id: active.productId },
+      where: { id: active.productId, ...BUYER_VISIBLE },
     });
     if (!product) return '';
     // fire-and-forget — طبق تصمیم سند تبلیغات موجود فقط «نشان داده شد» لازم است، تاخیرش
@@ -6213,7 +6223,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     const ref = this.resolveProductRef(ctx, parsed);
     const product = ref
       ? await this.prisma.product.findUnique({
-          where: { id: ref.id },
+          where: { id: ref.id, ...BUYER_VISIBLE },
           include: PRODUCT_VARIANT_INCLUDE,
         })
       : parsed.productQuery
@@ -6391,7 +6401,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         return this.doClarify(conversation, fa.salesAgent.cartInvalidQty);
       }
       const product = await this.prisma.product.findUnique({
-        where: { id: productId },
+        where: { id: productId, ...BUYER_VISIBLE },
         include: PRODUCT_VARIANT_INCLUDE,
       });
       if (!product || product.storeId !== conversation.storeId) {
@@ -6658,7 +6668,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
   ): Promise<EngineResult> {
     const pending = ctx.pendingVariantSelection!;
     const product = await this.prisma.product.findUnique({
-      where: { id: pending.productId },
+      where: { id: pending.productId, ...BUYER_VISIBLE },
       include: PRODUCT_VARIANT_INCLUDE,
     });
     if (!product) {
@@ -6726,7 +6736,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
   ): Promise<EngineResult> {
     const pending = ctx.pendingVariantSelection!;
     const product = await this.prisma.product.findUnique({
-      where: { id: pending.productId },
+      where: { id: pending.productId, ...BUYER_VISIBLE },
       include: PRODUCT_VARIANT_INCLUDE,
     });
     if (!product) {
@@ -7027,6 +7037,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           where: {
             id: { in: [...new Set(ctx.cart.map((i) => i.productId))] },
             storeId: conversation.storeId,
+            ...BUYER_VISIBLE,
           },
           include: PRODUCT_VARIANT_INCLUDE,
         });
@@ -7046,14 +7057,14 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
               v
                 ? {
                     unitPrice: v.priceOverride ?? product.basePrice,
-                    stock: v.stock,
+                    stock: availableQty(product, v),
                   }
                 : null,
             );
           } else {
             catalog.set(lineKey(item), {
               unitPrice: product.basePrice,
-              stock: product.stock,
+              stock: availableQty(product, null),
             });
           }
         }
@@ -8459,7 +8470,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     if (recentIds.length === 0) return null;
 
     const products = await this.prisma.product.findMany({
-      where: { id: { in: recentIds }, storeId: conversation.storeId },
+      where: { id: { in: recentIds }, storeId: conversation.storeId, ...BUYER_VISIBLE },
       select: { name: true, description: true, specs: true },
     });
     const withDescription = products.filter(

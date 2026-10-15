@@ -301,6 +301,12 @@ export class QueueService implements OnApplicationBootstrap {
     this.logger.log(
       `Product enrichment reminder job scheduled: ${PRODUCT_ENRICHMENT_REMINDER_CRON}`,
     );
+    // SP-3 — پاک‌سازی روزانه‌ی پیش‌نویس‌های خالی (همین صف؛ ۰۳:۳۰)
+    await this.productEnrichmentReminderQueue.add(
+      'cleanup-drafts',
+      {},
+      { repeat: { cron: '30 3 * * *' } },
+    );
 
     // docs/PRD-nivo-sales-unified.md 3.10 — انقضا/یادآوری سفارش پرداخت‌نشده
     const orderExpiryRepeatables =

@@ -647,6 +647,7 @@ export class SellerBotService {
     );
     const q = query.toLowerCase();
     const matches = products
+      .filter((p) => p.status === 'ACTIVE' || p.status === 'HIDDEN')
       .filter(
         (p) =>
           p.name.toLowerCase().includes(q) ||
@@ -662,7 +663,7 @@ export class SellerBotService {
     await this.api.sendText(chatId, fa.sellerBot.stockSearchHeader, {
       inline_keyboard: matches.map((p) => [
         {
-          text: `${p.name} (موجودی: ${p.stock})`,
+          text: `${p.name}${p.status === 'HIDDEN' ? ' (مخفی)' : ''} (${p.trackStock ? `موجودی: ${p.stock}` : fa.sellerBot.alwaysInStockShort})`,
           callback_data: `sbst:${p.id}`,
         },
       ]),
@@ -679,6 +680,10 @@ export class SellerBotService {
       where: { id: productId },
     });
     if (!product || product.storeId !== store.id) return;
+    if (!product.trackStock) {
+      await this.sendMenu(chatId, fa.sellerBot.alwaysInStockNotice);
+      return;
+    }
 
     await this.api.sendForceReply(
       chatId,
@@ -697,6 +702,10 @@ export class SellerBotService {
       where: { id: productId },
     });
     if (!product || product.storeId !== store.id) return;
+    if (!product.trackStock) {
+      await this.sendMenu(chatId, fa.sellerBot.alwaysInStockNotice);
+      return;
+    }
 
     const text = message.text?.trim() ?? '';
     const stock = Number(text);

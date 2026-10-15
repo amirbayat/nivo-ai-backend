@@ -2,6 +2,7 @@ import {
   IsArray,
   IsBoolean,
   IsEnum,
+  IsIn,
   IsInt,
   IsNumber,
   IsOptional,
@@ -100,4 +101,19 @@ export class CreateProductDto {
   @IsOptional()
   @IsBoolean()
   hasFulfillmentDelay?: boolean;
+
+  // SP-3 — پیش‌فرض ACTIVE برای سازگاری با کلاینت‌های قدیمی؛ DRAFT = فقط برای فروشنده، بدون اعتبارسنجی انتشار
+  @IsOptional()
+  @IsIn(['DRAFT', 'ACTIVE'])
+  status?: 'DRAFT' | 'ACTIVE';
+
+  // false = «همیشه موجود»
+  @IsOptional()
+  @IsBoolean()
+  trackStock?: boolean;
+
+  // فقط برای ثبت رویداد (ذخیره نمی‌شود)
+  @IsOptional()
+  @IsIn(['single', 'batch'])
+  via?: 'single' | 'batch';
 }
