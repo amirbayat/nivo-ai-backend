@@ -1,14 +1,95 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { CreditUsageKind, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { DateRange } from '../usage-analytics/usage-analytics.service';
+import { StoreCreditDeductionService } from '../store-credit-engine/store-credit-deduction.service';
+import { AdminAuditService } from '../admin-audit/admin-audit.service';
+import { fa } from '../../i18n/fa';
 
 // docs/PRD-admin-seller-credit-overview.md — لیست فروشنده‌ها در ادمین با اعتبار/هزینه‌ی AI
 // (Store.creditBalanceToman / CreditUsageEvent). فقط خواندن — منطق کسر/شارژ اعتبار
 // (credit.service.ts, store-credit.service.ts) دست‌نخورده می‌ماند.
 @Injectable()
 export class AdminStoreCreditService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly deduction: StoreCreditDeductionService,
+    private readonly audit: AdminAuditService,
+  ) {}
+
+  // R1.1 — تنظیم دستی اعتبار (شارژ یا کسر) با ممیزی؛ همه‌چیز در یک تراکنش با قفل ردیف فروشگاه
+  async adjustCredit(params: {
+    adminId: string;
+    storeId: string;
+    amountToman: number;
+    reason: string;
+  }) {
+    const { adminId, storeId, amountToman, reason } = params;
+    const store = await this.prisma.store.findUnique({
+      where: { id: storeId },
+      select: { id: true },
+    });
+    if (!store) throw new NotFoundException(fa.store.notFound);
+    const result = await this.prisma.$transaction(
+      async (tx) => {
+        let beforeToman: number;
+        let afterToman: number;
+        if (amountToman > 0) {
+          const locked = await tx.$queryRaw<{ creditBalanceToman: number }[]>`
+            SELECT "creditBalanceToman" FROM "stores" WHERE "id" = ${storeId} FOR UPDATE`;
+          beforeToman = locked[0].creditBalanceToman;
+          await this.deduction.applyTopup(tx, {
+            storeId,
+            source: 'ADMIN_MANUAL',
+            amountToman,
+          });
+          afterToman = beforeToman + amountToman;
+          await tx.creditUsageEvent.create({
+            data: {
+              storeId,
+              model: 'admin-manual',
+              kind: 'TOPUP',
+              costToman: amountToman,
+              chargedToman: amountToman,
+              source: 'ADMIN_MANUAL',
+              meta: { adminId, reason },
+            },
+          });
+        } else {
+          const debit = await this.deduction.applyAdminDebit(tx, {
+            storeId,
+            amountToman: -amountToman,
+          });
+          if (!debit) throw new BadRequestException(fa.admin.creditAdjustBelowFloor);
+          beforeToman = debit.beforeToman;
+          afterToman = debit.afterToman;
+        }
+        await this.audit.record(
+          {
+            adminId,
+            action: 'CREDIT_ADJUST',
+            targetType: 'STORE',
+            targetId: storeId,
+            before: { creditBalanceToman: beforeToman },
+            after: { creditBalanceToman: afterToman, deltaToman: amountToman },
+            reason,
+          },
+          tx,
+        );
+        return { beforeToman, afterToman };
+      },
+      { maxWait: 5_000, timeout: 15_000 },
+    );
+    await this.deduction.invalidateBalanceCache(storeId).catch(() => undefined);
+    if (amountToman > 0) {
+      await this.deduction.reevaluateBlockedConversations(storeId).catch(() => undefined);
+    }
+    return result;
+  }
+
+  getAuditLog(storeId: string) {
+    return this.audit.listForTarget('STORE', storeId);
+  }
 
   // فیدبک کاربر ۱۴۰۵/۰۷/۱۷ — «لاگ تجمیعی» روی ادمین: جمع کل (نه فقط صفحه‌ی فعلی ۲۰تایی)
   // درآمد بسته‌ها در مقابل COGS واقعی AI، برای جواب به «چقدر سوده؟» بدون جمع دستی ردیف‌ها
@@ -19,7 +100,7 @@ export class AdminStoreCreditService {
         _count: { id: true },
       }),
       this.prisma.creditUsageEvent.groupBy({
-        by: ['kind', 'isFreeQuota'],
+        by: ['kind', 'isFreeQuota', 'source'],
         where: { createdAt: { gte: params.range.from, lte: params.range.to } },
         _sum: { costToman: true, chargedToman: true },
         _count: { id: true },
@@ -38,7 +119,8 @@ export class AdminStoreCreditService {
       const charged = row._sum.chargedToman ?? 0;
       const count = row._count.id;
       if (row.kind === 'TOPUP') {
-        totalPurchasedToman += cogs;
+        // شارژ دستی ادمین فروش نیست
+        if (row.source !== 'ADMIN_MANUAL') totalPurchasedToman += cogs;
         continue;
       }
       totalAiCostToman += cogs;

@@ -263,6 +263,35 @@ export class StoreCreditDeductionService {
     // کش باید بعد از commit پاک شود؛ ولی TTL کوتاه است و caller بعد از تراکنش invalidate می‌کند
   }
 
+  // ───────────────────────── کسر دستی ادمین (R1.1) ─────────────────────────
+  // داخل تراکنش caller. از بخش‌های مثبت کسر می‌کند و باقی را روی ADMIN_MANUAL (می‌تواند منفی شود)؛
+  // null = موجودی بعد از کسر زیر کف overdraft می‌رفت (هیچ تغییری نمی‌دهد). ناوردایی حفظ می‌شود.
+  async applyAdminDebit(
+    tx: Tx,
+    params: { storeId: string; amountToman: number },
+  ): Promise<{ beforeToman: number; afterToman: number } | null> {
+    const store = await this.lockStore(tx, params.storeId);
+    const buckets = await this.loadHealedBuckets(tx, store);
+    const before = buckets.reduce((s, b) => s + b.balanceToman, 0);
+    const after = before - params.amountToman;
+    if (after < -OVERDRAFT_FLOOR_TOMAN) return null;
+    let remaining = params.amountToman;
+    for (const b of [...buckets].sort((a, c) => c.balanceToman - a.balanceToman)) {
+      if (remaining <= 0 || b.balanceToman <= 0) continue;
+      const take = Math.min(b.balanceToman, remaining);
+      await this.applyBucketDelta(tx, params.storeId, b.source, -take);
+      remaining -= take;
+    }
+    if (remaining > 0) {
+      await this.applyBucketDelta(tx, params.storeId, 'ADMIN_MANUAL', -remaining);
+    }
+    await tx.store.update({
+      where: { id: params.storeId },
+      data: { creditBalanceToman: { decrement: params.amountToman } },
+    });
+    return { beforeToman: before, afterToman: after };
+  }
+
   // ───────────────────────── خرید ثابت‌مبلغ (جایگاه تبلیغاتی) ─────────────────────────
   // داخل تراکنش خرید؛ null = موجودی (موثر) کافی نیست (overdraft ندارد)، وگرنه مبلغی که واقعاً
   // از بخش‌ها کم شد (برای بخش‌های گران‌تر مثل اسنپ‌پی از قیمت بیشتر است).

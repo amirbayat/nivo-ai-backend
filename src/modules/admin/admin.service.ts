@@ -14,6 +14,7 @@ import type {
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import * as XLSX from 'xlsx';
+import { AdminAuditService } from '../admin-audit/admin-audit.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RedisService } from '../../redis/redis.service';
 import { ExchangeRateService } from '../../exchange-rate/exchange-rate.service';
@@ -208,6 +209,7 @@ export class AdminService {
     private readonly aiProvider: AiProviderService,
     private readonly pricingService: PricingService,
     private readonly usageAnalytics: UsageAnalyticsService,
+    private readonly audit: AdminAuditService,
   ) {
     // همون درصدی که PricingService برای بودجه‌ی واقعی مصرف می‌کند — برای اینکه
     // «انتظار مصرف» ادمین با محدودیت واقعی چت هماهنگ بماند، نه یک 0.7 هاردکد جدا
@@ -1976,13 +1978,27 @@ export class AdminService {
     }));
   }
 
-  async updateSalesAgentGlobalConfig(dto: UpdateSalesAgentGlobalConfigDto) {
+  async updateSalesAgentGlobalConfig(dto: UpdateSalesAgentGlobalConfigDto, adminId: string) {
+    const previous = await this.prisma.salesAgentGlobalConfig.findUnique({
+      where: { id: 'singleton' },
+    });
     const config = await this.prisma.salesAgentGlobalConfig.upsert({
       where: { id: 'singleton' },
       create: { id: 'singleton', ...dto },
       update: dto,
     });
     invalidateSalesAgentGlobalConfigCache();
+    // R1.1 — فقط فیلدهای تغییرداده‌شده، قبل/بعد
+    const keys = Object.keys(dto) as (keyof typeof config)[];
+    await this.audit.recordSafely({
+      adminId,
+      action: 'GLOBAL_SALES_CONFIG_UPDATE',
+      targetType: 'SALES_CONFIG',
+      targetId: 'singleton',
+      before: Object.fromEntries(keys.map((k) => [k, previous?.[k] ?? null])),
+      after: Object.fromEntries(keys.map((k) => [k, config[k]])),
+      reason: 'global sales config update',
+    });
     return config;
   }
 }

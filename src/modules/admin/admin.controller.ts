@@ -359,8 +359,11 @@ export class AdminController {
   }
 
   @Patch('sales-agent/global-config')
-  updateSalesAgentGlobalConfig(@Body() dto: UpdateSalesAgentGlobalConfigDto) {
-    return this.adminService.updateSalesAgentGlobalConfig(dto);
+  updateSalesAgentGlobalConfig(
+    @Body() dto: UpdateSalesAgentGlobalConfigDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.adminService.updateSalesAgentGlobalConfig(dto, user.sub);
   }
 
   @Get('sales-agent/model-variants')

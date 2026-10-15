@@ -965,6 +965,7 @@ export const fa = {
     forbidden: 'دسترسی فقط برای مدیران مجاز است',
     userNotFound: 'کاربر یافت نشد',
     userUpdated: 'کاربر به‌روز شد',
+    creditAdjustBelowFloor: 'این کسر موجودی را زیر کف مجاز بدهی می‌برد',
   },
   budget: {
     dailyExceeded: 'بودجه روزانه شما به پایان رسیده است',

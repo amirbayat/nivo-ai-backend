@@ -4,6 +4,7 @@ import {
   Get,
   Param,
   Patch,
+  Post,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -12,6 +13,8 @@ import { JwtGuard } from '../../common/guards/jwt.guard';
 import { AdminGuard } from '../../common/guards/admin.guard';
 import { parseDateRange } from '../usage-analytics/usage-analytics.service';
 import { StoreCreditDeductionService } from '../store-credit-engine/store-credit-deduction.service';
+import { CurrentUser, JwtPayload } from '../../common/decorators/current-user.decorator';
+import { AdjustCreditDto } from './dto/adjust-credit.dto';
 import { AdminStoreCreditService } from './admin-store-credit.service';
 
 // docs/PRD-admin-seller-credit-overview.md — ماژول جدا از AdminModule غول‌پیکر موجود (مثل
@@ -59,6 +62,25 @@ export class AdminStoreCreditController {
     @Body() body: { enabled: boolean },
   ) {
     return this.service.setLeadCaptureOnly(id, body.enabled);
+  }
+
+  @Post(':id/credit-adjustments')
+  adjustCredit(
+    @Param('id') id: string,
+    @Body() dto: AdjustCreditDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.adjustCredit({
+      adminId: user.sub,
+      storeId: id,
+      amountToman: dto.amountToman,
+      reason: dto.reason.trim(),
+    });
+  }
+
+  @Get(':id/audit-log')
+  getAuditLog(@Param('id') id: string) {
+    return this.service.getAuditLog(id);
   }
 
   @Get(':id/credit-usage')

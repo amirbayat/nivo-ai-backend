@@ -2,6 +2,7 @@ import { Body, Controller, Post, UseGuards } from '@nestjs/common';
 import { JwtGuard } from '../../common/guards/jwt.guard';
 import { AdminGuard } from '../../common/guards/admin.guard';
 import { AuthService } from './auth.service';
+import { AdminAuditService } from '../admin-audit/admin-audit.service';
 import { CreateImpersonationDto } from './dto/create-impersonation.dto';
 import {
   CurrentUser,
@@ -13,7 +14,10 @@ import {
 @Controller('admin/impersonate')
 @UseGuards(JwtGuard, AdminGuard)
 export class AdminImpersonateController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly audit: AdminAuditService,
+  ) {}
 
   @Post()
   create(
@@ -22,6 +26,16 @@ export class AdminImpersonateController {
   ) {
     return this.authService
       .createImpersonationCode(dto, admin.sub)
-      .then((code) => ({ code }));
+      .then(async (code) => {
+        // R1.1 — هر impersonation ثبت می‌شود (شکست لاگ مانع ورود ادمین نمی‌شود)
+        await this.audit.recordSafely({
+          adminId: admin.sub,
+          action: 'IMPERSONATE',
+          targetType: 'USER',
+          targetId: dto.userId ?? dto.phone ?? 'unknown',
+          reason: dto.reason?.trim() || 'impersonation',
+        });
+        return { code };
+      });
   }
 }

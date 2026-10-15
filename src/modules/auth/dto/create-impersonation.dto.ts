@@ -11,4 +11,8 @@ export class CreateImpersonationDto {
   @IsOptional()
   @IsString({ message: fa.validation.required })
   phone?: string;
+
+  @IsOptional()
+  @IsString()
+  reason?: string;
 }
