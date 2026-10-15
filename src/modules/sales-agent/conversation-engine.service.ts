@@ -109,6 +109,7 @@ import { AbuseGuardService } from './abuse-guard.service';
 import { SellerBotApiClientService } from '../seller-bot/seller-bot-api-client.service';
 import { CommentsService } from '../comments/comments.service';
 import { formatShippingRulesSummary } from './shipping-rules-summary.util';
+import { formatShippingDays } from '../../common/utils/shipping-days.util';
 import { fa } from '../../i18n/fa';
 import {
   defaultModel,
@@ -2016,6 +2017,8 @@ relevantProductIds را خالی بگذار.${
       store.category && `حوزه‌ی فعالیت: ${store.category}`,
       store.brandIntro && `معرفی فروشگاه: ${store.brandIntro}`,
       store.shippingInfo && `ارسال: ${store.shippingInfo}`,
+      formatShippingDays(store.shippingDaysMin, store.shippingDaysMax) &&
+        `زمان ارسال: ${formatShippingDays(store.shippingDaysMin, store.shippingDaysMax)}`,
       shippingRulesSummary &&
         `هزینه‌ی ارسال به‌تفکیک استان:\n${shippingRulesSummary}`,
       store.returnPolicy && `شرایط مرجوعی/گارانتی: ${store.returnPolicy}`,
@@ -3906,6 +3909,11 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     if (store.returnPolicy)
       lines.push(`شرایط مرجوعی/گارانتی: ${store.returnPolicy}`);
     if (store.shippingInfo) lines.push(`ارسال: ${store.shippingInfo}`);
+    const shippingDays = formatShippingDays(
+      store.shippingDaysMin,
+      store.shippingDaysMax,
+    );
+    if (shippingDays) lines.push(`زمان ارسال: ${shippingDays}`);
     const shipping = await formatShippingRulesSummary(
       this.prisma,
       conversation.storeId,
@@ -8520,15 +8528,26 @@ answered=false بده (به‌جای حدس‌زدن).`,
     question: string,
   ): Promise<string | null> {
     const { shippingInfo, returnPolicy, brandIntro } = conversation.store;
+    const shippingDays = formatShippingDays(
+      conversation.store.shippingDaysMin,
+      conversation.store.shippingDaysMax,
+    );
     const shippingRulesSummary = await formatShippingRulesSummary(
       this.prisma,
       conversation.storeId,
     );
-    if (!shippingInfo && !shippingRulesSummary && !returnPolicy && !brandIntro)
+    if (
+      !shippingInfo &&
+      !shippingDays &&
+      !shippingRulesSummary &&
+      !returnPolicy &&
+      !brandIntro
+    )
       return null;
 
     const facts = [
       shippingInfo && `ارسال/هزینه‌ی ارسال: ${shippingInfo}`,
+      shippingDays && `زمان ارسال: ${shippingDays}`,
       shippingRulesSummary &&
         `هزینه‌ی ارسال به‌تفکیک استان:\n${shippingRulesSummary}`,
       returnPolicy && `شرایط مرجوعی/گارانتی: ${returnPolicy}`,

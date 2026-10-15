@@ -128,6 +128,8 @@ export const fa = {
     tooManyRequests: 'تعداد درخواست‌ها بیش از حد مجاز است',
   },
   store: {
+    shippingDaysInvalid:
+      'بازه‌ی روز ارسال باید هر دو عدد (حداقل و حداکثر) باشد، بین ۱ تا ۶۰ و حداقل از حداکثر بزرگ‌تر نباشد',
     notFound: 'فروشگاه یافت نشد',
     forbidden: 'دسترسی به این فروشگاه مجاز نیست',
     slugTaken: 'این آدرس قبلاً گرفته شده',
@@ -329,8 +331,8 @@ export const fa = {
       `یادآوری: سفارش ${code} هنوز پرداخت نشده. حدود ${hoursLeft.toLocaleString('fa-IR')} ساعت دیگه لغو می‌شه. بعد از واریز، عکس رسید رو همین‌جا بفرست 🙏`,
     reminderSms: (code: string, storeName: string) =>
       `نیوو: سفارش ${code} از ${storeName} هنوز پرداخت نشده. بعد از واریز، رسید رو در چت فروشگاه بفرست.`,
-    approvedChat: (code: string) =>
-      `سفارش ${code} تایید شد 🎉 به‌زودی ارسال می‌شه و خبرش رو همین‌جا بهت می‌دیم.`,
+    approvedChat: (code: string, shippingDaysLine?: string | null) =>
+      `سفارش ${code} تایید شد 🎉 ${shippingDaysLine ? `${shippingDaysLine}؛ ` : 'به‌زودی ارسال می‌شه و '}خبرش رو همین‌جا بهت می‌دیم.`,
     approvedSms: (code: string, storeName: string) =>
       `نیوو: سفارش ${code} از ${storeName} تایید شد 🎉`,
     shippedChat: (

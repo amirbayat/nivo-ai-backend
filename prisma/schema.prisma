@@ -2172,6 +2172,9 @@ model Store {
   // shippingInfo/returnPolicy هم بخشی از چک‌لیست تکمیل‌بودن فروشگاه هستند (بخش ۳.۱).
   shippingInfo                   String?           @db.Text
   returnPolicy                   String?           @db.Text
+  // R3.3 — بازه‌ی روز کاری ارسال؛ هر دو یا هیچ‌کدام
+  shippingDaysMin                Int?
+  shippingDaysMax                Int?
   // docs/PRD-nivo-sales-unified.md 3.16 — پیش‌فرض NONE: هیچ مسیر مرجوعی/تعویضی فعال نیست
   returnPolicyMode               ReturnPolicyMode     @default(NONE)
   returnWindowDays               Int                  @default(7)

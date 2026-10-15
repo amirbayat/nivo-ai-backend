@@ -70,6 +70,10 @@ import {
   normalizeOrderCodePartialInput,
 } from '../../common/utils/order-code.util';
 import { toEnglishDigits } from '../../common/utils/normalize-digits';
+import {
+  formatShippingDays,
+  isValidShippingDays,
+} from '../../common/utils/shipping-days.util';
 import { ORDER_CARRIERS } from '../../common/constants/sales-ops.constants';
 import {
   computeDisplayPrice,
@@ -274,6 +278,23 @@ export class StoreService {
       const maxLen = before.leadCaptureOnly ? 2000 : 300;
       if (data.brandIntro.length > maxLen) {
         throw new BadRequestException(fa.validation.stringTooLong);
+      }
+    }
+    // R3.3 — بازه‌ی روز ارسال: هر دو یا هیچ‌کدام، 1 ≤ min ≤ max؛ مقدار نامشخص از مقدار فعلی پر می‌شود
+    if (
+      data.shippingDaysMin !== undefined ||
+      data.shippingDaysMax !== undefined
+    ) {
+      const min =
+        data.shippingDaysMin !== undefined
+          ? data.shippingDaysMin
+          : (before.shippingDaysMin ?? null);
+      const max =
+        data.shippingDaysMax !== undefined
+          ? data.shippingDaysMax
+          : (before.shippingDaysMax ?? null);
+      if (!isValidShippingDays(min, max)) {
+        throw new BadRequestException(fa.store.shippingDaysInvalid);
       }
     }
     const updated = await this.prisma.store.update({
@@ -712,6 +733,10 @@ export class StoreService {
       page: opts.page,
       pageSize: opts.pageSize,
       shippingEstimate,
+      // R3.3 — «معمولاً ۲–۴ روز کاری ارسال می‌شه»؛ فقط برای فروشگاه‌هایی که کالای فیزیکی ارسال می‌کنند
+      shippingDaysText: store.requiresShipping
+        ? formatShippingDays(store.shippingDaysMin, store.shippingDaysMax)
+        : null,
     };
   }
 
@@ -794,7 +819,9 @@ export class StoreService {
       checklist: {
         hasProductWithPhoto: products.some((p) => p.images.length > 0),
         hasEnoughKbEntries: totalKbEntries >= MIN_STORE_KB_ENTRIES,
-        hasShippingPolicy: !!store.shippingInfo,
+        hasShippingPolicy:
+          !!store.shippingInfo ||
+          (store.shippingDaysMin != null && store.shippingDaysMax != null),
         // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۳.۳ — گسترش چک‌لیست
         // (قبلاً فقط hasShippingPolicy)؛ همه‌ی این فیلدها از قبل روی Store هستند، بدون کوئری اضافه
         hasReturnPolicy: !!store.returnPolicy,

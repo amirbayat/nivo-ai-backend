@@ -1,6 +1,7 @@
 import {
   IsBoolean,
   IsEnum,
+  IsInt,
   IsNumber,
   IsOptional,
   IsString,
@@ -30,6 +31,21 @@ export class UpdateStoreDto {
   @IsString()
   @MaxLength(1000, { message: fa.validation.stringTooLong })
   shippingInfo?: string;
+
+  // R3.3 — بازه‌ی روز کاری ارسال (null یعنی پاک‌کردن)؛ جفت‌بودن و min ≤ max در StoreService.update
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(60)
+  @ToNumber()
+  shippingDaysMin?: number | null;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(60)
+  @ToNumber()
+  shippingDaysMax?: number | null;
 
   @IsOptional()
   @IsString()

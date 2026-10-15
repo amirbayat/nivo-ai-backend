@@ -10,6 +10,7 @@ import { GOLDEN_QUESTIONS } from './qa-golden-questions';
 import { INTENT_GOLDEN_CASES } from './intent-golden-cases';
 import { IMPLICIT_NEED_GOLDEN_CASES } from './intent-implicit-need-golden-cases';
 import { formatShippingRulesSummary } from './shipping-rules-summary.util';
+import { formatShippingDays } from '../../common/utils/shipping-days.util';
 import {
   buildIntentClassificationPrompt,
   intentClassificationSchema,
@@ -118,6 +119,8 @@ export class SalesAgentQaService {
     );
     const storeProfileFacts = [
       store.shippingInfo && `ارسال/هزینه‌ی ارسال: ${store.shippingInfo}`,
+      formatShippingDays(store.shippingDaysMin, store.shippingDaysMax) &&
+        `زمان ارسال: ${formatShippingDays(store.shippingDaysMin, store.shippingDaysMax)}`,
       shippingRulesSummary &&
         `هزینه‌ی ارسال به‌تفکیک استان:\n${shippingRulesSummary}`,
       store.returnPolicy && `شرایط مرجوعی/گارانتی: ${store.returnPolicy}`,

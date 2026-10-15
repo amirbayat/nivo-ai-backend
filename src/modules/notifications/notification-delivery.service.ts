@@ -15,13 +15,18 @@ import {
 import { fa } from '../../i18n/fa';
 import { NotificationJob } from './notification.types';
 import { ensureBuyerOrderLink } from '../order-lifecycle/order-link.util';
+import { formatShippingDays } from '../../common/utils/shipping-days.util';
 
 type OrderForNotify = {
   id: string;
   orderCode: string | null;
   totalAmount: number;
   recipientPhone: string | null;
-  store: { name: string };
+  store: {
+    name: string;
+    shippingDaysMin?: number | null;
+    shippingDaysMax?: number | null;
+  };
   conversationId: string;
 };
 
@@ -52,7 +57,9 @@ export class NotificationDeliveryService {
         totalAmount: true,
         recipientPhone: true,
         conversationId: true,
-        store: { select: { name: true } },
+        store: {
+          select: { name: true, shippingDaysMin: true, shippingDaysMax: true },
+        },
       },
     });
     if (!order) return;
@@ -222,7 +229,13 @@ export class NotificationDeliveryService {
       case 'PAYMENT_REMINDER':
         return fa.orderNotify.reminderChat(code, d.hoursLeft ?? 1);
       case 'ORDER_APPROVED':
-        return fa.orderNotify.approvedChat(code);
+        return fa.orderNotify.approvedChat(
+          code,
+          formatShippingDays(
+            order.store.shippingDaysMin,
+            order.store.shippingDaysMax,
+          ),
+        );
       case 'ORDER_SHIPPED':
         return fa.orderNotify.shippedChat(code, d.carrier, d.trackingCode);
       case 'ORDER_REJECTED':
