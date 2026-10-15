@@ -103,13 +103,45 @@ describe('setCartLine cart lock [F8]', () => {
     expect(persistTransition).not.toHaveBeenCalled();
   });
 
-  it('REMOVE_FROM_CART in AWAITING_PAYMENT is 409', async () => {
+  it('REMOVE_FROM_CART (NLU) in AWAITING_PAYMENT clarifies with the lock message instead of throwing [R0.6]', async () => {
     const { eng, conversation, ctx, persistTransition } =
       setup('AWAITING_PAYMENT');
-    await expect(
-      eng.doUpdateCart(conversation, ctx, { intent: 'REMOVE_FROM_CART' }),
-    ).rejects.toMatchObject({ message: LOCKED });
+    const doClarify = jest.fn().mockResolvedValue({ reply: LOCKED });
+    Object.assign(eng, { doClarify });
+    const result = await eng.doUpdateCart(conversation, ctx, {
+      intent: 'REMOVE_FROM_CART',
+    });
+    expect(result.reply).toBe(LOCKED);
+    expect(doClarify).toHaveBeenCalledWith(conversation, LOCKED);
     expect(persistTransition).not.toHaveBeenCalled();
+  });
+
+  it('update_cart tool in AWAITING_PAYMENT returns the lock error and changes nothing [R0.5]', async () => {
+    const { eng, conversation, persistTransition, prisma } =
+      setup('AWAITING_PAYMENT');
+    const rt = {
+      ctx: { cart: [...cart], appliedDiscount: null },
+      mutationHappened: false,
+    };
+    const tools = (
+      eng as unknown as {
+        buildAgentTools: (...a: unknown[]) => {
+          update_cart: { execute: (a: unknown, o?: unknown) => Promise<unknown> };
+        };
+      }
+    ).buildAgentTools({ ...conversation, store: { leadCaptureOnly: false } }, rt, {
+      persuasionEnabled: false,
+      respondToCustomer: {},
+    });
+    const result = await tools.update_cart.execute(
+      { productId: 'p1', qty: 1 },
+      { toolCallId: 't', messages: [] },
+    );
+    expect(result).toEqual({ error: LOCKED });
+    expect(persistTransition).not.toHaveBeenCalled();
+    expect(prisma.product.findUnique).not.toHaveBeenCalled();
+    expect(rt.ctx.cart).toEqual(cart);
+    expect(rt.mutationHappened).toBe(false);
   });
 
   it('qty 0 uses the invalid-qty sentence', async () => {

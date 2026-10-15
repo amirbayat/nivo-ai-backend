@@ -2417,6 +2417,10 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         qty?: number;
         remove?: boolean;
       }) => {
+        // سبد بعد از ثبت سفارش/در AWAITING_PAYMENT قفل است؛ مدل همین پیام را به خریدار می‌گوید [R0.5]
+        if (await this.isCartLocked(conversation)) {
+          return { error: fa.salesAgent.cartLocked };
+        }
         const product = await this.prisma.product.findUnique({
           where: { id: productId },
           include: PRODUCT_VARIANT_INCLUDE,
@@ -6066,7 +6070,9 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     parsed: ParsedIntent,
   ): Promise<EngineResult> {
     if (parsed.intent === 'REMOVE_FROM_CART') {
-      await this.assertCartEditable(conversation);
+      if (await this.isCartLocked(conversation)) {
+        return this.doClarify(conversation, fa.salesAgent.cartLocked);
+      }
     } else if (!['BROWSING', 'CART_REVIEW'].includes(conversation.currentState)) {
       return this.doClarify(conversation, fa.salesAgent.nothingToConfirm);
     }
@@ -6183,20 +6189,25 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
   private async assertCartEditable(
     conversation: ConversationWithStore,
   ): Promise<void> {
+    if (await this.isCartLocked(conversation)) {
+      throw new ConflictException(fa.salesAgent.cartLocked);
+    }
+  }
+
+  // نسخه‌ی بدون throw: مسیرهای چت/ابزار باید به‌جای ۴۰۹ پیام «سبد قفل است» را برگردانند [R0.5/R0.6]
+  private async isCartLocked(
+    conversation: ConversationWithStore,
+  ): Promise<boolean> {
     const editable =
       conversation.currentState === 'GREETING' ||
       conversation.currentState === 'BROWSING' ||
       conversation.currentState === 'CART_REVIEW';
-    if (!editable) {
-      throw new ConflictException(fa.salesAgent.cartLocked);
-    }
+    if (!editable) return true;
     const existing = await this.prisma.order.findUnique({
       where: { conversationId: conversation.id },
       select: { id: true },
     });
-    if (existing) {
-      throw new ConflictException(fa.salesAgent.cartLocked);
-    }
+    return !!existing;
   }
 
   private async replaceLatestCartSummary(
