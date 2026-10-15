@@ -90,6 +90,14 @@ export class OrderPublicService {
     const orderId = await this.guard(code, token, ip);
     const order = await this.prisma.order.findUnique({ where: { id: orderId } });
     if (!order) throw new NotFoundException(fa.salesAgent.orderNotFound);
+    if (order.status !== 'APPROVED' && order.status !== 'SHIPPED' && order.status !== 'DELIVERED') {
+      throw new BadRequestException(fa.order.issueTooEarly);
+    }
+    const open = await this.prisma.orderIssue.findFirst({
+      where: { orderId, status: 'OPEN' },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (open) return { id: open.id, status: open.status };
     const issue = await this.prisma.orderIssue.create({
       data: { orderId, reason, text: text?.trim() || null },
     });

@@ -314,6 +314,7 @@ export const fa = {
     linkInvalid: 'این لینک سفارش معتبر نیست',
     buyerCancelReason: 'لغو توسط خریدار',
     issueReasonInvalid: 'دلیل مشکل را انتخاب کن',
+    issueTooEarly: 'گزارش مشکل بعد از تایید سفارش ممکن است',
   },
   orderNotify: {
     placedSms: (
