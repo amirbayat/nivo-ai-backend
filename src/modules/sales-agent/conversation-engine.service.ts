@@ -60,7 +60,11 @@ import {
   stepCountIs,
   type UserModelMessage,
 } from 'ai';
-import { generateShopTurn, runOutsideShopTurn } from './shop-turn-stream';
+import {
+  currentShopTurnId,
+  generateShopTurn,
+  runOutsideShopTurn,
+} from './shop-turn-stream';
 import { z } from 'zod';
 import type {
   ConversationState,
@@ -4377,6 +4381,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
   async handleMessage(
     conversation: ConversationWithStore,
     text: string,
+    opts?: { clientMessageId?: string },
   ): Promise<EngineResult> {
     let token = await this.lock.acquire(conversation.id);
     if (!token) {
@@ -4392,6 +4397,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       const first = await this.handleMessageInner(
         await this.reloadConversation(conversation),
         text,
+        opts,
       );
       token = await this.drainPendingUnderLock(conversation, token);
       return first;
@@ -4472,10 +4478,11 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
   private async handleMessageInner(
     conversation: ConversationWithStore,
     text: string,
+    opts?: { clientMessageId?: string },
   ): Promise<EngineResult> {
     if (isLlmSaturated()) return this.saturatedResult(conversation);
     return this.withTurnReservation(conversation, () =>
-      runLlmTurn(() => this.handleMessageTurn(conversation, text)).catch(
+      runLlmTurn(() => this.handleMessageTurn(conversation, text, opts)).catch(
         (err: unknown) => this.onTurnError(conversation, err),
       ),
     );
@@ -4520,6 +4527,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
   private async handleMessageTurn(
     conversation: ConversationWithStore,
     text: string,
+    opts?: { clientMessageId?: string },
   ): Promise<EngineResult> {
     // 2.6 — گارد سوءاستفاده قبل از هر نوشتن: پیام کاربرِ قفل‌شده نباید حتی یک ConversationEvent
     // بسازد (وگرنه spam، جدول eventها را بی‌سقف پر می‌کند)
@@ -4530,7 +4538,12 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       data: {
         conversationId: conversation.id,
         type: 'CUSTOMER_MESSAGE',
-        payload: { text },
+        payload: {
+          text,
+          ...(opts?.clientMessageId
+            ? { clientMessageId: opts.clientMessageId }
+            : {}),
+        },
       },
     });
 
@@ -8880,11 +8893,13 @@ answered=false بده (به‌جای حدس‌زدن).`,
     // یا نه و چرا. چون AGENT_REPLY (همین event) همیشه برای هر پاسخی ساخته می‌شود، voice هم
     // همیشه همین‌جا ثبت می‌شود — finishEvent در sales-agent-voice.processor.ts بعداً این فیلد
     // را با نتیجه‌ی نهایی (موفق/ناموفق) آپدیت می‌کند
+    const turnId = currentShopTurnId();
     const payload: Prisma.InputJsonObject = {
       text,
       uiBlock,
       ...(flag ? { flag } : {}),
       ...(quickReplies?.length ? { quickReplies } : {}),
+      ...(turnId ? { turnId } : {}),
       ...(wantsVoice ? { voicePending: true } : {}),
       voice: wantsVoice
         ? { generated: true }

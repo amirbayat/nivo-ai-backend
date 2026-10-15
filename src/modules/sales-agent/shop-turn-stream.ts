@@ -21,6 +21,7 @@ export type ShopTurnEvent =
 type Sink = {
   emit: (event: ShopTurnEvent) => void;
   noteFirstToken: () => void;
+  turnId: string;
 };
 
 const sinkStorage = new AsyncLocalStorage<Sink>();
@@ -55,6 +56,7 @@ export function openShopTurn(turnId: string, onFirstToken: () => void): Sink {
   armTurnExpiry(turnId);
   let noted = false;
   const sink: Sink = {
+    turnId,
     emit(event) {
       buf.events.push(event);
       const waiters = buf.waiters.splice(0);
@@ -116,6 +118,10 @@ export function runOutsideShopTurn<T>(fn: () => Promise<T>): Promise<T> {
 
 export function isInsideShopTurn(): boolean {
   return sinkStorage.getStore() != null;
+}
+
+export function currentShopTurnId(): string | undefined {
+  return sinkStorage.getStore()?.turnId;
 }
 
 const TOOL_STATUS: Record<string, string> = {

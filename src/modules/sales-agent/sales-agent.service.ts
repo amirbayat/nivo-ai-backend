@@ -579,7 +579,12 @@ export class SalesAgentService {
         data: {
           conversationId: conversation.id,
           type: 'CUSTOMER_MESSAGE',
-          payload: { text: dto.message ?? '' },
+          payload: {
+            text: dto.message ?? '',
+            ...(dto.clientMessageId
+              ? { clientMessageId: dto.clientMessageId }
+              : {}),
+          },
         },
       });
       return {
@@ -597,7 +602,9 @@ export class SalesAgentService {
     if (dto.action) {
       result = await this.engine.handleAction(conversation, dto.action);
     } else {
-      result = await this.engine.handleMessage(conversation, dto.message!);
+      result = await this.engine.handleMessage(conversation, dto.message!, {
+        clientMessageId: dto.clientMessageId,
+      });
     }
     // 0.13b — اگر اکشن مکالمه‌ی تازه ساخت، پاسخ/وویس مال همان است
     return this.attachVoicePending(
