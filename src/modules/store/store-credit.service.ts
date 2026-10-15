@@ -5,6 +5,7 @@ import { PaymentsService } from '../payments/payments.service';
 import { CreditsService } from '../credits/credits.service';
 import { StoreService } from './store.service';
 import { fa } from '../../i18n/fa';
+import { estimateConversationsLeft } from './credit-estimate.util';
 import { getSalesAgentGlobalConfig } from '../sales-agent/sales-agent-global-config.util';
 
 // docs/PRD-seller-credit-billing.md بخش ۷ — خرید self-serve اعتبار AI فروشگاه از همان درگاه
@@ -22,7 +23,7 @@ export class StoreCreditService {
     const store = await this.storeService.getOwned(sellerId, storeId);
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
-    const [config, freeQuotaUsedToday] = await Promise.all([
+    const [config, freeQuotaUsedToday, usageRows] = await Promise.all([
       getSalesAgentGlobalConfig(this.prisma),
       this.prisma.customer.count({
         where: {
@@ -31,6 +32,19 @@ export class StoreCreditService {
           NOT: { sessionToken: { startsWith: 'nivo-test:' } },
         },
       }),
+      // R3.4 — میانگین هزینه‌ی واقعی (کسرشده از اعتبار) هر مکالمه‌ی ۳۰ روز اخیر؛ مکالمه‌ی تستی و
+      // سهمیه‌ی رایگان حساب نمی‌شوند
+      this.prisma.$queryRaw<{ conversations: number; charged: number }[]>`
+        SELECT COUNT(DISTINCT e."conversationId")::int AS conversations,
+               COALESCE(SUM(e."chargedToman"), 0)::int AS charged
+        FROM credit_usage_events e
+        JOIN sales_conversations c ON c.id = e."conversationId"
+        WHERE e."storeId" = ${storeId}
+          AND e."createdAt" >= now() - interval '30 days'
+          AND e."isFreeQuota" = false
+          AND c."isTest" = false
+          AND e.kind IN ('TEXT_REPLY', 'VOICE_TTS', 'ASR')
+      `,
     ]);
     // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۶ — فقط وقتی واقعاً فعال است
     // (snapshot لحظه‌ی گرنت نگذشته و مانده‌اش مثبت است) به فروشنده نمایش داده شود
@@ -40,6 +54,11 @@ export class StoreCreditService {
       store.trialCreditRemainingToman > 0;
     return {
       balanceToman: store.creditBalanceToman,
+      conversationsLeftEstimate: estimateConversationsLeft(
+        store.creditBalanceToman,
+        Number(usageRows[0]?.charged ?? 0),
+        Number(usageRows[0]?.conversations ?? 0),
+      ),
       freeQuotaUsedToday,
       freeQuotaLimit: config.freeDailyQuota,
       trialCreditRemainingToman: trialActive
