@@ -440,11 +440,43 @@ export class StoreService {
     });
   }
 
+  // کل کاتالوگ (انتخاب‌گرهای پنل، بات فروشنده)؛ لیست صفحه‌ی محصولات از listProductsPage می‌آید
   async listProducts(sellerId: string, storeId: string) {
     await this.getOwned(sellerId, storeId);
+    return this.findProductsWithCompleteness(storeId);
+  }
+
+  // R3.2 — cursor pagination برای صفحه‌ی لیست محصولات
+  async listProductsPage(
+    sellerId: string,
+    storeId: string,
+    page: { cursor?: string; limit: number },
+  ) {
+    await this.getOwned(sellerId, storeId);
+    const rows = await this.findProductsWithCompleteness(storeId, page);
+    const items = rows.slice(0, page.limit);
+    return {
+      items,
+      nextCursor:
+        rows.length > page.limit ? items[items.length - 1].id : null,
+    };
+  }
+
+  private async findProductsWithCompleteness(
+    storeId: string,
+    page?: { cursor?: string; limit: number },
+  ) {
     const products = await this.prisma.product.findMany({
       where: { storeId },
-      orderBy: { createdAt: 'desc' },
+      orderBy: page
+        ? [{ createdAt: 'desc' }, { id: 'desc' }]
+        : { createdAt: 'desc' },
+      ...(page
+        ? {
+            take: page.limit + 1,
+            ...(page.cursor ? { cursor: { id: page.cursor }, skip: 1 } : {}),
+          }
+        : {}),
       include: {
         // docs/PRD-product-display-focus-and-variations.md §۴.۱ — پنل فروشنده جدول ترکیب‌ها
         // را از همین لیست پر می‌کند (نه یک GET جدا)، عیناً مثل completeness پایین
@@ -1640,6 +1672,7 @@ export class StoreService {
     return { OR: or };
   }
 
+  // کل لیست (بات فروشنده استفاده می‌کند)؛ پنل وب از listOrdersPage استفاده می‌کند
   async listOrders(
     sellerId: string,
     storeId: string,
@@ -1647,6 +1680,33 @@ export class StoreService {
     q?: string,
   ) {
     await this.getOwned(sellerId, storeId);
+    return this.findOrdersWithImages(storeId, status, q);
+  }
+
+  // R3.2 — cursor pagination؛ ترتیب پایدار (createdAt, id) تا سفارش‌های هم‌زمان جابه‌جا نشوند
+  async listOrdersPage(
+    sellerId: string,
+    storeId: string,
+    status: OrderStatus | undefined,
+    q: string | undefined,
+    page: { cursor?: string; limit: number },
+  ) {
+    await this.getOwned(sellerId, storeId);
+    const rows = await this.findOrdersWithImages(storeId, status, q, page);
+    const items = rows.slice(0, page.limit);
+    return {
+      items,
+      nextCursor:
+        rows.length > page.limit ? items[items.length - 1].id : null,
+    };
+  }
+
+  private async findOrdersWithImages(
+    storeId: string,
+    status?: OrderStatus,
+    q?: string,
+    page?: { cursor?: string; limit: number },
+  ) {
     const orders = await this.prisma.order.findMany({
       where: {
         storeId,
@@ -1654,7 +1714,15 @@ export class StoreService {
         ...(status ? { status } : {}),
         ...this.buildOrderSearchFilter(q),
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: page
+        ? [{ createdAt: 'desc' }, { id: 'desc' }]
+        : { createdAt: 'desc' },
+      ...(page
+        ? {
+            take: page.limit + 1,
+            ...(page.cursor ? { cursor: { id: page.cursor }, skip: 1 } : {}),
+          }
+        : {}),
     });
     // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۱۳.۲ — عکس محصول در
     // جزئیات سفارش؛ items فقط productId/name/unitPrice/qty را snapshot کرده (نه عکس)، پس

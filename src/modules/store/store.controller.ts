@@ -68,6 +68,7 @@ import { GenerateProductDescriptionDto } from './dto/generate-product-descriptio
 import { GenerateProductOptionsDto } from './dto/generate-product-options.dto';
 import { AnalyzeOwnerNotesDto } from './dto/analyze-owner-notes.dto';
 import { fa } from '../../i18n/fa';
+import { parsePageQuery } from '../../common/utils/page-query.util';
 
 // docs/PRD-mvp-launch-plan.md گام ۰ — ثبت‌نام فروشنده و ساخت فروشگاه
 @Controller('v2/stores')
@@ -184,7 +185,20 @@ export class StoreController {
   // معتبر). آن مسیر به stores/:slug/public-products تغییر نام داد — هر مسیر عمومی جدید زیر
   // v2/stores/... را «products» اسم نگذار، اسمی که اینجا هم ممکن است تکرار شود انتخاب نکن.
   @Get(':id/products')
-  listProducts(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+  listProducts(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string,
+  ) {
+    // R3.2 — با cursor/limit ← صفحه‌ای ({items, nextCursor})؛ بدون آن ← کل کاتالوگ (انتخاب‌گرها)
+    if (cursor !== undefined || limit !== undefined) {
+      return this.storeService.listProductsPage(
+        user.sub,
+        id,
+        parsePageQuery(cursor, limit),
+      );
+    }
     return this.storeService.listProducts(user.sub, id);
   }
 
@@ -428,8 +442,16 @@ export class StoreController {
     @Param('id') id: string,
     @Query('status') status?: OrderStatus,
     @Query('q') q?: string,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string,
   ) {
-    return this.storeService.listOrders(user.sub, id, status, q);
+    return this.storeService.listOrdersPage(
+      user.sub,
+      id,
+      status,
+      q,
+      parsePageQuery(cursor, limit),
+    );
   }
 
   @Post(':id/orders/:orderId/approve')
