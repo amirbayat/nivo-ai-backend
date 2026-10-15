@@ -412,6 +412,8 @@ export const fa = {
     receiptOverdueSms: (code: string) => `نیوو: رسید سفارش ${code} هنوز بررسی نشده.`,
     receiptCheckSms: (code: string) => `نیوو: نتیجه بررسی رسید سفارش ${code} آماده است. از پنل ببین.`,
     receiptNewSms: (code: string) => `نیوو: رسید جدید برای سفارش ${code} ثبت شد. از پنل بررسی کن.`,
+    receiptApprove: 'تایید',
+    receiptView: 'مشاهده',
     refundReadySeller: (code: string, amount: number, masked: string) =>
       `بازپرداخت ${code}: ${amount.toLocaleString('fa-IR')} تومان آماده واریز است. مقصد: ${masked}`,
     refundOverdue: (code: string, amount: number) =>

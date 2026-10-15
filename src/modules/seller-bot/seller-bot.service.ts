@@ -439,6 +439,10 @@ export class SellerBotService {
     await this.api.answerCallbackQuery(cq.id);
     const data = cq.data ?? '';
 
+    if (data.startsWith('sbok:')) {
+      await this.handleApproveFromNotification(chatId, data.slice('sbok:'.length));
+      return;
+    }
     if (data.startsWith('sbap:') || data.startsWith('sbrj:')) {
       await this.handleOrderDecision(chatId, data);
       return;
@@ -468,6 +472,40 @@ export class SellerBotService {
       await this.handleRefundPaid(chatId, data.slice('sbrf:'.length));
       return;
     }
+  }
+
+  private async handleApproveFromNotification(
+    chatId: string,
+    orderId: string,
+  ): Promise<void> {
+    const store = await this.getLinkedStore(chatId);
+    if (!store) return;
+    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
+    if (!order || order.storeId !== store.id) return;
+    const base = (this.config.get<string>('APP_URL') ?? '').replace(/\/$/, '');
+    const viewUrl = base ? `${base}/seller/panel/orders?orderId=${order.id}` : '';
+    if (order.receiptVerifiedMatch !== true) {
+      await this.api.sendText(
+        chatId,
+        viewUrl ? `${fa.orderNotify.receiptView}\n${viewUrl}` : fa.orderNotify.receiptView,
+      );
+      return;
+    }
+    try {
+      await this.storeService.approveOrder(
+        store.sellerId,
+        store.id,
+        orderId,
+        'TELEGRAM',
+      );
+    } catch (err) {
+      if (err instanceof ConflictException) {
+        await this.api.sendText(chatId, err.message);
+        return;
+      }
+      throw err;
+    }
+    await this.api.sendText(chatId, fa.sellerBot.orderApproved);
   }
 
   private async handleOrderDecision(

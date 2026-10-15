@@ -330,12 +330,21 @@ export class ReceiptCheckService {
               : fa.orderNotify.receiptMismatch(code)
             : fa.orderNotify.receiptUnreadable(code);
     const hint = similarTo ? `\n${fa.orderNotify.receiptSimilar(similarTo)}` : '';
+    const base = (process.env.APP_URL ?? '').replace(/\/$/, '');
+    const viewUrl = base ? `${base}/seller/panel/orders?orderId=${order.id}` : '';
+    const view = viewUrl ? [{ text: fa.orderNotify.receiptView, url: viewUrl }] : [];
+    const approve =
+      match === 'OK'
+        ? [{ text: fa.orderNotify.receiptApprove, callback_data: `sbok:${order.id}` }]
+        : [];
+    const row = [...approve, ...view];
     await this.notifications.notifySeller({
       storeId,
       template: 'RECEIPT_CHECK',
       entityId: order.id,
       botText: `${line}${hint}`,
       smsText: fa.orderNotify.receiptCheckSms(code),
+      botKeyboard: row.length ? { inline_keyboard: [row] } : undefined,
       dedupe: { key: `receipt-check:${order.id}:${match}`, ttlSeconds: 3600 },
     });
   }
