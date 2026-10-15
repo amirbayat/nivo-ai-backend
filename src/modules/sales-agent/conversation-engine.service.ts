@@ -75,6 +75,7 @@ import type {
   Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { ProductEventService } from '../../common/analytics/product-event.service';
 import { StorageService } from '../../storage/storage.service';
 import { mimeTypeForExt } from '../../common/validators/chat-image.validator';
 import { AiProviderService } from '../../common/services/ai-provider.service';
@@ -631,6 +632,7 @@ export class ConversationEngineService {
     private readonly orderNotifications: OrderNotificationService,
     private readonly receiptChecks: ReceiptCheckService,
     private readonly notifications: NotificationService,
+    private readonly productEvents: ProductEventService,
   ) {}
 
   // docs/PRD-category-specific-product-pricing-and-attributes.md بخش ۲.۳ — نقطه‌ی مرکزی حل
@@ -4582,16 +4584,11 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       this.logger.warn(
         `price guard: retries=${retries} stripped=${stripped.changed} conversation=${conversation.id}`,
       );
-      await this.prisma.productEvent
-        .create({
-          data: {
-            name: 'price_guard_triggered',
-            storeId: conversation.storeId,
-            conversationId: conversation.id,
-            props: { retries, stripped: stripped.changed },
-          },
-        })
-        .catch(() => undefined);
+      this.productEvents.log(
+        'price_guard_triggered',
+        { storeId: conversation.storeId, conversationId: conversation.id },
+        { retries, stripped: stripped.changed },
+      );
     }
     return stripped.text;
   }

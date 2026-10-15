@@ -12,6 +12,7 @@ import * as crypto from 'crypto';
 import { CHAT_START_LIMIT_PER_STORE_PER_MIN } from '../../common/constants/sales-ops.constants';
 import type { BillingMode } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { ProductEventService } from '../../common/analytics/product-event.service';
 import { RedisService } from '../../redis/redis.service';
 import { SmsService } from '../../sms/sms.service';
 import { normalizePhone } from '../../common/utils/normalize-phone';
@@ -81,6 +82,7 @@ export class SalesAgentService {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly productEvents: ProductEventService,
     private readonly engine: ConversationEngineService,
     private readonly storage: StorageService,
     private readonly mediaTranscode: MediaTranscodeService,
@@ -474,18 +476,11 @@ export class SalesAgentService {
     const turnId = randomUUID();
     const started = Date.now();
     const sink = openShopTurn(turnId, () => {
-      void this.prisma.productEvent
-        .create({
-          data: {
-            name: 'chat_first_token_ms',
-            storeId: conversation.storeId,
-            conversationId: conversation.id,
-            props: { ms: Date.now() - started },
-          },
-        })
-        .catch((err) => {
-          this.logger.error(`chat_first_token_ms write failed (${conversation.id})`, err as Error);
-        });
+      this.productEvents.log(
+        'chat_first_token_ms',
+        { storeId: conversation.storeId, conversationId: conversation.id },
+        { ms: Date.now() - started },
+      );
     });
     sink.emit({ type: 'status', text: fa.salesAgent.streamLooking });
     void runWithShopTurn(sink, () => this.processMessage(conversation, conversationId, dto))

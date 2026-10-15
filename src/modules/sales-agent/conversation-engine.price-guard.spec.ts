@@ -1,6 +1,7 @@
 import { ConversationEngineService } from './conversation-engine.service';
 import { buildCorrectiveInstruction } from './sales-machine/reply-validator';
 import { fa } from '../../i18n/fa';
+import { ProductEventService } from '../../common/analytics/product-event.service';
 
 // R1.4 — گارد قیمت: مبلغ غیرمجاز ← جمله حذف + «قیمت دقیق روی کارت»؛ ProductEvent و شمارش retry
 describe('price guard [R1.4]', () => {
@@ -16,7 +17,11 @@ describe('price guard [R1.4]', () => {
     const eng = Object.create(ConversationEngineService.prototype) as unknown as {
       applyPriceGuard: (c: unknown, t: string, a: Set<number>, r: number) => Promise<string>;
     };
-    Object.assign(eng, { prisma, logger: { warn: jest.fn() } });
+    Object.assign(eng, {
+      prisma,
+      productEvents: new ProductEventService(prisma as never),
+      logger: { warn: jest.fn() },
+    });
     return { eng, events };
   };
   const conversation = { id: 'c1', storeId: 's1' };

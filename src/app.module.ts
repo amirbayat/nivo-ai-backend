@@ -7,6 +7,7 @@ import { AllExceptionsFilter } from './common/filters/http-exception.filter';
 import { PrismaModule } from './prisma/prisma.module';
 import { RedisModule } from './redis/redis.module';
 import { AiProviderModule } from './common/services/ai-provider.module';
+import { ProductEventModule } from './common/analytics/product-event.module';
 import { HealthModule } from './health/health.module';
 import { StorageModule } from './storage/storage.module';
 import { RateLimitModule } from './rate-limit/rate-limit.module';
@@ -69,6 +70,7 @@ import { InstagramModule } from './modules/instagram/instagram.module';
     PrismaModule,
     RedisModule,
     AiProviderModule,
+    ProductEventModule,
     HealthModule,
     StorageModule,
     RateLimitModule,
