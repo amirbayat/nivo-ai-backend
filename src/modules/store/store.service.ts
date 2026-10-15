@@ -1677,6 +1677,30 @@ export class StoreService {
     });
   }
 
+  // SP-4 — «کاور کن»: عکس انتخاب‌شده اول آرایه می‌رود (عکس اول = کاور)
+  async setProductCoverImage(sellerId: string, storeId: string, productId: string, key: string) {
+    const product = await this.getOwnedProduct(sellerId, storeId, productId);
+    if (!product.images.includes(key)) throw new NotFoundException(fa.store.productNotFound);
+    return this.prisma.product.update({
+      where: { id: productId },
+      data: { images: [key, ...product.images.filter((k) => k !== key)] },
+    });
+  }
+
+  // SP-4 — یک محصول برای صفحه‌ی ویرایش (پیش‌نویس هم)، با همان شکل لیست (گزینه‌ها/مدل‌ها/تکمیل‌بودن)
+  async getProductForSeller(sellerId: string, storeId: string, productId: string) {
+    await this.getOwnedProduct(sellerId, storeId, productId);
+    const product = await this.prisma.product.findUnique({
+      where: { id: productId },
+      include: {
+        optionTypes: { orderBy: { position: 'asc' }, include: { values: { orderBy: { position: 'asc' } } } },
+        variants: true,
+      },
+    });
+    if (!product) throw new NotFoundException(fa.store.productNotFound);
+    return product;
+  }
+
   // بدون چک مالکیت (سلر) — محتوای عمومی ویترین است، باید در <img> مرورگر مشتری ناشناس
   // هم لود شود؛ بدون storeId (productId+key به‌تنهایی کافی است) — فقط چک می‌کند کلید واقعاً
   // داخل images همین محصول است تا کلید دلخواه سرو نشود

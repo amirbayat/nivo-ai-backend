@@ -250,6 +250,16 @@ export class StoreController {
     return this.storeService.logProductLinkShared(user.sub, id, productId, channel);
   }
 
+  // SP-4 — یک محصول (پیش‌نویس هم) برای صفحه‌ی ویرایش
+  @Get(':id/products/:productId')
+  getProduct(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('productId') productId: string,
+  ) {
+    return this.storeService.getProductForSeller(user.sub, id, productId);
+  }
+
   @Post(':id/products/:productId/duplicate')
   duplicateProduct(
     @CurrentUser() user: JwtPayload,
@@ -347,6 +357,16 @@ export class StoreController {
       productId,
       files ?? [],
     );
+  }
+
+  @Post(':id/products/:productId/images/:key/cover')
+  setCoverImage(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('productId') productId: string,
+    @Param('key') key: string,
+  ) {
+    return this.storeService.setProductCoverImage(user.sub, id, productId, key);
   }
 
   @Delete(':id/products/:productId/images/:key')
