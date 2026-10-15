@@ -30,6 +30,11 @@ import { buildHistoryEntry } from '../sales-agent/conversation-history.util';
 import { reattachReceiptIfOrderOpen } from '../sales-agent/receipt-reattach.util';
 import { OrderStateService } from '../order-lifecycle/order-state.service';
 import { ReceiptCheckService } from '../order-lifecycle/receipt-check.service';
+import { RefundService } from '../order-lifecycle/refund.service';
+import {
+  looksLikeDestinationMessage,
+  maskSensitiveNumbers,
+} from '../../common/utils/refund-destination.util';
 import type {
   ConversationContext,
   EngineResult,
@@ -123,6 +128,7 @@ export class TelegramService {
     private readonly storeKbService: StoreKbService,
     private readonly orderState: OrderStateService,
     private readonly receiptChecks: ReceiptCheckService,
+    private readonly refunds: RefundService,
   ) {
     this.botToken = this.config.get<string>('TELEGRAM_BOT_TOKEN');
     this.webhookSecret = this.config.get<string>('TELEGRAM_WEBHOOK_SECRET');
@@ -512,6 +518,10 @@ export class TelegramService {
 
   private async handleText(message: TelegramMessage): Promise<void> {
     const chatId = String(message.chat.id);
+    // کارت/شبای بازپرداخت باید قبل از هر چیز (حتی مکالمه‌ی mute یا بایگانی‌شده‌ی سفارش ردشده)
+    // گرفته شود و هرگز خام لاگ نشود [R0.3]
+    if (await this.tryCaptureRefundDestination(chatId, message.text ?? '')) return;
+    if (message.text) message = { ...message, text: maskSensitiveNumbers(message.text) };
     const conversation = await this.resolveActiveConversation(chatId);
     if (!conversation) {
       // docs/PRD-telegram-bot-channel.md بخش ۹.۲ — بدون مکالمه‌ی فعال، متن به‌عنوان جستجوی
@@ -527,6 +537,27 @@ export class TelegramService {
       this.engine.handleMessage(conversation, message.text ?? ''),
     );
     await this.sendEngineResult(chatId, result);
+  }
+
+  private async tryCaptureRefundDestination(chatId: string, text: string): Promise<boolean> {
+    if (!looksLikeDestinationMessage(text)) return false;
+    const customers = await this.prisma.customer.findMany({
+      where: { channel: 'TELEGRAM', telegramChatId: chatId },
+      select: { id: true },
+    });
+    try {
+      const captured = await this.refunds.tryCaptureForCustomers(
+        customers.map((c) => c.id),
+        text,
+      );
+      if (!captured) return false;
+      await this.sendText(chatId, captured.reply);
+      return true;
+    } catch (err) {
+      // ثبت‌نشدن (مثلاً هم‌زمانی با لغو) نباید متن خام را به LLM یا لاگ بدهد
+      this.logger.warn(`refund destination capture failed: ${err instanceof Error ? err.message : String(err)}`);
+      return false;
+    }
   }
 
   private async searchStores(chatId: string, query: string): Promise<void> {

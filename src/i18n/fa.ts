@@ -377,7 +377,7 @@ export const fa = {
       `برای برگشت ${amount.toLocaleString('fa-IR')} تومان شماره کارت یا شبا و نام صاحب حساب رو وارد کن.`,
     refundAskInThisChat: 'شماره کارت یا شبات رو همین‌جا بفرست.',
     refundDestinationSaved: (hours: number, masked: string) =>
-      `ثبت شد — فروشنده تا ${hours.toLocaleString('fa-IR')} ساعت واریز می‌کنه. مقصد: ${masked}`,
+      `شماره کارتت ثبت شد ✅ فروشنده تا ${hours.toLocaleString('fa-IR')} ساعت واریز می‌کنه. مقصد: ${masked}`,
     refundAskSms: (amount: number) =>
       `نیوو: برای برگشت ${amount.toLocaleString('fa-IR')} تومان شماره کارت یا شبا رو در لینک سفارش وارد کن.`,
     refundDoneChat: (amount: number, masked?: string | null, paidRef?: string | null) =>

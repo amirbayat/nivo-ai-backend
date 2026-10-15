@@ -15,6 +15,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { RedisService } from '../../redis/redis.service';
 import { SmsService } from '../../sms/sms.service';
 import { normalizePhone } from '../../common/utils/normalize-phone';
+import { maskSensitiveNumbers } from '../../common/utils/refund-destination.util';
 import { buyerOtpSendBlock } from '../../common/utils/buyer-otp-limit';
 import { StorageService } from '../../storage/storage.service';
 import { mimeTypeForExt } from '../../common/validators/chat-image.validator';
@@ -373,13 +374,30 @@ export class SalesAgentService {
     stream = false,
   ): Promise<SendMessageResponse> {
     const conversation = await this.loadOwned(conversationId, sessionToken);
-    const captured = await this.captureRefundCard(conversation, dto);
-    if (captured) return captured;
 
     // 2.1 — Idempotency: همان clientMessageId دوباره آمد → جواب ذخیره‌شده (یا «در حال پردازش»)
     const idemKey = dto.clientMessageId
       ? `idem:msg:${conversation.id}:${dto.clientMessageId}`
       : null;
+    // گرفتن کارت بازپرداخت بعد از چک idempotency: ارسال دوباره‌ی همان پیام کارت، جواب ذخیره‌شده
+    // را می‌گیرد، نه اینکه (چون refund دیگر منتظر مقصد نیست) به LLM/تاریخچه برود [R0.10]
+    if (idemKey) {
+      const replay = await this.redis.get(idemKey);
+      if (replay && replay !== MESSAGE_IDEMPOTENCY_PENDING_MARK) {
+        return JSON.parse(replay) as SendMessageResponse;
+      }
+    }
+    const captured = await this.captureRefundCard(conversation, dto);
+    if (captured) {
+      if (idemKey) {
+        await this.redis
+          .set(idemKey, JSON.stringify(captured), 'EX', MESSAGE_IDEMPOTENCY_TTL_SECONDS)
+          .catch(() => undefined);
+      }
+      return captured;
+    }
+    // هر رشته‌ی ۱۶/۲۴ رقمی که کارتِ ثبت‌شده نشد هم قبل از لاگ/LLM/تاریخچه ماسک می‌شود
+    if (dto.message) dto = { ...dto, message: maskSensitiveNumbers(dto.message) };
     if (stream) {
       const cfg = await getSalesAgentGlobalConfig(this.prisma);
       if (cfg.shopStreamEnabled) {

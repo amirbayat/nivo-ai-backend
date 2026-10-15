@@ -140,3 +140,30 @@ export function parseDestination(raw: string): ParsedDestination | null {
     bankName: bankNameForCard(digits),
   };
 }
+
+// R0.11 — پیام فقط وقتی «کارت/شبا» حساب می‌شود که عمدتاً یک بلوک رقم باشد: دقیقاً ۱۶ یا ۲۴ رقم
+// (با فاصله/خط‌تیره) و حداکثر ۶ کاراکتر غیررقمی دیگر («IR» هم جزو همین‌هاست). الحاق ارقام یک
+// جمله‌ی طولانی به‌عنوان کارت پذیرفته نمی‌شود.
+export function looksLikeDestinationMessage(text: string): boolean {
+  const t = toEnglishDigits(text);
+  const digits = t.replace(/\D/g, '').length;
+  if (digits !== 16 && digits !== 24) return false;
+  const others = t.replace(/[\d\s-]/g, '').length;
+  return others <= 6;
+}
+
+// R0.10 — هر رشته‌ی ۱۶ یا ۲۴ رقمی (حتی Luhn نامعتبر) قبل از لاگ/LLM/تاریخچه ماسک می‌شود
+const DIGIT = '[0-9۰-۹٠-٩]';
+const SENSITIVE_NUMBER_RE = new RegExp(
+  `(?<!${DIGIT})(?:(?:${DIGIT}[ -]?){23}${DIGIT}|(?:${DIGIT}[ -]?){15}${DIGIT})(?!${DIGIT})`,
+  'g',
+);
+
+export function maskSensitiveNumbers(text: string): string {
+  return text.replace(SENSITIVE_NUMBER_RE, (match) => {
+    const digits = digitsOnly(match);
+    return digits.length === 16
+      ? `${digits.slice(0, 4)}-****-****-${digits.slice(12)}`
+      : `${digits.slice(0, 4)}…${digits.slice(-4)}`;
+  });
+}

@@ -51,4 +51,17 @@ describe('tryCaptureFromMessage [F7]', () => {
     await expect(svc.tryCaptureFromMessage('conv-1', 'سلام')).resolves.toBeNull();
     expect(prisma.orderRefund.findFirst).not.toHaveBeenCalled();
   });
+
+  it('جمله‌ی طولانی حاوی ارقام کارت، کارت حساب نمی‌شود [R0.11]', async () => {
+    const prisma = { orderRefund: { findFirst: jest.fn() } };
+    const svc = Object.create(RefundService.prototype) as RefundService;
+    Object.assign(svc, { prisma });
+    await expect(
+      svc.tryCaptureFromMessage(
+        'conv-1',
+        'سفارش من شماره ۱۲ بود و کارت ۴۱۱۱ ۱۱۱۱ ۱۱۱۱ ۱۱۱۱ را قبلاً دادم',
+      ),
+    ).resolves.toBeNull();
+    expect(prisma.orderRefund.findFirst).not.toHaveBeenCalled();
+  });
 });

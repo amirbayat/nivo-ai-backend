@@ -39,3 +39,51 @@ describe('refund destination', () => {
     expect(parseDestination('not-a-card')).toBeNull();
   });
 });
+
+import {
+  looksLikeDestinationMessage,
+  maskSensitiveNumbers,
+} from './refund-destination.util';
+
+describe('looksLikeDestinationMessage [R0.11]', () => {
+  it.each([
+    '4111111111111111',
+    '4111 1111 1111 1111',
+    '4111-1111-1111-1111',
+    '۴۱۱۱ ۱۱۱۱ ۱۱۱۱ ۱۱۱۱',
+    'کارتم: 4111111111111111',
+    'IR062960000000100324200001',
+    '062960000000100324200001',
+  ])('%s → کارت/شبا', (text) => {
+    expect(looksLikeDestinationMessage(text)).toBe(true);
+  });
+
+  it.each([
+    'سلام',
+    'من سفارش ۱۲۳۴ دارم و شماره‌ام ۰۹۱۲۳۴۵۶۷۸۹ است و کارت ۴۱۱۱ ۱۱۱۱ ۱۱۱۱ ۱۱۱۱ را بفرستم؟',
+    'کد پیگیری 1234567890123456789012 و یک توضیح خیلی طولانی اینجا',
+    '41111111111111',
+    '4111111111111111 و بعد یک جمله‌ی طولانی دیگه',
+  ])('%s → کارت نیست', (text) => {
+    expect(looksLikeDestinationMessage(text)).toBe(false);
+  });
+});
+
+describe('maskSensitiveNumbers [R0.10]', () => {
+  it('کارت ۱۶ رقمی (حتی Luhn نامعتبر) ماسک می‌شود', () => {
+    expect(maskSensitiveNumbers('1234567812345678')).toBe('1234-****-****-5678');
+    expect(maskSensitiveNumbers('کارتم ۱۲۳۴ ۵۶۷۸ ۱۲۳۴ ۵۶۷۸ هست')).toBe(
+      'کارتم 1234-****-****-5678 هست',
+    );
+  });
+
+  it('رشته‌ی ۲۴ رقمی ماسک می‌شود و هیچ ۱۶ رقم پشت‌هم باقی نمی‌ماند', () => {
+    const out = maskSensitiveNumbers('IR062960000000100324200001 / 062960000000100324200001');
+    expect(out).not.toMatch(/\d{16}/);
+  });
+
+  it('تلفن، مبلغ و متن عادی دست نمی‌خورد', () => {
+    const text = 'شماره‌ام 09123456789 و مبلغ 450000 تومان، سفارش NV12345';
+    expect(maskSensitiveNumbers(text)).toBe(text);
+  });
+});

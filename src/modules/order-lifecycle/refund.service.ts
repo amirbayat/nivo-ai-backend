@@ -7,11 +7,11 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { RefundReason } from '@prisma/client';
+import { Prisma, RefundReason } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { fa } from '../../i18n/fa';
 import { encryptSecret, decryptSecret } from '../../common/utils/secret-cipher';
-import { parseDestination } from '../../common/utils/refund-destination.util';
+import { looksLikeDestinationMessage, parseDestination } from '../../common/utils/refund-destination.util';
 import { displayOrderCode } from '../../common/utils/order-code.util';
 import { REFUND_OVERDUE_HOURS } from '../../common/constants/sales-ops.constants';
 import { NotificationService } from '../notifications/notification.service';
@@ -232,13 +232,25 @@ export class RefundService {
   }
 
   async tryCaptureFromMessage(conversationId: string, text: string) {
+    return this.tryCapture({ order: { conversationId } }, text);
+  }
+
+  // تلگرام: مکالمه‌ی سفارش ردشده بایگانی است و resolveActiveConversation آن را نمی‌بیند،
+  // پس بازپرداخت را از روی مشتری‌های همین چت پیدا می‌کنیم
+  async tryCaptureForCustomers(customerIds: string[], text: string) {
+    if (customerIds.length === 0) return null;
+    return this.tryCapture(
+      { order: { conversation: { customerId: { in: customerIds } } } },
+      text,
+    );
+  }
+
+  private async tryCapture(scope: Prisma.OrderRefundWhereInput, text: string) {
+    if (!looksLikeDestinationMessage(text)) return null;
     const parsed = parseDestination(text);
     if (!parsed) return null;
     const refund = await this.prisma.orderRefund.findFirst({
-      where: {
-        status: 'AWAITING_DESTINATION',
-        order: { conversationId },
-      },
+      where: { status: 'AWAITING_DESTINATION', ...scope },
       orderBy: { createdAt: 'desc' },
     });
     if (!refund) return null;
