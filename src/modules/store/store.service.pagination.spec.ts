@@ -11,7 +11,10 @@ function rows(n: number) {
 function build(orderRows: unknown[], productRows: unknown[] = []) {
   const prisma = {
     order: { findMany: jest.fn().mockResolvedValue(orderRows) },
-    product: { findMany: jest.fn().mockResolvedValue(productRows) },
+    product: {
+      findMany: jest.fn().mockResolvedValue(productRows),
+      groupBy: jest.fn().mockResolvedValue([]),
+    },
   };
   const svc = Object.create(StoreService.prototype) as StoreService;
   Object.assign(svc, {
