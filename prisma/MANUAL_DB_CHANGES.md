@@ -22,6 +22,17 @@
 4. فایل را مستقیم روی دیتابیس پروداکشن اجرا کن (مثلاً `psql $DATABASE_URL -f prisma/manual-migrations/xxx.sql` یا از طریق DB client).
 5. بعد از تایید اجرای موفق روی پروداکشن، دیپلوی کد جدید را انجام بده.
 
+## ایندکس‌های دستی (قابل‌بیان در Prisma نیستند)
+
+این ایندکس‌ها فقط با SQL دستی ساخته می‌شوند و در `schema.prisma` نیستند؛ `prisma migrate diff` بعدی ممکن است
+پیشنهاد DROP بدهد — آن خط را **اجرا نکن**.
+
+| ایندکس | جدول | فایل | دلیل |
+|---|---|---|---|
+| `product_stock_alerts_open_unique` (partial unique روی `customerId, productId, COALESCE(variantId,'')` با `WHERE notifiedAt IS NULL`) | `product_stock_alerts` | `20261046a_stock_alert_dedupe.sql` سپس `20261046b_stock_alert_open_unique.sql` | هر خریدار برای هر محصول/واریانت فقط یک هشدار «خبرم کن» باز |
+
+ایندکس‌هایی که با Prisma قابل‌بیان‌اند (مثل `order_issues_status_idx`) حتماً در `schema.prisma` هم هستند.
+
 ## Seed ها
 
 Seed ها (`prisma/seeds/*.seed.ts`) دیگر در `entrypoint.prod.sh` اجرا نمی‌شوند. برای اجرای دستی روی پروداکشن:

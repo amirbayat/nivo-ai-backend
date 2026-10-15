@@ -3337,6 +3337,7 @@ model OrderIssue {
   resolvedAt DateTime?
 
   @@index([orderId])
+  @@index([status])
   @@map("order_issues")
 }
 
