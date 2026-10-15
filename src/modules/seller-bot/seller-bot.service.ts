@@ -5,6 +5,8 @@ import {
   Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { randomBytes } from 'crypto';
+import { ProductEventService } from '../../common/analytics/product-event.service';
 import { safeEqual } from '../../common/utils/safe-equal.util';
 import type { Store } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -28,6 +30,7 @@ import type {
 // (بخش ۸ سند): اعلان handoff/رسید حالا هم این‌جا پوش می‌شود (از conversation-engine.service.ts،
 // نه دیگر بات قدیم)؛ ایمپورت گروهی محصول با سند/صوت هنوز فقط روی بات قدیم مانده.
 const OTP_PENDING_TTL_MS = 3 * 60 * 1000;
+const CONNECT_TOKEN_TTL_MS = 15 * 60 * 1000;
 const STOCK_UPDATE_REF_REGEX = /کد محصول: ([0-9a-fA-F-]{36})/;
 const REJECT_REASON_REF_REGEX = /کد سفارش رد: ([0-9a-fA-F-]{36})(?: پول:(0|1))?/;
 const CONVERSATION_REPLY_REF_REGEX = /کد مکالمه: ([0-9a-fA-F-]{36})/;
@@ -76,6 +79,7 @@ export class SellerBotService {
     private readonly storeCreditService: StoreCreditService,
     private readonly api: SellerBotApiClientService,
     private readonly refunds: RefundService,
+    private readonly productEvents: ProductEventService,
   ) {
     this.webhookSecret = this.config.get<string>('SELLER_BOT_WEBHOOK_SECRET');
     this.botUsername =
@@ -167,7 +171,7 @@ export class SellerBotService {
     const text = message.text!.trim();
 
     if (text === '/start' || text.startsWith('/start ')) {
-      await this.handleStart(chatId);
+      await this.handleStart(chatId, text.slice('/start'.length).trim());
       return;
     }
     if (text === '/logout' || text === fa.sellerBot.menuLogoutButton) {
@@ -216,7 +220,61 @@ export class SellerBotService {
     await this.sendMenu(chatId, fa.sellerBot.unknownCommand);
   }
 
-  private async handleStart(chatId: string): Promise<void> {
+  // SP-7/S9 — اتصال با یک تپ: t.me/<bot>?start=c_<token>؛ توکن یک‌بارمصرف با TTL ۱۵ دقیقه
+  async createConnectToken(sellerId: string, storeId: string): Promise<{ url: string }> {
+    const store = await this.storeService.getOwned(sellerId, storeId);
+    if (!this.botUsername) throw new BadRequestException(fa.sellerBot.botNotConfigured);
+    const token = randomBytes(16).toString('base64url');
+    await this.prisma.store.update({
+      where: { id: store.id },
+      data: {
+        sellerBotConnectToken: token,
+        sellerBotConnectTokenExpiresAt: new Date(Date.now() + CONNECT_TOKEN_TTL_MS),
+      },
+    });
+    return { url: `https://t.me/${this.botUsername}?start=c_${token}` };
+  }
+
+  private async linkByToken(chatId: string, token: string): Promise<void> {
+    const store = await this.prisma.store.findFirst({
+      where: { sellerBotConnectToken: token, sellerBotConnectTokenExpiresAt: { gt: new Date() } },
+    });
+    if (!store) {
+      await this.api.sendText(chatId, fa.sellerBot.connectLinkExpired);
+      return;
+    }
+    // این چت قبلاً به فروشگاه دیگری وصل است ← دزدیده نمی‌شود
+    const existing = await this.getLinkedStore(chatId);
+    if (existing && existing.id !== store.id) {
+      await this.api.sendText(chatId, fa.sellerBot.chatAlreadyLinkedElsewhere);
+      return;
+    }
+    try {
+      await this.prisma.store.update({
+        where: { id: store.id },
+        data: {
+          sellerBotChatId: chatId,
+          sellerBotLinkedAt: new Date(),
+          sellerBotConnectToken: null,
+          sellerBotConnectTokenExpiresAt: null,
+        },
+      });
+    } catch (err) {
+      if ((err as { code?: string })?.code === 'P2002') {
+        await this.api.sendText(chatId, fa.sellerBot.chatAlreadyLinkedElsewhere);
+        return;
+      }
+      throw err;
+    }
+    this.productEvents.log('seller_bot_linked', { storeId: store.id }, { via: 'deeplink' });
+    await this.sendMenu(chatId, fa.sellerBot.linked(store.name));
+  }
+
+  private async handleStart(chatId: string, payload = ''): Promise<void> {
+    if (payload.startsWith('c_')) {
+      await this.linkByToken(chatId, payload.slice(2));
+      return;
+    }
     const store = await this.getLinkedStore(chatId);
     if (store) {
       await this.sendMenu(chatId, fa.sellerBot.alreadyLinked(store.name));
@@ -272,6 +330,7 @@ export class SellerBotService {
       where: { id: pending.storeId },
       data: { sellerBotChatId: chatId, sellerBotLinkedAt: new Date() },
     });
+    this.productEvents.log('seller_bot_linked', { storeId: store.id }, { via: 'otp' });
     await this.sendMenu(chatId, fa.sellerBot.linked(store.name));
   }
 
@@ -419,7 +478,7 @@ export class SellerBotService {
       return;
     }
     const base = (this.config.get<string>('APP_URL') ?? '').replace(/\/$/, '');
-    const panelUrl = base ? `${base}/seller/panel/refunds` : '';
+    const panelUrl = base ? `${base}/seller/panel/orders?view=refunds` : '';
     for (const row of rows.slice(0, 8)) {
       await this.api.sendText(
         chatId,

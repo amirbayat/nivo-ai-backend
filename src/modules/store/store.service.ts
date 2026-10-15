@@ -364,6 +364,8 @@ export class StoreService {
         throw new BadRequestException(fa.store.shippingDaysInvalid);
       }
     }
+    // SP-7 — اولین روش پرداخت: لینک اسنپ‌پی (کارت در StoreBankCardService ثبت می‌شود)
+    const addingSnapppay = !!data.snapppayPaymentLink && !(await this.storeHasPaymentMethod(before));
     let updated;
     try {
       updated = await this.prisma.store.update({
@@ -375,6 +377,9 @@ export class StoreService {
         throw new ConflictException(fa.store.slugTaken);
       }
       throw err;
+    }
+    if (addingSnapppay) {
+      this.productEvents.log('payment_method_added', { storeId, userId: sellerId }, { kind: 'snapppay' });
     }
     // docs/PRD-seller-guide-assistant-modal.md بخش ۱.۳ — فقط فیلدهای متنی/توصیفی تراکینگ می‌شوند
     await this.changeLog.logMany(
@@ -978,7 +983,33 @@ export class StoreService {
         hasWorkingHours: !!(store.workingHoursStart && store.workingHoursEnd),
         hasPaymentMethod: await this.storeHasPaymentMethod(store),
       },
+      // SP-6 — کارت «۳ قدم تا اولین فروش»؛ products همین‌جا فقط ACTIVE است
+      launch: {
+        hasActiveProduct: products.length > 0,
+        hasPaymentMethod: await this.storeHasPaymentMethod(store),
+        shared: !!store.launchSharedAt,
+      },
     };
+  }
+
+  // SP-6 — idempotent؛ اولین بار launchSharedAt ست می‌شود، هر بار رویداد ثبت می‌شود
+  async markLaunchShared(sellerId: string, storeId: string) {
+    const store = await this.getOwned(sellerId, storeId);
+    if (!store.launchSharedAt) {
+      await this.prisma.store.updateMany({
+        where: { id: storeId, launchSharedAt: null },
+        data: { launchSharedAt: new Date() },
+      });
+    }
+    this.productEvents.log('shop_link_shared', { storeId, userId: sellerId });
+    return { ok: true as const };
+  }
+
+  // SP-7 / §4.12.1 — فقط آمار اشتراک لینک محصول
+  async logProductLinkShared(sellerId: string, storeId: string, productId: string, channel: 'native' | 'copy' | 'telegram') {
+    await this.getOwnedProduct(sellerId, storeId, productId);
+    this.productEvents.log('product_link_shared', { storeId, userId: sellerId }, { productId, channel });
+    return { ok: true as const };
   }
 
   // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۳.۳/۳.۴ — موضوعات
@@ -986,31 +1017,60 @@ export class StoreService {
   // (CUSTOMER_REQUESTED، همراه دلیل آزاد)، خوشه‌بندی‌شده با یک فراخوان LLM؛ برای تب «توجه».
   // نتیجه روی خود Store کش می‌شود (ATTENTION_SUGGESTIONS_TTL_MS) چون تولیدش یک فراخوان LLM
   // است و نباید با هر بار باز شدن تب دوباره محاسبه شود
+  // SP-6 — کش قبلاً آرایه‌ی ساده بود؛ حالا {topics, dismissedTopics}. هر دو شکل خوانده می‌شود
+  private readAttentionCache(raw: unknown): {
+    topics: AttentionSuggestionTopic[];
+    dismissedTopics: string[];
+  } {
+    if (Array.isArray(raw)) return { topics: raw as AttentionSuggestionTopic[], dismissedTopics: [] };
+    const obj = (raw ?? {}) as { topics?: AttentionSuggestionTopic[]; dismissedTopics?: string[] };
+    return { topics: obj.topics ?? [], dismissedTopics: obj.dismissedTopics ?? [] };
+  }
+
   async getAttentionSuggestions(sellerId: string, storeId: string) {
     const store = await this.getOwned(sellerId, storeId);
+    const cached = this.readAttentionCache(store.attentionSuggestions);
     const isFresh =
       !!store.attentionSuggestionsComputedAt &&
       Date.now() - store.attentionSuggestionsComputedAt.getTime() <
         ATTENTION_SUGGESTIONS_TTL_MS;
     if (isFresh) {
       return {
-        topics:
-          (store.attentionSuggestions as unknown as AttentionSuggestionTopic[]) ??
-          [],
+        topics: cached.topics.filter((t) => !cached.dismissedTopics.includes(t.topic)),
         computedAt: store.attentionSuggestionsComputedAt,
       };
     }
 
-    const topics = await this.computeAttentionSuggestionTopics(storeId);
+    const computed = await this.computeAttentionSuggestionTopics(storeId);
+    const topics = computed.filter((t) => !cached.dismissedTopics.includes(t.topic));
     const computedAt = new Date();
     await this.prisma.store.update({
       where: { id: storeId },
       data: {
-        attentionSuggestions: topics as unknown as Prisma.InputJsonValue,
+        attentionSuggestions: {
+          topics,
+          dismissedTopics: cached.dismissedTopics,
+        } as unknown as Prisma.InputJsonValue,
         attentionSuggestionsComputedAt: computedAt,
       },
     });
     return { topics, computedAt };
+  }
+
+  // SP-6 — «جواب بده» انجام شد؛ همان topic (با رشته‌ی دقیق) از کش حذف و در dismissedTopics
+  // (آخرین ۵۰ تا) نگه داشته می‌شود تا محاسبه‌ی بعدی دوباره نشانش ندهد
+  async dismissAttentionTopic(sellerId: string, storeId: string, topic: string) {
+    const store = await this.getOwned(sellerId, storeId);
+    const cached = this.readAttentionCache(store.attentionSuggestions);
+    const dismissedTopics = [...cached.dismissedTopics.filter((t) => t !== topic), topic].slice(-50);
+    const topics = cached.topics.filter((t) => t.topic !== topic);
+    await this.prisma.store.update({
+      where: { id: storeId },
+      data: {
+        attentionSuggestions: { topics, dismissedTopics } as unknown as Prisma.InputJsonValue,
+      },
+    });
+    return { topics };
   }
 
   private async computeAttentionSuggestionTopics(
@@ -2022,7 +2082,7 @@ export class StoreService {
   async listOrdersPage(
     sellerId: string,
     storeId: string,
-    status: OrderStatus | undefined,
+    status: OrderStatus | OrderStatus[] | undefined,
     q: string | undefined,
     page: { cursor?: string; limit: number },
   ) {
@@ -2038,7 +2098,7 @@ export class StoreService {
 
   private async findOrdersWithImages(
     storeId: string,
-    status?: OrderStatus,
+    status?: OrderStatus | OrderStatus[],
     q?: string,
     page?: { cursor?: string; limit: number },
   ) {
@@ -2046,7 +2106,14 @@ export class StoreService {
       where: {
         storeId,
         conversation: { isTest: false },
-        ...(status ? { status } : {}),
+        // SP-6 — لیست وضعیت‌ها (فیلتر «ارسال شده» = SHIPPED+DELIVERED)
+        ...(Array.isArray(status)
+          ? status.length > 0
+            ? { status: { in: status } }
+            : {}
+          : status
+            ? { status }
+            : {}),
         ...this.buildOrderSearchFilter(q),
       },
       orderBy: page
@@ -2617,6 +2684,10 @@ export class StoreService {
             id: true,
             orderCode: true,
             receiptVerifiedMatch: true,
+            totalAmount: true,
+            updatedAt: true,
+            receiptImageKey: true,
+            conversation: { select: { customer: { select: { phone: true, fullName: true } } } },
           },
         }),
         this.prisma.order.findMany({
@@ -2675,6 +2746,21 @@ export class StoreService {
         }),
       ]);
 
+    // یک کوئری برای آخرین پیام مشتری همه‌ی گفتگوهای منتظر (نه N+1)
+    const lastMessages = new Map<string, string>();
+    if (conversations.length > 0) {
+      const rows = await this.prisma.$queryRaw<{ conversationId: string; text: string | null }[]>`
+        SELECT DISTINCT ON ("conversationId") "conversationId", payload->>'text' AS text
+        FROM conversation_events
+        WHERE type = 'CUSTOMER_MESSAGE'
+          AND "conversationId" IN (${Prisma.join(conversations.map((c) => c.id))})
+        ORDER BY "conversationId", "createdAt" DESC
+      `;
+      for (const row of rows) {
+        if (row.text) lastMessages.set(row.conversationId, row.text.slice(0, 80));
+      }
+    }
+
     const waitingIds = waitingRows
       .sort((a, b) => b._count._all - a._count._all)
       .slice(0, take);
@@ -2701,6 +2787,14 @@ export class StoreService {
         id: order.id,
         orderCode: displayOrderCode(order),
         receiptVerifiedMatch: order.receiptVerifiedMatch,
+        // SP-6 — کارت رسید در «امروز» (تایید/رد همان‌جا)
+        amountToman: order.totalAmount,
+        customerLabel:
+          order.conversation?.customer?.fullName ??
+          order.conversation?.customer?.phone ??
+          'مشتری ناشناس',
+        submittedAt: order.updatedAt,
+        hasReceiptImage: !!order.receiptImageKey,
       })),
       toShip: toShip.map((order) => ({
         id: order.id,
@@ -2712,6 +2806,9 @@ export class StoreService {
           conversation.customer.phone ??
           conversation.customer.fullName ??
           'مشتری ناشناس',
+        // SP-6 — آخرین پیام مشتری (≤۸۰ کاراکتر) و «از کی منتظر»؛ updatedAt تقریب زمان بی‌صدا شدن است
+        lastCustomerMessage: lastMessages.get(conversation.id) ?? null,
+        waitingSince: conversation.updatedAt,
       })),
       refunds: refunds.map((refund) => ({
         id: refund.id,

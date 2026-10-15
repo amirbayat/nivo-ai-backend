@@ -17,7 +17,8 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
-import type { OrderStatus, GoldWageType } from '@prisma/client';
+import { OrderStatus } from '@prisma/client';
+import type { GoldWageType } from '@prisma/client';
 import { SkipThrottle } from '@nestjs/throttler';
 import { JwtGuard } from '../../common/guards/jwt.guard';
 import {
@@ -156,6 +157,16 @@ export class StoreController {
   }
 
   // بخش ۳.۳/۳.۴ — پیشنهادهای aggregator (موضوعات تکرارشونده‌ی گیرکردن ربات)، برای تب «توجه»
+  @Post(':id/attention-suggestions/dismiss')
+  dismissAttentionTopic(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() body: { topic?: string },
+  ) {
+    if (!body?.topic || typeof body.topic !== 'string') throw new BadRequestException(fa.validation.required);
+    return this.storeService.dismissAttentionTopic(user.sub, id, body.topic.slice(0, 300));
+  }
+
   @Get(':id/attention-suggestions')
   getAttentionSuggestions(
     @CurrentUser() user: JwtPayload,
@@ -219,6 +230,24 @@ export class StoreController {
     @Body() dto: PublishProductsDto,
   ) {
     return this.storeService.publishProducts(user.sub, id, dto.ids);
+  }
+
+  // SP-6 — «لینک فروشگاه را فرستادم» (کارت راه‌اندازی)؛ idempotent
+  @Post(':id/launch/shared')
+  markLaunchShared(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    return this.storeService.markLaunchShared(user.sub, id);
+  }
+
+  @Post(':id/products/:productId/link-shared')
+  productLinkShared(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('productId') productId: string,
+    @Body() body: { channel?: string },
+  ) {
+    const channel =
+      body?.channel === 'copy' || body?.channel === 'telegram' ? body.channel : 'native';
+    return this.storeService.logProductLinkShared(user.sub, id, productId, channel);
   }
 
   @Post(':id/products/:productId/duplicate')
@@ -479,15 +508,20 @@ export class StoreController {
   listOrders(
     @CurrentUser() user: JwtPayload,
     @Param('id') id: string,
-    @Query('status') status?: OrderStatus,
+    @Query('status') status?: string,
     @Query('q') q?: string,
     @Query('cursor') cursor?: string,
     @Query('limit') limit?: string,
   ) {
+    // SP-6 — status می‌تواند فهرست جداشده با ویرگول باشد؛ مقدارهای نامعتبر نادیده گرفته می‌شوند
+    const statuses = (status ?? '')
+      .split(',')
+      .map((x) => x.trim())
+      .filter((x): x is OrderStatus => (Object.values(OrderStatus) as string[]).includes(x));
     return this.storeService.listOrdersPage(
       user.sub,
       id,
-      status,
+      statuses.length === 0 ? undefined : statuses.length === 1 ? statuses[0] : statuses,
       q,
       parsePageQuery(cursor, limit),
     );

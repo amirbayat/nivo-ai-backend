@@ -949,6 +949,9 @@ export const fa = {
     orderRejected: 'سفارش رد شد ❌',
     stockUsage: 'به این شکل بفرست: /stock <اسم یا کد محصول>',
     alwaysInStockShort: 'همیشه موجود',
+    botNotConfigured: 'بات تلگرام فروشنده هنوز تنظیم نشده',
+    connectLinkExpired: 'لینک منقضی شده؛ از پنل دوباره «وصل کن» رو بزن',
+    chatAlreadyLinkedElsewhere: 'این تلگرام قبلاً به یک فروشگاه دیگه وصل شده؛ اول /logout بزن.',
     alwaysInStockNotice:
       'این محصول همیشه موجوده؛ برای شمردن موجودی از پنل خاموشش کن',
     stockSearchEmpty: 'محصولی با این اسم/کد پیدا نشد.',

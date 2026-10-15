@@ -8,6 +8,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { StoreService } from './store.service';
 import { CreateBankCardDto } from './dto/create-bank-card.dto';
 import { UpdateBankCardDto } from './dto/update-bank-card.dto';
+import { ProductEventService } from '../../common/analytics/product-event.service';
 import { fa } from '../../i18n/fa';
 
 // docs/PRD-seller-multi-bank-card-rotation.md بخش ۳ — مدیریت کارت‌های بانکی فروشگاه در پنل
@@ -16,6 +17,7 @@ export class StoreBankCardService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storeService: StoreService,
+    private readonly productEvents: ProductEventService,
   ) {}
 
   async list(sellerId: string, storeId: string) {
@@ -28,8 +30,16 @@ export class StoreBankCardService {
   }
 
   async create(sellerId: string, storeId: string, dto: CreateBankCardDto) {
-    await this.storeService.getOwned(sellerId, storeId);
-    return this.prisma.storeBankCard.create({ data: { ...dto, storeId } });
+    const store = await this.storeService.getOwned(sellerId, storeId);
+    const hadMethod =
+      !!store.snapppayPaymentLink ||
+      !!(store.bankCardNumber && store.bankOwnerName) ||
+      (await this.prisma.storeBankCard.count({ where: { storeId } })) > 0;
+    const card = await this.prisma.storeBankCard.create({ data: { ...dto, storeId } });
+    if (!hadMethod) {
+      this.productEvents.log('payment_method_added', { storeId, userId: sellerId }, { kind: 'card' });
+    }
+    return card;
   }
 
   private async getOwnedCard(

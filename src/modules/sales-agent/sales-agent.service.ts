@@ -185,11 +185,12 @@ export class SalesAgentService {
     };
   }
 
-  async startTestChat(sellerId: string, storeId: string) {
+  async startTestChat(sellerId: string, storeId: string, fromFirstProduct = false) {
     const store = await this.prisma.store.findFirst({
       where: { id: storeId, sellerId },
     });
     if (!store) throw new NotFoundException(fa.store.notFound);
+    this.productEvents.log('test_chat_started', { storeId: store.id, userId: sellerId }, { fromFirstProduct });
 
     const rateKey = `rl:test-chat:${sellerId}`;
     const opened = await this.redis.incr(rateKey);

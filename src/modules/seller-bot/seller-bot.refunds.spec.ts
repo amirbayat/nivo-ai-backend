@@ -28,7 +28,7 @@ describe('handleRefunds [F22]', () => {
     expect(call[2]).toEqual({
       inline_keyboard: [
         [{ text: 'واریز کردم', callback_data: 'sbrf:r1' }],
-        [{ text: 'کپی در پنل', url: 'https://nivo.example/seller/panel/refunds' }],
+        [{ text: 'کپی در پنل', url: 'https://nivo.example/seller/panel/orders?view=refunds' }],
       ],
     });
   });

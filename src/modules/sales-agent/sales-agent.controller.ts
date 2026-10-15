@@ -179,8 +179,13 @@ export class SalesAgentController {
   startTestChat(
     @CurrentUser() user: JwtPayload,
     @Param('storeId') storeId: string,
+    @Body() body?: { fromFirstProduct?: boolean },
   ) {
-    return this.salesAgentService.startTestChat(user.sub, storeId);
+    return this.salesAgentService.startTestChat(
+      user.sub,
+      storeId,
+      body?.fromFirstProduct === true,
+    );
   }
 
   @Post('chat/:conversationId/messages')

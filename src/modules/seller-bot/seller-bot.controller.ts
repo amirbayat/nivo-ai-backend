@@ -6,10 +6,17 @@ import {
   HttpCode,
   Get,
   Logger,
+  Param,
   Post,
+  UseGuards,
 } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
 import { SellerBotService } from './seller-bot.service';
+import { JwtGuard } from '../../common/guards/jwt.guard';
+import {
+  CurrentUser,
+  JwtPayload,
+} from '../../common/decorators/current-user.decorator';
 import type { TelegramUpdate } from '../telegram/telegram.types';
 
 // docs/PRD-seller-telegram-management-bot.md — وبهوک بات دوم (مدیریت پنل)، کاملاً جدا از
@@ -26,6 +33,13 @@ export class SellerBotController {
   @Get('info')
   info(): { username: string | null } {
     return { username: this.sellerBot.getBotUsername() };
+  }
+
+  // SP-7/S9 — لینک اتصال با یک تپ (توکن یک‌بارمصرف، ۱۵ دقیقه)
+  @UseGuards(JwtGuard)
+  @Post('stores/:id/connect-token')
+  connectToken(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    return this.sellerBot.createConnectToken(user.sub, id);
   }
 
   @SkipThrottle()

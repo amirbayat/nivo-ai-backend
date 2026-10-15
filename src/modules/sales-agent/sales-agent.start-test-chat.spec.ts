@@ -55,6 +55,7 @@ describe('startTestChat [F4]', () => {
     Object.assign(svc, {
       prisma,
       redis,
+      productEvents: { log: jest.fn() },
       creditService: { decideBillingMode: jest.fn(async () => 'PAID') },
       buildInitialReply: jest.fn(async () => null),
     });
