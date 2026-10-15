@@ -7,9 +7,10 @@ function build(opts: { store?: object | null; linkedElsewhere?: object | null; u
     store: {
       findFirst: jest.fn().mockResolvedValue(opts.store === undefined ? { id: 's1', name: 'مهتاب' } : opts.store),
       findUnique: jest.fn().mockResolvedValue(opts.linkedElsewhere ?? null),
-      update: opts.updateError
+      update: jest.fn().mockResolvedValue({ id: 's1', name: 'مهتاب' }),
+      updateMany: opts.updateError
         ? jest.fn().mockRejectedValue(opts.updateError)
-        : jest.fn().mockResolvedValue({ id: 's1', name: 'مهتاب' }),
+        : jest.fn().mockResolvedValue({ count: 1 }),
     },
   };
   const api = {
@@ -45,7 +46,7 @@ describe('seller bot one-tap connect [SP-7]', () => {
     const q = prisma.store.findFirst.mock.calls[0][0].where;
     expect(q.sellerBotConnectToken).toBe('abc');
     expect(q.sellerBotConnectTokenExpiresAt.gt).toBeInstanceOf(Date);
-    expect(prisma.store.update.mock.calls[0][0].data).toMatchObject({
+    expect(prisma.store.updateMany.mock.calls[0][0].data).toMatchObject({
       sellerBotChatId: 'chat1', sellerBotConnectToken: null, sellerBotConnectTokenExpiresAt: null,
     });
     expect(productEvents.log).toHaveBeenCalledWith('seller_bot_linked', { storeId: 's1' }, { via: 'deeplink' });
@@ -55,14 +56,14 @@ describe('seller bot one-tap connect [SP-7]', () => {
   it('expired or unknown token → expired message, nothing linked', async () => {
     const { svc, prisma, sent } = build({ store: null });
     await start(svc, 'c_old');
-    expect(prisma.store.update).not.toHaveBeenCalled();
+    expect(prisma.store.updateMany).not.toHaveBeenCalled();
     expect(sent).toEqual([fa.sellerBot.connectLinkExpired]);
   });
 
   it('chat already linked to another store is refused (not stolen)', async () => {
     const { svc, prisma, sent } = build({ linkedElsewhere: { id: 'OTHER' } });
     await start(svc, 'c_abc');
-    expect(prisma.store.update).not.toHaveBeenCalled();
+    expect(prisma.store.updateMany).not.toHaveBeenCalled();
     expect(sent).toEqual([fa.sellerBot.chatAlreadyLinkedElsewhere]);
   });
 

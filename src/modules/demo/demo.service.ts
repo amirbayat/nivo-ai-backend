@@ -42,7 +42,7 @@ export class DemoService {
 
     const template = await this.prisma.store.findFirst({
       where: { isDemoTemplate: true, category },
-      include: { products: true },
+      include: { products: { where: { status: 'ACTIVE' } } },
     });
     if (!template) throw new NotFoundException(fa.demo.templateNotFound);
 
@@ -81,6 +81,9 @@ export class DemoService {
         name: p.name,
         basePrice: p.basePrice,
         stock: p.stock,
+        trackStock: p.trackStock,
+        stockSetAt: p.stockSetAt,
+        status: 'ACTIVE' as const,
         description: p.description,
         images: p.images,
         videos: p.videos as Prisma.InputJsonValue,

@@ -3937,8 +3937,10 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     if (focusProductId) {
       const product = await this.prisma.product.findFirst({
         where: { id: focusProductId, storeId: conversation.storeId, ...BUYER_VISIBLE },
+        include: PRODUCT_VARIANT_INCLUDE,
       });
       if (product) {
+        await this.resolveProductPrices(conversation.storeId, [product]);
         if (product.description) {
           lines.push(
             `توضیحات «${product.name}»: ${truncateDescriptionForFacts(product.description)}`,

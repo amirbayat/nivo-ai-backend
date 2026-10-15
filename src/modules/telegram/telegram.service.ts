@@ -1352,8 +1352,12 @@ export class TelegramService {
               name: item.name,
               basePrice: item.basePrice ?? 0,
               description: item.description,
-              stock: item.stock,
+              // SP-3 — سطر ناقص (بدون قیمت/موجودی) پیش‌نویس می‌شود، نه خطا؛ موجودی null نفرستیم
+              ...(item.stock != null ? { stock: item.stock } : {}),
               code: item.code,
+              ...(!(item.basePrice && item.basePrice > 0) || item.stock == null
+                ? { status: 'DRAFT' as const }
+                : {}),
             },
           );
         }

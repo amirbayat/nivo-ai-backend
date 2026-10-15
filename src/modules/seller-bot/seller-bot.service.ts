@@ -250,8 +250,13 @@ export class SellerBotService {
       return;
     }
     try {
-      await this.prisma.store.update({
-        where: { id: store.id },
+      // مصرف اتمیک توکن: فقط اگر هنوز همان توکنِ معتبر روی ردیف است
+      const { count } = await this.prisma.store.updateMany({
+        where: {
+          id: store.id,
+          sellerBotConnectToken: token,
+          sellerBotConnectTokenExpiresAt: { gt: new Date() },
+        },
         data: {
           sellerBotChatId: chatId,
           sellerBotLinkedAt: new Date(),
@@ -259,6 +264,10 @@ export class SellerBotService {
           sellerBotConnectTokenExpiresAt: null,
         },
       });
+      if (count !== 1) {
+        await this.api.sendText(chatId, fa.sellerBot.connectLinkExpired);
+        return;
+      }
     } catch (err) {
       if ((err as { code?: string })?.code === 'P2002') {
         await this.api.sendText(chatId, fa.sellerBot.chatAlreadyLinkedElsewhere);

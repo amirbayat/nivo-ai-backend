@@ -1236,6 +1236,21 @@ export class StoreService {
     if (dto.status === 'DRAFT' && before.status !== 'DRAFT') {
       throw new BadRequestException(fa.store.productBackToDraft);
     }
+    // untracked → tracked بدون هیچ عددی، محصول را یک‌دفعه «تموم شده» می‌کرد؛ موجودی باید صریح بیاید
+    if (
+      dto.trackStock === true &&
+      before.trackStock === false &&
+      dto.stock === undefined &&
+      !before.stockSetAt &&
+      (await this.prisma.productVariant.count({ where: { productId } })) === 0
+    ) {
+      throw new BadRequestException({
+        statusCode: 400,
+        code: 'PRODUCT_NOT_READY',
+        missing: ['stock'],
+        message: fa.store.productNotReady,
+      });
+    }
     const becomingActive = dto.status === 'ACTIVE' && before.status !== 'ACTIVE';
     if (becomingActive) {
       const variantCount = await this.prisma.productVariant.count({ where: { productId } });
@@ -1318,7 +1333,8 @@ export class StoreService {
   // SP-5/S4 — انتشار گروهی پیش‌نویس‌ها؛ هر محصول مستقل (یکی ناقص بقیه را نمی‌گیرد)
   async publishProducts(sellerId: string, storeId: string, ids: string[]) {
     await this.getOwned(sellerId, storeId);
-    const unique = [...new Set(ids)].slice(0, 50);
+    const unique = [...new Set(ids)];
+    if (unique.length > 50) throw new BadRequestException(fa.store.publishTooMany);
     const rows = await this.prisma.product.findMany({
       where: { id: { in: unique }, storeId },
       include: { _count: { select: { variants: true } } },
@@ -1353,7 +1369,12 @@ export class StoreService {
         failed.push({ id, missing });
         continue;
       }
-      await this.prisma.product.update({ where: { id }, data: { status: 'ACTIVE' } });
+      try {
+        await this.prisma.product.update({ where: { id }, data: { status: 'ACTIVE' } });
+      } catch {
+        failed.push({ id, missing: ['error'] });
+        continue;
+      }
       this.productEvents.log(
         'product_published',
         { storeId, userId: sellerId },

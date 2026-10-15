@@ -129,6 +129,7 @@ export const fa = {
   },
   store: {
     csvUnlimited: 'نامحدود',
+    publishTooMany: 'در هر بار حداکثر ۵۰ محصول قابل انتشار است',
     aiFillRateLimited: 'امروز زیاد استفاده کردی؛ فردا دوباره امتحان کن',
     aiFillFailed: 'الان نشد، دوباره بزن',
     importBlankStockNote: 'موجودی خالی بود ← همیشه موجود',
