@@ -25,6 +25,7 @@ export type ReceiptCheckResult = {
   timeOk: boolean | null;
   costUsd?: number;
   reason?: string;
+  meta?: { similarTo?: string; ahash?: string };
 };
 
 export function compareReceipt(input: {
@@ -54,8 +55,8 @@ export function compareReceipt(input: {
   }
   let timeOk: boolean | null = null;
   if (e.dateTime) {
-    const t = Date.parse(e.dateTime);
-    timeOk = Number.isFinite(t) ? t >= input.orderCreatedAt.getTime() - 5 * 60_000 : null;
+    const t = gregorianMillis(e.dateTime);
+    timeOk = t == null ? null : t >= input.orderCreatedAt.getTime() - 5 * 60_000;
   }
   const amountOk = amount === input.expectedAmountToman;
   const overpaidToman = amount > input.expectedAmountToman ? amount - input.expectedAmountToman : 0;
@@ -68,4 +69,22 @@ export function compareReceipt(input: {
     overpaidToman,
     match: mismatch ? 'MISMATCH' : 'OK',
   };
+}
+
+// No Jalali converter exists in this repo. A year below 2000 is a Jalali
+// reading, so the time is ignored and only the amount and card are judged.
+function gregorianMillis(dateTime: string): number | null {
+  const year = /^(\d{4})/.exec(dateTime.trim());
+  if (year && Number(year[1]) < 2000) return null;
+  const t = Date.parse(dateTime);
+  if (!Number.isFinite(t)) return null;
+  if (new Date(t).getUTCFullYear() < 2000) return null;
+  return t;
+}
+
+export function shouldNotifyReceiptUnderpay(
+  amountToman: number | null,
+  orderTotal: number,
+): boolean {
+  return amountToman != null && amountToman < orderTotal;
 }

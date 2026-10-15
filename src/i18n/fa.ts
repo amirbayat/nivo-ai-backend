@@ -403,6 +403,7 @@ export const fa = {
     receiptMismatch: (code: string) => `رسید ${code}: مغایرت مبلغ یا کارت.`,
     receiptDuplicate: (code: string, other: string) =>
       `رسید ${code}: رسید تکراری (سفارش ${other}).`,
+    receiptSimilar: (other: string) => `شبیه رسید سفارش ${other}.`,
     receiptOverpaid: (code: string, extra: number) =>
       `رسید ${code}: مبلغ بیشتر از سفارش است. مابه‌التفاوت ${extra.toLocaleString('fa-IR')} تومان را می‌توانی بازپرداخت کنی.`,
     receiptUnreadable: (code: string) => `رسید ${code}: ناخوانا.`,

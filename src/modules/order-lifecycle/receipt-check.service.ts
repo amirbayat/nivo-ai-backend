@@ -22,7 +22,12 @@ import {
   RECEIPT_CHECK_TIMEOUT_MS,
   RECEIPT_VISION_FALLBACK_MODEL,
 } from '../../common/constants/sales-ops.constants';
-import { compareReceipt, ReceiptCheckResult, ReceiptExtraction } from './receipt-check.logic';
+import {
+  compareReceipt,
+  ReceiptCheckResult,
+  ReceiptExtraction,
+  shouldNotifyReceiptUnderpay,
+} from './receipt-check.logic';
 
 export const RECEIPT_CHECK_QUEUE = 'receipt-check';
 
@@ -36,9 +41,10 @@ const schema = z.object({
   confidence: z.number(),
 });
 
-const PROMPT =
+export const RECEIPT_CHECK_PROMPT =
   'Iranian bank transfer receipt or Snapp Pay success screenshot. ' +
-  'Extract amount in toman (if the receipt says rial, divide by 10), transfer time as ISO-8601 or null, ' +
+  'Extract amount in toman (if the receipt says rial, divide by 10). ' +
+  'dateTime must be a Gregorian ISO-8601 timestamp with offset +03:30, or null. Never return a Jalali year. ' +
   'destination card last 4 digits or null, tracking number or null, bank name or null. ' +
   'isLikelyReceipt is false when this is not a payment receipt. confidence is 0 to 1. Do not invent digits.';
 
@@ -79,72 +85,112 @@ export class ReceiptCheckService {
     if (!order?.receiptImageKey || order.receiptType === 'MANUAL_INFO') return;
     const keys = new Set(order.receiptImageKeys);
     keys.add(order.receiptImageKey);
-    if (keys.size > RECEIPT_CHECK_MAX_IMAGES) return;
+    if (keys.size > RECEIPT_CHECK_MAX_IMAGES) {
+      await this.save(order.id, keys, order.receiptHash, unread('max_images'));
+      await this.tellSeller(order.storeId, order, 'UNREADABLE');
+      return;
+    }
 
     const buffer = await this.storage.downloadImage(order.receiptImageKey);
-    const hash = await perceptualOrSha(buffer);
-    if (order.receiptHash === hash && order.receiptCheck) return;
+    const sha = sha256Of(buffer);
+    if (order.receiptHash === sha && order.receiptCheck) return;
 
     const duplicate = await this.prisma.order.findFirst({
-      where: { storeId: order.storeId, receiptHash: hash, NOT: { id: order.id } },
+      where: { storeId: order.storeId, receiptHash: sha, NOT: { id: order.id } },
       select: { id: true, orderCode: true },
     });
     if (duplicate) {
-      await this.save(order.id, keys, hash, {
-        match: 'DUPLICATE',
-        overpaidToman: 0,
-        duplicateOrderCode: displayOrderCode(duplicate),
-        amountToman: null,
-        destCardLast4: null,
-        trackingNumber: null,
-        bankName: null,
-        cardOk: null,
-        timeOk: null,
-        reason: 'duplicate',
-      });
+      await this.save(order.id, keys, sha, duplicateResult(displayOrderCode(duplicate)));
       await this.tellSeller(order.storeId, order, 'DUPLICATE', displayOrderCode(duplicate));
       return;
     }
 
+    const ahash = await this.perceptualAhash(buffer);
+    const similar = ahash
+      ? await this.prisma.order.findFirst({
+          where: {
+            storeId: order.storeId,
+            NOT: { id: order.id },
+            OR: [
+              { receiptHash: ahash },
+              { receiptCheck: { path: ['meta', 'ahash'], equals: ahash } },
+            ],
+          },
+          select: { id: true, orderCode: true },
+        })
+      : null;
+    const similarTo = similar ? displayOrderCode(similar) : undefined;
+
     if (!(await this.credits.canSpend(order.storeId))) {
-      await this.save(order.id, keys, hash, unread('no_credit'));
+      await this.save(order.id, keys, sha, withMeta(unread('no_credit'), ahash, similarTo));
       return;
     }
     if (order.receiptImageKey.toLowerCase().endsWith('.pdf')) {
-      await this.save(order.id, keys, hash, unread('pdf'));
-      await this.tellSeller(order.storeId, order, 'UNREADABLE');
+      await this.save(order.id, keys, sha, withMeta(unread('pdf'), ahash, similarTo));
+      await this.tellSeller(order.storeId, order, 'UNREADABLE', undefined, 0, similarTo);
       return;
     }
 
     const jpeg = await toJpeg(buffer);
     const vision = await this.read(jpeg);
     if (!vision) {
-      await this.save(order.id, keys, hash, unread('vision_failed'));
-      await this.tellSeller(order.storeId, order, 'UNREADABLE');
+      await this.save(order.id, keys, sha, withMeta(unread('vision_failed'), ahash, similarTo));
+      await this.tellSeller(order.storeId, order, 'UNREADABLE', undefined, 0, similarTo);
       return;
+    }
+    const tracking = vision.extraction.trackingNumber?.trim();
+    if (tracking) {
+      const tracked = await this.prisma.order.findFirst({
+        where: {
+          storeId: order.storeId,
+          NOT: { id: order.id },
+          receiptCheck: { path: ['trackingNumber'], equals: tracking },
+        },
+        select: { id: true, orderCode: true },
+      });
+      if (tracked) {
+        await this.save(
+          order.id,
+          keys,
+          sha,
+          withMeta(duplicateResult(displayOrderCode(tracked), { trackingNumber: tracking }), ahash, similarTo),
+        );
+        await this.charge(order, vision);
+        await this.tellSeller(order.storeId, order, 'DUPLICATE', displayOrderCode(tracked));
+        return;
+      }
     }
     const last4s = order.store.bankCards
       .map((c) => c.cardNumber.replace(/\D/g, '').slice(-4))
       .filter((d) => d.length === 4);
-    const result = compareReceipt({
-      extraction: vision.extraction,
-      expectedAmountToman: order.totalAmount,
-      orderCreatedAt: order.createdAt,
-      storeCardLast4: last4s,
-    });
+    const result = withMeta(
+      compareReceipt({
+        extraction: vision.extraction,
+        expectedAmountToman: order.totalAmount,
+        orderCreatedAt: order.createdAt,
+        storeCardLast4: last4s,
+      }),
+      ahash,
+      similarTo,
+    );
     result.costUsd = vision.costUsd;
     if (vision.costUsd > RECEIPT_CHECK_BUDGET_USD) {
       this.logger.warn(
         `receipt check cost ${vision.costUsd} USD exceeds ${RECEIPT_CHECK_BUDGET_USD} (order=${order.id})`,
       );
     }
-    await this.save(order.id, keys, hash, result, vision.extraction.amountToman);
+    await this.save(order.id, keys, sha, result, vision.extraction.amountToman);
     await this.charge(order, vision);
-    await this.tellSeller(order.storeId, order, result.match, result.duplicateOrderCode, result.overpaidToman);
+    await this.tellSeller(
+      order.storeId,
+      order,
+      result.match,
+      result.duplicateOrderCode,
+      result.overpaidToman,
+      result.meta?.similarTo,
+    );
     if (
-      result.match === 'MISMATCH' &&
-      result.overpaidToman === 0 &&
-      result.amountToman != null &&
+      shouldNotifyReceiptUnderpay(result.amountToman, order.totalAmount) &&
       order.conversation.customerId
     ) {
       await this.notifications.notifyBuyer({
@@ -157,6 +203,21 @@ export class ReceiptCheckService {
           orderAmountToman: order.totalAmount,
         },
       });
+    }
+  }
+
+  private async perceptualAhash(buffer: Buffer): Promise<string | null> {
+    try {
+      const sharp = (await import('sharp')).default;
+      const raw = await sharp(buffer).resize(8, 8, { fit: 'fill' }).greyscale().raw().toBuffer();
+      let sum = 0;
+      for (const p of raw) sum += p;
+      const avg = sum / raw.length || 0;
+      let bits = '';
+      for (const p of raw) bits += p >= avg ? '1' : '0';
+      return `ahash:${BigInt('0b' + bits).toString(16)}`;
+    } catch {
+      return null;
     }
   }
 
@@ -177,7 +238,7 @@ export class ReceiptCheckService {
             role: 'user',
             content: [
               { type: 'image', image: dataUrl },
-              { type: 'text', text: PROMPT },
+              { type: 'text', text: RECEIPT_CHECK_PROMPT },
             ],
           },
         ],
@@ -233,7 +294,7 @@ export class ReceiptCheckService {
   private async save(
     orderId: string,
     keys: Set<string>,
-    hash: string,
+    hash: string | null,
     result: ReceiptCheckResult,
     extracted?: number | null,
   ) {
@@ -255,6 +316,7 @@ export class ReceiptCheckService {
     match: ReceiptCheckResult['match'],
     duplicateCode?: string,
     overpaid = 0,
+    similarTo?: string,
   ) {
     const code = displayOrderCode(order);
     const line =
@@ -267,11 +329,12 @@ export class ReceiptCheckService {
               ? fa.orderNotify.receiptOverpaid(code, overpaid)
               : fa.orderNotify.receiptMismatch(code)
             : fa.orderNotify.receiptUnreadable(code);
+    const hint = similarTo ? `\n${fa.orderNotify.receiptSimilar(similarTo)}` : '';
     await this.notifications.notifySeller({
       storeId,
       template: 'RECEIPT_CHECK',
       entityId: order.id,
-      botText: line,
+      botText: `${line}${hint}`,
       dedupe: { key: `receipt-check:${order.id}:${match}`, ttlSeconds: 3600 },
     });
   }
@@ -291,19 +354,37 @@ function unread(reason: string): ReceiptCheckResult {
   };
 }
 
-async function perceptualOrSha(buffer: Buffer): Promise<string> {
-  try {
-    const sharp = (await import('sharp')).default;
-    const raw = await sharp(buffer).resize(8, 8, { fit: 'fill' }).greyscale().raw().toBuffer();
-    let sum = 0;
-    for (const p of raw) sum += p;
-    const avg = sum / raw.length || 0;
-    let bits = '';
-    for (const p of raw) bits += p >= avg ? '1' : '0';
-    return `ahash:${BigInt('0b' + bits).toString(16)}`;
-  } catch {
-    return `sha256:${createHash('sha256').update(buffer).digest('hex')}`;
-  }
+function sha256Of(buffer: Buffer): string {
+  return `sha256:${createHash('sha256').update(buffer).digest('hex')}`;
+}
+
+function duplicateResult(code: string, extra?: Partial<ReceiptCheckResult>): ReceiptCheckResult {
+  return {
+    match: 'DUPLICATE',
+    overpaidToman: 0,
+    duplicateOrderCode: code,
+    amountToman: null,
+    destCardLast4: null,
+    trackingNumber: null,
+    bankName: null,
+    cardOk: null,
+    timeOk: null,
+    reason: 'duplicate',
+    ...extra,
+  };
+}
+
+function withMeta(
+  result: ReceiptCheckResult,
+  ahash: string | null,
+  similarTo?: string,
+): ReceiptCheckResult {
+  if (!ahash && !similarTo) return result;
+  result.meta = {
+    ...(ahash ? { ahash } : {}),
+    ...(similarTo ? { similarTo } : {}),
+  };
+  return result;
 }
 
 async function toJpeg(buffer: Buffer): Promise<Buffer> {
