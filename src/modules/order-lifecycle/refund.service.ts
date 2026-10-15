@@ -383,6 +383,8 @@ export class RefundService {
 
   async summary(sellerId: string, storeId: string) {
     const rows = await this.list(sellerId, storeId, 'READY');
+    // SP-6 — شمارنده‌ی بخش «بازپرداخت‌ها (n)» در تب سفارش‌ها: READY + AWAITING_SELLER_CONFIRM
+    const awaitingConfirm = await this.list(sellerId, storeId, 'AWAITING_SELLER_CONFIRM');
     const people = new Set(rows.map((r) => r.orderId)).size;
     const overdue = rows.filter((r) => r.overdue).length;
     const bankingText = rows
@@ -392,6 +394,7 @@ export class RefundService {
       .join('\n');
     return {
       readyCount: rows.length,
+      awaitingSellerConfirmCount: awaitingConfirm.length,
       readyAmountToman: rows.reduce((s, r) => s + r.amountToman, 0),
       people,
       overdue,

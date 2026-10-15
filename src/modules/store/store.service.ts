@@ -174,12 +174,19 @@ export class StoreService {
     private readonly productEvents: ProductEventService,
   ) {}
 
-  list(sellerId: string) {
-    return this.prisma.store.findMany({
+  async list(sellerId: string) {
+    const stores = await this.prisma.store.findMany({
       where: { sellerId },
       orderBy: { createdAt: 'desc' },
       include: { products: true },
     });
+    // SP-6 — «لینک بعد از اولین مشتری قفل می‌شود»: فرانت بدون حدس‌زدن بداند slug قابل ویرایش است یا نه
+    const locks = await Promise.all(
+      stores.map((st) =>
+        this.prisma.salesConversation.count({ where: { storeId: st.id, isTest: false } }),
+      ),
+    );
+    return stores.map((st, i) => ({ ...st, slugLocked: locks[i] > 0 }));
   }
 
   async isSlugAvailable(slug: string): Promise<boolean> {
