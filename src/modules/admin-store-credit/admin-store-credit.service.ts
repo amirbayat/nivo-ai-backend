@@ -87,6 +87,40 @@ export class AdminStoreCreditService {
     return result;
   }
 
+  // R1.2 — تعلیق/رفع تعلیق با دلیل و ممیزی
+  async setStoreStatus(params: {
+    adminId: string;
+    storeId: string;
+    status: 'ACTIVE' | 'SUSPENDED';
+    reason: string;
+  }) {
+    const { adminId, storeId, status, reason } = params;
+    const store = await this.prisma.store.findUnique({
+      where: { id: storeId },
+      select: { id: true, status: true, suspendedReason: true },
+    });
+    if (!store) throw new NotFoundException(fa.store.notFound);
+    await this.prisma.$transaction(async (tx) => {
+      await tx.store.update({
+        where: { id: storeId },
+        data: { status, suspendedReason: status === 'SUSPENDED' ? reason : null },
+      });
+      await this.audit.record(
+        {
+          adminId,
+          action: status === 'SUSPENDED' ? 'STORE_SUSPEND' : 'STORE_ACTIVATE',
+          targetType: 'STORE',
+          targetId: storeId,
+          before: { status: store.status },
+          after: { status },
+          reason,
+        },
+        tx,
+      );
+    });
+    return { id: storeId, status };
+  }
+
   getAuditLog(storeId: string) {
     return this.audit.listForTarget('STORE', storeId);
   }

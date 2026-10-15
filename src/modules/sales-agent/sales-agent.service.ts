@@ -106,8 +106,9 @@ export class SalesAgentService {
     opts?: { isTest?: boolean },
   ) {
     const store = await this.prisma.store.findUnique({ where: { slug } });
-    if (!store || store.status !== 'ACTIVE')
-      throw new NotFoundException(fa.store.notFound);
+    if (!store) throw new NotFoundException(fa.store.notFound);
+    // R1.2 — فروشگاه معلق: صفحه پیام ثابت نشان می‌دهد (۴۰۳ با همین متن)، نه «پیدا نشد»
+    if (store.status === 'SUSPENDED') throw new ForbiddenException(fa.store.suspended);
 
     const isTest = opts?.isTest === true;
     if (!isTest) {

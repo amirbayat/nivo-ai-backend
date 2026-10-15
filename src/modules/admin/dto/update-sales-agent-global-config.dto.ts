@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsIn, IsInt, IsNumber, IsOptional, Min } from 'class-validator';
+import { IsBoolean, IsIn, IsInt, IsNumber, IsOptional, Min } from 'class-validator';
 import { fa } from '../../../i18n/fa';
 import { VARIANT_KEYS } from '../../sales-agent/model-variants';
 import { ToNumber } from '../../../common/decorators/digits.decorators';
@@ -7,6 +7,11 @@ import { ToNumber } from '../../../common/decorators/digits.decorators';
 // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۶.۵ — سه عدد مارکت‌پلیس
 // sales-agent، جدا از CreditConfig (که مال ویجت نیوو/nivoai.ir است)
 export class UpdateSalesAgentGlobalConfigDto {
+  // R1.2 — kill switch هوش مصنوعی
+  @IsOptional()
+  @IsBoolean()
+  aiEnabled?: boolean;
+
   @IsOptional()
   @Type(() => Number)
   @IsInt({ message: fa.validation.mustBeNumber })

@@ -14,6 +14,7 @@ import { AdminGuard } from '../../common/guards/admin.guard';
 import { parseDateRange } from '../usage-analytics/usage-analytics.service';
 import { StoreCreditDeductionService } from '../store-credit-engine/store-credit-deduction.service';
 import { CurrentUser, JwtPayload } from '../../common/decorators/current-user.decorator';
+import { SetStoreStatusDto } from './dto/set-store-status.dto';
 import { AdjustCreditDto } from './dto/adjust-credit.dto';
 import { AdminStoreCreditService } from './admin-store-credit.service';
 
@@ -74,6 +75,20 @@ export class AdminStoreCreditController {
       adminId: user.sub,
       storeId: id,
       amountToman: dto.amountToman,
+      reason: dto.reason.trim(),
+    });
+  }
+
+  @Patch(':id/status')
+  setStatus(
+    @Param('id') id: string,
+    @Body() dto: SetStoreStatusDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.setStoreStatus({
+      adminId: user.sub,
+      storeId: id,
+      status: dto.status,
       reason: dto.reason.trim(),
     });
   }

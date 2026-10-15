@@ -332,7 +332,7 @@ export class TelegramService {
       where: { slug: payload },
     });
     if (!store || store.status !== 'ACTIVE') {
-      await this.sendText(chatId, fa.store.notFound);
+      await this.sendText(chatId, store ? fa.store.suspended : fa.store.notFound);
       return;
     }
     await this.startChatForStore(chatId, store, message.from?.first_name);
@@ -676,7 +676,7 @@ export class TelegramService {
         where: { id: data.slice(3) },
       });
       if (!store || store.status !== 'ACTIVE') {
-        await this.sendText(chatId, fa.store.notFound);
+        await this.sendText(chatId, store ? fa.store.suspended : fa.store.notFound);
         return;
       }
       await this.startChatForStore(chatId, store, cq.from.first_name);

@@ -4492,12 +4492,51 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     text: string,
     opts?: { clientMessageId?: string },
   ): Promise<EngineResult> {
+    const blocked = await this.guardStoreAndAi(conversation, text, true);
+    if (blocked) return blocked;
     if (isLlmSaturated()) return this.saturatedResult(conversation);
     return this.withTurnReservation(conversation, () =>
       runLlmTurn(() => this.handleMessageTurn(conversation, text, opts)).catch(
         (err: unknown) => this.onTurnError(conversation, err),
       ),
     );
+  }
+
+  // R1.2 — فروشگاه معلق: پیام ثابت، بدون هیچ call مدل و بدون سفارش جدید. kill switch AI
+  // (فقط پیام آزاد): handoff مهربان بدون LLM؛ پیام خریدار لاگ می‌شود تا فروشنده ببیند.
+  private async guardStoreAndAi(
+    conversation: ConversationWithStore,
+    text: string | null,
+    isMessage: boolean,
+  ): Promise<EngineResult | null> {
+    if (conversation.store?.status === 'SUSPENDED') {
+      return {
+        reply: fa.store.suspended,
+        uiBlocks: [],
+        state: conversation.currentState,
+      };
+    }
+    if (!isMessage) return null;
+    // خواندن کانفیگ شکست خورد ← fail-open (سوییچ خاموش فرض می‌شود، چت نباید از کار بیفتد)
+    const cfg = await getSalesAgentGlobalConfig(this.prisma).catch(() => null);
+    if (!cfg || cfg.aiEnabled) return null;
+    if (text) {
+      await this.prisma.conversationEvent.create({
+        data: {
+          conversationId: conversation.id,
+          type: 'CUSTOMER_MESSAGE',
+          payload: { text },
+        },
+      });
+    }
+    if (conversation.currentState === 'HANDOFF_HUMAN') {
+      return {
+        reply: fa.salesAgent.aiDisabledHandoff,
+        uiBlocks: [],
+        state: conversation.currentState,
+      };
+    }
+    return this.transitionToHandoff(conversation, 'AI_DISABLED');
   }
 
   // 1.2(۱) — کف overdraft: هر turn قبل از شروع، برآورد هزینه‌اش را از موجودی قابل‌خرج رزرو
@@ -5282,6 +5321,8 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     conversation: ConversationWithStore,
     action: SalesAction,
   ): Promise<EngineResult> {
+    const blocked = await this.guardStoreAndAi(conversation, null, false);
+    if (blocked) return blocked;
     const abuseResult = await this.checkAbuseGuard(conversation);
     if (abuseResult) return abuseResult;
 
@@ -8545,7 +8586,9 @@ answered=false بده (به‌جای حدس‌زدن).`,
       | 'BILLING_BLOCKED'
       // docs/PRD-buyer-purchase-intent-taxonomy.md بخش ۲ — گروه‌های P1 (PAYMENT_ISSUE/
       // POST_PURCHASE_SUPPORT در buyerNeeds)؛ ربات Tool ای برای این‌ها ندارد، مستقیم ارجاع
-      | 'SUPPORT_NEEDED',
+      | 'SUPPORT_NEEDED'
+      // R1.2 — kill switch سراسری هوش مصنوعی (SalesAgentGlobalConfig.aiEnabled=false)
+      | 'AI_DISABLED',
     // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۳.۲ — دلیل آزاد مدل وقتی
     // request_human_handoff را صدا می‌زند؛ قبلاً دور ریخته می‌شد، الان در ConversationEvent
     // ذخیره می‌شود تا aggregator پیشنهاد تکمیل پروفایل (بخش ۳.۳) از آن استفاده کند
@@ -8573,7 +8616,9 @@ answered=false بده (به‌جای حدس‌زدن).`,
     const reply =
       reason === 'BILLING_BLOCKED'
         ? fa.salesAgent.billingBlockedHandoff
-        : reason === 'SUPPORT_NEEDED'
+        : reason === 'AI_DISABLED'
+          ? fa.salesAgent.aiDisabledHandoff
+          : reason === 'SUPPORT_NEEDED'
           ? fa.salesAgent.supportNeededHandoff
           : this.isWithinWorkingHours(conversation.store)
             ? fa.salesAgent.handoffToHuman
@@ -8674,7 +8719,8 @@ answered=false بده (به‌جای حدس‌زدن).`,
       | 'CUSTOMER_REQUESTED'
       | 'AGENT_STUCK'
       | 'BILLING_BLOCKED'
-      | 'SUPPORT_NEEDED',
+      | 'SUPPORT_NEEDED'
+      | 'AI_DISABLED',
   ): Promise<void> {
     // 1.5 — «اعتبار تمام شد» حداکثر روزی یک‌بار به‌ازای فروشگاه (بات + SMS)، نه به‌ازای هر مکالمه
     if (reason === 'BILLING_BLOCKED') {

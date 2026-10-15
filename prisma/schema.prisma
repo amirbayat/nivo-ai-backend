@@ -610,6 +610,8 @@ model SalesAgentGlobalConfig {
   orderPublicLinkEnabled   Boolean  @default(false)
   // 4.15 — web shop streams the reply only when this is on. Default off.
   shopStreamEnabled        Boolean  @default(false)
+  // R1.2 — kill switch: false ← همه‌ی مکالمات handoff مهربان بدون هیچ call مدل
+  aiEnabled                Boolean  @default(true)
   // 4.6 — first visit shows a template welcome and the product grid. Default off.
   shopLandingEnabled       Boolean  @default(false)
   updatedAt           DateTime @updatedAt
@@ -2141,6 +2143,8 @@ model Store {
   // که این فیلدشان خالی یا قدیمی‌تر از cooldown است را دوباره نوتیف می‌کند (جلوگیری از اسپم)
   lastEnrichmentNudgeAt          DateTime?
   status                         StoreStatus       @default(ACTIVE)
+  // R1.2 — دلیل تعلیق (بنر پنل فروشنده)؛ با رفع تعلیق null می‌شود
+  suspendedReason                String?
   // docs/PRD-seller-credit-billing.md بخش ۱/۵ — اعتبار AI فروشگاه به تومان؛ بعد از تمام‌شدن
   // سهمیه‌ی رایگان روزانه، مصرف واقعی هر فراخوانی AI از همین فیلد کم می‌شود
   creditBalanceToman             Int               @default(0)
