@@ -34,7 +34,7 @@ describe('publishProducts [SP-5]', () => {
       { id: 'foreign', missing: ['not_found'] },
     ]);
     expect(prisma.product.update).toHaveBeenCalledTimes(1);
-    expect(productEvents.log).toHaveBeenCalledWith('product_published', expect.anything(), { via: 'batch', first: true });
+    expect(productEvents.log).toHaveBeenCalledWith('product_published', expect.anything(), { via: 'batch', first: true, productId: 'a' });
   });
   it('only the first publish of an empty store is flagged first', async () => {
     const { svc, productEvents } = build([draft('a'), draft('b')]);

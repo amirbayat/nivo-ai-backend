@@ -212,6 +212,7 @@ export class ProductAiFillService {
         'product_ai_draft',
         { storeId, userId: sellerId },
         {
+          productId,
           hasImage: images.length > 0,
           hasText: text.length > 0,
           ok,

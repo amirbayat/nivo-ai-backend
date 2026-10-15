@@ -469,7 +469,7 @@ export class StoreService {
       this.productEvents.log(
         'product_published',
         { storeId, userId: sellerId },
-        { via: via ?? 'legacy', first: isFirstActiveProduct },
+        { via: via ?? 'legacy', first: isFirstActiveProduct, productId: created.id },
       );
     }
     return { ...created, isFirstActiveProduct };
@@ -1261,7 +1261,7 @@ export class StoreService {
       this.productEvents.log(
         'product_published',
         { storeId, userId: sellerId },
-        { via: 'single', first: isFirstActiveProduct },
+        { via: 'single', first: isFirstActiveProduct, productId },
       );
     }
     if (dto.stock !== undefined && before.stock <= 0 && updated.stock > 0) {
@@ -1357,7 +1357,7 @@ export class StoreService {
       this.productEvents.log(
         'product_published',
         { storeId, userId: sellerId },
-        { via: 'batch', first: activeCount === 0 },
+        { via: 'batch', first: activeCount === 0, productId: id },
       );
       activeCount++;
       published.push(id);

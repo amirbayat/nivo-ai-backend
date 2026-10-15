@@ -70,7 +70,7 @@ describe('product status transitions [SP-3]', () => {
     const done = await b.svc.updateProduct('u', 's1', 'p1', { status: 'ACTIVE', basePrice: 890000 } as never);
     expect(done.status).toBe('ACTIVE');
     expect(done.isFirstActiveProduct).toBe(true);
-    expect(b.productEvents.log).toHaveBeenCalledWith('product_published', expect.anything(), { via: 'single', first: true });
+    expect(b.productEvents.log).toHaveBeenCalledWith('product_published', expect.anything(), { via: 'single', first: true, productId: 'p1' });
   });
 
   it('isFirstActiveProduct is false when the store already has an active product', async () => {
