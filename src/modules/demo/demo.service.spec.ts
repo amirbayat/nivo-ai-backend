@@ -43,7 +43,7 @@ describe('DemoService.ensureDemoStore (DEMO-3 کپی کامل)', () => {
       $transaction: jest.fn(async (fn) => fn(tx)),
     };
     const redis: any = { incr: jest.fn(async () => 1), expire: jest.fn() };
-    return { svc: new DemoService(prisma, redis, {} as any), calls };
+    return { svc: new DemoService(prisma, redis, {} as any, { log: jest.fn() } as any), calls };
   };
 
   it('همه‌ی بخش‌ها کپی می‌شوند و شماره کارت قالب هرگز نه', async () => {
@@ -78,17 +78,19 @@ describe('DemoService.convertToReal (DEMO-4)', () => {
       },
       $transaction: jest.fn(async (fn) => fn(tx)),
     };
+    const events = { log: jest.fn() };
     const storeService: any = {
       newStoreTrialData: jest.fn(async () => ({ trialCreditRemainingToman: 300000, trialStartedAt: new Date(), trialEndsAt: new Date() })),
       suggestSlug: jest.fn(async () => ({ slug: 'ghaleb' })),
       afterRealStoreCreated: jest.fn(),
     };
-    return { svc: new DemoService(prisma, {} as any, storeService), calls, storeService };
+    return { svc: new DemoService(prisma, {} as any, storeService, events as any), calls, storeService, events };
   };
 
   it('اعتبار هدیه، کارت خالی، محصولات DRAFT، slug جدید و رویداد', async () => {
-    const { svc, calls, storeService } = build();
+    const { svc, calls, storeService, events } = build();
     await svc.convertToReal('u1', 's1');
+    expect(events.log).toHaveBeenCalledWith('demo_converted', { storeId: 's1', userId: 'u1' }, expect.anything());
     expect(calls.store.trialCreditRemainingToman).toBe(300000);
     expect(calls.store.bankCardNumber).toBeNull();
     expect(calls.store.slug).toBe('ghaleb');
@@ -101,5 +103,27 @@ describe('DemoService.convertToReal (DEMO-4)', () => {
   it('اگر فروشنده از قبل فروشگاه واقعی دارد → Conflict', async () => {
     const { svc } = build(1);
     await expect(svc.convertToReal('u1', 's1')).rejects.toThrow();
+  });
+});
+
+describe('DemoService.logPanelTourEvent (DEMO-6)', () => {
+  const mk = (store: unknown) => {
+    const events = { log: jest.fn() };
+    const prisma: any = { store: { findUnique: jest.fn(async () => store) } };
+    return { svc: new DemoService(prisma, {} as any, {} as any, events as any), events };
+  };
+  it('whitelist: فقط دو رویداد پنل', async () => {
+    const { svc } = mk({ sellerId: 'u1', isDemo: true, category: 'پوشاک' });
+    await expect(svc.logPanelTourEvent('u1', 's1', 'demo_converted')).rejects.toThrow();
+    await expect(svc.logPanelTourEvent('u1', 's1', 'hack')).rejects.toThrow();
+  });
+  it('مالک فروشگاه دمو → ثبت با category', async () => {
+    const { svc, events } = mk({ sellerId: 'u1', isDemo: true, category: 'پوشاک' });
+    await svc.logPanelTourEvent('u1', 's1', 'demo_order_confirmed');
+    expect(events.log).toHaveBeenCalledWith('demo_order_confirmed', { storeId: 's1', userId: 'u1' }, { category: 'پوشاک' });
+  });
+  it('غیرمالک یا فروشگاه غیردمو → ۴۰۴', async () => {
+    await expect(mk({ sellerId: 'x', isDemo: true, category: 'a' }).svc.logPanelTourEvent('u1', 's1', 'demo_order_confirmed')).rejects.toThrow();
+    await expect(mk({ sellerId: 'u1', isDemo: false, category: 'a' }).svc.logPanelTourEvent('u1', 's1', 'demo_order_confirmed')).rejects.toThrow();
   });
 });

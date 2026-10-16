@@ -38,7 +38,14 @@ export type ProductEventName =
   | 'lead_otp_sent'
   | 'lead_otp_fail'
   | 'lead_verified'
-  | 'lead_go_onboarding';
+  | 'lead_go_onboarding'
+  // DEMO-6 — قیف دمو (همه با props.category)
+  | 'demo_buyer_chat_opened'
+  | 'demo_first_message'
+  | 'demo_order_placed'
+  | 'demo_panel_opened_from_order'
+  | 'demo_order_confirmed'
+  | 'demo_converted';
 
 // فهرست سفید نام‌های مجاز ui-events (B5)
 export const SHOP_UI_EVENT_NAMES = [
@@ -60,7 +67,21 @@ export const SHOP_UI_EVENT_NAMES = [
   'lead_otp_fail',
   'lead_verified',
   'lead_go_onboarding',
+  'demo_buyer_chat_opened',
+  'demo_first_message',
 ] as const;
+
+// DEMO-6 — کل رویدادهای قیف دمو (برای ردیف «قیف دمو» ادمین)
+export const DEMO_FUNNEL_EVENTS = [
+  'demo_buyer_chat_opened',
+  'demo_first_message',
+  'demo_order_placed',
+  'demo_panel_opened_from_order',
+  'demo_order_confirmed',
+  'demo_converted',
+] as const;
+// رویدادهایی که پنل فروشنده (نه چت خریدار) می‌فرستد
+export const DEMO_PANEL_EVENT_NAMES = ['demo_panel_opened_from_order', 'demo_order_confirmed'] as const;
 export type ShopUiEventName = (typeof SHOP_UI_EVENT_NAMES)[number];
 
 export interface ProductEventContext {

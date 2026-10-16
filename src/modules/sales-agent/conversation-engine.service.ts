@@ -7438,6 +7438,13 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
 
     const nextState: ConversationState = 'AWAITING_PAYMENT';
     await this.persistTransition(conversation, nextState, ctx, 'createOrder');
+    if (conversation.store.isDemo) {
+      this.productEvents.log(
+        'demo_order_placed',
+        { storeId: conversation.storeId, conversationId: conversation.id },
+        { category: conversation.store.category },
+      );
+    }
 
     return {
       status: 'created',

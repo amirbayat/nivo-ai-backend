@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { DEMO_FUNNEL_EVENTS } from '../../common/analytics/product-event.service';
 import type { SalesKbKind } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SmsService } from '../../sms/sms.service';
@@ -293,7 +294,19 @@ export class SalesAdminService {
       this.prisma.leadProfile.count({ where: { ...leadWhere, signupStatus: { in: ['VERIFIED', 'STORE_CREATED'] } } }),
       this.prisma.leadProfile.count({ where: { ...leadWhere, signupStatus: 'STORE_CREATED' } }),
     ]);
-    return { days, conversations, phoneSubmitted, verified, storeCreated };
+    // DEMO-6 — قیف دمو؛ جدول product_events (بدون schema جدید)، خطا → خالی
+    const demoFunnel: Record<string, number> = {};
+    try {
+      const grouped = await this.prisma.productEvent.groupBy({
+        by: ['name'],
+        where: { name: { in: [...DEMO_FUNNEL_EVENTS] }, createdAt: { gte: since } },
+        _count: { _all: true },
+      });
+      for (const n of DEMO_FUNNEL_EVENTS) demoFunnel[n] = grouped.find((g) => g.name === n)?._count._all ?? 0;
+    } catch {
+      for (const n of DEMO_FUNNEL_EVENTS) demoFunnel[n] = 0;
+    }
+    return { days, conversations, phoneSubmitted, verified, storeCreated, demoFunnel };
   }
 
   async updateLeadFollowUp(id: string, followUpStatus: string) {

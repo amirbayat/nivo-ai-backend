@@ -9,6 +9,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RedisService } from '../../redis/redis.service';
 import { StoreService } from '../store/store.service';
+import { DEMO_PANEL_EVENT_NAMES, ProductEventService, type ProductEventName } from '../../common/analytics/product-event.service';
 import { fa } from '../../i18n/fa';
 import { DEMO_FAKE_CARD_NUMBER, DEMO_FAKE_CARD_OWNER } from '../../common/utils/store-mode';
 import { DEMO_CATEGORY_SLUGS, isDemoCategorySlug } from './demo-categories';
@@ -29,7 +30,19 @@ export class DemoService {
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
     private readonly storeService: StoreService,
+    private readonly productEvents: ProductEventService,
   ) {}
+
+  // DEMO-6 — رویدادهای پنل فروشنده در تور (فقط برای مالک همین فروشگاه دمو)
+  async logPanelTourEvent(userId: string, storeId: string, name: string) {
+    if (!(DEMO_PANEL_EVENT_NAMES as readonly string[]).includes(name)) {
+      throw new BadRequestException();
+    }
+    const store = await this.prisma.store.findUnique({ where: { id: storeId }, select: { sellerId: true, isDemo: true, category: true } });
+    if (!store || store.sellerId !== userId || !store.isDemo) throw new NotFoundException(fa.store.notFound);
+    this.productEvents.log(name as ProductEventName, { storeId, userId }, { category: store.category });
+    return { ok: true };
+  }
 
   // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۵.۱ — هر User حداکثر یک
   // کپی دمو به‌ازای هر دسته‌بندی دارد؛ بازدیدهای بعدی همان کپی را برمی‌گردانند (نه کپی تکراری)
@@ -244,6 +257,7 @@ export class DemoService {
       });
     });
     this.storeService.afterRealStoreCreated(userId, updated, now, { fromDemo: true });
+    this.productEvents.log('demo_converted', { storeId, userId }, { category: store.category });
     return updated;
   }
 }

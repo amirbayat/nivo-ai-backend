@@ -18,6 +18,15 @@ export class DemoController {
     return this.demoService.ensureDemoStore(user.sub, dto.category);
   }
 
+  @Post(':storeId/events')
+  logEvent(
+    @CurrentUser() user: JwtPayload,
+    @Param('storeId') storeId: string,
+    @Body() body: { name?: string },
+  ) {
+    return this.demoService.logPanelTourEvent(user.sub, storeId, body?.name ?? '');
+  }
+
   @Post(':storeId/convert-to-real')
   convertToReal(
     @CurrentUser() user: JwtPayload,
