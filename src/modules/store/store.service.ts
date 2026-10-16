@@ -966,6 +966,8 @@ export class StoreService {
       pageSize: opts.pageSize,
       // B1/§6.2 — تا سفارش موفق کمتر از ۳ است، «پرفروش‌ترین» رندوم به نظر می‌رسد و فرانت مخفی‌اش می‌کند
       popularSortAvailable: successfulOrders >= MIN_ORDERS_FOR_POPULAR_SORT,
+      // docs/PRD-buyer-chat-redesign.md §6.6/§13.10 — دکمه‌ی سبد «ادامه و ثبت آدرس» یا «ادامه و پرداخت»
+      requiresShipping: store.requiresShipping,
       shippingEstimate,
       // R3.3 — «معمولاً ۲–۴ روز کاری ارسال می‌شه»؛ فقط برای فروشگاه‌هایی که کالای فیزیکی ارسال می‌کنند
       shippingDaysText: store.requiresShipping

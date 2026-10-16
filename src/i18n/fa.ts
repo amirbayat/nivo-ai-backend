@@ -536,6 +536,13 @@ export const fa = {
         .join('\n')}\nسبد با قیمت جدید به‌روز شد؛ ادامه بدیم؟`,
     cartEmpty: 'سبد خرید خالی است',
     cartUpdated: (total: number) => `سبد به‌روز شد. جمع ${total.toLocaleString('fa-IR')} تومان.`,
+    // docs/PRD-buyer-chat-redesign.md B3 — پاسخ قالبی دکمه‌های سبد (بدون فراخوانی مدل)
+    cartBtnAdded: (name: string, variantLabel: string | null, total: number) =>
+      `✓ ${name}${variantLabel ? ` (${variantLabel})` : ''} به سبدت اضافه شد. جمع سبد: ${total.toLocaleString('fa-IR')} تومان.`,
+    cartBtnQty: (name: string, qty: number, total: number) =>
+      `تعداد ${name} شد ${qty.toLocaleString('fa-IR')}. جمع سبد: ${total.toLocaleString('fa-IR')} تومان.`,
+    cartBtnRemoved: (name: string) => `${name} از سبد حذف شد.`,
+    cartBtnEmpty: 'سبدت خالی شد.',
     addressFormPrompt: 'آدرس را یک‌جا بنویس. هزینه ارسال بعد از تایید استان نشان داده می‌شود.',
     addressFieldName: 'اسم گیرنده را بنویس.',
     addressFieldPhone: 'شماره موبایل را درست بنویس (مثلاً ۰۹۱۲xxxxxxx).',

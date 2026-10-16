@@ -5497,6 +5497,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           action.qty ?? 1,
           false,
           'ADD_TO_CART',
+          true,
         );
       }
       // docs/PRD-product-display-focus-and-variations.md §۴.۲ — محصول با گزینه مستقیم به سبد
@@ -5517,6 +5518,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         action.qty ?? 1,
         false,
         'ADD_TO_CART',
+        true,
       );
     }
 
@@ -6426,11 +6428,16 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     }
 
     let nextAppliedDiscount = ctx.appliedDiscount;
+    let discountNote = '';
     if (ctx.appliedDiscount && cart.length) {
       const preview = await this.previewDiscount(conversation.storeId, cart, ctx.appliedDiscount.code);
       nextAppliedDiscount = preview.valid
         ? { id: preview.id, code: preview.code, amountToman: preview.amountToman }
         : null;
+      // B3 — همان خط‌های تخفیف applyCartUpdate، عیناً
+      discountNote = preview.valid
+        ? `\nکد تخفیف ${preview.code} هنوز روی این سبد فعاله — ${preview.amountToman} تومان تخفیف، جمع با تخفیف ${preview.newTotal} تومان.`
+        : `\n${fa.salesAgent.discountRemovedAfterCartChange}`;
     } else if (!cart.length) {
       nextAppliedDiscount = null;
     }
@@ -6444,7 +6451,14 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     const rawTotal = this.cartTotal(cart);
     const total = nextAppliedDiscount ? rawTotal - nextAppliedDiscount.amountToman : rawTotal;
     const uiBlock: UiBlock = { type: 'CART_SUMMARY', items: cart, total };
-    const reply = cart.length ? fa.salesAgent.cartUpdated(total) : fa.salesAgent.cartEmpty;
+    // B3 — جمله‌ی قالبی؛ همیشه بدون caption()
+    const reply = `${
+      !cart.length
+        ? fa.salesAgent.cartBtnEmpty
+        : action.type === 'SET_CART_QTY'
+          ? fa.salesAgent.cartBtnQty(line.name, action.qty ?? line.qty, total)
+          : fa.salesAgent.cartBtnRemoved(line.name)
+    }${discountNote}`;
     const replaced = await this.replaceLatestCartSummary(conversation.id, reply, uiBlock);
     if (!replaced) {
       await this.logReply(conversation, reply, uiBlock, undefined, {
@@ -6470,6 +6484,8 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     qty: number,
     remove: boolean,
     intent: string,
+    // docs/PRD-buyer-chat-redesign.md B3 — true وقتی از «دکمه» (اکشن) آمده؛ جمله‌ی قالبی، بدون caption()
+    buttonTemplate = false,
   ): Promise<EngineResult> {
     const mutation = this.computeCartMutation(
       ctx.cart,
@@ -6531,7 +6547,22 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     const facts = cart.length
       ? `سبد فعلی: ${cart.map((i) => `${i.name}${i.variantLabel ? ` (${i.variantLabel})` : ''} × ${i.qty}`).join('، ')} — جمع کل ${rawTotal} تومان${discountNote}${nextAppliedDiscount ? '' : `\n${fa.salesAgent.discountAppliedHint}`}`
       : fa.salesAgent.cartEmpty;
-    const reply = await this.caption(facts, conversation);
+    const addedLine = cart.find(
+      (item) =>
+        item.productId === product.id &&
+        (item.variantId ?? null) === (variant?.id ?? null),
+    );
+    const reply = buttonTemplate
+      ? `${
+          cart.length
+            ? fa.salesAgent.cartBtnAdded(
+                product.name,
+                addedLine?.variantLabel ?? null,
+                total,
+              )
+            : fa.salesAgent.cartBtnEmpty
+        }${discountNote}`
+      : await this.caption(facts, conversation);
     await this.logReply(conversation, reply, uiBlock, undefined, {
       intent,
       handler: 'applyCartUpdate',

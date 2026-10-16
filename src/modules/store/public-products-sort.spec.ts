@@ -78,6 +78,7 @@ describe('listPublicProducts ids/sort [BC-2 B1]', () => {
     const page = await svc.listPublicProducts('shop', { page: 1, pageSize: 3, sort: 'popular' });
     expect(page.items.map((i) => i.id)).toEqual(['best', 'mid', 'old']);
     expect(page.popularSortAvailable).toBe(true);
+    expect(page.requiresShipping).toBe(false);
     const page2 = await svc.listPublicProducts('shop', { page: 2, pageSize: 3, sort: 'popular' });
     expect(page2.items.map((i) => i.id)).toEqual(['new']);
   });
