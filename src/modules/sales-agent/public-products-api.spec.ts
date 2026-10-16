@@ -41,6 +41,19 @@ describe('PRODUCT_CARD hasVariants [BC-2 B2]', () => {
     expect(out.products.map((p) => p.hasVariants)).toEqual([true, false]);
   });
 
+  it('flags the caller\'s own block in place, so the reply sent to the client carries it [FX-1 F2]', async () => {
+    const svc = Object.create(ConversationEngineService.prototype) as ConversationEngineService;
+    Object.assign(svc, {
+      prisma: { productOptionType: { findMany: async () => [{ productId: 'a' }] } },
+    });
+    const block = {
+      type: 'PRODUCT_CARD',
+      products: [{ id: 'a', name: 'a', basePrice: 1, stock: 1, images: [], videos: [] }],
+    } as UiBlock;
+    await (svc as unknown as { withHasVariants(b: UiBlock): Promise<UiBlock> }).withHasVariants(block);
+    expect((block as Extract<UiBlock, { type: 'PRODUCT_CARD' }>).products[0].hasVariants).toBe(true);
+  });
+
   it('leaves other blocks untouched', async () => {
     const svc = Object.create(ConversationEngineService.prototype) as ConversationEngineService;
     const block: UiBlock = { type: 'NONE' };

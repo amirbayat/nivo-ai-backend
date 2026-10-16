@@ -9064,7 +9064,9 @@ answered=false بده (به‌جای حدس‌زدن).`,
   }
 
   // docs/PRD-buyer-chat-redesign.md B2 — PRODUCT_CARD از چند مسیر ساخته می‌شود (بعضی بدون
-  // optionTypes)، پس یک‌جا و قبل از ثبت، با یک query سبک hasVariants را پر می‌کنیم
+  // optionTypes)، پس یک‌جا و قبل از ثبت، با یک query سبک hasVariants را پر می‌کنیم.
+  // docs/PRD-fixes-after-buyer-redesign.md F2 — محصولات همان آبجکت‌ها در جا آپدیت می‌شوند
+  // (نه کپی)، چون callerها بلوکِ خودشان را به کلاینت برمی‌گردانند و باید پرچم را ببینند
   private async withHasVariants(uiBlock: UiBlock): Promise<UiBlock> {
     if (uiBlock.type !== 'PRODUCT_CARD' || uiBlock.products.length === 0) {
       return uiBlock;
@@ -9075,13 +9077,10 @@ answered=false بده (به‌جای حدس‌زدن).`,
       distinct: ['productId'],
     });
     const withOptions = new Set(rows.map((row) => row.productId));
-    return {
-      ...uiBlock,
-      products: uiBlock.products.map((p) => ({
-        ...p,
-        hasVariants: withOptions.has(p.id),
-      })),
-    };
+    for (const p of uiBlock.products) {
+      p.hasVariants = withOptions.has(p.id);
+    }
+    return uiBlock;
   }
 
   private async logReply(
