@@ -558,7 +558,7 @@ export const fa = {
     cartBtnEmpty: 'سبدت خالی شد.',
     uiEventTooLarge: 'داده‌ی رویداد بیش از حد بزرگ است',
     uiEventRateLimited: 'تعداد رویدادها زیاد است',
-    addressFormPrompt: 'آدرس را یک‌جا بنویس. هزینه ارسال بعد از تایید استان نشان داده می‌شود.',
+    addressFormPrompt: 'آدرس رو وارد کن؛ هزینه‌ی ارسال بعد از انتخاب استان نشون داده می‌شه.',
     addressFieldName: 'اسم گیرنده را بنویس.',
     addressFieldPhone: 'شماره موبایل را درست بنویس (مثلاً ۰۹۱۲xxxxxxx).',
     addressFieldProvince: 'استان را از فهرست انتخاب کن.',
