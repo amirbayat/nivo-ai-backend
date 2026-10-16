@@ -111,9 +111,11 @@ export class NotificationService {
       }
       const store = await this.prisma.store.findUnique({
         where: { id: input.storeId },
-        select: { sellerBotChatId: true, seller: { select: { phone: true } } },
+        select: { isDemo: true, sellerBotChatId: true, seller: { select: { phone: true } } },
       });
       if (!store) return;
+      // DEMO-2 — فروشگاه دمو فقط اعلان درون‌برنامه (خود پنل) دارد، نه تلگرام/SMS
+      if (store.isDemo) return;
       if (store.sellerBotChatId) {
         const send = input.botKeyboard
           ? this.sellerBotApi.sendText(

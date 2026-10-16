@@ -78,11 +78,13 @@ export class ReceiptCheckService {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
       include: {
-        store: { select: { bankCards: { select: { cardNumber: true } } } },
+        store: { select: { isDemo: true, bankCards: { select: { cardNumber: true } } } },
         conversation: { select: { customerId: true } },
       },
     });
     if (!order?.receiptImageKey || order.receiptType === 'MANUAL_INFO') return;
+    // DEMO-2 — در دمو چک AI رسید اجرا نمی‌شود (هزینه‌ی بی‌فایده؛ کارت هم ساختگی است)
+    if (order.store.isDemo) return;
     const keys = new Set(order.receiptImageKeys);
     keys.add(order.receiptImageKey);
     if (keys.size > RECEIPT_CHECK_MAX_IMAGES) {

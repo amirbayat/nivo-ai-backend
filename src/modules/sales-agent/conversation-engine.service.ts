@@ -167,7 +167,7 @@ import { setLogCtx } from '../../common/logging/log-context';
 import { formatTomanAmountsInText, stripUnauthorizedPriceSentences } from '../../common/utils/fa-amounts.util';
 import { isValidCartQty, reconcileCart, lineKey } from './cart-validation.util';
 import type { CatalogLine } from './cart-validation.util';
-import { isNivoLeadStore } from '../../common/utils/store-mode';
+import { DEMO_FAKE_CARD_NUMBER, DEMO_FAKE_CARD_OWNER, isNivoLeadStore } from '../../common/utils/store-mode';
 
 export type ConversationWithStore = Prisma.SalesConversationGetPayload<{
   include: { store: true };
@@ -319,7 +319,7 @@ const HANDOFF_CLARIFY_THRESHOLD = 4;
 // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۲.۵ — سقف پیام خریدار در هر
 // مکالمه‌ی دمو (store.isDemo)؛ چت واقعی = توکن واقعی مدل، این عدد جلوی هزینه‌ی نامحدود یک سشن
 // دمو را می‌گیرد. فقط برای isDemo چک می‌شود، فروشگاه‌های واقعی اصلاً از این مسیر رد نمی‌شوند
-const DEMO_MESSAGE_CAP = 15;
+const DEMO_MESSAGE_CAP = 25; // DEMO-2: یک خرید کامل با ۱۵ کم بود
 
 // docs/PRD-sales-agent-voice.md بخش ۱.۳/۳ — آستانه‌ی طول پاسخ برای تولید وویس + سقف تعداد
 // وویس به‌ازای هر مکالمه (جلوی مکالمه‌ای که هر پاسخش وویس می‌گیرد)
@@ -7405,6 +7405,11 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       cardNumber = conversation.store.bankCardNumber!;
       ownerName = conversation.store.bankOwnerName!;
     }
+    if (conversation.store.isDemo) {
+      cardNumber = DEMO_FAKE_CARD_NUMBER;
+      ownerName = DEMO_FAKE_CARD_OWNER;
+      snapppayLink = '';
+    }
 
     const nextState: ConversationState = 'AWAITING_PAYMENT';
     await this.persistTransition(conversation, nextState, ctx, 'createOrder');
@@ -7438,7 +7443,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
   // دسترس است (فروشگاه ایرانی بدون آن اصلاً به این مرحله نمی‌رسد)؛ تنها شرط واقعی، فعال‌بودن
   // لینک اسنپ‌پی فروشگاه است. وقتی هر دو در دسترس باشند، خریدار باید انتخاب کند
   private snapppayAvailable(store: ConversationWithStore['store']): boolean {
-    return !!store.snapppayPaymentLink;
+    return !store.isDemo && !!store.snapppayPaymentLink;
   }
 
   // docs/PRD-buyer-payment-method-card-or-snapppay-link.md — جواب PAYMENT_METHOD_SELECTION،

@@ -24,6 +24,7 @@ type OrderForNotify = {
   recipientPhone: string | null;
   store: {
     name: string;
+    isDemo?: boolean;
     shippingDaysMin?: number | null;
     shippingDaysMax?: number | null;
   };
@@ -58,7 +59,7 @@ export class NotificationDeliveryService {
         recipientPhone: true,
         conversationId: true,
         store: {
-          select: { name: true, shippingDaysMin: true, shippingDaysMax: true },
+          select: { name: true, isDemo: true, shippingDaysMin: true, shippingDaysMax: true },
         },
       },
     });
@@ -74,6 +75,16 @@ export class NotificationDeliveryService {
       },
     });
     if (!customer) return;
+
+    // DEMO-2 — سفارش فروشگاه دمو هیچ اعلان بیرونی نمی‌گیرد (SMS/تلگرام)؛ فقط پیام درون‌چت
+    if (order.store.isDemo) {
+      if (job.channel === 'SMS') {
+        await this.log(job, 'SMS', `customer:${customer.id}`, 'SKIPPED_DEMO');
+        return;
+      }
+      await this.deliverChat(job, order, { ...customer, telegramChatId: null });
+      return;
+    }
 
     if (job.channel === 'CHAT') {
       await this.deliverChat(job, order, customer);

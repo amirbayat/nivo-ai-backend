@@ -1389,6 +1389,7 @@ export class AdminService {
     const pageSize = 20;
     const where = {
       conversation: { isTest: false },
+      store: { isDemo: false }, // DEMO-2: سفارش sandbox دمو در آمار نیست
       ...(params.storeId ? { storeId: params.storeId } : {}),
       ...(params.paymentMethod ? { paymentMethod: params.paymentMethod } : {}),
       ...(params.status ? { status: params.status } : {}),
@@ -1444,6 +1445,7 @@ export class AdminService {
   async getOrderPaymentMethodStats(params: { from?: Date; to?: Date }) {
     const where = {
       conversation: { isTest: false },
+      store: { isDemo: false },
       ...((params.from ?? params.to)
         ? {
             createdAt: {
@@ -1848,6 +1850,7 @@ export class AdminService {
       where: {
         satisfactionFollowUpSentAt: { not: null },
         conversation: { isTest: false },
+        store: { isDemo: false },
         ...(params.storeId ? { storeId: params.storeId } : {}),
         ...((params.from ?? params.to)
           ? {
@@ -1945,6 +1948,7 @@ export class AdminService {
     const recoveredCount = await this.prisma.order.count({
       where: {
         conversationId: { in: conversations.map((c) => c.id) },
+        store: { isDemo: false },
         status: { in: [...SUCCESSFUL_ORDER_STATUSES] },
       },
     });
