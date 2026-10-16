@@ -2738,8 +2738,20 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         'جواب واقعی یک سؤال (باکس دانش فروشگاه / توضیح محصولات اخیر / پروفایل فروشگاه) را جست‌وجو می‌کند',
       inputSchema: z.object({ question: z.string() }),
       execute: async ({ question }: { question: string }) => {
-        const found = await this.findFaqAnswer(conversation, rt.ctx, question);
-        return found ?? { matched: false };
+        // [QA-8] فروشگاه لید: «اطلاعات فروشگاه» (معرفی/ارسال/مرجوعی) همین الان عیناً در پرامپت
+        // سیستمِ همین نوبت هست؛ فراخوان LLM جداگانه‌ی tryAnswerFromStoreProfile فقط همان واقعیت‌ها
+        // را بازنویسی می‌کرد (یک رفت‌وبرگشت کامل مدل، پشتِ سرِ جست‌وجوی باکس دانش) — حذف می‌شود
+        const leadOnly = conversation.store.leadCaptureOnly;
+        const found = await this.findFaqAnswer(conversation, rt.ctx, question, {
+          skipStoreProfileLlm: leadOnly,
+        });
+        if (found) return found;
+        return leadOnly
+          ? {
+              matched: false,
+              note: 'در باکس دانش جوابی نبود؛ اطلاعات ثابت فروشگاه (معرفی/ارسال/مرجوعی) همین الان در بخش «اطلاعات فروشگاه» پرامپت توست — اگر جواب همان‌جاست همان را بده، وگرنه چیزی اختراع نکن.',
+            }
+          : { matched: false };
       },
     });
 
@@ -2863,7 +2875,11 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
   }> {
     const storeId = conversation.storeId;
 
-    const initialProducts = await this.searchProducts(storeId);
+    // [QA-8] دو خواندن مستقل DB (کاتالوگ اولیه، تاریخچه‌ی اخیر) پشت‌سرهم منتظر هم نمی‌مانند
+    const [initialProducts, transcript] = await Promise.all([
+      this.searchProducts(storeId),
+      this.buildRecentTranscript(conversation.id),
+    ]);
     const seenProducts = new Map<string, CompactProduct>(
       initialProducts.map((p) => [
         p.id,
@@ -2932,7 +2948,6 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       ? await this.findUrgentActiveDiscount(storeId)
       : null;
 
-    const transcript = await this.buildRecentTranscript(conversation.id);
     // فیدبک کاربر ۱۴۰۵/۰۷/۲۱ — این نادج ذاتاً حول search_products/سبد است (فروشگاه‌های با
     // کاتالوگ واقعی)؛ در leadCaptureOnly هیچ کاتالوگ/سبد واقعی‌ای نیست، پس progressHappened
     // هیچ‌وقت true نمی‌شود و این نادج همیشه زودتر از حد فعال می‌شد — و فشار «دیگه وقت
@@ -8459,6 +8474,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     conversation: ConversationWithStore,
     ctx: ConversationContext,
     question: string,
+    opts: { skipStoreProfileLlm?: boolean } = {},
   ): Promise<{
     source: 'STORE_KB' | 'PRODUCT_DESCRIPTION' | 'STORE_PROFILE';
     fact: string;
@@ -8489,6 +8505,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     if (fromDescription) {
       return { source: 'PRODUCT_DESCRIPTION', fact: fromDescription };
     }
+    if (opts.skipStoreProfileLlm) return null;
     const fromStoreProfile = await this.tryAnswerFromStoreProfile(
       conversation,
       question,
