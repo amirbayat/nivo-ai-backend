@@ -151,6 +151,7 @@ export const fa = {
       'نام لینک فقط می‌تواند از حروف انگلیسی کوچک، عدد و خط تیره باشد',
     bankCardInvalid: 'شماره کارت باید ۱۶ رقم باشد',
     productNotFound: 'محصول یافت نشد',
+    adProductNotActive: 'اول محصول رو منتشر کن، بعد تبلیغش کن.',
     noFileUploaded: 'فایلی ارسال نشده',
     excelOnly: 'فقط فایل اکسل (.xlsx یا .xls) پذیرفته می‌شود',
     excelUnreadable: 'فایل اکسل قابل خواندن نیست',

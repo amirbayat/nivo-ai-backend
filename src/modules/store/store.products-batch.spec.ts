@@ -3,7 +3,7 @@ import { StoreService } from './store.service';
 
 const draft = (id: string, over: object = {}) => ({
   id, storeId: 's1', name: 'مانتو', basePrice: 100, pricingModel: 'FIXED', trackStock: true,
-  stockSetAt: new Date(), status: 'DRAFT', _count: { variants: 0 }, ...over,
+  stockSetAt: new Date(), status: 'DRAFT', _count: { variants: 0 }, variants: [], ...over,
 });
 
 function build(rows: object[], active = 0) {

@@ -9,6 +9,8 @@ export interface PublishCandidate {
   trackStock: boolean;
   hasVariants: boolean;
   stockSetAt: Date | null;
+  // S1: برای محصول واریانت‌دار تعداد واریانت‌های دارای موجودی > ۰؛ undefined = بررسی نشود (مسیرهای بدون داده‌ی واریانت)
+  variantsInStock?: number;
 }
 
 export function missingForPublish(p: PublishCandidate): ProductMissingField[] {
@@ -16,5 +18,6 @@ export function missingForPublish(p: PublishCandidate): ProductMissingField[] {
   if (p.name.trim().length < 2) missing.push('name');
   if (p.pricingModel === 'FIXED' && !(p.basePrice > 0)) missing.push('price');
   if (p.trackStock && !p.hasVariants && !p.stockSetAt) missing.push('stock');
+  if (p.trackStock && p.hasVariants && p.variantsInStock !== undefined && p.variantsInStock <= 0) missing.push('stock');
   return missing;
 }

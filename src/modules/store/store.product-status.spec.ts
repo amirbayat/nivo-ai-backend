@@ -100,4 +100,14 @@ describe('product status transitions [SP-3]', () => {
     await svc.updateProduct('u', 's1', 'p1', { stock: 4 } as never);
     expect(prisma.product.update.mock.calls[0][0].data.stockSetAt).toBeInstanceOf(Date);
   });
+
+  it('an ACTIVE product cannot be PATCHed to an empty name or price 0 [FX-4 S6]', async () => {
+    const { svc, prisma } = build({ status: 'ACTIVE', name: 'مانتو', basePrice: 100, stockSetAt: new Date() });
+    const a = await notReady(svc.updateProduct('u', 's1', 'p1', { name: ' ' } as never));
+    expect(a).toMatchObject({ code: 'PRODUCT_NOT_READY', missing: ['name'] });
+    const b = await notReady(svc.updateProduct('u', 's1', 'p1', { basePrice: 0 } as never));
+    expect(b.missing).toEqual(['price']);
+    expect(prisma.product.update).not.toHaveBeenCalled();
+    await expect(svc.updateProduct('u', 's1', 'p1', { name: 'مانتوی نو' } as never)).resolves.toBeDefined();
+  });
 });

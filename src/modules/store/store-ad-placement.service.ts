@@ -113,7 +113,9 @@ export class StoreAdPlacementService {
     productId: string,
     durationDays: 7 | 30,
   ) {
-    await this.storeService.getOwnedProduct(sellerId, storeId, productId);
+    const product = await this.storeService.getOwnedProduct(sellerId, storeId, productId);
+    // S2: تبلیغ محصول غیرفعال هیچ‌وقت نمایش داده نمی‌شود؛ قبل از کسر اعتبار رد می‌شود
+    if (product.status !== 'ACTIVE') throw new BadRequestException(fa.store.adProductNotActive);
     const tier = PRICE_TIERS.find((t) => t.durationDays === durationDays);
     if (!tier) throw new BadRequestException(fa.validation.required);
 

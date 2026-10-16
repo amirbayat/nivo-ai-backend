@@ -29,3 +29,13 @@ describe('missingForPublish [SP-3]', () => {
     expect(missingForPublish({ ...ready, hasVariants: true, stockSetAt: null })).toEqual([]);
   });
 });
+
+describe('variant stock rule [FX-4 S1]', () => {
+  it('a tracked product whose variants are all at stock 0 cannot be published', () => {
+    expect(missingForPublish({ ...ready, hasVariants: true, stockSetAt: null, variantsInStock: 0 })).toEqual(['stock']);
+  });
+  it('one variant with stock is enough; unknown variant data is not checked', () => {
+    expect(missingForPublish({ ...ready, hasVariants: true, stockSetAt: null, variantsInStock: 1 })).toEqual([]);
+    expect(missingForPublish({ ...ready, hasVariants: true, stockSetAt: null })).toEqual([]);
+  });
+});

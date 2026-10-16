@@ -4,6 +4,7 @@ import {
   Injectable,
   Logger,
 } from '@nestjs/common';
+import { toEnglishDigits } from '../../common/utils/normalize-digits';
 import { ConfigService } from '@nestjs/config';
 import { randomBytes } from 'crypto';
 import { ProductEventService } from '../../common/analytics/product-event.service';
@@ -775,7 +776,8 @@ export class SellerBotService {
       return;
     }
 
-    const text = message.text?.trim() ?? '';
+    // S11: کیبورد فارسی/عربی عدد فارسی می‌دهد؛ اول نرمال می‌شود
+    const text = toEnglishDigits(message.text?.trim() ?? '');
     const stock = Number(text);
     if (!/^\d+$/.test(text) || !Number.isInteger(stock)) {
       await this.sendMenu(chatId, fa.sellerBot.stockInvalidNumber);

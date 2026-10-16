@@ -92,6 +92,8 @@ export class StockAlertService {
           productId: line.productId,
           variantId: line.variantId,
           notifiedAt: null,
+          // محصول پنهان/پیش‌نویس به خریدار «موجود شد» نمی‌دهد (لینکش باز نمی‌شود)
+          product: { status: 'ACTIVE' },
         },
         orderBy: { createdAt: 'asc' },
         include: {
