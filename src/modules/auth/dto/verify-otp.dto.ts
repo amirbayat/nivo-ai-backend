@@ -35,4 +35,13 @@ export class VerifyOtpDto {
   @IsOptional()
   @IsString({ message: fa.validation.required })
   anonSessionId?: string;
+
+  // docs/PRD-nivo-lead-shop-seller-signup.md D5 — فقط با conversationId یک فروشگاه لید اثر دارد (سرور چک می‌کند)
+  @IsOptional()
+  @IsString({ message: fa.validation.required })
+  signupSource?: string;
+
+  @IsOptional()
+  @IsString({ message: fa.validation.required })
+  conversationId?: string;
 }

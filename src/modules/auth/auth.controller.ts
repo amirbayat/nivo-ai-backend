@@ -37,6 +37,7 @@ export class AuthController {
       dto.referralCode,
       dto.deviceUuid,
       dto.anonSessionId,
+      { source: dto.signupSource, conversationId: dto.conversationId },
     );
   }
 

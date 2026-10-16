@@ -1638,6 +1638,8 @@ enum AdminNotificationType {
   LIARA_ERROR_RATE
   // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۶ — شکست خاموش صف‌ها
   QUEUE_JOB_FAILED
+  // docs/PRD-nivo-lead-shop-seller-signup.md §5.3 — لید/ثبت‌نام تازه از فروشگاه لید نیوو
+  LEAD_SIGNUP
 }
 
 // توکن FCM هر نصب اپ موبایل ادمین — برای ارسال پوش هدفمند وقتی پنل باز نیست

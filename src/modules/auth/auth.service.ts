@@ -246,12 +246,26 @@ export class AuthService {
     }
   }
 
+  private async isLeadShopSignup(leadSignup?: { source?: string; conversationId?: string }): Promise<boolean> {
+    if (leadSignup?.source !== 'lead_shop' || !leadSignup.conversationId) return false;
+    try {
+      const conversation = await this.prisma.salesConversation.findUnique({
+        where: { id: leadSignup.conversationId },
+        select: { store: { select: { leadCaptureOnly: true } } },
+      });
+      return conversation?.store.leadCaptureOnly === true;
+    } catch {
+      return false;
+    }
+  }
+
   async verifyOtp(
     rawPhone: string,
     code: string,
     referralCode?: string,
     deviceUuid?: string,
     anonSessionId?: string,
+    leadSignup?: { source?: string; conversationId?: string },
   ) {
     const phone = normalizePhone(rawPhone);
     const isTestPhone = phone === TEST_PHONE && this.isTestUserEnabled();
@@ -333,7 +347,9 @@ export class AuthService {
 
     // حساب تستی هیچ‌وقت پشت گیت waitlist سافت‌لانچ گیر نمی‌افتد
     let waitlisted: { message: string; queuePosition: number } | null = null;
-    if (isNewUser && !isTestPhone) {
+    // docs/PRD-nivo-lead-shop-seller-signup.md D5 — ثبت‌نام از فروشگاه لید از waitlist رد می‌شود؛ فقط اگر
+    // conversationId واقعاً متعلق به فروشگاه leadCaptureOnly باشد (هیچ ورودی دیگری bypass نمی‌دهد)
+    if (isNewUser && !isTestPhone && !(await this.isLeadShopSignup(leadSignup))) {
       waitlisted = await this.campaign.applyToNewUser(user.id, phone);
     }
 
