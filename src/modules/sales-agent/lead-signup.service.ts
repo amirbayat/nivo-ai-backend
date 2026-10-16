@@ -14,6 +14,13 @@ import { fa } from '../../i18n/fa';
 
 const CHAT_HISTORY_LIMIT = 30;
 
+export interface LeadUtm {
+  utmSource?: string;
+  utmMedium?: string;
+  utmCampaign?: string;
+  utmContent?: string;
+}
+
 // docs/PRD-nivo-lead-shop-seller-signup.md §5.2/§5.3 — ثبت‌نام داخل چت فروشگاه لید:
 // شماره (PHONE_SUBMITTED) → تأیید OTP (VERIFIED) → ساخت فروشگاه (STORE_CREATED)
 @Injectable()
@@ -40,7 +47,16 @@ export class LeadSignupService {
     return conversation;
   }
 
-  async submitPhone(conversationId: string, sessionToken: string, rawPhone: string) {
+  private cleanUtm(utm?: LeadUtm): LeadUtm {
+    const out: LeadUtm = {};
+    for (const key of ['utmSource', 'utmMedium', 'utmCampaign', 'utmContent'] as const) {
+      const value = utm?.[key]?.trim().slice(0, 100);
+      if (value) out[key] = value;
+    }
+    return out;
+  }
+
+  async submitPhone(conversationId: string, sessionToken: string, rawPhone: string, utm?: LeadUtm) {
     const conversation = await this.loadLeadConversation(conversationId, sessionToken);
     const phone = normalizeLeadPhone(rawPhone);
     if (!phone) throw new BadRequestException(fa.validation.phoneInvalid);
@@ -62,8 +78,9 @@ export class LeadSignupService {
         chatHistory,
         source: 'sales_agent_lead_capture',
         signupStatus: 'PHONE_SUBMITTED',
+        ...this.cleanUtm(utm),
       },
-      update: { phone, chatHistory, signupStatus: 'PHONE_SUBMITTED' },
+      update: { phone, chatHistory, signupStatus: 'PHONE_SUBMITTED', ...this.cleanUtm(utm) },
     });
     await this.prisma.salesConversation.update({
       where: { id: conversationId },

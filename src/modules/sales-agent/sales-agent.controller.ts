@@ -460,7 +460,12 @@ export class SalesAgentController {
     @Headers('x-session-token') sessionToken: string,
     @Body() dto: LeadPhoneDto,
   ) {
-    return this.leadSignup.submitPhone(conversationId, sessionToken, dto.phone);
+    return this.leadSignup.submitPhone(conversationId, sessionToken, dto.phone, {
+      utmSource: dto.utmSource,
+      utmMedium: dto.utmMedium,
+      utmCampaign: dto.utmCampaign,
+      utmContent: dto.utmContent,
+    });
   }
 
   @UseGuards(JwtGuard)

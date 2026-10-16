@@ -242,20 +242,58 @@ export class SalesAdminService {
     }));
   }
 
-  async getLeads(page: number, limit: number, followUpStatus?: string) {
-    const where = followUpStatus
-      ? { followUpStatus: followUpStatus as any }
-      : {};
-    const [items, total] = await Promise.all([
+  // docs/PRD-nivo-lead-shop-seller-signup.md §5.8 — فیلتر storeId/source/signupStatus + نام فروشگاه و مرحله‌ی فانل گفتگو
+  async getLeads(
+    page: number,
+    limit: number,
+    followUpStatus?: string,
+    filters: { storeId?: string; source?: string; signupStatus?: string } = {},
+  ) {
+    const where = {
+      ...(followUpStatus ? { followUpStatus: followUpStatus as any } : {}),
+      ...(filters.storeId ? { storeId: filters.storeId } : {}),
+      ...(filters.source ? { source: filters.source } : {}),
+      ...(filters.signupStatus ? { signupStatus: filters.signupStatus as any } : {}),
+    };
+    const [rows, total] = await Promise.all([
       this.prisma.leadProfile.findMany({
         where,
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * limit,
         take: limit,
+        include: { store: { select: { name: true, slug: true } } },
       }),
       this.prisma.leadProfile.count({ where }),
     ]);
+    const conversationIds = rows.map((r) => r.conversationId).filter((id): id is string => !!id);
+    const stages = conversationIds.length
+      ? await this.prisma.salesConversation.findMany({
+          where: { id: { in: conversationIds } },
+          select: { id: true, leadFunnelStage: true },
+        })
+      : [];
+    const stageById = new Map(stages.map((s) => [s.id, s.leadFunnelStage]));
+    const items = rows.map(({ store, ...lead }) => ({
+      ...lead,
+      storeName: store?.name ?? null,
+      storeSlug: store?.slug ?? null,
+      leadFunnelStage: lead.conversationId ? (stageById.get(lead.conversationId) ?? null) : null,
+    }));
     return { items, total, page, limit };
+  }
+
+  // ردیف خلاصه‌ی بالای تب لیدها: گفتگوها → شماره ثبت‌شده → تأیید شده → فروشگاه ساخته شده
+  async getLeadFunnelSummary(days = 7, storeId?: string) {
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    const storeWhere = storeId ? { storeId } : { store: { leadCaptureOnly: true } };
+    const leadWhere = { createdAt: { gte: since }, signupStatus: { not: null }, ...storeWhere };
+    const [conversations, phoneSubmitted, verified, storeCreated] = await Promise.all([
+      this.prisma.salesConversation.count({ where: { createdAt: { gte: since }, isTest: false, ...storeWhere } }),
+      this.prisma.leadProfile.count({ where: leadWhere }),
+      this.prisma.leadProfile.count({ where: { ...leadWhere, signupStatus: { in: ['VERIFIED', 'STORE_CREATED'] } } }),
+      this.prisma.leadProfile.count({ where: { ...leadWhere, signupStatus: 'STORE_CREATED' } }),
+    ]);
+    return { days, conversations, phoneSubmitted, verified, storeCreated };
   }
 
   async updateLeadFollowUp(id: string, followUpStatus: string) {

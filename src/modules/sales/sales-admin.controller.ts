@@ -54,12 +54,22 @@ export class SalesAdminController {
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('status') status?: string,
+    @Query('storeId') storeId?: string,
+    @Query('source') source?: string,
+    @Query('signupStatus') signupStatus?: string,
   ) {
     return this.salesAdminService.getLeads(
       page ? Number(page) : 1,
       limit ? Number(limit) : 20,
       status,
+      { storeId, source, signupStatus },
     );
+  }
+
+  @Get('leads/summary')
+  getLeadFunnelSummary(@Query('days') days?: string, @Query('storeId') storeId?: string) {
+    const n = Number(days);
+    return this.salesAdminService.getLeadFunnelSummary(n > 0 && n <= 90 ? n : 7, storeId);
   }
 
   @Patch('leads/:id')
