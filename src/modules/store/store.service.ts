@@ -757,8 +757,23 @@ export class StoreService {
     const storeCategory = (
       await this.prisma.store.findUnique({ where: { id: storeId }, select: { category: true } })
     )?.category ?? null;
+    // PQ-4 — امتیاز آخرین بررسی LLM؛ جدول نبود/خطا → null (فقط catch، لیست نمی‌شکند)
+    const scoreByProduct = new Map<string, number>();
+    try {
+      const reviews = await this.prisma.contentQualityReview.findMany({
+        where: { storeId, entityType: 'PRODUCT', entityId: { in: products.map((p) => p.id) } },
+        select: { entityId: true, review: true },
+      });
+      for (const r of reviews) {
+        const score = (r.review as { score?: number } | null)?.score;
+        if (typeof score === 'number') scoreByProduct.set(r.entityId, score);
+      }
+    } catch {
+      /* SQL اجرا نشده */
+    }
     return products.map((product) => ({
       ...product,
+      qualityScore: scoreByProduct.get(product.id) ?? null,
       // PQ-1 — لایه‌ی قاعده‌ای رایگان (فقط ok/unknown)
       qualityRules: this.productRuleReview(product, storeCategory),
       stockAlertCount: stockAlertCounts.get(product.id) ?? 0,
