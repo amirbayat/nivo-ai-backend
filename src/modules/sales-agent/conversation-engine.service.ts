@@ -2753,6 +2753,18 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           skipStoreProfileLlm: leadOnly,
         });
         if (found) return found;
+        // PQ-5 — سؤال بی‌جواب مشتری؛ سیگنال کیفیت توضیح همان محصول (بدون schema جدید)
+        if (!leadOnly && !conversation.store.isDemo) {
+          const productId =
+            rt.ctx.anchoredProductId ??
+            rt.ctx.lastShownProducts?.[0]?.id ??
+            null;
+          this.productEvents.log(
+            'faq_miss',
+            { storeId, conversationId: conversation.id },
+            { productId, question: question.trim().slice(0, 200) },
+          );
+        }
         return leadOnly
           ? {
               matched: false,

@@ -17,6 +17,8 @@ export type ProductEventName =
   | 'seller_bot_linked'
   | 'product_link_shared'
   | 'product_duplicated'
+  // PQ-5 — سؤال مشتری که باکس دانش/توضیح جوابی برایش نداشت؛ props: { productId|null, question }
+  | 'faq_miss'
   // docs/PRD-buyer-chat-redesign.md §10 — رویدادهای صفحه‌ی خریدار (از POST v2/chat/:id/ui-events)
   | 'shop_view'
   | 'product_sheet_opened'
