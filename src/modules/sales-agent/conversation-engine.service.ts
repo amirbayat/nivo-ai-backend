@@ -616,6 +616,15 @@ capture_lead، دکمه‌ی لینک خودش زیر پیام نمایش داد
 همان هدف (جمع‌آوری لید) ببر.`;
 }
 
+// F13 — اکشن‌های دکمه‌ی سبد (بدون مدل)
+export function isButtonCartAction(action: SalesAction): boolean {
+  return (
+    (action.type === 'ADD_TO_CART' && !!action.productId) ||
+    action.type === 'SET_CART_QTY' ||
+    action.type === 'REMOVE_CART_ITEM'
+  );
+}
+
 @Injectable()
 export class ConversationEngineService {
   private readonly logger = new Logger(ConversationEngineService.name);
@@ -5413,6 +5422,13 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     conversation: ConversationWithStore,
     action: SalesAction,
   ): Promise<EngineResult> {
+    // F13: دکمه‌های سبد جمله‌ی قالبی دارند و مدل صدا نمی‌زنند؛ نه «شلوغ است» می‌گیرند نه رزرو نوبت AI.
+    // قفل هر مکالمه (runActionLocked) سر جایش می‌ماند، پس دو عملیات سبد هم‌زمان اجرا نمی‌شوند
+    if (isButtonCartAction(action)) {
+      return this.handleActionTurn(conversation, action).catch((err: unknown) =>
+        this.onTurnError(conversation, err),
+      );
+    }
     if (isLlmSaturated()) return this.saturatedResult(conversation);
     return this.withTurnReservation(conversation, () =>
       runLlmTurn(() => this.handleActionTurn(conversation, action)).catch(
@@ -5789,7 +5805,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
             code: preview.code,
             amountToman: preview.amountToman,
           };
-          discountNote = `\nکد تخفیف ${preview.code} هنوز روی این سبد فعاله — ${preview.amountToman} تومان تخفیف، جمع با تخفیف ${preview.newTotal} تومان.`;
+          discountNote = `\nکد تخفیف ${preview.code} هنوز روی این سبد فعاله — ${preview.amountToman.toLocaleString('fa-IR')} تومان تخفیف، جمع با تخفیف ${preview.newTotal.toLocaleString('fa-IR')} تومان.`;
         } else {
           nextAppliedDiscount = null;
           discountNote = `\n${fa.salesAgent.discountRemovedAfterCartChange}`;
@@ -6435,9 +6451,8 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         ? { id: preview.id, code: preview.code, amountToman: preview.amountToman }
         : null;
       // B3 — همان خط‌های تخفیف applyCartUpdate، عیناً
-      discountNote = preview.valid
-        ? `\nکد تخفیف ${preview.code} هنوز روی این سبد فعاله — ${preview.amountToman} تومان تخفیف، جمع با تخفیف ${preview.newTotal} تومان.`
-        : `\n${fa.salesAgent.discountRemovedAfterCartChange}`;
+      // F12: تخفیف معتبر داخل همان یک خط جمع می‌آید (در قالب)؛ فقط حذف تخفیف خط جدا دارد
+      discountNote = preview.valid ? '' : `\n${fa.salesAgent.discountRemovedAfterCartChange}`;
     } else if (!cart.length) {
       nextAppliedDiscount = null;
     }
@@ -6456,9 +6471,9 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       !cart.length
         ? fa.salesAgent.cartBtnEmpty
         : action.type === 'SET_CART_QTY'
-          ? fa.salesAgent.cartBtnQty(line.name, action.qty ?? line.qty, total)
+          ? fa.salesAgent.cartBtnQty(line.name, action.qty ?? line.qty, total, nextAppliedDiscount?.amountToman)
           : fa.salesAgent.cartBtnRemoved(line.name)
-    }${discountNote}`;
+    }${discountNote}${await this.cartDiscountHint(conversation, cart.length > 0 && !nextAppliedDiscount && !discountNote)}`;
     const replaced = await this.replaceLatestCartSummary(conversation.id, reply, uiBlock);
     if (!replaced) {
       await this.logReply(conversation, reply, uiBlock, undefined, {
@@ -6518,7 +6533,10 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           code: preview.code,
           amountToman: preview.amountToman,
         };
-        discountNote = `\nکد تخفیف ${preview.code} هنوز روی این سبد فعاله — ${preview.amountToman} تومان تخفیف، جمع با تخفیف ${preview.newTotal} تومان.`;
+        // facts مدل (متن تایپی) عدد فارسی و همان یک خط جمع؛ قالب دکمه خودش تخفیف را در خط جمع می‌گذارد
+        discountNote = buttonTemplate
+          ? ''
+          : `\nکد تخفیف ${preview.code} هنوز روی این سبد فعاله — ${preview.amountToman.toLocaleString('fa-IR')} تومان تخفیف، جمع با تخفیف ${preview.newTotal.toLocaleString('fa-IR')} تومان.`;
       } else {
         nextAppliedDiscount = null;
         discountNote = `\n${fa.salesAgent.discountRemovedAfterCartChange}`;
@@ -6559,9 +6577,10 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
                 product.name,
                 addedLine?.variantLabel ?? null,
                 total,
+                nextAppliedDiscount?.amountToman,
               )
             : fa.salesAgent.cartBtnEmpty
-        }${discountNote}`
+        }${discountNote}${await this.cartDiscountHint(conversation, cart.length > 0 && !nextAppliedDiscount && !discountNote)}`
       : await this.caption(facts, conversation);
     await this.logReply(conversation, reply, uiBlock, undefined, {
       intent,
@@ -6962,6 +6981,19 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     const reply = fa.salesAgent.variantOutOfStockAlternatives;
     await this.logReply(conversation, reply, uiBlock);
     return { reply, uiBlocks: [uiBlock], state: conversation.currentState };
+  }
+
+  // F12 — caption() قبلاً برای سبد بدون تخفیف خط discountAppliedHint می‌گرفت؛ در وب همین یادآوری در شیت سبد
+  // هست، پس فقط برای تلگرام (که شیت ندارد) به قالب دکمه برمی‌گردد
+  private async cartDiscountHint(conversation: ConversationWithStore, wanted: boolean): Promise<string> {
+    if (!wanted) return '';
+    // یادآوری تزئینی است؛ شکست خواندن کانال نباید جواب دکمه‌ی سبد را خراب کند
+    try {
+      const channel = await this.orderChannelOf(this.prisma, conversation);
+      return channel === 'TELEGRAM' ? `\n${fa.salesAgent.discountAppliedHint}` : '';
+    } catch {
+      return '';
+    }
   }
 
   // کانال ثبت‌کننده‌ی رویداد سفارش (OrderStatusEvent.channel): تلگرام یا وب

@@ -3,7 +3,7 @@ import { ConversationEngineService } from './conversation-engine.service';
 // docs/PRD-buyer-chat-redesign.md B3 — دکمه‌های سبد (اکشن) بدون caption()، با جمله‌ی قالبی؛ متن تایپی عوض نمی‌شود
 describe('cart button templates [BC-4 B3]', () => {
   const product = { id: 'p1', name: 'مانتو', basePrice: 1000, stock: 10 };
-  function build(appliedDiscount: unknown = null, previewValid = true) {
+  function build(appliedDiscount: unknown = null, previewValid = true, channel: 'WEB' | 'TELEGRAM' = 'WEB') {
     const caption = jest.fn().mockResolvedValue('جمله‌ی مدل');
     const logReply = jest.fn().mockResolvedValue(undefined);
     const eng = Object.create(ConversationEngineService.prototype) as Record<string, any>;
@@ -20,6 +20,7 @@ describe('cart button templates [BC-4 B3]', () => {
           : { valid: false },
       ),
       prisma: {
+        customer: { findUnique: jest.fn().mockResolvedValue({ channel }) },
         product: { findUnique: jest.fn().mockResolvedValue({ ...product, storeId: 's1', variants: [], optionTypes: [] }) },
       },
       resolveProductPrices: jest.fn().mockResolvedValue(undefined),
@@ -47,8 +48,9 @@ describe('cart button templates [BC-4 B3]', () => {
     const { eng, caption, conversation, ctx } = build({ id: 'd1', code: 'OFF', amountToman: 50 });
     const res = await eng.applyCartUpdate(conversation, ctx, product, null, 1, false, 'ADD_TO_CART', true);
     expect(caption).not.toHaveBeenCalled();
-    expect(res.reply).toContain('کد تخفیف OFF هنوز روی این سبد فعاله');
-    expect(res.reply).toContain('جمع سبد: ۹۰۰ تومان');
+    // F12: یک خط جمع با تخفیف، بدون عدد لاتین
+    expect(res.reply).toBe('✓ مانتو به سبدت اضافه شد. جمع سبد: ۹۰۰ تومان (با ۱۰۰ تومان تخفیف).');
+    expect(res.reply).not.toMatch(/[0-9]/);
   });
 
   it('qty change and remove use templates; removing the last line says the cart is empty', async () => {
@@ -66,5 +68,14 @@ describe('cart button templates [BC-4 B3]', () => {
     const emptied = await c.eng.setCartLine(c.conversation, c.ctx, { type: 'REMOVE_CART_ITEM', productId: 'p1' });
     expect(emptied.reply).toBe('سبدت خالی شد.');
     for (const x of [a, b, c]) expect(x.caption).not.toHaveBeenCalled();
+  });
+
+  it('Telegram without a discount gets the discountAppliedHint line; web does not [F12]', async () => {
+    const tg = build(null, true, 'TELEGRAM');
+    const a = await tg.eng.applyCartUpdate(tg.conversation, tg.ctx, product, null, 1, false, 'ADD_TO_CART', true);
+    expect(a.reply).toContain('اگه کد تخفیف داری');
+    const web = build();
+    const b = await web.eng.applyCartUpdate(web.conversation, web.ctx, product, null, 1, false, 'ADD_TO_CART', true);
+    expect(b.reply).not.toContain('اگه کد تخفیف داری');
   });
 });

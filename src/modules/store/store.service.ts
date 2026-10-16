@@ -80,6 +80,7 @@ import {
   isValidShippingDays,
 } from '../../common/utils/shipping-days.util';
 import { ORDER_CARRIERS } from '../../common/constants/sales-ops.constants';
+import { RedisService } from '../../redis/redis.service';
 import {
   computeDisplayPrice,
   describeGoldPricing,
@@ -178,6 +179,9 @@ export interface PublicStoreAbout {
   paymentMethods: ('CARD_TO_CARD' | 'SNAPPPAY')[];
 }
 
+const POPULARITY_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
+const POPULARITY_CACHE_TTL_SECONDS = 600;
+
 @Injectable()
 export class StoreService {
   private readonly logger = new Logger(StoreService.name);
@@ -195,6 +199,7 @@ export class StoreService {
     private readonly orderState: OrderStateService,
     private readonly stockAlerts: StockAlertService,
     private readonly productEvents: ProductEventService,
+    private readonly redis: RedisService,
   ) {}
 
   async list(sellerId: string) {
@@ -804,12 +809,8 @@ export class StoreService {
             select: { cost: true },
           })
         : Promise.resolve([] as { cost: number }[]),
-      this.prisma.order.count({
-        where: {
-          storeId: store.id,
-          status: { in: [...SUCCESSFUL_ORDER_STATUSES] },
-        },
-      }),
+      // F14: «ids=» (شیت محصول/کارت چت) هرگز شمارش اضافه نمی‌خواهد؛ بقیه از کش ۱۰ دقیقه‌ای می‌خوانند
+      opts.ids ? Promise.resolve(0) : this.popularSortAvailableCached(store.id),
     ]);
     const items = pageIds
       ? [...rawItems].sort(
@@ -1030,32 +1031,69 @@ export class StoreService {
   }
 
   // docs/PRD-buyer-chat-redesign.md B1 — productId → تعداد فروش (مجموع qty) در ۹۰ روز اخیر
+  // F14 — نتیجه‌ی محاسبه‌ی پرهزینه (تا ۵۰۰۰ سفارش) و شمارش پنجره‌ی ۹۰ روزه را ۱۰ دقیقه در Redis نگه می‌داریم تا
+  // اسکرول بی‌نهایت «پرفروش‌ترین» هر صفحه همه را دوباره نخواند. خرابی Redis فقط یعنی بدون کش
+  private async cachedJson<T>(key: string, compute: () => Promise<T>): Promise<T> {
+    try {
+      const hit = await this.redis.get(key);
+      if (hit) return JSON.parse(hit) as T;
+    } catch {
+      // بدون کش ادامه می‌دهیم
+    }
+    const value = await compute();
+    try {
+      await this.redis.set(key, JSON.stringify(value), 'EX', POPULARITY_CACHE_TTL_SECONDS);
+    } catch {
+      // نوشتن کش حیاتی نیست
+    }
+    return value;
+  }
+
+  // «پرفروش‌ترین» همان پنجره‌ی ۹۰ روزه‌ی رتبه‌بندی را برای در دسترس بودن می‌شمارد (قبلاً کل تاریخچه)
+  private async popularSortAvailableCached(storeId: string): Promise<number> {
+    return this.cachedJson(`popavail:${storeId}`, () =>
+      this.prisma.order.count({
+        where: {
+          storeId,
+          status: { in: [...SUCCESSFUL_ORDER_STATUSES] },
+          createdAt: { gte: new Date(Date.now() - POPULARITY_WINDOW_MS) },
+        },
+      }),
+    );
+  }
+
   private async popularityByProduct(
     storeId: string,
   ): Promise<Map<string, number>> {
-    const since = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
-    const orders = await this.prisma.order.findMany({
-      where: {
-        storeId,
-        status: { in: [...SUCCESSFUL_ORDER_STATUSES] },
-        createdAt: { gte: since },
+    const entries = await this.cachedJson<[string, number][]>(
+      `pop:${storeId}`,
+      async () => {
+        const since = new Date(Date.now() - POPULARITY_WINDOW_MS);
+        const orders = await this.prisma.order.findMany({
+          where: {
+            storeId,
+            status: { in: [...SUCCESSFUL_ORDER_STATUSES] },
+            createdAt: { gte: since },
+          },
+          select: { items: true },
+          orderBy: { createdAt: 'desc' },
+          take: 5000,
+        });
+        const counts = new Map<string, number>();
+        for (const order of orders) {
+          if (!Array.isArray(order.items)) continue;
+          for (const raw of order.items) {
+            const item = raw as { productId?: unknown; qty?: unknown } | null;
+            if (!item || typeof item.productId !== 'string') continue;
+            const qty =
+              typeof item.qty === 'number' && item.qty > 0 ? item.qty : 1;
+            counts.set(item.productId, (counts.get(item.productId) ?? 0) + qty);
+          }
+        }
+        return [...counts.entries()];
       },
-      select: { items: true },
-      orderBy: { createdAt: 'desc' },
-      take: 5000,
-    });
-    const counts = new Map<string, number>();
-    for (const order of orders) {
-      if (!Array.isArray(order.items)) continue;
-      for (const raw of order.items) {
-        const item = raw as { productId?: unknown; qty?: unknown } | null;
-        if (!item || typeof item.productId !== 'string') continue;
-        const qty =
-          typeof item.qty === 'number' && item.qty > 0 ? item.qty : 1;
-        counts.set(item.productId, (counts.get(item.productId) ?? 0) + qty);
-      }
-    }
-    return counts;
+    );
+    return new Map(entries);
   }
 
   // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۱۴.۲ — «مشاهده نظرات

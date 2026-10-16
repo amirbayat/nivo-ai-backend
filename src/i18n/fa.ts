@@ -1,3 +1,7 @@
+// F12: یک خط جمع؛ با تخفیف معتبر «(با X تومان تخفیف)». total همان جمع بعد از تخفیف است
+const cartTotalLine = (total: number, discount?: number) =>
+  `جمع سبد: ${total.toLocaleString('fa-IR')} تومان${discount ? ` (با ${discount.toLocaleString('fa-IR')} تومان تخفیف)` : ''}.`
+
 export const fa = {
   validation: {
     phoneInvalid: 'شماره موبایل معتبر نیست',
@@ -537,10 +541,11 @@ export const fa = {
     cartEmpty: 'سبد خرید خالی است',
     cartUpdated: (total: number) => `سبد به‌روز شد. جمع ${total.toLocaleString('fa-IR')} تومان.`,
     // docs/PRD-buyer-chat-redesign.md B3 — پاسخ قالبی دکمه‌های سبد (بدون فراخوانی مدل)
-    cartBtnAdded: (name: string, variantLabel: string | null, total: number) =>
-      `✓ ${name}${variantLabel ? ` (${variantLabel})` : ''} به سبدت اضافه شد. جمع سبد: ${total.toLocaleString('fa-IR')} تومان.`,
-    cartBtnQty: (name: string, qty: number, total: number) =>
-      `تعداد ${name} شد ${qty.toLocaleString('fa-IR')}. جمع سبد: ${total.toLocaleString('fa-IR')} تومان.`,
+    cartTotalLine,
+    cartBtnAdded: (name: string, variantLabel: string | null, total: number, discount?: number) =>
+      `✓ ${name}${variantLabel ? ` (${variantLabel})` : ''} به سبدت اضافه شد. ${cartTotalLine(total, discount)}`,
+    cartBtnQty: (name: string, qty: number, total: number, discount?: number) =>
+      `تعداد ${name} شد ${qty.toLocaleString('fa-IR')}. ${cartTotalLine(total, discount)}`,
     cartBtnRemoved: (name: string) => `${name} از سبد حذف شد.`,
     cartBtnEmpty: 'سبدت خالی شد.',
     uiEventTooLarge: 'داده‌ی رویداد بیش از حد بزرگ است',

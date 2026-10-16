@@ -35,8 +35,9 @@ describe('listPublicProducts ids/sort [BC-2 B1]', () => {
         productComment: { groupBy: async () => [] },
         order: { findMany: orderFindMany, count: orderCount },
       },
+      redis: { get: async () => null, set: async () => 'OK' },
     });
-    return { svc, findMany };
+    return { svc, findMany, orderCount };
   }
 
   it('ids filter is applied together with the buyer-visibility filter', async () => {
@@ -81,5 +82,23 @@ describe('listPublicProducts ids/sort [BC-2 B1]', () => {
     expect(page.requiresShipping).toBe(false);
     const page2 = await svc.listPublicProducts('shop', { page: 2, pageSize: 3, sort: 'popular' });
     expect(page2.items.map((i) => i.id)).toEqual(['new']);
+  });
+
+  it('ids lookups skip the availability count; the count uses the 90-day window and is cached [FX-3 F14]', async () => {
+    const { svc, orderCount } = build();
+    await svc.listPublicProducts('shop', { page: 1, pageSize: 20, ids: ['a'] });
+    expect(orderCount).not.toHaveBeenCalled();
+    const stored = new Map<string, string>();
+    Object.assign(svc, {
+      redis: {
+        get: async (k: string) => stored.get(k) ?? null,
+        set: async (k: string, v: string) => (stored.set(k, v), 'OK'),
+      },
+    });
+    const first = await svc.listPublicProducts('shop', { page: 1, pageSize: 20 });
+    await svc.listPublicProducts('shop', { page: 2, pageSize: 20 });
+    expect(orderCount).toHaveBeenCalledTimes(1);
+    expect(orderCount.mock.calls[0][0].where.createdAt.gte).toBeInstanceOf(Date);
+    expect(first.popularSortAvailable).toBe(true);
   });
 });
