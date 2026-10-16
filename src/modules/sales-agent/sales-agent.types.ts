@@ -257,6 +257,8 @@ export type UiBlock =
   // فیدبک کاربر ۱۴۰۵/۰۷/۲۰ — برای فروشگاه‌های leadCaptureOnly؛ بعد از ثبت لید، اگر فروشگاه
   // websiteUrl داشته باشد، یک دکمه‌ی «مشاهده وبسایت» که در تب جدید باز می‌شود نشان داده شود
   | { type: 'VISIT_WEBSITE'; url: string }
+  // docs/PRD-nivo-lead-shop-seller-signup.md §5.2 — کارت ثبت‌نام داخل چت (فقط فروشگاه لید)
+  | { type: 'SIGNUP_CARD'; prefillPhone?: string }
   | { type: 'NONE' };
 
 // docs/PRD-buyer-purchase-intent-taxonomy.md بخش ۳ — لایه‌ی «نیاز خریدار»، مکمل و جدا از

@@ -279,6 +279,7 @@ export class StoreService {
           { category: dto.category ?? null, hasCustomSlug: !!dto.slug && dto.slug === store.slug },
         );
         void this.recordTermsAcceptance(sellerId, now);
+        if (!store.isDemo) void this.markLeadStoreCreated(sellerId);
         return store;
       } catch (err) {
         if (!isSlugUniqueConflict(err) || attempt >= 5) {
@@ -288,6 +289,19 @@ export class StoreService {
         triedSlugs.add(suggestion.slug);
         suggestion = await this.suggestSlug(dto.name, dto.slug, triedSlugs);
       }
+    }
+  }
+
+  // docs/PRD-nivo-lead-shop-seller-signup.md §5.5 — لیدِ وصل‌شده به این کاربر → STORE_CREATED؛
+  // بهترین‌تلاش و بی‌صدا: خطا (مثلاً SQL هنوز اجرا نشده) هرگز ساخت فروشگاه را نمی‌شکند
+  private async markLeadStoreCreated(userId: string): Promise<void> {
+    try {
+      await this.prisma.leadProfile.updateMany({
+        where: { userId, signupStatus: { in: ['PHONE_SUBMITTED', 'VERIFIED'] } },
+        data: { signupStatus: 'STORE_CREATED' },
+      });
+    } catch {
+      /* best-effort */
     }
   }
 

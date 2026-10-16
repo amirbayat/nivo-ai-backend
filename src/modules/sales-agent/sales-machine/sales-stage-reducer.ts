@@ -268,7 +268,11 @@ export function resolveAllowedTools(
 ): SalesToolName[] {
   const list = base ?? TOOLS_BY_GOAL[goal];
   if (!facts.leadCaptureOnly) return [...list];
-  const mapped = list
+  // docs/PRD-nivo-lead-shop-seller-signup.md §5.2 (P6) — فقط در فروشگاه لید، گُل‌های بستن هم ابزار capture_lead
+  // را دارند (فروشگاه عادی همان TOOLS_BY_GOAL بدون create_order می‌ماند)
+  const withClose =
+    !base && (goal === 'ALTERNATIVE_CLOSE' || goal === 'TRIAL_CLOSE') ? [...list, 'create_order' as SalesToolName] : list;
+  const mapped = withClose
     .filter((t) => !LEAD_ONLY_REMOVED.includes(t))
     .map((t): SalesToolName => (t === 'create_order' ? 'capture_lead' : t));
   return [...new Set(mapped)];

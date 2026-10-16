@@ -112,6 +112,7 @@ import {
 import { CreditService } from './credit.service';
 import { CreditAlertService } from './credit-alert.service';
 import { AbuseGuardService } from './abuse-guard.service';
+import { normalizeLeadPhone } from '../../common/utils/lead-phone';
 import { SellerBotApiClientService } from '../seller-bot/seller-bot-api-client.service';
 import { CommentsService } from '../comments/comments.service';
 import { formatShippingRulesSummary } from './shipping-rules-summary.util';
@@ -397,15 +398,11 @@ const salesRespondShape = {
 // §۱۳ — نسخه‌ی مسیر جدید buildLeadCaptureOnlyInstruction: بخش «مسیر تبدیل (CTA)» حذف شد (نقشش را
 // هدف‌های نوبت گرفته‌اند)؛ فقط «سفارش ندارد»، «کاتالوگ خالی طبیعی است»، «۲-۳ ویژگی با ✅» و نگاشت
 // بستن به capture_lead
-function buildSalesLeadCaptureNote(hasWebsiteUrl: boolean): string {
+function buildSalesLeadCaptureNote(): string {
   return `این فروشگاه حالت ثبت سفارش/پرداخت ندارد — هرگز ادعا نکن سفارشی ثبت شده یا قرار است پرداختی انجام شود؛ سبد و create_order اصلاً در اختیارت نیست.
 این فروشگاه عمداً کاتالوگ محصول ندارد یا خیلی محدود است — اگر چیزی پیدا نشد هرگز نگو «محصولی نداریم»؛ طبق معرفی فروشگاه و باکس دانش درباره‌ی خودِ کسب‌وکار صحبت کن.
 وقتی ویژگی‌های واقعی نیوو را می‌گویی، ۲-۳ ویژگی مشخص را هر کدام در یک خط جدا با ✅ بنویس؛ تعریف کلی و مبهم («ما بهترینیم») ممنوع، و هرگز عدد/درصد اختراع نکن.
-اگر هدف نوبت «اجرای خرید» یا «بستن» است، به‌جای سبد: ${
-    hasWebsiteUrl
-      ? 'مشتری را به دکمه‌ی ثبت‌نام زیر پیام هدایت کن (اعتبار هدیه‌ی رایگان با ثبت‌نام) و capture_lead را صدا بزن؛ phone را خالی بگذار مگر مشتری خودش داد، و شماره نخواه.'
-      : 'مؤدبانه شماره‌ی تماسش را بخواه؛ به‌محض گرفتن شماره capture_lead را صدا بزن.'
-  } quickReplies برای بستن: «ثبت‌نام می‌کنم» و «اول یه سؤال دارم».`;
+اگر هدف نوبت «بستن» یا «اجرای خرید» است، به‌جای سبد: وقتی مشتری آماده بود یا گفت «ثبت‌نام می‌کنم»، capture_lead را صدا بزن؛ کارت ثبت‌نام (شماره و کد پیامکی) خودکار زیر پیام نمایش داده می‌شود. هرگز شماره را در متن نخواه و نگو «بهت زنگ می‌زنم»؛ فقط اگر مشتری خودش شماره‌اش را در پیام نوشت، همان را در phone بگذار. interest را با یک جمله‌ی کوتاه از نیاز مشتری پر کن. quickReplies برای بستن: «ثبت‌نام می‌کنم» و «اول یه سؤال دارم».`;
 }
 
 // findSuspiciousPriceClaims اکنون در sales-machine/reply-validator.ts است (docs/PRD-sales-agent-sales-state-machine.md
@@ -447,11 +444,10 @@ search_products را با بهترین خلاصه‌ای که از کل بحث �
 const LEAD_CAPTURE_NUDGE_THRESHOLD = 2;
 
 const LEAD_CAPTURE_NUDGE_INSTRUCTION = `چند نوبت پشت‌سرهم مشتری علاقه/سؤال نشان داده ولی هنوز به
-CTA (گرفتن شماره یا هدایت به لینک ثبت‌نام) نرسیده‌ای — دیگر وقت توضیح‌دادن دوباره‌ی همان ویژگی‌ها یا
+CTA (باز شدن کارت ثبت‌نام با capture_lead) نرسیده‌ای — دیگر وقت توضیح‌دادن دوباره‌ی همان ویژگی‌ها یا
 پرسیدن یک سؤال اطلاعاتی تازه تمام شده. در همین پاسخ (بعد از جواب‌دادن به هر سؤال واقعی مشتری طبق
-قانون «اول answer_faq» بالا، اگر چنین سؤالی مطرح شده)، حتماً یک قدم عملی به سمت بستن بردار: اگر
-فروشگاه لینک وبسایت دارد همین الان capture_lead را صدا بزن و مشتری را به دکمه‌ی ثبت‌نام دعوت کن؛ اگر
-ندارد، مستقیم و مؤدبانه شماره تماسش را بخواه. دیگر صرفاً یک سؤال عمومی دیگر («بیشتر پیام‌هاتون از
+قانون «اول answer_faq» بالا، اگر چنین سؤالی مطرح شده)، حتماً یک قدم عملی به سمت بستن بردار: همین
+الان capture_lead را صدا بزن تا کارت ثبت‌نام نمایش داده شود (شماره را در متن نخواه). دیگر صرفاً یک سؤال عمومی دیگر («بیشتر پیام‌هاتون از
 دایرکته؟» و مشابه آن) نپرس و فقط ویژگی‌ها را دوباره بازگو نکن.`;
 
 // فیدبک کاربر ۱۴۰۵/۰۸/۲۱ — دو دستورالعمل استراتژی مبتنی بر CustomerState خودگزارش‌دهی‌شده
@@ -475,8 +471,9 @@ const EMPATHY_MISSING_INSTRUCTION = `طبق تحلیل خودت در نوبت ق
 // می‌فروشد). نگاه کن به callFullAgentTurn، درست بعد از اولین finalCall
 const CTA_CORRECTIVE_INSTRUCTION = `توجه فوری — تناقض در پاسخ قبلی‌ات: خودت گزارش دادی مشتری در
 مرحله‌ی READY (آماده‌ی اقدام) است، ولی در همان پاسخ نه capture_lead را صدا زدی و نه شماره تماس
-خواستی. این بار دقیقاً طبق بخش «مسیر تبدیل (CTA)» بالا عمل کن — یا capture_lead را صدا بزن (اگر
-فروشگاه لینک وبسایت دارد) یا صریح و مؤدبانه شماره تماس بخواه؛ دیگر فقط توضیح یا سؤال عمومی دیگری نده.`;
+خواستی. این بار دقیقاً طبق بخش «مسیر تبدیل (CTA)» بالا عمل کن — اگر ابزار capture_lead در اختیارت است
+همین الان صدایش بزن (کارت ثبت‌نام خودکار نمایش داده می‌شود)، وگرنه صریح و مؤدبانه شماره تماس بخواه؛ دیگر
+فقط توضیح یا سؤال عمومی دیگری نده.`;
 
 const PAIN_NOT_SOLVABLE_CORRECTIVE_INSTRUCTION = `توجه فوری — تناقض در پاسخ قبلی‌ات: خودت گزارش
 دادی دردی که مشتری دارد را این فروشگاه نمی‌تواند حل کند (painSolvable=NO)، ولی هم‌زمان داشتی
@@ -571,7 +568,7 @@ persuasionTechniquesUsed بگذار (برای ثبت/گزارش داخلی فر�
 // یک سوال جدید می‌پرسید بدون اینکه واقعاً متقاعدسازی/پرزنت کند؛ و همیشه شماره تماس می‌خواست حتی
 // وقتی فروشگاه لینک وبسایت واقعی (با ثبت‌نام + اعتبار هدیه) داشت. حالا: وقتی لینک هست، لینک
 // اولویت دارد و شماره خواسته نمی‌شود؛ وقتی نیست، مسیر قبلی (گرفتن شماره) می‌ماند.
-function buildLeadCaptureOnlyInstruction(hasWebsiteUrl: boolean): string {
+function buildLeadCaptureOnlyInstruction(): string {
   return `این فروشگاه حالت ثبت سفارش/پرداخت ندارد — هرگز ادعا نکن سفارشی ثبت شده یا قرار است
 پرداختی انجام شود، و create_order اصلاً در اختیارت نیست.
 سبک گفت‌وگو (مهم): هر نوبت حداکثر یک سؤال بپرس، نه بیشتر. به‌محض اینکه مشتری نوع کسب‌وکار یا
@@ -597,19 +594,12 @@ function buildLeadCaptureOnlyInstruction(hasWebsiteUrl: boolean): string {
 و مشتری فقط گفته «آره بگو»/«باشه بگو»/«آره». این نوع پاسخ هم یک سؤال مشخص جدید نیست، پس باید همان‌جا
 یک قدم واقعی به CTA نزدیک‌تر شوی (نه این‌که دوباره فقط توضیح عمومی/ویژگی‌ها را تکرار کنی) — فقط در
 این حالت‌ها می‌توانی مستقیم سراغ CTA بروی:
-${
-  hasWebsiteUrl
-    ? `این فروشگاه لینک وبسایت واقعی ثبت کرده؛ هدف نهایی رساندن مشتری به همان لینک است، **نه**
-گرفتن شماره تماس. وقتی مشتری علاقه‌ی کلی نشان داد (طبق تعریف بالا — نه یک سؤال مشخص بی‌جواب)، هرگز
-شماره تماس نخواه و اصرار هم نکن؛ فقط با لحن طبیعی بگو همین الان می‌تواند با زدن دکمه‌ی زیر ثبت‌نام
-کند و اعتبار هدیه‌اش را بگیرد، و بلافاصله capture_lead را صدا بزن (interest را پر کن؛ phone را خالی
-بگذار — فقط اگر مشتری خودش داوطلبانه شماره‌اش را گفت، همان را هم در phone بگذار). به‌محض صدازدن
-capture_lead، دکمه‌ی لینک خودش زیر پیام نمایش داده می‌شود؛ دیگر respond_to_customer لازم نیست.`
-    : `این فروشگاه لینک وبسایتی ثبت نکرده، پس مسیر تبدیل گرفتن شماره تماس است. وقتی مشتری علاقه‌ی
-کلی نشان داد (طبق تعریف بالا — نه یک سؤال مشخص بی‌جواب)، مؤدبانه شماره تماسش را بپرس؛ به‌محض گرفتن
-شماره (و اگر گفت، اسمش) بلافاصله capture_lead را صدا بزن — دیگر respond_to_customer لازم نیست،
-مکالمه همان‌جا تمام می‌شود.`
-}
+هدف نهایی ثبت‌نام رایگان فروشنده در نیوو است و ثبت‌نام داخل همین چت انجام می‌شود (کارت شماره + کد
+پیامکی)، نه با تماس بعدی. وقتی مشتری علاقه‌ی کلی نشان داد (طبق تعریف بالا — نه یک سؤال مشخص بی‌جواب)
+یا گفت «ثبت‌نام می‌کنم»، بلافاصله capture_lead را صدا بزن (interest را با یک جمله‌ی کوتاه از نیازش پر
+کن)؛ کارت ثبت‌نام خودکار زیر پیام نمایش داده می‌شود و دیگر respond_to_customer لازم نیست. هرگز شماره‌ی
+تماس را در متن نخواه و نگو «بهت زنگ می‌زنم»؛ فقط اگر مشتری خودش شماره‌اش را داوطلبانه نوشت، همان را در
+phone بگذار.
 این فروشگاه عمداً کاتالوگ محصول ندارد یا خیلی محدود است — اگر search_products چیزی پیدا نکرد یا
 کاتالوگ خالی بود، هرگز نگو «محصولی نداریم» یا عذرخواهی نکن؛ این طبیعی و مورد انتظار است. به‌جایش
 طبق معرفی فروشگاه (storeProfile) و باکس دانش درباره‌ی خودِ کسب‌وکار صحبت کن و گفت‌وگو را به سمت
@@ -2173,7 +2163,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         : ''
     }${nudgeActive ? `\n\n${OPEN_QUESTION_NUDGE_INSTRUCTION}` : ''}${
       leadCaptureOnly
-        ? `\n\n${buildLeadCaptureOnlyInstruction(!!store.websiteUrl)}`
+        ? `\n\n${buildLeadCaptureOnlyInstruction()}`
         : ''
     }${leadCaptureNudgeActive ? `\n\n${LEAD_CAPTURE_NUDGE_INSTRUCTION}` : ''}${
       painNotSolvable ? `\n\n${PAIN_NOT_SOLVABLE_INSTRUCTION}` : ''
@@ -4099,7 +4089,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           }`
         : null,
       leadCaptureInstruction: store.leadCaptureOnly
-        ? buildSalesLeadCaptureNote(!!store.websiteUrl)
+        ? buildSalesLeadCaptureNote()
         : null,
     });
 
@@ -8807,55 +8797,44 @@ answered=false بده (به‌جای حدس‌زدن).`,
     return { reply, uiBlocks: [], state: nextState };
   }
 
-  // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۱۶ — جایگزین doCreateOrder/
-  // finalizeOrder برای فروشگاه‌های leadCaptureOnly: هیچ Order ای ساخته نمی‌شود، فقط یک
-  // LeadProfile. مکالمه را مثل یک handoff موفق به COMPLETED می‌برد (نه HANDOFF_HUMAN، چون منتظر
-  // پاسخ انسانی هم‌اکنون نیست، فقط به هدفش رسیده)
+  // docs/PRD-nivo-lead-shop-seller-signup.md §5.2 — بازتعریف: دیگر گفتگو را COMPLETED نمی‌کند و
+  // «زنگ می‌زنم» نمی‌گوید. فقط لید را upsert می‌کند (کلید storeId+conversationId) و کارت ثبت‌نام
+  // (SIGNUP_CARD) را برمی‌گرداند؛ ارسال شماره/OTP و اتصال به User کار فرانت + LeadSignupService است
   private async captureLead(
     conversation: ConversationWithStore,
     args: { phone?: string; name?: string; interest?: string },
   ): Promise<EngineResult> {
-    await this.prisma.leadProfile.create({
-      data: {
+    // شماره‌ی نامعتبر نادیده گرفته می‌شود (کارت بدون prefill)
+    const phone = normalizeLeadPhone(args.phone);
+    const where = {
+      storeId_conversationId: { storeId: conversation.storeId, conversationId: conversation.id },
+    };
+    await this.prisma.leadProfile.upsert({
+      where,
+      create: {
         storeId: conversation.storeId,
-        phone: args.phone,
+        conversationId: conversation.id,
+        phone: phone ?? undefined,
         name: args.name,
         interests: args.interest ? [args.interest] : undefined,
         source: 'sales_agent_lead_capture',
       },
+      update: {
+        ...(args.name ? { name: args.name } : {}),
+        ...(args.interest ? { interests: [args.interest] } : {}),
+      },
     });
-    const nextState: ConversationState = 'COMPLETED';
-    await this.persistTransition(
-      conversation,
-      nextState,
-      this.getContext(conversation),
-      'capture_lead',
-    );
-    // فیدبک کاربر ۱۴۰۵/۰۷/۲۰ — سرور-محور، نه خوداظهاری مدل (دقیقاً مثل progressHappened پایین‌تر
-    // در callFullAgentTurn)؛ مدل هیچ‌وقت نمی‌تواند خودش LEAD_CAPTURED را در respond_to_customer
-    // اعلام کند، فقط وقتی capture_lead واقعاً اجرا شده باشد اینجا ست می‌شود
+    // سرور-محور (نه خوداظهاری مدل): فقط وقتی capture_lead واقعاً اجرا شده؛ LEAD_CAPTURED بعد از ارسال شماره
     await this.prisma.salesConversation.update({
       where: { id: conversation.id },
-      data: { leadFunnelStage: 'LEAD_CAPTURED' },
+      data: { leadFunnelStage: 'READY_TO_CAPTURE' },
     });
-    // فیدبک کاربر ۱۴۰۵/۰۷/۲۰ — اگر فروشگاه لینک وبسایت ثبت کرده، بعد از جمع‌آوری لید دکمه‌ی
-    // «مشاهده وبسایت» را هم نشان بده؛ فروشگاه بدون websiteUrl همان رفتار قبلی (بدون بلاک) را دارد.
-    // وقتی لینک هست و مشتری شماره نداده، پیام باید به سمت کلیک روی همان دکمه هدایت کند، نه
-    // ادعای «بهت زنگ می‌زنم» که دیگر درست نیست
-    const uiBlock: UiBlock = conversation.store.websiteUrl
-      ? { type: 'VISIT_WEBSITE', url: conversation.store.websiteUrl }
-      : { type: 'NONE' };
-    const reply =
-      uiBlock.type === 'VISIT_WEBSITE' && !args.phone
-        ? fa.salesAgent.leadCapturedWithLink
-        : fa.salesAgent.leadCaptured;
+    const uiBlock: UiBlock = phone
+      ? { type: 'SIGNUP_CARD', prefillPhone: phone }
+      : { type: 'SIGNUP_CARD' };
+    const reply = fa.salesAgent.leadSignupPrompt;
     await this.logReply(conversation, reply, uiBlock);
-    await this.notifySellerOfLeadCapture(conversation, args.phone, args.name);
-    return {
-      reply,
-      uiBlocks: uiBlock.type === 'NONE' ? [] : [uiBlock],
-      state: nextState,
-    };
+    return { reply, uiBlocks: [uiBlock], state: conversation.currentState };
   }
 
   // docs/PRD-product-strategy-and-roadmap.md بخش ۳.۲ — وقتی هر دو فیلد ست نشده، یعنی
@@ -8940,22 +8919,6 @@ answered=false بده (به‌جای حدس‌زدن).`,
           ],
         ],
       },
-    );
-  }
-
-  // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۱۶ — همان گیت
-  // sellerBotChatId بالا؛ عمداً تابعی جدا از notifySellerOfHandoff چون این یک لید است، نه یک
-  // مکالمه‌ی در انتظار پاسخ انسانی (بدون دکمه‌ی «پاسخ بده»)
-  private async notifySellerOfLeadCapture(
-    conversation: ConversationWithStore,
-    phone?: string,
-    name?: string,
-  ): Promise<void> {
-    const chatId = conversation.store.sellerBotChatId;
-    if (!chatId) return;
-    await this.sellerBotApi.sendText(
-      chatId,
-      fa.telegram.leadCaptureNotification(phone, name),
     );
   }
 

@@ -12,6 +12,8 @@ import { MarketPricesModule } from '../market-prices/market-prices.module';
 import { StoreCreditEngineModule } from '../store-credit-engine/store-credit-engine.module';
 import { OrderLifecycleModule } from '../order-lifecycle/order-lifecycle.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { LeadSignupService } from './lead-signup.service';
+import { AdminNotificationsModule } from '../admin-notifications/admin-notifications.module';
 import { SalesAgentController } from './sales-agent.controller';
 import { SalesAgentService } from './sales-agent.service';
 import { ConversationEngineService } from './conversation-engine.service';
@@ -27,6 +29,7 @@ import { SalesAgentQaController } from './sales-agent-qa.controller';
 @Module({
   imports: [
     StoreModule,
+    AdminNotificationsModule,
     MediaTranscodeModule,
     AsrModule,
     // docs/PRD-seller-credit-billing.md — CreditService از PricingService.calcCost استفاده می‌کند
@@ -55,6 +58,7 @@ import { SalesAgentQaController } from './sales-agent-qa.controller';
   controllers: [SalesAgentController, SalesAgentQaController],
   providers: [
     SalesAgentService,
+    LeadSignupService,
     ConversationEngineService,
     ConversationLockService,
     CreditService,
@@ -69,6 +73,7 @@ import { SalesAgentQaController } from './sales-agent-qa.controller';
   // §۵.۳/۵.۴ نقشه‌ی راه) لازم‌اند
   exports: [
     ConversationEngineService,
+    LeadSignupService,
     CreditService,
     PostPurchaseFollowUpService,
     AbandonedCartReminderService,

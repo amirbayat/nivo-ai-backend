@@ -450,6 +450,13 @@ export const fa = {
     refundCopyInPanel: 'کپی در پنل',
     refundMarkedPaid: 'واریز ثبت شد.',
   },
+  // docs/PRD-nivo-lead-shop-seller-signup.md §5.3 — اعلان ادمین برای لید/ثبت‌نام فروشگاه لید
+  leadSignup: {
+    title: 'لید فروشگاه نیوو',
+    newLead: (name?: string | null, phone?: string | null, interest?: string | null) =>
+      `📝 لید جدید (نیوو): ${name ?? '—'} · ${phone ?? '—'} · ${interest ?? '—'} · تأیید نشده`,
+    verified: (phone?: string | null) => `✅ ثبت‌نام شد: ${phone ?? '—'}`,
+  },
   salesAgent: {
     invalidSession: 'نشست معتبر نیست',
     testChatNoRealOrder:
@@ -616,6 +623,8 @@ export const fa = {
       'ممنون! شماره‌تون رو یادداشت کردم، به‌زودی خودم باهاتون تماس می‌گیرم 🙏',
     // فیدبک کاربر ۱۴۰۵/۰۷/۲۰ — وقتی فروشگاه لینک وبسایت دارد و مسیر تبدیل خودِ لینک است (نه
     // شماره تماس)، دیگر نباید ادعای «بهت زنگ می‌زنم» کرد؛ دکمه‌ی VISIT_WEBSITE زیر همین پیام می‌آید
+    // LS-3 — بعد از capture_lead کارت ثبت‌نام (SIGNUP_CARD) زیر همین پیام می‌آید؛ دیگر «زنگ می‌زنم» نیست
+    leadSignupPrompt: 'عالیه! برای ساخت حساب رایگانت فقط شماره‌ی موبایلت رو توی کارت زیر وارد کن 👇',
     leadCapturedWithLink:
       'عالی! از دکمه‌ی زیر می‌تونی ثبت‌نام کنی و اعتبار هدیه‌ت رو بگیری 🎁',
     // docs/PRD-buyer-abuse-rate-limit.md — فقط یک‌بار (لحظه‌ی قفل‌شدن) نشان داده می‌شود، بعدش سکوت کامل

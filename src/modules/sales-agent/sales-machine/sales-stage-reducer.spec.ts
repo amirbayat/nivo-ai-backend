@@ -444,6 +444,14 @@ describe('sales-stage-reducer', () => {
     ).toContain('create_order');
   });
 
+  // docs/PRD-nivo-lead-shop-seller-signup.md §7 تست ۴
+  it('21b. گُل‌های بستن: لید capture_lead دارد، فروشگاه عادی create_order ندارد', () => {
+    for (const goal of ['ALTERNATIVE_CLOSE', 'TRIAL_CLOSE'] as const) {
+      expect(resolveAllowedTools(goal, { leadCaptureOnly: true })).toContain('capture_lead');
+      expect(resolveAllowedTools(goal, { leadCaptureOnly: false })).not.toContain('create_order');
+    }
+  });
+
   it('22. deriveLeadFunnelStage طبق جدول §۱۳', () => {
     expect(deriveLeadFunnelStage('OPENING')).toBe('NEW');
     expect(deriveLeadFunnelStage('DISCOVERY')).toBe('DISCOVERING_NEED');

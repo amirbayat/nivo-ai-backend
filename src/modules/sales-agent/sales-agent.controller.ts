@@ -33,6 +33,8 @@ import { SendBuyerOtpDto, VerifyBuyerOtpDto } from './dto/register-buyer.dto';
 import { SubscribeStockAlertDto } from './dto/subscribe-stock-alert.dto';
 import { SubmitCommentDto } from './dto/submit-comment.dto';
 import { UiEventDto } from './dto/ui-event.dto';
+import { LeadPhoneDto } from './dto/lead-phone.dto';
+import { LeadSignupService } from './lead-signup.service';
 import {
   PUBLIC_PRODUCT_SORTS,
   StoreService,
@@ -55,6 +57,7 @@ export class SalesAgentController {
     private readonly storeService: StoreService,
     private readonly comments: CommentsService,
     private readonly storage: StorageService,
+    private readonly leadSignup: LeadSignupService,
   ) {}
 
   @Throttle({
@@ -447,6 +450,28 @@ export class SalesAgentController {
     @Body() dto: UiEventDto,
   ) {
     return this.salesAgentService.logUiEvent(conversationId, sessionToken, dto);
+  }
+
+  // docs/PRD-nivo-lead-shop-seller-signup.md §5.2 — فقط فروشگاه leadCaptureOnly (وگرنه ۴۰۴)
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @Post('chat/:conversationId/lead/phone')
+  leadPhone(
+    @Param('conversationId') conversationId: string,
+    @Headers('x-session-token') sessionToken: string,
+    @Body() dto: LeadPhoneDto,
+  ) {
+    return this.leadSignup.submitPhone(conversationId, sessionToken, dto.phone);
+  }
+
+  @UseGuards(JwtGuard)
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @Post('chat/:conversationId/lead/verified')
+  leadVerified(
+    @Param('conversationId') conversationId: string,
+    @Headers('x-session-token') sessionToken: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.leadSignup.markVerified(conversationId, sessionToken, user.sub);
   }
 
   @Get('chat/:conversationId/order-link/:orderCode')
