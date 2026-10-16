@@ -32,6 +32,7 @@ import { ToggleSavedProductDto } from './dto/toggle-saved-product.dto';
 import { SendBuyerOtpDto, VerifyBuyerOtpDto } from './dto/register-buyer.dto';
 import { SubscribeStockAlertDto } from './dto/subscribe-stock-alert.dto';
 import { SubmitCommentDto } from './dto/submit-comment.dto';
+import { UiEventDto } from './dto/ui-event.dto';
 import {
   PUBLIC_PRODUCT_SORTS,
   StoreService,
@@ -434,6 +435,17 @@ export class SalesAgentController {
       sessionToken,
       dto.productId,
     );
+  }
+
+  // docs/PRD-buyer-chat-redesign.md B5 — رویدادهای رابط خریدار؛ بدون محدودیت IP (محدودیت ۶۰ در دقیقه برای هر گفتگو در سرویس)
+  @SkipThrottle()
+  @Post('chat/:conversationId/ui-events')
+  logUiEvent(
+    @Param('conversationId') conversationId: string,
+    @Headers('x-session-token') sessionToken: string,
+    @Body() dto: UiEventDto,
+  ) {
+    return this.salesAgentService.logUiEvent(conversationId, sessionToken, dto);
   }
 
   @Get('chat/:conversationId')

@@ -16,7 +16,27 @@ export type ProductEventName =
   | 'test_chat_started'
   | 'seller_bot_linked'
   | 'product_link_shared'
-  | 'product_duplicated';
+  | 'product_duplicated'
+  // docs/PRD-buyer-chat-redesign.md §10 — رویدادهای صفحه‌ی خریدار (از POST v2/chat/:id/ui-events)
+  | 'shop_view'
+  | 'product_sheet_opened'
+  | 'cart_add'
+  | 'ask_from_products'
+  | 'checkout_sheet_opened'
+  | 'about_opened'
+  | 'menu_item';
+
+// فهرست سفید نام‌های مجاز ui-events (B5)
+export const SHOP_UI_EVENT_NAMES = [
+  'shop_view',
+  'product_sheet_opened',
+  'cart_add',
+  'ask_from_products',
+  'checkout_sheet_opened',
+  'about_opened',
+  'menu_item',
+] as const;
+export type ShopUiEventName = (typeof SHOP_UI_EVENT_NAMES)[number];
 
 export interface ProductEventContext {
   storeId?: string | null;

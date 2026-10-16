@@ -14,6 +14,9 @@ import { CHAT_START_LIMIT_PER_STORE_PER_MIN } from '../../common/constants/sales
 import type { BillingMode } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ProductEventService } from '../../common/analytics/product-event.service';
+import { UiEventDto } from './dto/ui-event.dto';
+
+const UI_EVENTS_PER_MINUTE = 60;
 import { RedisService } from '../../redis/redis.service';
 import { SmsService } from '../../sms/sms.service';
 import { normalizePhone } from '../../common/utils/normalize-phone';
@@ -1317,6 +1320,33 @@ export class SalesAgentService {
         return item ? [item] : [];
       }),
     };
+  }
+
+  // docs/PRD-buyer-chat-redesign.md B5 — رویدادهای رابط خریدار. نام از فهرست سفید (DTO)، props حداکثر ۱KB، ۶۰ در
+  // دقیقه برای هر گفتگو. fire-and-forget؛ گفتگوی تست و فروشگاه دمو با props.test=true ثبت می‌شوند
+  async logUiEvent(conversationId: string, sessionToken: string, dto: UiEventDto) {
+    // PRD B5: توکن اشتباه ۴۰۱ (نه ۴۰۳ مثل بقیه‌ی مسیرهای گفتگو)
+    const conversation = await this.loadOwned(conversationId, sessionToken).catch((err: unknown) => {
+      if (err instanceof ForbiddenException) throw new UnauthorizedException(fa.salesAgent.invalidSession);
+      throw err;
+    });
+    const props = dto.props ?? {};
+    if (Buffer.byteLength(JSON.stringify(props), 'utf8') > 1024) {
+      throw new BadRequestException(fa.salesAgent.uiEventTooLarge);
+    }
+    const key = `uiev:${conversation.id}:${Math.floor(Date.now() / 60_000)}`;
+    const count = await this.redis.incr(key);
+    if (count === 1) await this.redis.expire(key, 90);
+    if (count > UI_EVENTS_PER_MINUTE) {
+      throw new HttpException(fa.salesAgent.uiEventRateLimited, HttpStatus.TOO_MANY_REQUESTS);
+    }
+    const isTest = conversation.isTest || conversation.store.isDemo;
+    this.productEvents.log(
+      dto.name,
+      { storeId: conversation.storeId, conversationId: conversation.id },
+      isTest ? { ...props, test: true } : props,
+    );
+    return { ok: true };
   }
 
   async toggleSavedProduct(
