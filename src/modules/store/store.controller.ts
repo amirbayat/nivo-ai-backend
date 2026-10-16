@@ -73,6 +73,7 @@ import { ProductAiFillService } from './product-ai-fill.service';
 import { PublishProductsDto } from './dto/publish-products.dto';
 import { AiFillProductDto } from './dto/ai-fill-product.dto';
 import { QualityApplyDto } from './dto/quality-apply.dto';
+import { StoreQualityReviewService } from './store-quality-review.service';
 import { ProductQualityReviewService } from './product-quality-review.service';
 import { parsePageQuery } from '../../common/utils/page-query.util';
 
@@ -92,6 +93,7 @@ export class StoreController {
     private readonly refunds: RefundService,
     private readonly productAiFill: ProductAiFillService,
     private readonly productQualityReview: ProductQualityReviewService,
+    private readonly storeQualityReview: StoreQualityReviewService,
   ) {}
 
   @Get('me')
@@ -251,6 +253,22 @@ export class StoreController {
     const channel =
       body?.channel === 'copy' || body?.channel === 'telegram' ? body.channel : 'native';
     return this.storeService.logProductLinkShared(user.sub, id, productId, channel);
+  }
+
+  // SQ-2/SQ-3 — بررسی پروفایل فروشگاه (مسیر ثابت قبل از :id/products/... تداخلی ندارد)
+  @Get(':id/quality-review')
+  getStoreQualityReview(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    return this.storeQualityReview.getReview(user.sub, id);
+  }
+
+  @Post(':id/quality-review/refresh')
+  refreshStoreQualityReview(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    return this.storeQualityReview.refresh(user.sub, id);
+  }
+
+  @Post(':id/quality-apply')
+  applyStoreQuality(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Body() dto: QualityApplyDto) {
+    return this.storeQualityReview.apply(user.sub, id, dto.key, dto.answer);
   }
 
   // PQ-2 — کارت بررسی کیفیت توضیح؛ جدول نبود → rules_only

@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { onStoreContentChanged } from './store-content-changed';
 import type { CardDisplayPolicy } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StoreService } from './store.service';
@@ -29,7 +30,13 @@ export class StoreBankCardService {
     return { policy: store.cardDisplayPolicy, cards };
   }
 
-  async create(sellerId: string, storeId: string, dto: CreateBankCardDto) {
+  async create(...args: Parameters<StoreBankCardService['createImpl']>) {
+    const result = await this.createImpl(...args);
+    onStoreContentChanged(args[1]);
+    return result;
+  }
+
+  private async createImpl(sellerId: string, storeId: string, dto: CreateBankCardDto) {
     const store = await this.storeService.getOwned(sellerId, storeId);
     const hadMethod =
       !!store.snapppayPaymentLink ||
@@ -57,7 +64,13 @@ export class StoreBankCardService {
     return card;
   }
 
-  async update(
+  async update(...args: Parameters<StoreBankCardService['updateImpl']>) {
+    const result = await this.updateImpl(...args);
+    onStoreContentChanged(args[1]);
+    return result;
+  }
+
+  private async updateImpl(
     sellerId: string,
     storeId: string,
     cardId: string,

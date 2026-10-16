@@ -7,6 +7,7 @@ import {
 import { getAceContext, setCallSite } from '../../common/ai-cost-engine/ace-context';
 import { memoCall } from '../../common/ai-cost-engine/memo-cache';
 import { cachedEmbedding } from '../../common/ai-cost-engine/embedding-cache';
+import { scheduleStoreReview } from './quality-review-scheduler';
 import { bumpVersions } from '../../common/ai-cost-engine/version-keys';
 import { embed, cosineSimilarity, generateObject, generateText } from 'ai';
 import type { RepairTextFunction, UserModelMessage } from 'ai';
@@ -2084,6 +2085,7 @@ ${resourceText.slice(0, MAX_EXTRACTED_CHARS)}`,
     this.cache.delete(storeId);
     // ACE-3 — هر تغییر KB نسخه‌ی کش‌های وابسته را بالا می‌برد
     void bumpVersions({ storeId, kb: true });
+    scheduleStoreReview(storeId); // SQ-2
   }
 
   private async computeEmbedding(text: string): Promise<number[] | null> {

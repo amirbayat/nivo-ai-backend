@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { onStoreContentChanged } from './store-content-changed';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StoreService } from './store.service';
 import { CreateShippingRuleDto } from './dto/create-shipping-rule.dto';
@@ -65,7 +66,13 @@ export class StoreShippingRuleService {
     }
   }
 
-  async create(sellerId: string, storeId: string, dto: CreateShippingRuleDto) {
+  async create(...args: Parameters<StoreShippingRuleService['createImpl']>) {
+    const result = await this.createImpl(...args);
+    onStoreContentChanged(args[1]);
+    return result;
+  }
+
+  private async createImpl(sellerId: string, storeId: string, dto: CreateShippingRuleDto) {
     await this.storeService.getOwned(sellerId, storeId);
     const provinces = dto.provinces ?? [];
     if (provinces.length === 0) {
@@ -99,7 +106,13 @@ export class StoreShippingRuleService {
     return rule;
   }
 
-  async update(
+  async update(...args: Parameters<StoreShippingRuleService['updateImpl']>) {
+    const result = await this.updateImpl(...args);
+    onStoreContentChanged(args[1]);
+    return result;
+  }
+
+  private async updateImpl(
     sellerId: string,
     storeId: string,
     ruleId: string,
@@ -140,7 +153,13 @@ export class StoreShippingRuleService {
     return updated;
   }
 
-  async delete(sellerId: string, storeId: string, ruleId: string) {
+  async delete(...args: Parameters<StoreShippingRuleService['deleteImpl']>) {
+    const result = await this.deleteImpl(...args);
+    onStoreContentChanged(args[1]);
+    return result;
+  }
+
+  private async deleteImpl(sellerId: string, storeId: string, ruleId: string) {
     await this.storeService.getOwned(sellerId, storeId);
     const rule = await this.prisma.storeShippingRule.findUnique({
       where: { id: ruleId },

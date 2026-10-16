@@ -90,7 +90,7 @@ import {
   GoldPricingNotConfiguredError,
 } from './product-pricing.util';
 import { scheduleProductReview } from './quality-review-scheduler';
-import { bumpVersions } from '../../common/ai-cost-engine/version-keys';
+import { onStoreContentChanged } from './store-content-changed';
 import { isNivoLeadStore } from '../../common/utils/store-mode';
 
 // docs/PRD-product-strategy-and-roadmap.md بخش ۳.۱ — چک‌لیست سطح فروشگاه
@@ -450,7 +450,7 @@ export class StoreService {
       }
       throw err;
     }
-    void bumpVersions({ storeId }); // ACE-3
+    onStoreContentChanged(storeId); // ACE-3 + SQ-2
     if (addingSnapppay) {
       this.productEvents.log('payment_method_added', { storeId, userId: sellerId }, { kind: 'snapppay' });
     }

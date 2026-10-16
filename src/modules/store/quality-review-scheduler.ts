@@ -14,3 +14,19 @@ export function scheduleProductReview(productId: string): void {
     /* best-effort */
   }
 }
+
+// SQ-2 — همان الگو برای بررسی فروشگاه (jobId=store:{storeId})
+let storeHandler: Handler | null = null;
+
+export function setStoreQualityReviewHandler(h: Handler | null): void {
+  storeHandler = h;
+}
+
+// helper مشترک تغییر محتوای فروشگاه (کنار bumpVersions ACE-3)
+export function scheduleStoreReview(storeId: string): void {
+  try {
+    if (storeId) storeHandler?.(storeId);
+  } catch {
+    /* best-effort */
+  }
+}
