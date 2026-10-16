@@ -70,6 +70,8 @@ model User {
   // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۴.۲ — همین User اگر با
   // همین شماره در یک یا چند فروشگاه هم به‌عنوان خریدار چت کرده باشد، آن رکوردهای Customer
   customerLinks             Customer[]
+  // docs/PRD-nivo-lead-shop-seller-signup.md §5.5 — لیدهای فروشگاه نیوو که با OTP به این کاربر وصل شده‌اند
+  leadProfiles              LeadProfile[]
 
   @@map("users")
 }
@@ -1156,9 +1158,27 @@ model LeadProfile {
   // leadCaptureOnly)؛ برای لیدهای صفحه‌ی قیمت‌گذاری قدیمی null می‌ماند
   storeId         String?
   store           Store?             @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  // docs/PRD-nivo-lead-shop-seller-signup.md §5.5 — ثبت‌نام داخل چت فروشگاه لید؛ همه null-پذیر (لیدهای قدیمی)
+  userId          String?
+  user            User?              @relation(fields: [userId], references: [id], onDelete: SetNull)
+  conversationId  String?
+  signupStatus    LeadSignupStatus?
+  signedUpAt      DateTime?
+  utmSource       String?
+  utmMedium       String?
+  utmCampaign     String?
+  utmContent      String?
 
+  @@unique([storeId, conversationId])
   @@index([storeId])
+  @@index([userId])
   @@map("lead_profiles")
+}
+
+enum LeadSignupStatus {
+  PHONE_SUBMITTED
+  VERIFIED
+  STORE_CREATED
 }
 
 enum LeadFollowUpStatus {
