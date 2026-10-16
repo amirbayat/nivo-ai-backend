@@ -9,9 +9,39 @@ import { PricingService } from '../usage/pricing.service';
 import { setCallSite } from '../../common/ai-cost-engine/ace-context';
 import { getProductQualityGuide } from './product-quality-guides';
 import { ruleReview } from './product-quality-rules';
+import { clampProductSpecs, parseProductSpecs, type ProductSpecItem } from './product-specs.types';
 import { setQualityReviewHandler } from './quality-review-scheduler';
 
 const MODEL = 'openai/gpt-5.4-mini';
+const MAX_DESCRIPTION_CHARS = 2000;
+
+const applySchema = z.object({
+  descriptionAddition: z.string().nullable(),
+  specsAdditions: z.array(z.object({ label: z.string(), value: z.string() })).max(3),
+});
+
+// PQ-3 — ادغام امن: مدل فقط «افزوده» می‌دهد؛ متن قبلی و specs قبلی دست‌نخورده می‌مانند،
+// تکراری اضافه نمی‌شود و سقف طول رعایت می‌شود
+export function mergeQualityAnswer(
+  description: string | null,
+  specs: ProductSpecItem[],
+  out: { descriptionAddition: string | null; specsAdditions: ProductSpecItem[] },
+): { description: string; specs: ProductSpecItem[] } {
+  const base = (description ?? '').trim();
+  const add = out.descriptionAddition?.trim() ?? '';
+  const norm = (t: string) => t.replace(/\s+/g, ' ').trim();
+  let next = base;
+  if (add && !norm(base).includes(norm(add))) next = base ? `${base}\n${add}` : add;
+  next = next.slice(0, MAX_DESCRIPTION_CHARS);
+  const have = new Set(specs.map((s) => norm(s.label)));
+  const merged = [...specs];
+  for (const a of out.specsAdditions) {
+    if (!a.label.trim() || !a.value.trim() || have.has(norm(a.label))) continue;
+    have.add(norm(a.label));
+    merged.push({ label: a.label, value: a.value });
+  }
+  return { description: next, specs: clampProductSpecs(merged) ?? [] };
+}
 const DEBOUNCE_MS = 10_000;
 const DAILY_CAP = 60;
 
@@ -237,6 +267,27 @@ export class ProductQualityReviewService implements OnModuleInit, OnModuleDestro
       this.warnTable(err);
       return { status: 'rules_only' as QualityReviewStatus, review: null, rules };
     }
+  }
+
+  // PQ-3 — «جواب بده تا اضافه‌اش کنم»: فقط پیش‌نمایش؛ ذخیره با PATCH معمولی بعد از تأیید فروشنده
+  async apply(sellerId: string, storeId: string, productId: string, key: string, answer: string) {
+    const product = await this.getOwned(sellerId, storeId, productId);
+    const guide = getProductQualityGuide(product.store.category);
+    const item = guide.find((g) => g.key === key);
+    if (!item) throw new NotFoundException();
+    const specs = parseProductSpecs(product.specs);
+    setCallSite('quality_apply');
+    const { object } = await generateObject({
+      model: this.provider(MODEL),
+      schema: applySchema,
+      system: `تو پاسخ فروشنده را در توضیح یک محصول ادغام می‌کنی.
+- فقط اطلاعاتِ همین آیتم («${item.label}») را اضافه کن؛ چیز دیگری اضافه یا بازنویسی نکن.
+- descriptionAddition: یک یا دو جمله‌ی فارسی کوتاه با همان لحن توضیح فعلی؛ اگر آن اطلاعات از قبل در توضیح هست null بده.
+- specsAdditions: فقط اگر پاسخ یک مشخصه‌ی کوتاه (مثل «جنس: نخ پنبه») دارد، حداکثر ۳ مورد؛ برچسبی که از قبل هست تکرار نشود.
+- هرگز چیزی که فروشنده نگفته اختراع نکن.`,
+      prompt: `نام محصول: ${product.name}\nتوضیح فعلی: ${product.description ?? '(خالی)'}\nمشخصات فعلی: ${JSON.stringify(specs)}\nپاسخ فروشنده: ${answer}`,
+    });
+    return mergeQualityAnswer(product.description, specs, object);
   }
 
   async refresh(sellerId: string, storeId: string, productId: string) {

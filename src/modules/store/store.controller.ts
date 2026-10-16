@@ -72,6 +72,7 @@ import { fa } from '../../i18n/fa';
 import { ProductAiFillService } from './product-ai-fill.service';
 import { PublishProductsDto } from './dto/publish-products.dto';
 import { AiFillProductDto } from './dto/ai-fill-product.dto';
+import { QualityApplyDto } from './dto/quality-apply.dto';
 import { ProductQualityReviewService } from './product-quality-review.service';
 import { parsePageQuery } from '../../common/utils/page-query.util';
 
@@ -260,6 +261,16 @@ export class StoreController {
     @Param('productId') productId: string,
   ) {
     return this.productQualityReview.getReview(user.sub, id, productId);
+  }
+
+  @Post(':id/products/:productId/quality-apply')
+  applyProductQuality(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('productId') productId: string,
+    @Body() dto: QualityApplyDto,
+  ) {
+    return this.productQualityReview.apply(user.sub, id, productId, dto.key, dto.answer);
   }
 
   @Post(':id/products/:productId/quality-review/refresh')

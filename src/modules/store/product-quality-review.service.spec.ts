@@ -1,6 +1,6 @@
 jest.mock('ai', () => ({ ...jest.requireActual('ai'), generateObject: jest.fn() }));
 import { generateObject } from 'ai';
-import { ProductQualityReviewService, productInputHash, shouldReview } from './product-quality-review.service';
+import { ProductQualityReviewService, mergeQualityAnswer, productInputHash, shouldReview } from './product-quality-review.service';
 
 const product = {
   id: 'p1', storeId: 's1', name: 'مانتو لینن', description: 'جنس لینن', specs: { جنس: 'لینن' }, basePrice: 1000, images: ['a', 'b'],
@@ -79,5 +79,23 @@ describe('ProductQualityReviewService', () => {
     expect(await svc.unansweredQuestions('s1', 'p1')).toEqual(['آبرفت داره؟']);
     await svc.run('p1', false);
     expect((upsert.mock.calls[0] as any)[0].create.review.buyerQuestionsUnanswered).toEqual(['آبرفت داره؟']);
+  });
+});
+
+describe('mergeQualityAnswer (PQ-3)', () => {
+  it('فقط افزوده می‌شود؛ متن و specs قبلی دست‌نخورده؛ تکراری اضافه نمی‌شود', () => {
+    const out = mergeQualityAnswer('مانتو راحت و خنک.', [{ label: 'رنگ', value: 'مشکی' }], {
+      descriptionAddition: 'جنسش نخ پنبه است و با ماشین ۳۰ درجه شسته می‌شود.',
+      specsAdditions: [{ label: 'جنس', value: 'نخ پنبه' }, { label: 'رنگ', value: 'سفید' }],
+    });
+    expect(out.description).toBe('مانتو راحت و خنک.\nجنسش نخ پنبه است و با ماشین ۳۰ درجه شسته می‌شود.');
+    expect(out.specs).toEqual([{ label: 'رنگ', value: 'مشکی' }, { label: 'جنس', value: 'نخ پنبه' }]);
+    const again = mergeQualityAnswer(out.description, out.specs, {
+      descriptionAddition: 'جنسش نخ پنبه است و با ماشین ۳۰ درجه شسته می‌شود.', specsAdditions: [],
+    });
+    expect(again.description).toBe(out.description);
+  });
+  it('addition خالی → توضیح بدون تغییر', () => {
+    expect(mergeQualityAnswer('abc', [], { descriptionAddition: null, specsAdditions: [] }).description).toBe('abc');
   });
 });
