@@ -11,6 +11,8 @@ import { getProductQualityGuide } from './product-quality-guides';
 import { ruleReview } from './product-quality-rules';
 import { clampProductSpecs, parseProductSpecs, type ProductSpecItem } from './product-specs.types';
 import { setQualityReviewHandler } from './quality-review-scheduler';
+import { maskPaymentSecrets } from '../../common/utils/payment-secret-mask.util';
+import { assertQualityApplyCap } from './quality-apply-cap';
 
 const MODEL = 'openai/gpt-5.4-mini';
 const MAX_DESCRIPTION_CHARS = 2000;
@@ -183,7 +185,8 @@ export class ProductQualityReviewService implements OnModuleInit, OnModuleDestro
       model: this.provider(MODEL),
       schema: reviewSchema,
       system: SYSTEM_PROMPT,
-      prompt: [
+      // REV-3 — توضیح محصول متن آزاد است؛ شماره کارت/شبا به مدل نرسد
+      prompt: maskPaymentSecrets([
         `دسته: ${product.store.category ?? 'نامشخص'}`,
         `نام: ${product.name}`,
         `قیمت: ${product.basePrice} تومان`,
@@ -193,7 +196,7 @@ export class ProductQualityReviewService implements OnModuleInit, OnModuleDestro
         `گزینه‌ها: ${JSON.stringify(options)}`,
         `آیتم‌های راهنمای این دسته:\n${guide.map((g) => `- ${g.key}: ${g.label}`).join('\n')}`,
         questions.length ? `سؤال‌های واقعی بی‌جواب مشتری‌ها:\n${questions.map((q) => `- ${q}`).join('\n')}` : '',
-      ].filter(Boolean).join('\n'),
+      ].filter(Boolean).join('\n')),
     });
 
     // فقط کلیدهای راهنما معتبرند؛ مدل نباید آیتم اختراع کند
@@ -276,6 +279,7 @@ export class ProductQualityReviewService implements OnModuleInit, OnModuleDestro
     const item = guide.find((g) => g.key === key);
     if (!item) throw new NotFoundException();
     const specs = parseProductSpecs(product.specs);
+    await assertQualityApplyCap(this.redis, product.storeId);
     setCallSite('quality_apply');
     const { object } = await generateObject({
       model: this.provider(MODEL),
@@ -285,7 +289,7 @@ export class ProductQualityReviewService implements OnModuleInit, OnModuleDestro
 - descriptionAddition: یک یا دو جمله‌ی فارسی کوتاه با همان لحن توضیح فعلی؛ اگر آن اطلاعات از قبل در توضیح هست null بده.
 - specsAdditions: فقط اگر پاسخ یک مشخصه‌ی کوتاه (مثل «جنس: نخ پنبه») دارد، حداکثر ۳ مورد؛ برچسبی که از قبل هست تکرار نشود.
 - هرگز چیزی که فروشنده نگفته اختراع نکن.`,
-      prompt: `نام محصول: ${product.name}\nتوضیح فعلی: ${product.description ?? '(خالی)'}\nمشخصات فعلی: ${JSON.stringify(specs)}\nپاسخ فروشنده: ${answer}`,
+      prompt: maskPaymentSecrets(`نام محصول: ${product.name}\nتوضیح فعلی: ${product.description ?? '(خالی)'}\nمشخصات فعلی: ${JSON.stringify(specs)}\nپاسخ فروشنده: ${answer}`),
     });
     return mergeQualityAnswer(product.description, specs, object);
   }

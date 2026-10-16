@@ -68,6 +68,7 @@ describe('DemoService.convertToReal (DEMO-4)', () => {
     const calls: any = {};
     const tx = {
       storeBankCard: { deleteMany: jest.fn(async (a) => { calls.cards = a; }) },
+      salesConversation: { deleteMany: jest.fn(async (a) => { calls.convs = a; }) },
       product: { updateMany: jest.fn(async (a) => { calls.products = a; }) },
       store: { update: jest.fn(async (a) => { calls.store = a.data; return { id: 's1', isDemo: false, ...a.data }; }) },
     };
@@ -97,6 +98,7 @@ describe('DemoService.convertToReal (DEMO-4)', () => {
     expect(calls.store.isDemo).toBe(false);
     expect(calls.cards.where.storeId).toBe('s1');
     expect(calls.products.data.status).toBe('DRAFT');
+    expect(calls.convs.where.storeId).toBe('s1'); // REV-2
     expect(storeService.afterRealStoreCreated).toHaveBeenCalledWith('u1', expect.anything(), expect.any(Date), { fromDemo: true });
   });
 

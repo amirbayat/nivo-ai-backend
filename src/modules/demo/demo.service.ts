@@ -243,6 +243,9 @@ export class DemoService {
     const suggestion = await this.storeService.suggestSlug(store.name);
     const updated = await this.prisma.$transaction(async (tx) => {
       await tx.storeBankCard.deleteMany({ where: { storeId } });
+      // REV-2 — گفتگوها و سفارش‌های sandbox دمو (کارت ساختگی) نباید سفارش واقعی فروشگاه شوند؛
+      // Order و وابسته‌هایش با Cascade از روی گفتگو حذف می‌شوند
+      await tx.salesConversation.deleteMany({ where: { storeId } });
       await tx.product.updateMany({ where: { storeId }, data: { status: 'DRAFT' } });
       return tx.store.update({
         where: { id: storeId },

@@ -10,6 +10,8 @@ import { setCallSite } from '../../common/ai-cost-engine/ace-context';
 import { setStoreQualityReviewHandler } from './quality-review-scheduler';
 import { getStoreQualityGuide } from './store-quality-guides';
 import { ruleStoreReview, type StoreQualityInput } from './store-quality-rules';
+import { maskPaymentSecrets } from '../../common/utils/payment-secret-mask.util';
+import { assertQualityApplyCap } from './quality-apply-cap';
 
 const MODEL = 'openai/gpt-5.4-mini';
 const DEBOUNCE_MS = 10_000;
@@ -168,7 +170,8 @@ export class StoreQualityReviewService implements OnModuleInit, OnModuleDestroy 
       model: this.provider(MODEL),
       schema: reviewSchema,
       system: STORE_SYSTEM_PROMPT,
-      prompt: [
+      // REV-3 — متن‌های آزاد (یادداشت، معرفی، KB) ممکن است شماره کارت/شبا داشته باشند
+      prompt: maskPaymentSecrets([
         `دسته: ${store.category ?? 'نامشخص'}`,
         `فروشگاه ارسال دارد: ${store.requiresShipping ? 'بله' : 'خیر'}`,
         `معرفی برند: ${store.brandIntro ?? '(خالی)'}`,
@@ -183,7 +186,7 @@ export class StoreQualityReviewService implements OnModuleInit, OnModuleDestroy 
         `یادداشت‌های فروشنده (ownerNotes): ${base.ownerNotes ?? '(ندارد)'}`,
         `آیتم‌های راهنمای این دسته:\n${guide.map((g) => `- ${g.key} (${g.target}): ${g.label}`).join('\n')}`,
         questions.length ? `سؤال‌های واقعی بی‌جواب مشتری‌ها:\n${questions.map((q) => `- ${q.text}`).join('\n')}` : '',
-      ].filter(Boolean).join('\n'),
+      ].filter(Boolean).join('\n')),
     });
 
     const byKey = new Map(guide.map((g) => [g.key, g]));
@@ -259,6 +262,7 @@ export class StoreQualityReviewService implements OnModuleInit, OnModuleDestroy 
     const field = item.target as StoreTextField;
     const max = field === 'brandIntro' ? (store.leadCaptureOnly ? 2000 : 300) : 1000;
     const current = store[field] ?? '';
+    await assertQualityApplyCap(this.redis, storeId);
     setCallSite('store_quality_apply');
     const { object } = await generateObject({
       model: this.provider(MODEL),
@@ -272,7 +276,7 @@ export class StoreQualityReviewService implements OnModuleInit, OnModuleDestroy 
 - طول کل متن حداکثر ${max} کاراکتر باشد (فشرده بنویس).
 - چیزی که فروشنده نگفته اختراع نکن.
 - returnWindowDays و returnShippingPaidBy فقط اگر جواب فروشنده صریحاً مهلت یا هزینه‌ی برگشت را گفته؛ وگرنه null.`,
-      prompt: `متن فعلی: ${current || '(خالی)'}\nجواب فروشنده: ${answer}`,
+      prompt: maskPaymentSecrets(`متن فعلی: ${current || '(خالی)'}\nجواب فروشنده: ${answer}`),
     });
     const newText = object.newText.trim().slice(0, max);
     return {
