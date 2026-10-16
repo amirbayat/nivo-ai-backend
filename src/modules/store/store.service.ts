@@ -88,6 +88,7 @@ import {
   GoldPriceUnavailableError,
   GoldPricingNotConfiguredError,
 } from './product-pricing.util';
+import { bumpVersions } from '../../common/ai-cost-engine/version-keys';
 import { isNivoLeadStore } from '../../common/utils/store-mode';
 
 // docs/PRD-product-strategy-and-roadmap.md بخش ۳.۱ — چک‌لیست سطح فروشگاه
@@ -447,6 +448,7 @@ export class StoreService {
       }
       throw err;
     }
+    void bumpVersions({ storeId }); // ACE-3
     if (addingSnapppay) {
       this.productEvents.log('payment_method_added', { storeId, userId: sellerId }, { kind: 'snapppay' });
     }

@@ -1,5 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { RedisService } from '../../redis/redis.service';
+import { setAceRuntime } from './ace-runtime';
 import { LedgerEntry, setLedgerSink } from './ledger-sink';
 
 const FLUSH_INTERVAL_MS = 2000;
@@ -16,16 +18,25 @@ export class LedgerService implements OnModuleInit, OnModuleDestroy {
   private warned = false;
   private lastPurge = 0;
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly redis: RedisService,
+  ) {}
 
   onModuleInit(): void {
     setLedgerSink((e) => this.push(e));
+    // ACE — Redis و خواندن تنظیمات برای کش‌ها/کلید لایه‌ها (بدون DI در سرویس‌های مصرف‌کننده)
+    setAceRuntime({
+      redis: this.redis,
+      loadConfig: () => this.prisma.aiCostEngineConfig.findUnique({ where: { id: 'singleton' } }),
+    });
     this.timer = setInterval(() => void this.flush(), FLUSH_INTERVAL_MS);
     this.timer.unref?.();
   }
 
   async onModuleDestroy(): Promise<void> {
     setLedgerSink(null);
+    setAceRuntime({ redis: null, loadConfig: null });
     if (this.timer) clearInterval(this.timer);
     await this.flush();
   }

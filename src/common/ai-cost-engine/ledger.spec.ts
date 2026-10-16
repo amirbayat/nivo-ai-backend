@@ -43,7 +43,7 @@ describe('ACE-0 ledger', () => {
   });
 
   it('خطای Prisma هرگز throw نمی‌کند', async () => {
-    const svc = new LedgerService({ aiCallLedger: { createMany: jest.fn().mockRejectedValue(new Error('no table')) } } as never);
+    const svc = new LedgerService({ aiCallLedger: { createMany: jest.fn().mockRejectedValue(new Error('no table')) } } as never, {} as never);
     svc.push({ callSite: 'x', servedBy: 'llm' });
     await expect(svc.flush()).resolves.toBeUndefined();
   });

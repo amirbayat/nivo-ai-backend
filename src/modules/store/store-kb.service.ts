@@ -4,7 +4,10 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { setCallSite } from '../../common/ai-cost-engine/ace-context';
+import { getAceContext, setCallSite } from '../../common/ai-cost-engine/ace-context';
+import { memoCall } from '../../common/ai-cost-engine/memo-cache';
+import { cachedEmbedding } from '../../common/ai-cost-engine/embedding-cache';
+import { bumpVersions } from '../../common/ai-cost-engine/version-keys';
 import { embed, cosineSimilarity, generateObject, generateText } from 'ai';
 import type { RepairTextFunction, UserModelMessage } from 'ai';
 import { z } from 'zod';
@@ -61,6 +64,13 @@ const PRODUCT_ENRICHMENT_WEB_SEARCH_TOOLS = [
 // docs/PRD-seller-knowledge-base.md بخش ۲.۴ — اگر یک CanonicalProduct مشترک تازه‌تر از این
 // باشد، به‌جای فراخوان جدید وب‌سرچ همان نتیجه استفاده می‌شود (بدون کسر اعتبار).
 const CANONICAL_FRESHNESS_MS = 30 * 24 * 60 * 60 * 1000;
+
+const FAQ_PICK_SYSTEM = `تو داری بررسی می‌کنی که آیا یکی از سؤال-جواب‌های آماده‌ی زیر (که فروشنده از قبل
+در باکس دانش فروشگاهش ثبت کرده) واقعاً به سؤال مشتری جواب می‌دهد یا نه. حتی اگر فرمول‌بندی سؤال
+مشتری با سؤال ثبت‌شده فرق داشته باشد ولی معنایشان یکی باشد (مثل «قیمتش چقدره؟» در برابر
+«هزینه‌ها چقدره؟»)، آن را match در نظر بگیر. اگر یکی واقعاً جواب می‌دهد، answered=true و
+matchedIndex همان شماره‌ی کاندید بده. اگر هیچ‌کدام واقعاً ربطی ندارد یا کافی نیست، answered=false
+بده و matchedIndex را خالی بگذار — هیچ‌وقت صرفاً به‌خاطر شباهت موضوعی match اعلام نکن.`;
 
 function normalizeProductName(name: string): string {
   return name.trim().toLowerCase().replace(/\s+/g, ' ');
@@ -413,22 +423,34 @@ JSON را برگردان، بدون توضیح یا markdown fence.`,
       usage: { model: string; inputTokens: number; outputTokens: number };
     } | null> => {
       setCallSite('faq_pick');
-      const { object, usage } = await generateObject({
-        model: this.provider(model),
-        schema: z.object({
-          answered: z.boolean(),
-          matchedIndex: z.number().int().optional(),
-        }),
-        system: `تو داری بررسی می‌کنی که آیا یکی از سؤال-جواب‌های آماده‌ی زیر (که فروشنده از قبل
-در باکس دانش فروشگاهش ثبت کرده) واقعاً به سؤال مشتری جواب می‌دهد یا نه. حتی اگر فرمول‌بندی سؤال
-مشتری با سؤال ثبت‌شده فرق داشته باشد ولی معنایشان یکی باشد (مثل «قیمتش چقدره؟» در برابر
-«هزینه‌ها چقدره؟»)، آن را match در نظر بگیر. اگر یکی واقعاً جواب می‌دهد، answered=true و
-matchedIndex همان شماره‌ی کاندید بده. اگر هیچ‌کدام واقعاً ربطی ندارد یا کافی نیست، answered=false
-بده و matchedIndex را خالی بگذار — هیچ‌وقت صرفاً به‌خاطر شباهت موضوعی match اعلام نکن.`,
-        prompt: `سؤال مشتری: ${question}\n\nکاندیدها:\n${candidates
-          .map((c, i) => `[${i}] سؤال: ${c.question}\nجواب: ${c.answer}`)
-          .join('\n\n')}`,
-      });
+      const storeId = getAceContext()?.storeId;
+      const system = FAQ_PICK_SYSTEM;
+      const prompt = `سؤال مشتری: ${question}\n\nکاندیدها:\n${candidates
+        .map((c, i) => `[${i}] سؤال: ${c.question}\nجواب: ${c.answer}`)
+        .join('\n\n')}`;
+      // ACE-3 — memo دقیق (فقط داخل نوبت یک فروشگاه؛ I-2). روی hit usage صفر تا دوباره کسر نشود
+      const call = () =>
+        generateObject({
+          model: this.provider(model),
+          schema: z.object({
+            answered: z.boolean(),
+            matchedIndex: z.number().int().optional(),
+          }),
+          system,
+          prompt,
+        }).then((r) => ({
+          object: r.object,
+          usage: { inputTokens: r.usage.inputTokens ?? 0, outputTokens: r.usage.outputTokens ?? 0 },
+        }));
+      const { object, usage } = storeId
+        ? await memoCall({
+            callSite: 'faq_pick',
+            keyInput: { model, system, prompt },
+            sources: { storeId, kb: true },
+            onHit: (v) => ({ ...v, usage: { inputTokens: 0, outputTokens: 0 } }),
+            compute: call,
+          })
+        : await call();
       const matched =
         object.answered && object.matchedIndex !== undefined
           ? candidates[object.matchedIndex]
@@ -2060,16 +2082,20 @@ ${resourceText.slice(0, MAX_EXTRACTED_CHARS)}`,
 
   private invalidateCache(storeId: string): void {
     this.cache.delete(storeId);
+    // ACE-3 — هر تغییر KB نسخه‌ی کش‌های وابسته را بالا می‌برد
+    void bumpVersions({ storeId, kb: true });
   }
 
   private async computeEmbedding(text: string): Promise<number[] | null> {
     try {
-      setCallSite('embedding');
-      const { embedding } = await embed({
-        model: this.provider.embeddingModel(EMBEDDING_MODEL),
-        value: text,
+      return await cachedEmbedding(EMBEDDING_MODEL, text, async () => {
+        setCallSite('embedding');
+        const { embedding } = await embed({
+          model: this.provider.embeddingModel(EMBEDDING_MODEL),
+          value: text,
+        });
+        return embedding;
       });
-      return embedding;
     } catch (err) {
       this.logger.error(
         `embedding computation failed: ${err instanceof Error ? err.message : String(err)}`,
