@@ -39,7 +39,7 @@ describe('StoreService.create slug resolution [SP-2]', () => {
   it('creates without a slug: transliterated from the name', async () => {
     const { svc, prisma } = build();
     const store = await svc.create('s1', { name: 'مهتاب' } as never);
-    expect(store.slug).toBe('mhtab');
+    expect(store.slug).toBe('mahtab');
     expect(prisma.store.create).toHaveBeenCalledTimes(1);
   });
 
@@ -53,10 +53,10 @@ describe('StoreService.create slug resolution [SP-2]', () => {
     const a = build({ failFirstCreates: 1 });
     const store = await a.svc.create('s1', { name: 'مهتاب' } as never);
     expect(a.prisma.store.create).toHaveBeenCalledTimes(2);
-    expect(store.slug).toBe('mhtab-2');
+    expect(store.slug).toBe('mahtab-2');
     const b = build();
     const other = await b.svc.create('s2', { name: 'مهتاب' } as never);
-    expect(other.slug).toBe('mhtab');
+    expect(other.slug).toBe('mahtab');
     expect(other.slug).not.toBe(store.slug);
   });
 
