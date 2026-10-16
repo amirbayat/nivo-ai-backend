@@ -170,6 +170,7 @@ const MIN_ORDERS_FOR_PUBLIC_COUNT = 10;
 export interface PublicStoreAbout {
   name: string;
   logoKey: string | null;
+  mode: 'LEAD' | 'SHOP';
   memberSince: string;
   successfulOrders: number | null;
   approvalEtaLabel: string | null;
@@ -1014,6 +1015,7 @@ export class StoreService {
     return {
       name: store.name,
       logoKey: store.logoImageKey,
+      mode: store.leadCaptureOnly ? 'LEAD' : 'SHOP',
       memberSince: `${created.getUTCFullYear()}-${String(created.getUTCMonth() + 1).padStart(2, '0')}`,
       successfulOrders:
         successfulOrders >= MIN_ORDERS_FOR_PUBLIC_COUNT ? successfulOrders : null,

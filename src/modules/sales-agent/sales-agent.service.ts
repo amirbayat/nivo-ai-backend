@@ -173,6 +173,8 @@ export class SalesAgentService {
       storeId: store.id,
       storeName: store.name,
       storeLogoKey: store.logoImageKey,
+      // docs/PRD-nivo-lead-shop-seller-signup.md §5.1 — فرانت با این فلگ UI سفارش‌محور را در فروشگاه لید حذف می‌کند
+      mode: store.leadCaptureOnly ? ('LEAD' as const) : ('SHOP' as const),
       // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md — فرانت با این فلگ نوار دمو
       // را روی صفحه‌ی چت نشان می‌دهد؛ قبلاً این صفحه اصلاً نمی‌دانست فروشگاه دموست یا نه
       isDemo: store.isDemo,
@@ -238,6 +240,8 @@ export class SalesAgentService {
       storeId: store.id,
       storeName: store.name,
       storeLogoKey: store.logoImageKey,
+      // docs/PRD-nivo-lead-shop-seller-signup.md §5.1 — فرانت با این فلگ UI سفارش‌محور را در فروشگاه لید حذف می‌کند
+      mode: store.leadCaptureOnly ? ('LEAD' as const) : ('SHOP' as const),
       isDemo: store.isDemo,
       shopStreamEnabled: globalConfig.shopStreamEnabled,
       shopLandingEnabled: globalConfig.shopLandingEnabled,
@@ -293,6 +297,7 @@ export class SalesAgentService {
       storeId: conversation.storeId,
       storeName: conversation.store.name,
       storeLogoKey: conversation.store.logoImageKey,
+      mode: conversation.store.leadCaptureOnly ? ('LEAD' as const) : ('SHOP' as const),
       isDemo: conversation.store.isDemo,
       shopStreamEnabled: globalConfig.shopStreamEnabled,
       shopLandingEnabled: globalConfig.shopLandingEnabled,
@@ -1282,6 +1287,7 @@ export class SalesAgentService {
       storeId: conversation.storeId,
       storeName: conversation.store.name,
       storeLogoKey: conversation.store.logoImageKey,
+      mode: conversation.store.leadCaptureOnly ? ('LEAD' as const) : ('SHOP' as const),
       isDemo: conversation.store.isDemo,
       shopStreamEnabled: globalConfig.shopStreamEnabled,
       shopLandingEnabled: globalConfig.shopLandingEnabled,

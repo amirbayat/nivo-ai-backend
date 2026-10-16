@@ -47,6 +47,13 @@ describe('getPublicAbout [BC-3 B4]', () => {
     expect((await build({ samples: 9 }).getPublicAbout('mahtab')).approvalEtaLabel).toBe('حدود ۲ ساعت');
   });
 
+  // docs/PRD-nivo-lead-shop-seller-signup.md §7 تست ۱
+  it('returns mode LEAD for leadCaptureOnly stores and SHOP otherwise', async () => {
+    expect((await build({ store: { leadCaptureOnly: true } }).getPublicAbout('nivo')).mode).toBe('LEAD');
+    expect((await build({ store: { leadCaptureOnly: false } }).getPublicAbout('mahtab')).mode).toBe('SHOP');
+    expect((await build().getPublicAbout('mahtab')).mode).toBe('SHOP');
+  });
+
   it('exposes exactly the whitelisted fields (no cards, phones, tokens, owner)', async () => {
     const about = await build({ orders: 12, samples: 9 }).getPublicAbout('mahtab');
     expect(Object.keys(about).sort()).toEqual(
@@ -54,6 +61,7 @@ describe('getPublicAbout [BC-3 B4]', () => {
         'approvalEtaLabel',
         'logoKey',
         'memberSince',
+        'mode',
         'name',
         'paymentMethods',
         'returnPolicyText',
