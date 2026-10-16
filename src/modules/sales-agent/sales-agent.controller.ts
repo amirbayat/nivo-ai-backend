@@ -448,6 +448,15 @@ export class SalesAgentController {
     return this.salesAgentService.logUiEvent(conversationId, sessionToken, dto);
   }
 
+  @Get('chat/:conversationId/order-link/:orderCode')
+  getOrderTrackPath(
+    @Param('conversationId') conversationId: string,
+    @Param('orderCode') orderCode: string,
+    @Headers('x-session-token') sessionToken: string,
+  ) {
+    return this.salesAgentService.getOrderTrackPath(conversationId, sessionToken, orderCode);
+  }
+
   @Get('chat/:conversationId')
   getConversation(
     @Param('conversationId') conversationId: string,

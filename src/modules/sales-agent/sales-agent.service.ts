@@ -60,6 +60,8 @@ import {
 import { fa } from '../../i18n/fa';
 import { getRecentConversationEvents } from '../../common/utils/conversation-events.util';
 import { randomUUID } from 'crypto';
+import { normalizeOrderCodeInput } from '../../common/utils/order-code.util';
+import { ensureBuyerOrderLink } from '../order-lifecycle/order-link.util';
 import type { SendMessageDto } from './dto/send-message.dto';
 import {
   closeShopTurn,
@@ -1347,6 +1349,27 @@ export class SalesAgentService {
       isTest ? { ...props, test: true } : props,
     );
     return { ok: true };
+  }
+
+  // لینک عمومی پیگیری (/o/:code) فقط با کد کوتاه یا توکن امضاشده باز می‌شود، نه با کد نمایشی سفارش.
+  // دکمه‌ی «پیگیری» کارت سنجاق‌شده از اینجا مسیر درست را می‌گیرد؛ فقط برای سفارش‌های همین خریدار و همین فروشگاه.
+  // null یعنی لینک عمومی خاموش است (فلگ، secret یا APP_URL) و UI باید به «سفارش‌های من» برود
+  async getOrderTrackPath(conversationId: string, sessionToken: string, rawOrderCode: string) {
+    const conversation = await this.loadOwned(conversationId, sessionToken);
+    const orderCode = normalizeOrderCodeInput(rawOrderCode ?? '');
+    if (!orderCode) throw new NotFoundException(fa.salesAgent.orderNotFound);
+    const order = await this.prisma.order.findFirst({
+      where: {
+        orderCode,
+        storeId: conversation.storeId,
+        conversation: { customerId: conversation.customerId },
+      },
+      select: { id: true },
+    });
+    if (!order) throw new NotFoundException(fa.salesAgent.orderNotFound);
+    const url = await ensureBuyerOrderLink(this.prisma, order.id);
+    if (!url) return { path: null };
+    return { path: new URL(url).pathname };
   }
 
   async toggleSavedProduct(
