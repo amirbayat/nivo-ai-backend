@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -7,6 +8,7 @@ import { randomBytes } from 'crypto';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RedisService } from '../../redis/redis.service';
+import { StoreService } from '../store/store.service';
 import { fa } from '../../i18n/fa';
 import { DEMO_FAKE_CARD_NUMBER, DEMO_FAKE_CARD_OWNER } from '../../common/utils/store-mode';
 import { DEMO_CATEGORY_SLUGS, isDemoCategorySlug } from './demo-categories';
@@ -26,6 +28,7 @@ export class DemoService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
+    private readonly storeService: StoreService,
   ) {}
 
   // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۵.۱ — هر User حداکثر یک
@@ -205,9 +208,9 @@ export class DemoService {
     return { storeId: clone.id, slug: clone.slug };
   }
 
-  // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۵.۳ — دکمه‌ی «این رو
-  // فروشگاه واقعی من کن»؛ همان رکورد Store می‌ماند، فقط فلگ isDemo برداشته می‌شود — محصولات
-  // نمونه همان‌جا می‌مانند تا خودش ویرایش/حذفشان کند
+  // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۵.۳ + DEMO-4 — دکمه‌ی «این رو
+  // فروشگاه واقعی من کن»؛ همان رکورد Store می‌ماند ولی مثل ساخت فروشگاه تازه رفتار می‌کند:
+  // اعتبار هدیه، پاک‌شدن کارت قالب، محصولات نمونه DRAFT، slug بدون «demo-»، رویداد و پذیرش قوانین
   async convertToReal(userId: string, storeId: string) {
     const store = await this.prisma.store.findUnique({
       where: { id: storeId },
@@ -216,9 +219,31 @@ export class DemoService {
       throw new NotFoundException(fa.store.notFound);
     }
     if (!store.isDemo) return store;
-    return this.prisma.store.update({
-      where: { id: storeId },
-      data: { isDemo: false, leadCaptureOnly: false },
+
+    const existingReal = await this.prisma.store.count({
+      where: { sellerId: userId, isDemo: false },
     });
+    if (existingReal > 0) throw new ConflictException(fa.store.alreadyHasStore);
+
+    const now = new Date();
+    const trial = await this.storeService.newStoreTrialData(now);
+    const suggestion = await this.storeService.suggestSlug(store.name);
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await tx.storeBankCard.deleteMany({ where: { storeId } });
+      await tx.product.updateMany({ where: { storeId }, data: { status: 'DRAFT' } });
+      return tx.store.update({
+        where: { id: storeId },
+        data: {
+          isDemo: false,
+          leadCaptureOnly: false,
+          slug: suggestion.slug,
+          bankCardNumber: null,
+          bankOwnerName: null,
+          ...trial,
+        },
+      });
+    });
+    this.storeService.afterRealStoreCreated(userId, updated, now, { fromDemo: true });
+    return updated;
   }
 }

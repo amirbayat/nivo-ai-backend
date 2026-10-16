@@ -43,7 +43,7 @@ describe('DemoService.ensureDemoStore (DEMO-3 کپی کامل)', () => {
       $transaction: jest.fn(async (fn) => fn(tx)),
     };
     const redis: any = { incr: jest.fn(async () => 1), expire: jest.fn() };
-    return { svc: new DemoService(prisma, redis), calls };
+    return { svc: new DemoService(prisma, redis, {} as any), calls };
   };
 
   it('همه‌ی بخش‌ها کپی می‌شوند و شماره کارت قالب هرگز نه', async () => {
@@ -60,5 +60,46 @@ describe('DemoService.ensureDemoStore (DEMO-3 کپی کامل)', () => {
     expect(calls.kb.map((k) => k.question)).toEqual(['q1', 'q2']);
     expect(calls.kb[0].relatedProductId).toBe('np1');
     expect(calls.rule).toHaveLength(1);
+  });
+});
+
+describe('DemoService.convertToReal (DEMO-4)', () => {
+  const build = (existingReal = 0) => {
+    const calls: any = {};
+    const tx = {
+      storeBankCard: { deleteMany: jest.fn(async (a) => { calls.cards = a; }) },
+      product: { updateMany: jest.fn(async (a) => { calls.products = a; }) },
+      store: { update: jest.fn(async (a) => { calls.store = a.data; return { id: 's1', isDemo: false, ...a.data }; }) },
+    };
+    const prisma: any = {
+      store: {
+        findUnique: jest.fn(async () => ({ id: 's1', sellerId: 'u1', isDemo: true, name: 'قالب' })),
+        count: jest.fn(async () => existingReal),
+      },
+      $transaction: jest.fn(async (fn) => fn(tx)),
+    };
+    const storeService: any = {
+      newStoreTrialData: jest.fn(async () => ({ trialCreditRemainingToman: 300000, trialStartedAt: new Date(), trialEndsAt: new Date() })),
+      suggestSlug: jest.fn(async () => ({ slug: 'ghaleb' })),
+      afterRealStoreCreated: jest.fn(),
+    };
+    return { svc: new DemoService(prisma, {} as any, storeService), calls, storeService };
+  };
+
+  it('اعتبار هدیه، کارت خالی، محصولات DRAFT، slug جدید و رویداد', async () => {
+    const { svc, calls, storeService } = build();
+    await svc.convertToReal('u1', 's1');
+    expect(calls.store.trialCreditRemainingToman).toBe(300000);
+    expect(calls.store.bankCardNumber).toBeNull();
+    expect(calls.store.slug).toBe('ghaleb');
+    expect(calls.store.isDemo).toBe(false);
+    expect(calls.cards.where.storeId).toBe('s1');
+    expect(calls.products.data.status).toBe('DRAFT');
+    expect(storeService.afterRealStoreCreated).toHaveBeenCalledWith('u1', expect.anything(), expect.any(Date), { fromDemo: true });
+  });
+
+  it('اگر فروشنده از قبل فروشگاه واقعی دارد → Conflict', async () => {
+    const { svc } = build(1);
+    await expect(svc.convertToReal('u1', 's1')).rejects.toThrow();
   });
 });

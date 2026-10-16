@@ -257,11 +257,8 @@ export class StoreService {
     if (existingReal > 0) {
       throw new ConflictException(fa.store.alreadyHasStore);
     }
-    const config = await getSalesAgentGlobalConfig(this.prisma);
     const now = new Date();
-    const trialEndsAt = new Date(
-      now.getTime() + config.trialDurationDays * 24 * 60 * 60 * 1000,
-    );
+    const trial = await this.newStoreTrialData(now);
     // هیچ‌وقت ۴۰۹ برای تداخل slug نمی‌دهیم: اگر بین پیشنهاد و create کسی slug را گرفت (P2002)،
     // با گزینه‌ی بعدی تا ۵ بار تکرار می‌شود
     const triedSlugs = new Set<string>();
@@ -273,18 +270,13 @@ export class StoreService {
             ...dto,
             slug: suggestion.slug,
             sellerId,
-            trialStartedAt: now,
-            trialEndsAt,
-            trialCreditRemainingToman: config.trialCreditToman,
+            ...trial,
           },
         });
-        this.productEvents.log(
-          'store_created',
-          { storeId: store.id, userId: sellerId },
-          { category: dto.category ?? null, hasCustomSlug: !!dto.slug && dto.slug === store.slug },
-        );
-        void this.recordTermsAcceptance(sellerId, now);
-        if (!store.isDemo) void this.markLeadStoreCreated(sellerId);
+        this.afterRealStoreCreated(sellerId, store, now, {
+          category: dto.category ?? null,
+          hasCustomSlug: !!dto.slug && dto.slug === store.slug,
+        });
         return omitStoreSecrets(store);
       } catch (err) {
         if (!isSlugUniqueConflict(err) || attempt >= 5) {
@@ -295,6 +287,27 @@ export class StoreService {
         suggestion = await this.suggestSlug(dto.name, dto.slug, triedSlugs);
       }
     }
+  }
+
+  // DEMO-4 — منطق مشترک «فروشگاه واقعی تازه»: create و تبدیل دمو (DemoService.convertToReal)
+  async newStoreTrialData(now: Date) {
+    const config = await getSalesAgentGlobalConfig(this.prisma);
+    return {
+      trialStartedAt: now,
+      trialEndsAt: new Date(now.getTime() + config.trialDurationDays * 24 * 60 * 60 * 1000),
+      trialCreditRemainingToman: config.trialCreditToman,
+    };
+  }
+
+  afterRealStoreCreated(
+    sellerId: string,
+    store: { id: string; isDemo: boolean },
+    now: Date,
+    eventProps: Record<string, unknown>,
+  ): void {
+    this.productEvents.log('store_created', { storeId: store.id, userId: sellerId }, eventProps);
+    void this.recordTermsAcceptance(sellerId, now);
+    if (!store.isDemo) void this.markLeadStoreCreated(sellerId);
   }
 
   // docs/PRD-nivo-lead-shop-seller-signup.md §5.5 — لیدِ وصل‌شده به این کاربر → STORE_CREATED؛
