@@ -55,7 +55,8 @@ export class StoreCreditService {
     return {
       balanceToman: store.creditBalanceToman,
       conversationsLeftEstimate: estimateConversationsLeft(
-        store.creditBalanceToman,
+        // QA-10 — اعتبار هدیه‌ی آزمایشی هم قابل خرج کردن است و در برآورد می‌آید
+        store.creditBalanceToman + (trialActive ? store.trialCreditRemainingToman : 0),
         Number(usageRows[0]?.charged ?? 0),
         Number(usageRows[0]?.conversations ?? 0),
       ),

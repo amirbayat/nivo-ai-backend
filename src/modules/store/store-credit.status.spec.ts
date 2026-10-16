@@ -1,6 +1,6 @@
 import { StoreCreditService } from './store-credit.service';
 
-function build(rows: { conversations: number; charged: number }[], balance: number) {
+function build(rows: { conversations: number; charged: number }[], balance: number, trial = 0) {
   const prisma = {
     customer: { count: jest.fn().mockResolvedValue(0) },
     salesAgentGlobalConfig: {
@@ -16,8 +16,8 @@ function build(rows: { conversations: number; charged: number }[], balance: numb
       getOwned: jest.fn(async () => ({
         id: 's',
         creditBalanceToman: balance,
-        trialEndsAt: null,
-        trialCreditRemainingToman: 0,
+        trialEndsAt: trial > 0 ? new Date(Date.now() + 86_400_000) : null,
+        trialCreditRemainingToman: trial,
       })),
     } as never,
     {} as never,
@@ -42,5 +42,11 @@ describe('StoreCreditService.getStatus conversationsLeftEstimate [R3.4]', () => 
     const res = await svc.getStatus('u', 's');
     expect(res.balanceToman).toBe(-30_000);
     expect(res.conversationsLeftEstimate).toBe(0);
+  });
+  it('QA-10: اعتبار هدیه‌ی فعال در برآورد گفتگو شمرده می‌شود', async () => {
+    const svc = build([{ conversations: 40, charged: 400_000 }], 0, 100_000);
+    const res = await svc.getStatus('u', 's');
+    expect(res.trialCreditRemainingToman).toBe(100_000);
+    expect(res.conversationsLeftEstimate).toBe(10);
   });
 });
