@@ -18,7 +18,16 @@ export class MarketplaceService {
 
   async listActiveStores() {
     const stores = await this.prisma.store.findMany({
-      where: { status: 'ACTIVE' },
+      // [QA-2] فقط فروشگاه‌های واقعی: غیرلید/دمو/قالب و دارای حداقل یک محصول ACTIVE عکس‌دار
+      where: {
+        status: 'ACTIVE',
+        leadCaptureOnly: false,
+        isDemo: false,
+        isDemoTemplate: false,
+        products: {
+          some: { status: 'ACTIVE', NOT: { images: { isEmpty: true } } },
+        },
+      },
       select: {
         id: true,
         slug: true,
@@ -26,7 +35,11 @@ export class MarketplaceService {
         category: true,
         logoImageKey: true,
       },
-      orderBy: { name: 'asc' },
+      // لوگودارها اول
+      orderBy: [
+        { logoImageKey: { sort: 'asc', nulls: 'last' } },
+        { name: 'asc' },
+      ],
     });
     return { stores };
   }
