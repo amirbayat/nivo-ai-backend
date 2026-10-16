@@ -167,6 +167,7 @@ import { setLogCtx } from '../../common/logging/log-context';
 import { formatTomanAmountsInText, stripUnauthorizedPriceSentences } from '../../common/utils/fa-amounts.util';
 import { isValidCartQty, reconcileCart, lineKey } from './cart-validation.util';
 import type { CatalogLine } from './cart-validation.util';
+import { isNivoLeadStore } from '../../common/utils/store-mode';
 
 export type ConversationWithStore = Prisma.SalesConversationGetPayload<{
   include: { store: true };
@@ -2741,7 +2742,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         // [QA-8] فروشگاه لید: «اطلاعات فروشگاه» (معرفی/ارسال/مرجوعی) همین الان عیناً در پرامپت
         // سیستمِ همین نوبت هست؛ فراخوان LLM جداگانه‌ی tryAnswerFromStoreProfile فقط همان واقعیت‌ها
         // را بازنویسی می‌کرد (یک رفت‌وبرگشت کامل مدل، پشتِ سرِ جست‌وجوی باکس دانش) — حذف می‌شود
-        const leadOnly = conversation.store.leadCaptureOnly;
+        const leadOnly = isNivoLeadStore(conversation.store);
         const found = await this.findFaqAnswer(conversation, rt.ctx, question, {
           skipStoreProfileLlm: leadOnly,
         });
@@ -2847,7 +2848,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       update_cart: updateCartTool,
       view_cart: viewCartTool,
       apply_discount: applyDiscountTool,
-      ...(conversation.store.leadCaptureOnly
+      ...(isNivoLeadStore(conversation.store)
         ? { capture_lead: captureLeadTool }
         : { create_order: createOrderTool }),
       cancel_order: cancelOrderTool,
@@ -2932,7 +2933,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     // فروشگاه ادامه بدهد
     const catalogFacts =
       initialProducts.length === 0
-        ? conversation.store.leadCaptureOnly
+        ? isNivoLeadStore(conversation.store)
           ? 'این فروشگاه عمداً هیچ محصولی برای فروش ندارد — کسب‌وکاری است که فقط از طریق گفت‌وگو ' +
             'با مشتری‌ها آشنا می‌شود و لید جمع می‌کند. هیچ‌وقت نگو «محصولی نداریم»؛ طبق معرفی ' +
             'فروشگاه (storeProfile) و باکس دانش زیر به مشتری جواب بده.'
@@ -2954,7 +2955,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     // سوال‌پرسیدن تمام شده»ی آن با قانون «اول answer_faq، بعد CTA» تداخل پیدا می‌کرد (دیده‌شده:
     // یک سؤال قیمت واقعی بدون صدازدن answer_faq مستقیم با CTA جواب داده شد)
     const nudgeActive =
-      !conversation.store.leadCaptureOnly &&
+      !isNivoLeadStore(conversation.store) &&
       conversation.openQuestionStreak >= OPEN_QUESTION_NUDGE_THRESHOLD;
     // فیدبک کاربر ۱۴۰۵/۰۸/۲۱ — جایگزین همان نادج بالا، مخصوص leadCaptureOnly؛ همان شمارنده‌ی
     // openQuestionStreak را دوباره استفاده می‌کند (قبلاً برای این فروشگاه‌ها فقط بی‌مصرف بالا
@@ -2963,7 +2964,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     // آستانه پایین‌تر از OPEN_QUESTION_NUDGE_THRESHOLD عمدی است: این فانل کوتاه‌تر از مرور
     // کاتالوگ واقعی است و دیده‌شده مدل بدون این فشار تا بی‌نهایت فقط معرفی را تکرار می‌کند
     const leadCaptureNudgeActive =
-      conversation.store.leadCaptureOnly &&
+      isNivoLeadStore(conversation.store) &&
       conversation.openQuestionStreak >= LEAD_CAPTURE_NUDGE_THRESHOLD;
 
     // بدون execute — دقیقاً مثل respond_to_customer در callAgentCaptionWithRelevance (Track B)،
@@ -3060,7 +3061,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       description:
         'پاسخ نهایی به مشتری را اعلام می‌کند — دقیقاً یک‌بار، به‌عنوان آخرین قدم (مگر وقتی request_human_handoff زده‌ای)',
       inputSchema:
-        storePersuasionEnabled && conversation.store.leadCaptureOnly
+        storePersuasionEnabled && isNivoLeadStore(conversation.store)
           ? z.object({
               ...respondBaseShape,
               ...persuasionShape,
@@ -3068,7 +3069,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
             })
           : storePersuasionEnabled
             ? z.object({ ...respondBaseShape, ...persuasionShape })
-            : conversation.store.leadCaptureOnly
+            : isNivoLeadStore(conversation.store)
               ? z.object({ ...respondBaseShape, ...leadFunnelStageShape })
               : z.object({ ...respondBaseShape }),
     });
@@ -3085,7 +3086,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       nudgeActive,
       storePersuasionEnabled,
       urgentDiscount,
-      conversation.store.leadCaptureOnly,
+      isNivoLeadStore(conversation.store),
       leadCaptureNudgeActive,
     );
 
@@ -3208,7 +3209,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       'READY_WITHOUT_ACTION' | 'PAIN_NOT_SOLVABLE_CONTRADICTION' | null = null;
     const firstAttemptState = finalCall.input.customerState;
     const readyWithoutAction =
-      conversation.store.leadCaptureOnly && firstAttemptState.stage === 'READY';
+      isNivoLeadStore(conversation.store) && firstAttemptState.stage === 'READY';
     const painNotSolvableContradiction =
       firstAttemptState.painSolvable === 'NO' &&
       (firstAttemptState.stage === 'PITCHED' ||
@@ -3595,7 +3596,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     return {
       conversationState: conversation.currentState,
       cartItemCount: ctx.cart.length,
-      leadCaptureOnly: conversation.store.leadCaptureOnly,
+      leadCaptureOnly: isNivoLeadStore(conversation.store),
       catalogSize,
       hasWebsiteUrl: !!conversation.store.websiteUrl,
       nowIso: new Date().toISOString(),
@@ -3779,7 +3780,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         : {}),
       sales: mem,
     };
-    const funnel = conversation.store.leadCaptureOnly
+    const funnel = isNivoLeadStore(conversation.store)
       ? deriveLeadFunnelStage(mem.stage)
       : null;
     await this.prisma.salesConversation.update({
@@ -4145,7 +4146,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
               : ''
           }`
         : null,
-      leadCaptureInstruction: store.leadCaptureOnly
+      leadCaptureInstruction: isNivoLeadStore(store)
         ? buildSalesLeadCaptureNote()
         : null,
     });
@@ -6072,7 +6073,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       // (docs برای همین هدفشان brandIntro/باکس دانش است)؛ پاسخ ثابت «محصولی ثبت نشده» اینجا
       // گمراه‌کننده است، پس به همان مسیر doFaq (که brandIntro و باکس دانش را می‌خواند) ارجاع
       // می‌دهیم. بدون customerMessage (مثلاً startBrowse) چیزی برای جستجو نیست، رفتار قبلی می‌ماند
-      if (conversation.store.leadCaptureOnly && customerMessage) {
+      if (isNivoLeadStore(conversation.store) && customerMessage) {
         return this.doFaq(
           conversation,
           customerMessage,

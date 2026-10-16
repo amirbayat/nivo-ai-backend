@@ -2258,7 +2258,7 @@ model Store {
   // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۵.۱ — فروشگاه «قالب»:
   // دستی seed می‌شود، هیچ‌وقت مستقیم به بازدیدکننده نشان داده نمی‌شود، فقط منبع کپی است
   isDemoTemplate                 Boolean              @default(false)
-  // همان بخش — کپی شخصی هر بازدیدکننده‌ی لینک /demo/...؛ همیشه leadCaptureOnly=true
+  // همان بخش — کپی شخصی هر بازدیدکننده‌ی لینک /demo/...؛ leadCaptureOnly=false (DEMO-1؛ کپی‌های قدیمی true هستند و isNivoLeadStore آن‌ها را SHOP حساب می‌کند)
   // (هیچ‌وقت Order واقعی نمی‌سازد) تا نیازی به کارت بانکی/تسویه‌ی واقعی نباشد
   isDemo                         Boolean              @default(false)
   clonedFromStoreId              String?

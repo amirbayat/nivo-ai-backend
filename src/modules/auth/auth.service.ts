@@ -17,6 +17,7 @@ import { AnonMigrationService } from '../anon-chat/anon-migration.service';
 import { generateShortCode } from '../../common/utils/generate-code';
 import { normalizePhone } from '../../common/utils/normalize-phone';
 import { fa } from '../../i18n/fa';
+import { isNivoLeadStore } from '../../common/utils/store-mode';
 
 // مقادیر پیش‌فرض — همه از طریق env variable قابل بازنویسی‌اند (به ثانیه)
 const DEFAULT_OTP_TTL = 120; // OTP_TTL_SECONDS
@@ -251,9 +252,9 @@ export class AuthService {
     try {
       const conversation = await this.prisma.salesConversation.findUnique({
         where: { id: leadSignup.conversationId },
-        select: { store: { select: { leadCaptureOnly: true } } },
+        select: { store: { select: { leadCaptureOnly: true, isDemo: true } } },
       });
-      return conversation?.store.leadCaptureOnly === true;
+      return conversation ? isNivoLeadStore(conversation.store) : false;
     } catch {
       return false;
     }

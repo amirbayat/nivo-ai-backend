@@ -67,9 +67,9 @@ export class DemoService {
         shippingInfo: template.shippingInfo,
         returnPolicy: template.returnPolicy,
         requiresShipping: template.requiresShipping,
-        // همیشه true — کپی‌های دمو هیچ‌وقت Order واقعی نمی‌سازند (بخش ۵.۵/۱۶ سند)، صرف‌نظر
-        // از مقدار leadCaptureOnly خودِ فروشگاه قالب
-        leadCaptureOnly: true,
+        // DEMO-1 — leadCaptureOnly فقط برای صفحه‌ی ثبت‌نام خودِ نیوو است؛ دمو چت خریدارِ واقعی
+        // همان دسته است (سفارش sandbox، DEMO-2)
+        leadCaptureOnly: false,
         isDemo: true,
         clonedFromStoreId: template.id,
       },

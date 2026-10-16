@@ -285,7 +285,7 @@ export class SalesAdminService {
   // ردیف خلاصه‌ی بالای تب لیدها: گفتگوها → شماره ثبت‌شده → تأیید شده → فروشگاه ساخته شده
   async getLeadFunnelSummary(days = 7, storeId?: string) {
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-    const storeWhere = storeId ? { storeId } : { store: { leadCaptureOnly: true } };
+    const storeWhere = storeId ? { storeId } : { store: { leadCaptureOnly: true, isDemo: false } };
     const leadWhere = { createdAt: { gte: since }, signupStatus: { not: null }, ...storeWhere };
     const [conversations, phoneSubmitted, verified, storeCreated] = await Promise.all([
       this.prisma.salesConversation.count({ where: { createdAt: { gte: since }, isTest: false, ...storeWhere } }),

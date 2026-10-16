@@ -11,6 +11,7 @@ import { AdminNotificationsService } from '../admin-notifications/admin-notifica
 import { SellerBotApiClientService } from '../seller-bot/seller-bot-api-client.service';
 import { normalizeLeadPhone } from '../../common/utils/lead-phone';
 import { fa } from '../../i18n/fa';
+import { isNivoLeadStore } from '../../common/utils/store-mode';
 
 const CHAT_HISTORY_LIMIT = 30;
 
@@ -43,7 +44,7 @@ export class LeadSignupService {
       throw new ForbiddenException(fa.salesAgent.invalidSession);
     }
     // فقط فروشگاه لید؛ برای بقیه وجود این مسیر لو نمی‌رود
-    if (!conversation.store.leadCaptureOnly) throw new NotFoundException(fa.store.notFound);
+    if (!isNivoLeadStore(conversation.store)) throw new NotFoundException(fa.store.notFound);
     return conversation;
   }
 

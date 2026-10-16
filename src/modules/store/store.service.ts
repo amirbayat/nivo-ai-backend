@@ -88,6 +88,7 @@ import {
   GoldPriceUnavailableError,
   GoldPricingNotConfiguredError,
 } from './product-pricing.util';
+import { isNivoLeadStore } from '../../common/utils/store-mode';
 
 // docs/PRD-product-strategy-and-roadmap.md بخش ۳.۱ — چک‌لیست سطح فروشگاه
 // SP-2 §4.11.5 — نسخه‌ی متن شرایط استفاده که با ساخت فروشگاه پذیرفته می‌شود (R3.7 متن را می‌سازد)
@@ -1034,7 +1035,7 @@ export class StoreService {
     return {
       name: store.name,
       logoKey: store.logoImageKey,
-      mode: store.leadCaptureOnly ? 'LEAD' : 'SHOP',
+      mode: isNivoLeadStore(store) ? 'LEAD' : 'SHOP',
       memberSince: `${created.getUTCFullYear()}-${String(created.getUTCMonth() + 1).padStart(2, '0')}`,
       successfulOrders:
         successfulOrders >= MIN_ORDERS_FOR_PUBLIC_COUNT ? successfulOrders : null,
