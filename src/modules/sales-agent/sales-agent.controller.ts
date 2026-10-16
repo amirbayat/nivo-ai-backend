@@ -16,7 +16,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { SkipThrottle, Throttle } from '@nestjs/throttler';
-import { CHAT_START_LIMIT_PER_IP_PER_MIN } from '../../common/constants/sales-ops.constants';
+import { CHAT_START_LIMIT_PER_IP_PER_MIN, UI_EVENTS_LIMIT_PER_IP_PER_MIN } from '../../common/constants/sales-ops.constants';
 import type { Request, Response } from 'express';
 import { AdminGuard } from '../../common/guards/admin.guard';
 import { JwtGuard } from '../../common/guards/jwt.guard';
@@ -437,8 +437,9 @@ export class SalesAgentController {
     );
   }
 
-  // docs/PRD-buyer-chat-redesign.md B5 — رویدادهای رابط خریدار؛ بدون محدودیت IP (محدودیت ۶۰ در دقیقه برای هر گفتگو در سرویس)
-  @SkipThrottle()
+  // docs/PRD-buyer-chat-redesign.md B5 — رویدادهای رابط خریدار؛ ۶۰ در دقیقه برای هر گفتگو (در سرویس) و
+  // docs/PRD-fixes-after-buyer-redesign.md F9 — ۱۲۰ در دقیقه برای هر IP، قبل از چک توکن
+  @Throttle({ default: { limit: UI_EVENTS_LIMIT_PER_IP_PER_MIN, ttl: 60_000 } })
   @Post('chat/:conversationId/ui-events')
   logUiEvent(
     @Param('conversationId') conversationId: string,

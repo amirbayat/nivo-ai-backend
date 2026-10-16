@@ -1329,12 +1329,23 @@ export class SalesAgentService {
   // docs/PRD-buyer-chat-redesign.md B5 — رویدادهای رابط خریدار. نام از فهرست سفید (DTO)، props حداکثر ۱KB، ۶۰ در
   // دقیقه برای هر گفتگو. fire-and-forget؛ گفتگوی تست و فروشگاه دمو با props.test=true ثبت می‌شوند
   async logUiEvent(conversationId: string, sessionToken: string, dto: UiEventDto) {
-    // PRD B5: توکن اشتباه ۴۰۱ (نه ۴۰۳ مثل بقیه‌ی مسیرهای گفتگو)
-    const conversation = await this.loadOwned(conversationId, sessionToken).catch((err: unknown) => {
-      if (err instanceof ForbiddenException) throw new UnauthorizedException(fa.salesAgent.invalidSession);
-      throw err;
+    // PRD B5: توکن اشتباه ۴۰۱ (نه ۴۰۳ مثل بقیه‌ی مسیرهای گفتگو). F9: select سبک، چون این مسیر پرتکرار است
+    const conversation = await this.prisma.salesConversation.findUnique({
+      where: { id: conversationId },
+      select: {
+        id: true,
+        storeId: true,
+        isTest: true,
+        customer: { select: { sessionToken: true } },
+        store: { select: { isDemo: true } },
+      },
     });
-    const props = dto.props ?? {};
+    if (!conversation) throw new NotFoundException(fa.salesAgent.conversationNotFound);
+    if (!sessionToken || conversation.customer.sessionToken !== sessionToken) {
+      throw new UnauthorizedException(fa.salesAgent.invalidSession);
+    }
+    // F17: برچسب test فقط از سرور؛ هر props.test کلاینت دور ریخته می‌شود
+    const { test: _clientTest, ...props } = dto.props ?? {};
     if (Buffer.byteLength(JSON.stringify(props), 'utf8') > 1024) {
       throw new BadRequestException(fa.salesAgent.uiEventTooLarge);
     }

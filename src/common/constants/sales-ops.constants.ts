@@ -130,3 +130,6 @@ export const ORDER_CARRIERS = [
   'پیک',
   'سایر',
 ] as const;
+
+// docs/PRD-fixes-after-buyer-redesign.md F9 — سقف IP برای ui-events خریدار (علاوه بر ۶۰ در دقیقه برای هر گفتگو)
+export const UI_EVENTS_LIMIT_PER_IP_PER_MIN = 120;

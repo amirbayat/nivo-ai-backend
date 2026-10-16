@@ -2,6 +2,7 @@ import { BadRequestException, HttpException, UnauthorizedException, ForbiddenExc
 import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
 import { SalesAgentService } from './sales-agent.service';
+import { SalesAgentController } from './sales-agent.controller';
 import { UiEventDto } from './dto/ui-event.dto';
 
 // docs/PRD-buyer-chat-redesign.md B5 — POST v2/chat/:id/ui-events
@@ -64,5 +65,17 @@ describe('logUiEvent [BC-5 B5]', () => {
     const b = build({ isDemo: true });
     await b.svc.logUiEvent('c1', 'tok', ev('cart_add', { ok: true }));
     expect(b.log.mock.calls[0][2]).toEqual({ ok: true, test: true });
+  });
+
+  it('a client-sent props.test is dropped on a real conversation [FX-1 F9/F17]', async () => {
+    const { svc, log } = build();
+    await svc.logUiEvent('c1', 'tok', ev('cart_add', { ok: true, test: true }));
+    expect(log.mock.calls[0][2]).toEqual({ ok: true });
+  });
+
+  it('the route has an explicit IP throttle and is not skipped [F9]', () => {
+    const handler = SalesAgentController.prototype.logUiEvent;
+    expect(Reflect.getMetadata('THROTTLER:LIMITdefault', handler)).toBe(120);
+    expect(Reflect.getMetadata('THROTTLER:SKIPdefault', handler)).toBeFalsy();
   });
 });
