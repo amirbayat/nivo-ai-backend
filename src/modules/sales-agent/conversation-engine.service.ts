@@ -164,7 +164,7 @@ import {
   runLlmTurn,
 } from '../../common/services/llm-turn-guard';
 import { setLogCtx } from '../../common/logging/log-context';
-import { stripUnauthorizedPriceSentences } from '../../common/utils/fa-amounts.util';
+import { formatTomanAmountsInText, stripUnauthorizedPriceSentences } from '../../common/utils/fa-amounts.util';
 import { isValidCartQty, reconcileCart, lineKey } from './cart-validation.util';
 import type { CatalogLine } from './cart-validation.util';
 
@@ -237,6 +237,47 @@ type ProductVariantRow = {
 // محصول با گزینه فعال است یعنی حداقل یک ProductOptionType دارد — خودِ وجود واریانت‌ها هم
 // همین را نشان می‌دهد، ولی optionTypes منبع واقعی تصمیم است (ممکن است فروشنده گزینه ساخته
 // ولی هنوز هیچ ردیف موجودی‌دار نساخته باشد)
+// QA-15 — از پیام‌های خریدار (جدیدترین اول) برای هر بُعد، مقداری را پیدا می‌کند که دقیقاً یکی از
+// مقدارهای همان بُعد در متن آمده؛ اگر در یک پیام چند مقدار از یک بُعد آمد مبهم است و رد می‌شود.
+// ارقام فارسی/عربی/لاتین یکسان‌اند و «۴ ساله» با مقدار «۴ سال» جور می‌شود (نه «۱۴ ساله»).
+export function extractOptionValuesFromTexts(
+  optionTypes: ReadonlyArray<{ name: string; values: ReadonlyArray<{ value: string }> }>,
+  texts: readonly string[],
+): Record<string, string> {
+  const norm = (t: string) =>
+    toEnglishDigits(t)
+      .replace(/ي/g, 'ی')
+      .replace(/ك/g, 'ک')
+      .replace(/[‌\s]+/g, ' ')
+      .trim()
+      .toLowerCase();
+  const normTexts = texts.map(norm);
+  const found: Record<string, string> = {};
+  for (const type of optionTypes) {
+    for (const text of normTexts) {
+      const hits = type.values.filter((v) => {
+        const needle = norm(v.value);
+        if (!needle) return false;
+        let from = 0;
+        for (;;) {
+          const idx = text.indexOf(needle, from);
+          if (idx === -1) return false;
+          const before = idx > 0 ? text[idx - 1] : '';
+          const startsWithDigit = /\d/.test(needle[0]);
+          if (!(startsWithDigit && /\d/.test(before))) return true;
+          from = idx + 1;
+        }
+      });
+      if (hits.length === 1) {
+        found[type.name] = hits[0].value;
+        break;
+      }
+      if (hits.length > 1) break;
+    }
+  }
+  return found;
+}
+
 function hasVariantOptions(product: Pick<ProductLike, 'optionTypes'>): boolean {
   return (product.optionTypes?.length ?? 0) > 0;
 }
@@ -1202,7 +1243,8 @@ export class ConversationEngineService {
       temperature: 0.3,
     });
     return {
-      text: text.trim(),
+      // QA-17 — مبلغ‌های متن آزاد مدل با جداکننده‌ی هزارگان
+      text: formatTomanAmountsInText(text.trim()),
       inputTokens: usage.inputTokens ?? 0,
       outputTokens: usage.outputTokens ?? 0,
     };
@@ -4590,7 +4632,9 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       allowed,
       fa.salesAgent.priceSeeCard,
     );
-    if (stripped.changed) emitShopReplace(stripped.text);
+    // QA-17 — جداکننده‌ی هزارگان برای مبلغ‌های متن آزاد (بعد از گارد قیمت، که روی عدد خام کار می‌کند)
+    const formatted = formatTomanAmountsInText(stripped.text);
+    if (stripped.changed || formatted !== stripped.text) emitShopReplace(formatted);
     if (retries > 0 || stripped.changed) {
       this.logger.warn(
         `price guard: retries=${retries} stripped=${stripped.changed} conversation=${conversation.id}`,
@@ -4601,7 +4645,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         { retries, stripped: stripped.changed },
       );
     }
-    return stripped.text;
+    return formatted;
   }
 
   // R1.2 — فروشگاه معلق: پیام ثابت، بدون هیچ call مدل و بدون سفارش جدید. kill switch AI
@@ -6553,7 +6597,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       total,
     };
     const facts = cart.length
-      ? `سبد فعلی: ${cart.map((i) => `${i.name}${i.variantLabel ? ` (${i.variantLabel})` : ''} × ${i.qty}`).join('، ')} — جمع کل ${rawTotal} تومان${discountNote}${nextAppliedDiscount ? '' : `\n${fa.salesAgent.discountAppliedHint}`}`
+      ? `سبد فعلی: ${cart.map((i) => `${i.name}${i.variantLabel ? ` (${i.variantLabel})` : ''} × ${i.qty}`).join('، ')} — جمع کل ${rawTotal.toLocaleString('fa-IR')} تومان${discountNote}`
       : fa.salesAgent.cartEmpty;
     const addedLine = cart.find(
       (item) =>
@@ -6597,7 +6641,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       total,
     };
     const facts = ctx.cart.length
-      ? `سبد فعلی: ${ctx.cart.map((i) => `${i.name}${i.variantLabel ? ` (${i.variantLabel})` : ''} × ${i.qty}`).join('، ')} — جمع کل ${rawTotal} تومان${ctx.appliedDiscount ? `\nکد تخفیف ${ctx.appliedDiscount.code} فعاله — ${ctx.appliedDiscount.amountToman} تومان تخفیف، جمع با تخفیف ${total} تومان.` : ''}`
+      ? `سبد فعلی: ${ctx.cart.map((i) => `${i.name}${i.variantLabel ? ` (${i.variantLabel})` : ''} × ${i.qty}`).join('، ')} — جمع کل ${rawTotal.toLocaleString('fa-IR')} تومان${ctx.appliedDiscount ? `\nکد تخفیف ${ctx.appliedDiscount.code} فعاله — ${ctx.appliedDiscount.amountToman.toLocaleString('fa-IR')} تومان تخفیف، جمع با تخفیف ${total.toLocaleString('fa-IR')} تومان.` : ''}`
       : fa.salesAgent.cartEmpty;
     const reply = await this.caption(facts, conversation);
     await this.logReply(conversation, reply, uiBlock, undefined, {
@@ -6670,6 +6714,26 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     };
   }
 
+  private async prefilledOptionValues(
+    conversationId: string,
+    product: ProductLike,
+  ): Promise<Record<string, string>> {
+    try {
+      const events = await this.prisma.conversationEvent.findMany({
+        where: { conversationId, type: 'CUSTOMER_MESSAGE' },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+        select: { payload: true },
+      });
+      const texts = events
+        .map((e) => (e.payload as { text?: unknown } | null)?.text)
+        .filter((t): t is string => typeof t === 'string');
+      return extractOptionValuesFromTexts(product.optionTypes ?? [], texts);
+    } catch {
+      return {};
+    }
+  }
+
   // از handleAction (ADD_TO_CART روی محصول دارای گزینه) و doUpdateCart (مسیر NLU) صدا زده
   // می‌شود — همیشه از بُعد اول (position=0) شروع می‌کند
   private async startVariantSelection(
@@ -6678,11 +6742,24 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     product: ProductLike,
     qty: number,
   ): Promise<EngineResult> {
-    const firstOptionType = product.optionTypes![0];
+    // QA-15 — مقدارهایی که خریدار قبلاً در همین گفتگو گفته (مثل «۴ ساله»، «رنگ آبیش هست؟»)
+    // دوباره پرسیده نمی‌شود؛ فقط بُعدهای مشخص‌نشده چیپ می‌گیرند
+    const prefilled = await this.prefilledOptionValues(conversation.id, product);
+    const unresolvedType = this.firstUnresolvedOptionType(product, prefilled);
+    if (!unresolvedType && Object.keys(prefilled).length > 0) {
+      return this.finalizeVariantSelection(
+        conversation,
+        ctx,
+        product,
+        { productId: product.id, qty, selectedValues: prefilled, mode: 'DIMENSION' },
+        true,
+      );
+    }
+    const firstOptionType = unresolvedType ?? product.optionTypes![0];
     const pendingVariantSelection: PendingVariantSelection = {
       productId: product.id,
       qty,
-      selectedValues: {},
+      selectedValues: unresolvedType ? prefilled : {},
       mode: 'DIMENSION',
     };
     await this.persistTransition(conversation, conversation.currentState, {
@@ -6692,7 +6769,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     const uiBlock = this.buildVariantDimensionPrompt(
       product,
       firstOptionType,
-      {},
+      pendingVariantSelection.selectedValues,
     );
     const reply = fa.salesAgent.variantAskOption(firstOptionType.name);
     await this.logReply(conversation, reply, uiBlock);
@@ -6835,6 +6912,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         pending.qty,
         false,
         'ADD_TO_CART',
+        true,
       );
     }
 
@@ -6843,7 +6921,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       pending.selectedValues,
     );
     if (!optionType) {
-      return this.finalizeVariantSelection(conversation, ctx, product, pending);
+      return this.finalizeVariantSelection(conversation, ctx, product, pending, true);
     }
     const matched = optionType.values.find((v) => v.value === rawValue);
     if (!matched) {
@@ -6863,6 +6941,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       pending,
       optionType,
       matched.value,
+      true,
     );
   }
 
@@ -6875,6 +6954,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     pending: PendingVariantSelection,
     optionType: ProductOptionTypeWithValues,
     value: string,
+    buttonTemplate = false,
   ): Promise<EngineResult> {
     const nextSelectedValues = {
       ...pending.selectedValues,
@@ -6902,10 +6982,13 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       await this.logReply(conversation, reply, uiBlock);
       return { reply, uiBlocks: [uiBlock], state: conversation.currentState };
     }
-    return this.finalizeVariantSelection(conversation, ctx, product, {
-      ...pending,
-      selectedValues: nextSelectedValues,
-    });
+    return this.finalizeVariantSelection(
+      conversation,
+      ctx,
+      product,
+      { ...pending, selectedValues: nextSelectedValues },
+      buttonTemplate,
+    );
   }
 
   // docs/PRD-product-display-focus-and-variations.md §۴.۳ — همه‌ی ابعاد مشخص شدند؛ یا ترکیب
@@ -6916,6 +6999,8 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     ctx: ConversationContext,
     product: ProductLike,
     pending: PendingVariantSelection,
+    // QA-17 — چیپ/پیش‌پر‌شده از تاریخچه: جمله‌ی قالبی، نه caption() مدل
+    buttonTemplate = false,
   ): Promise<EngineResult> {
     const match = product.variants!.find((v) => {
       const values = this.optionValuesOf(v);
@@ -6940,6 +7025,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         pending.qty,
         false,
         'ADD_TO_CART',
+        buttonTemplate,
       );
     }
 

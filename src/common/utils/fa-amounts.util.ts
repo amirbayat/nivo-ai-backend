@@ -101,3 +101,18 @@ export function stripUnauthorizedPriceSentences(
   if (kept.length === parts.length) return { text, changed: false };
   return { text: [...kept, seeCardLine].join(' ').trim(), changed: true };
 }
+
+// QA-17 — اعداد ۴ رقمی و بیشتر کنار «تومان/تومن» (بدون جداکننده‌ی هزارگان) در متن آزاد LLM
+// با «٬» و ارقام فارسی نمایش داده شوند: «۳۵۰۰۰۰ تومن» ← «۳۵۰٬۰۰۰ تومن». عددهایی که از قبل
+// جداکننده دارند، اعشاری‌اند یا بخشی از عدد بزرگ‌ترند دست نمی‌خورند.
+const UNSEPARATED_TOMAN_RE =
+  /(?<![\d۰-۹٠-٩٬,٫.])([\d۰-۹٠-٩]{4,})(?![\d۰-۹٠-٩٬,٫])(?!\.[\d۰-۹])(\s*)(تومان|تومن)/g;
+
+export function formatTomanAmountsInText(text: string): string {
+  if (!text) return text;
+  return text.replace(UNSEPARATED_TOMAN_RE, (_m, digits: string, space: string, unit: string) => {
+    const n = Number(toEnglishDigits(digits));
+    if (!Number.isSafeInteger(n)) return _m;
+    return `${n.toLocaleString('fa-IR')}${space}${unit}`;
+  });
+}
