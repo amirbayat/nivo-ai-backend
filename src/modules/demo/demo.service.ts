@@ -8,6 +8,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RedisService } from '../../redis/redis.service';
 import { fa } from '../../i18n/fa';
+import { DEMO_FAKE_CARD_NUMBER, DEMO_FAKE_CARD_OWNER } from '../../common/utils/store-mode';
 import { DEMO_CATEGORY_SLUGS, isDemoCategorySlug } from './demo-categories';
 
 // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۲.۵ — سقف کل سشن دمو
@@ -42,7 +43,18 @@ export class DemoService {
 
     const template = await this.prisma.store.findFirst({
       where: { isDemoTemplate: true, category },
-      include: { products: { where: { status: 'ACTIVE' } } },
+      include: {
+        products: {
+          where: { status: 'ACTIVE' },
+          include: {
+            optionTypes: { include: { values: true } },
+            variants: true,
+          },
+        },
+        kbEntries: { where: { isActive: true } },
+        shippingRules: true,
+        discountCodes: true,
+      },
     });
     if (!template) throw new NotFoundException(fa.demo.templateNotFound);
 
@@ -54,40 +66,140 @@ export class DemoService {
     }
 
     const slug = `demo-${categorySlug}-${randomBytes(4).toString('hex')}`;
-    const clone = await this.prisma.store.create({
-      data: {
-        sellerId: userId,
-        slug,
-        name: template.name,
-        category: template.category,
-        businessType: template.businessType,
-        bankCardNumber: template.bankCardNumber,
-        bankOwnerName: template.bankOwnerName,
-        brandIntro: template.brandIntro,
-        shippingInfo: template.shippingInfo,
-        returnPolicy: template.returnPolicy,
-        requiresShipping: template.requiresShipping,
-        // DEMO-1 — leadCaptureOnly فقط برای صفحه‌ی ثبت‌نام خودِ نیوو است؛ دمو چت خریدارِ واقعی
-        // همان دسته است (سفارش sandbox، DEMO-2)
-        leadCaptureOnly: false,
-        isDemo: true,
-        clonedFromStoreId: template.id,
-      },
-    });
+    // DEMO-3 — کپی کامل داخل یک تراکنش؛ کارت بانکی همیشه ساختگی (DEMO-2)، هرگز شماره‌ی قالب
+    const clone = await this.prisma.$transaction(async (tx) => {
+      const store = await tx.store.create({
+        data: {
+          sellerId: userId,
+          slug,
+          name: template.name,
+          category: template.category,
+          businessType: template.businessType,
+          bankCardNumber: DEMO_FAKE_CARD_NUMBER,
+          bankOwnerName: DEMO_FAKE_CARD_OWNER,
+          brandIntro: template.brandIntro,
+          shippingInfo: template.shippingInfo,
+          returnPolicy: template.returnPolicy,
+          returnPolicyMode: template.returnPolicyMode,
+          returnWindowDays: template.returnWindowDays,
+          returnShippingPaidBy: template.returnShippingPaidBy,
+          requiresShipping: template.requiresShipping,
+          shippingDaysMin: template.shippingDaysMin,
+          shippingDaysMax: template.shippingDaysMax,
+          workingHoursStart: template.workingHoursStart,
+          workingHoursEnd: template.workingHoursEnd,
+          logoImageKey: template.logoImageKey,
+          persuasionTechniquesEnabled: template.persuasionTechniquesEnabled,
+          goldWageType: template.goldWageType,
+          goldWageValue: template.goldWageValue,
+          goldProfitPercent: template.goldProfitPercent,
+          goldVatPercent: template.goldVatPercent,
+          // DEMO-1 — leadCaptureOnly فقط برای صفحه‌ی ثبت‌نام خودِ نیوو است؛ دمو چت خریدارِ
+          // واقعی همان دسته است (سفارش sandbox، DEMO-2)
+          leadCaptureOnly: false,
+          isDemo: true,
+          clonedFromStoreId: template.id,
+        },
+      });
 
-    await this.prisma.product.createMany({
-      data: template.products.map((p) => ({
-        storeId: clone.id,
-        name: p.name,
-        basePrice: p.basePrice,
-        stock: p.stock,
-        trackStock: p.trackStock,
-        stockSetAt: p.stockSetAt,
-        status: 'ACTIVE' as const,
-        description: p.description,
-        images: p.images,
-        videos: p.videos as Prisma.InputJsonValue,
-      })),
+      await tx.storeBankCard.create({
+        data: { storeId: store.id, cardNumber: DEMO_FAKE_CARD_NUMBER, ownerName: DEMO_FAKE_CARD_OWNER },
+      });
+
+      const productIdMap = new Map<string, string>();
+      for (const p of template.products) {
+        const created = await tx.product.create({
+          data: {
+            storeId: store.id,
+            name: p.name,
+            basePrice: p.basePrice,
+            stock: p.stock,
+            trackStock: p.trackStock,
+            stockSetAt: p.stockSetAt,
+            status: 'ACTIVE',
+            description: p.description,
+            images: p.images,
+            videos: p.videos as Prisma.InputJsonValue,
+            specs: (p.specs ?? undefined) as Prisma.InputJsonValue | undefined,
+            code: p.code,
+            hasFulfillmentDelay: p.hasFulfillmentDelay,
+            persuasionTechniquesEnabled: p.persuasionTechniquesEnabled,
+            pricingModel: p.pricingModel,
+            weightGrams: p.weightGrams,
+            purityKarat: p.purityKarat,
+            goldWageType: p.goldWageType,
+            goldWageValue: p.goldWageValue,
+            goldProfitPercent: p.goldProfitPercent,
+            optionTypes: {
+              create: p.optionTypes.map((t) => ({
+                name: t.name,
+                position: t.position,
+                values: { create: t.values.map((v) => ({ value: v.value, position: v.position })) },
+              })),
+            },
+            // optionValues بر اساس «نام گزینه → مقدار» است، پس نیازی به map شناسه ندارد
+            variants: {
+              create: p.variants.map((v) => ({
+                optionValues: v.optionValues as Prisma.InputJsonValue,
+                priceOverride: v.priceOverride,
+                stock: v.stock,
+                sku: v.sku,
+                weightGrams: v.weightGrams,
+                purityKarat: v.purityKarat,
+              })),
+            },
+          },
+        });
+        productIdMap.set(p.id, created.id);
+      }
+
+      for (const kb of template.kbEntries) {
+        // آیتم دانشِ وابسته به محصولی که کپی نشده (غیرفعال) بی‌معناست
+        if (kb.relatedProductId && !productIdMap.has(kb.relatedProductId)) continue;
+        await tx.storeKbEntry.create({
+          data: {
+            storeId: store.id,
+            kind: kb.kind,
+            relatedProductId: kb.relatedProductId ? productIdMap.get(kb.relatedProductId) : null,
+            question: kb.question,
+            answer: kb.answer,
+            tags: kb.tags as Prisma.InputJsonValue,
+            embedding: (kb.embedding ?? undefined) as Prisma.InputJsonValue | undefined,
+            embeddingModel: kb.embeddingModel,
+            isActive: true,
+          },
+        });
+      }
+
+      if (template.shippingRules.length > 0) {
+        await tx.storeShippingRule.createMany({
+          data: template.shippingRules.map((r) => ({
+            storeId: store.id,
+            provinces: r.provinces,
+            cost: r.cost,
+            enabled: r.enabled,
+          })),
+        });
+      }
+
+      for (const d of template.discountCodes) {
+        // کد مخصوص محصولِ کپی‌نشده، اگر null می‌شد عمومی می‌شد؛ پس رد می‌شود
+        if (d.productId && !productIdMap.has(d.productId)) continue;
+        await tx.storeDiscountCode.create({
+          data: {
+            storeId: store.id,
+            code: d.code,
+            kind: d.kind,
+            value: d.value,
+            maxRedemptions: d.maxRedemptions,
+            expiresAt: d.expiresAt,
+            isActive: d.isActive,
+            minQuantity: d.minQuantity,
+            productId: d.productId ? productIdMap.get(d.productId)! : null,
+          },
+        });
+      }
+      return store;
     });
 
     return { storeId: clone.id, slug: clone.slug };
