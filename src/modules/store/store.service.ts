@@ -89,6 +89,7 @@ import {
   GoldPriceUnavailableError,
   GoldPricingNotConfiguredError,
 } from './product-pricing.util';
+import { scheduleProductReview } from './quality-review-scheduler';
 import { bumpVersions } from '../../common/ai-cost-engine/version-keys';
 import { isNivoLeadStore } from '../../common/utils/store-mode';
 
@@ -490,7 +491,14 @@ export class StoreService {
     return store;
   }
 
-  async createProduct(
+  // PQ-2 — بعد از هر ساخت/ویرایش، بررسی کیفیت (debounce‌شده، غیرهمزمان) تریگر می‌شود
+  async createProduct(...args: Parameters<StoreService['createProductImpl']>) {
+    const result = await this.createProductImpl(...args);
+    scheduleProductReview((result as { id?: string })?.id ?? '');
+    return result;
+  }
+
+  private async createProductImpl(
     sellerId: string,
     storeId: string,
     dto: CreateProductDto,
@@ -1465,7 +1473,13 @@ export class StoreService {
     return product;
   }
 
-  async updateProduct(
+  async updateProduct(...args: Parameters<StoreService['updateProductImpl']>) {
+    const result = await this.updateProductImpl(...args);
+    scheduleProductReview(args[2]);
+    return result;
+  }
+
+  private async updateProductImpl(
     sellerId: string,
     storeId: string,
     productId: string,
@@ -1616,7 +1630,13 @@ export class StoreService {
   }
 
   // SP-5/S4 — انتشار گروهی پیش‌نویس‌ها؛ هر محصول مستقل (یکی ناقص بقیه را نمی‌گیرد)
-  async publishProducts(sellerId: string, storeId: string, ids: string[]) {
+  async publishProducts(...args: Parameters<StoreService['publishProductsImpl']>) {
+    const result = await this.publishProductsImpl(...args);
+    for (const id of args[2]) scheduleProductReview(id);
+    return result;
+  }
+
+  private async publishProductsImpl(sellerId: string, storeId: string, ids: string[]) {
     await this.getOwned(sellerId, storeId);
     const unique = [...new Set(ids)];
     if (unique.length > 50) throw new BadRequestException(fa.store.publishTooMany);
@@ -1736,7 +1756,13 @@ export class StoreService {
   // docs/PRD-product-display-focus-and-variations.md §۴.۱ — همیشه جایگزین کامل (نه patch
   // تدریجی)، چون جدول ترکیب‌ها در پنل یک‌جا ذخیره می‌شود؛ هیچ محصولی هنگام ساخت اولیه این
   // را نمی‌سازد، فقط وقتی فروشنده صریح سوئیچ «چند حالت داره؟» را روشن کند
-  async replaceProductVariants(
+  async replaceProductVariants(...args: Parameters<StoreService['replaceProductVariantsImpl']>) {
+    const result = await this.replaceProductVariantsImpl(...args);
+    scheduleProductReview(args[2]);
+    return result;
+  }
+
+  private async replaceProductVariantsImpl(
     sellerId: string,
     storeId: string,
     productId: string,

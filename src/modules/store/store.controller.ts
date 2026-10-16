@@ -72,6 +72,7 @@ import { fa } from '../../i18n/fa';
 import { ProductAiFillService } from './product-ai-fill.service';
 import { PublishProductsDto } from './dto/publish-products.dto';
 import { AiFillProductDto } from './dto/ai-fill-product.dto';
+import { ProductQualityReviewService } from './product-quality-review.service';
 import { parsePageQuery } from '../../common/utils/page-query.util';
 
 // docs/PRD-mvp-launch-plan.md گام ۰ — ثبت‌نام فروشنده و ساخت فروشگاه
@@ -89,6 +90,7 @@ export class StoreController {
     private readonly productEnrichmentService: ProductEnrichmentService,
     private readonly refunds: RefundService,
     private readonly productAiFill: ProductAiFillService,
+    private readonly productQualityReview: ProductQualityReviewService,
   ) {}
 
   @Get('me')
@@ -248,6 +250,25 @@ export class StoreController {
     const channel =
       body?.channel === 'copy' || body?.channel === 'telegram' ? body.channel : 'native';
     return this.storeService.logProductLinkShared(user.sub, id, productId, channel);
+  }
+
+  // PQ-2 — کارت بررسی کیفیت توضیح؛ جدول نبود → rules_only
+  @Get(':id/products/:productId/quality-review')
+  getProductQualityReview(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('productId') productId: string,
+  ) {
+    return this.productQualityReview.getReview(user.sub, id, productId);
+  }
+
+  @Post(':id/products/:productId/quality-review/refresh')
+  refreshProductQualityReview(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('productId') productId: string,
+  ) {
+    return this.productQualityReview.refresh(user.sub, id, productId);
   }
 
   // SP-4 — یک محصول (پیش‌نویس هم) برای صفحه‌ی ویرایش

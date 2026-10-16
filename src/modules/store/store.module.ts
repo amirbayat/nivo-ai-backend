@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ProductQualityReviewService } from './product-quality-review.service';
 import { PaymentsModule } from '../payments/payments.module';
 import { CreditsModule } from '../credits/credits.module';
 import { UsageModule } from '../usage/usage.module';
@@ -63,6 +64,7 @@ import { ContentChangeLogService } from './content-change-log.service';
     ProductEnrichmentReminderService,
     ContentChangeLogService,
     ProductAiFillService,
+    ProductQualityReviewService,
   ],
   // docs/PRD-seller-guide-assistant-modal.md بخش ۱.۳ — ContentChangeLogService هم از
   // AdminModule لازم است (endpoint مشاهده‌ی لاگ تغییرات محتوا)
@@ -73,6 +75,7 @@ import { ContentChangeLogService } from './content-change-log.service';
   // StoreCreditService هم از SellerBotModule لازم است (دستور /credit) —
   // docs/PRD-seller-telegram-management-bot.md
   exports: [
+    ProductQualityReviewService,
     StoreService,
     StoreKbService,
     StoreCreditService,

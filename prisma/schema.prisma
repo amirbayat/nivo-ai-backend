@@ -3660,3 +3660,24 @@ model AiCostEngineConfig {
 
   @@map("ai_cost_engine_config")
 }
+
+// PQ-2/SQ-2 — نتیجه‌ی بررسی کیفیت توضیحات (محصول/فروشگاه). جدول جدا و بدون relation تا نبودنش فقط
+// همین سرویس را (با catch) تحت تأثیر بگذارد، نه کوئری‌های Product/Store
+enum QualityReviewEntity {
+  PRODUCT
+  STORE
+}
+
+model ContentQualityReview {
+  id         String              @id @default(uuid())
+  entityType QualityReviewEntity
+  entityId   String // productId یا storeId
+  storeId    String
+  review     Json
+  inputHash  String
+  reviewedAt DateTime            @default(now())
+
+  @@unique([entityType, entityId])
+  @@index([storeId])
+  @@map("content_quality_review")
+}
