@@ -56,6 +56,7 @@ import { getRecentConversationEvents } from '../../common/utils/conversation-eve
 import { computeConversationStats } from '../sales-agent/conversation-stats.util';
 import { TelegramApiClientService } from '../telegram/telegram-api-client.service';
 import { computeProductCompleteness } from './product-completeness.util';
+import { ruleReview, type QualityReviewProductInput } from './product-quality-rules';
 import { generateShortCode } from '../../common/utils/generate-code';
 import {
   parseProductVideos,
@@ -695,6 +696,28 @@ export class StoreService {
     };
   }
 
+  // PQ-1 — ورودی ruleReview از خود محصول (همراه optionTypes)؛ همه‌ی بخش‌ها fail-safe
+  productRuleReview(
+    product: {
+      name: string;
+      description: string | null;
+      specs?: unknown;
+      images: string[];
+      optionTypes?: { name: string; values: { value: string }[] }[];
+    },
+    category: string | null,
+  ) {
+    const input: QualityReviewProductInput = {
+      name: product.name ?? '',
+      description: product.description ?? null,
+      specs: product.specs,
+      imageCount: product.images?.length ?? 0,
+      category,
+      optionTypes: (product.optionTypes ?? []).map((o) => ({ name: o.name, values: o.values.map((v) => v.value) })),
+    };
+    return ruleReview(input);
+  }
+
   private async findProductsWithCompleteness(
     storeId: string,
     page?: { cursor?: string; limit: number },
@@ -723,8 +746,13 @@ export class StoreService {
     });
     const kbCountByProduct = await this.relatedKbEntryCounts(storeId);
     const stockAlertCounts = await this.stockAlerts.openCountsByProduct(storeId);
+    const storeCategory = (
+      await this.prisma.store.findUnique({ where: { id: storeId }, select: { category: true } })
+    )?.category ?? null;
     return products.map((product) => ({
       ...product,
+      // PQ-1 — لایه‌ی قاعده‌ای رایگان (فقط ok/unknown)
+      qualityRules: this.productRuleReview(product, storeCategory),
       stockAlertCount: stockAlertCounts.get(product.id) ?? 0,
       completeness: computeProductCompleteness(
         {
@@ -1984,7 +2012,8 @@ export class StoreService {
       },
     });
     if (!product) throw new NotFoundException(fa.store.productNotFound);
-    return product;
+    const store = await this.prisma.store.findUnique({ where: { id: storeId }, select: { category: true } });
+    return { ...product, qualityRules: this.productRuleReview(product, store?.category ?? null) };
   }
 
   // بدون چک مالکیت (سلر) — محتوای عمومی ویترین است، باید در <img> مرورگر مشتری ناشناس

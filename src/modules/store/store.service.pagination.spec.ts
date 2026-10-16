@@ -11,6 +11,7 @@ function rows(n: number) {
 function build(orderRows: unknown[], productRows: unknown[] = []) {
   const prisma = {
     order: { findMany: jest.fn().mockResolvedValue(orderRows) },
+    store: { findUnique: jest.fn().mockResolvedValue({ category: 'پوشاک' }) },
     product: {
       findMany: jest.fn().mockResolvedValue(productRows),
       groupBy: jest.fn().mockResolvedValue([]),
