@@ -180,14 +180,31 @@ export class OrderOpsService {
   }
 }
 
-const etaCache = new Map<string, { at: number; label: string }>();
+const etaCache = new Map<string, { at: number; label: string; hasData: boolean }>();
 
 export async function approvalEtaLabel(
   prisma: PrismaService,
   storeId: string,
 ): Promise<string> {
+  return (await approvalEta(prisma, storeId)).label;
+}
+
+// docs/PRD-buyer-chat-redesign.md B4 — «معمولاً X تایید می‌کنه» فقط وقتی نمونه‌ی کافی هست؛ وگرنه null
+// (approvalEtaLabel همیشه یک متن fallback می‌دهد و برای پیام سفارش خوب است، نه برای صفحه‌ی اعتماد)
+export async function approvalEtaOrNull(
+  prisma: PrismaService,
+  storeId: string,
+): Promise<string | null> {
+  const { label, hasData } = await approvalEta(prisma, storeId);
+  return hasData ? label : null;
+}
+
+async function approvalEta(
+  prisma: PrismaService,
+  storeId: string,
+): Promise<{ label: string; hasData: boolean }> {
   const hit = etaCache.get(storeId);
-  if (hit && Date.now() - hit.at < 24 * HOUR_MS) return hit.label;
+  if (hit && Date.now() - hit.at < 24 * HOUR_MS) return hit;
   const since = new Date(Date.now() - RECEIPT_SLA_LOOKBACK_DAYS * DAY_MS);
   const rows = await prisma.$queryRaw<{ samples: number; median_seconds: number | null }[]>`
     SELECT COUNT(*)::int AS samples,
@@ -212,10 +229,13 @@ export async function approvalEtaLabel(
   const samples = Number(rows[0]?.samples ?? 0);
   const medianSeconds = Number(rows[0]?.median_seconds ?? 0);
   let label: string = fa.orderNotify.etaFallback;
+  let hasData = false;
   if (samples >= RECEIPT_SLA_MIN_SAMPLES && medianSeconds > 0) {
     const hours = Math.max(1, Math.round(medianSeconds / 3600));
     label = fa.orderNotify.etaHours(hours);
+    hasData = true;
   }
-  etaCache.set(storeId, { at: Date.now(), label });
-  return label;
+  const entry = { at: Date.now(), label, hasData };
+  etaCache.set(storeId, entry);
+  return entry;
 }

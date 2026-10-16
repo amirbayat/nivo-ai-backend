@@ -35,6 +35,7 @@ import { ReplaceProductVariantsDto } from './dto/replace-product-variants.dto';
 import { UpdateStoreDto } from './dto/update-store.dto';
 import { fa } from '../../i18n/fa';
 import { BUYER_VISIBLE, UNLIMITED_STOCK } from './product-visibility';
+import { approvalEtaOrNull } from '../order-lifecycle/order-ops.service';
 import { SUCCESSFUL_ORDER_STATUSES } from '../../common/constants/sales-ops.constants';
 import { missingForPublish, type PublishCandidate } from './product-publish.util';
 import { ProductEventService } from '../../common/analytics/product-event.service';
@@ -163,6 +164,19 @@ export const PUBLIC_PRODUCT_SORTS = [
 ] as const;
 export type PublicProductSort = (typeof PUBLIC_PRODUCT_SORTS)[number];
 const MIN_ORDERS_FOR_POPULAR_SORT = 3;
+const MIN_ORDERS_FOR_PUBLIC_COUNT = 10;
+
+export interface PublicStoreAbout {
+  name: string;
+  logoKey: string | null;
+  memberSince: string;
+  successfulOrders: number | null;
+  approvalEtaLabel: string | null;
+  shippingDaysText: string | null;
+  shippingCostRange: { minCostToman: number; maxCostToman: number } | null;
+  returnPolicyText: string | null;
+  paymentMethods: ('CARD_TO_CARD' | 'SNAPPPAY')[];
+}
 
 @Injectable()
 export class StoreService {
@@ -957,6 +971,59 @@ export class StoreService {
       shippingDaysText: store.requiresShipping
         ? formatShippingDays(store.shippingDaysMin, store.shippingDaysMax)
         : null,
+    };
+  }
+
+  // docs/PRD-buyer-chat-redesign.md B4 — «درباره‌ی فروشگاه» برای خریدار؛ عمومی و فقط با فیلدهای
+  // فهرست سفید. شماره کارت، تلفن، نام مالک و هر فیلد مخصوص فروشنده عمداً برنمی‌گردد
+  async getPublicAbout(slug: string): Promise<PublicStoreAbout> {
+    const store = await this.prisma.store.findUnique({ where: { slug } });
+    if (!store) throw new NotFoundException(fa.store.notFound);
+    if (store.status === 'SUSPENDED') {
+      throw new ForbiddenException(fa.store.suspended);
+    }
+    if (store.status !== 'ACTIVE') throw new NotFoundException(fa.store.notFound);
+
+    const [successfulOrders, shippingRules, activeCards, approvalEta] =
+      await Promise.all([
+        this.prisma.order.count({
+          where: {
+            storeId: store.id,
+            status: { in: [...SUCCESSFUL_ORDER_STATUSES] },
+          },
+        }),
+        store.requiresShipping
+          ? this.prisma.storeShippingRule.findMany({
+              where: { storeId: store.id, enabled: true },
+              select: { cost: true },
+            })
+          : Promise.resolve([] as { cost: number }[]),
+        this.prisma.storeBankCard.count({
+          where: { storeId: store.id, isActive: true },
+        }),
+        approvalEtaOrNull(this.prisma, store.id).catch(() => null),
+      ]);
+    const costs = shippingRules.map((rule) => rule.cost);
+    const created = store.createdAt;
+    const paymentMethods: ('CARD_TO_CARD' | 'SNAPPPAY')[] = [];
+    if (activeCards > 0) paymentMethods.push('CARD_TO_CARD');
+    if (store.snapppayPaymentLink) paymentMethods.push('SNAPPPAY');
+    return {
+      name: store.name,
+      logoKey: store.logoImageKey,
+      memberSince: `${created.getUTCFullYear()}-${String(created.getUTCMonth() + 1).padStart(2, '0')}`,
+      successfulOrders:
+        successfulOrders >= MIN_ORDERS_FOR_PUBLIC_COUNT ? successfulOrders : null,
+      approvalEtaLabel: approvalEta,
+      shippingDaysText: store.requiresShipping
+        ? formatShippingDays(store.shippingDaysMin, store.shippingDaysMax)
+        : null,
+      shippingCostRange:
+        costs.length === 0
+          ? null
+          : { minCostToman: Math.min(...costs), maxCostToman: Math.max(...costs) },
+      returnPolicyText: store.returnPolicy?.trim() || null,
+      paymentMethods,
     };
   }
 

@@ -132,6 +132,12 @@ export class SalesAgentController {
     });
   }
 
+  // docs/PRD-buyer-chat-redesign.md B4 — «درباره‌ی فروشگاه»؛ عمومی، فقط فیلدهای فهرست سفید
+  @Get('stores/:slug/about')
+  getStoreAbout(@Param('slug') slug: string) {
+    return this.storeService.getPublicAbout(slug);
+  }
+
   // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۱۴.۲ — «مشاهده نظرات
   // خریداران قبلی»، عمومی/بدون session-token (عیناً الگوی public-products بالا) چون محتوای
   // تاییدشده‌ی نمایشی است، نه چیز خصوصی؛ برخلاف getApprovedForProduct داخلی (فقط مصرف AI)
