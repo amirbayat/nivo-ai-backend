@@ -1287,6 +1287,8 @@ export class SalesAgentService {
       shopLandingEnabled: globalConfig.shopLandingEnabled,
       responseStrategy: conversation.responseStrategy,
       awaitingReview: !!awaitingReview,
+      // ثبت‌نام خریدار؛ منبع حقیقت سرور است (localStorage ممکن است پاک شده یا گوشی دیگری باشد)
+      buyerVerified: !!conversation.customer.phoneVerifiedAt,
       awaitingSatisfactionCheck: !!(
         conversation.contextData as { awaitingSatisfactionCheck?: boolean } | null
       )?.awaitingSatisfactionCheck,
