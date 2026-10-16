@@ -139,6 +139,9 @@ export type UiBlock =
         purityKarat?: number | null;
         isWeightBasedPricing?: boolean;
         goldPricingSummary?: string | null;
+        // docs/PRD-buyer-chat-redesign.md B2 — فرانت با این می‌فهمد «افزودن» باید شیت محصول را باز کند؛
+        // در logReply پر می‌شود (کلاینت‌های قدیمی نادیده می‌گیرند)
+        hasVariants?: boolean;
       }[];
     }
   // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۱۳ — برخلاف PRODUCT_CARD که فقط

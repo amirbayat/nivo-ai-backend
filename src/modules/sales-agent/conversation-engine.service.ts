@@ -9032,6 +9032,27 @@ answered=false بده (به‌جای حدس‌زدن).`,
     conversation.contextData = written;
   }
 
+  // docs/PRD-buyer-chat-redesign.md B2 — PRODUCT_CARD از چند مسیر ساخته می‌شود (بعضی بدون
+  // optionTypes)، پس یک‌جا و قبل از ثبت، با یک query سبک hasVariants را پر می‌کنیم
+  private async withHasVariants(uiBlock: UiBlock): Promise<UiBlock> {
+    if (uiBlock.type !== 'PRODUCT_CARD' || uiBlock.products.length === 0) {
+      return uiBlock;
+    }
+    const rows = await this.prisma.productOptionType.findMany({
+      where: { productId: { in: uiBlock.products.map((p) => p.id) } },
+      select: { productId: true },
+      distinct: ['productId'],
+    });
+    const withOptions = new Set(rows.map((row) => row.productId));
+    return {
+      ...uiBlock,
+      products: uiBlock.products.map((p) => ({
+        ...p,
+        hasVariants: withOptions.has(p.id),
+      })),
+    };
+  }
+
   private async logReply(
     conversation: ConversationWithStore,
     text: string,
@@ -9041,6 +9062,7 @@ answered=false بده (به‌جای حدس‌زدن).`,
     // docs/PRD-sales-agent-sales-state-machine.md §۱۲.۱ — فقط مسیر ماشین‌حالت فروش
     quickReplies?: string[],
   ) {
+    uiBlock = await this.withHasVariants(uiBlock);
     // برخلاف قبل، طول کوتاه/رسیدن به سقف باید از هم تفکیک شوند (نه فقط یک بولین) — بخش
     // voice.reason در AI_TRACE (docs/PRD-admin-ai-decision-trace-log.md بخش ۱) به همین نیاز دارد
     let wantsVoice = false;

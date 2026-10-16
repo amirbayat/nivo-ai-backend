@@ -32,7 +32,11 @@ import { ToggleSavedProductDto } from './dto/toggle-saved-product.dto';
 import { SendBuyerOtpDto, VerifyBuyerOtpDto } from './dto/register-buyer.dto';
 import { SubscribeStockAlertDto } from './dto/subscribe-stock-alert.dto';
 import { SubmitCommentDto } from './dto/submit-comment.dto';
-import { StoreService } from '../store/store.service';
+import {
+  PUBLIC_PRODUCT_SORTS,
+  StoreService,
+  type PublicProductSort,
+} from '../store/store.service';
 import { CommentsService } from '../comments/comments.service';
 import { StorageService } from '../../storage/storage.service';
 import { mimeTypeForExt } from '../../common/validators/chat-image.validator';
@@ -105,8 +109,23 @@ export class SalesAgentController {
     @Query('q') q?: string,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
+    @Query('ids') ids?: string,
+    @Query('sort') sort?: string,
   ) {
+    // docs/PRD-buyer-chat-redesign.md B1 — ids: لیست جداشده با کاما، حداکثر ۲۰ (کارت چت/لینک محصول)؛
+    // sort ناشناخته → newest. محصول پنهان/پیش‌نویس هرگز برنمی‌گردد (BUYER_VISIBLE در سرویس)
+    const idList = ids
+      ? ids
+          .split(',')
+          .map((id) => id.trim())
+          .filter(Boolean)
+          .slice(0, 20)
+      : undefined;
     return this.storeService.listPublicProducts(slug, {
+      ...(idList ? { ids: idList } : {}),
+      sort: (PUBLIC_PRODUCT_SORTS as readonly string[]).includes(sort ?? '')
+        ? (sort as PublicProductSort)
+        : 'newest',
       q,
       page: Math.max(1, parseInt(page ?? '1', 10) || 1),
       pageSize: Math.min(60, Math.max(1, parseInt(pageSize ?? '24', 10) || 24)),

@@ -67,6 +67,7 @@ describe('buyer visibility [SP-3]', () => {
         store: { findUnique: async () => ({ id: 's1', status: 'ACTIVE', requiresShipping: false }) },
         product: { findMany, count },
         productComment: { groupBy: async () => [] },
+        order: { count: async () => 0 },
       },
     });
     await svc.listPublicProducts('shop', { page: 1, pageSize: 10 }).catch(() => undefined);

@@ -35,6 +35,7 @@ import { ReplaceProductVariantsDto } from './dto/replace-product-variants.dto';
 import { UpdateStoreDto } from './dto/update-store.dto';
 import { fa } from '../../i18n/fa';
 import { BUYER_VISIBLE, UNLIMITED_STOCK } from './product-visibility';
+import { SUCCESSFUL_ORDER_STATUSES } from '../../common/constants/sales-ops.constants';
 import { missingForPublish, type PublishCandidate } from './product-publish.util';
 import { ProductEventService } from '../../common/analytics/product-event.service';
 import { slugFromName, suggestSlug, type SlugSuggestion } from '../../common/utils/slug-from-name';
@@ -44,7 +45,6 @@ import {
   planVariantSync,
   variantComboKey,
 } from './seller-catalog.util';
-import { SUCCESSFUL_ORDER_STATUSES } from '../../common/constants/sales-ops.constants';
 import { StockAlertService } from '../order-lifecycle/stock-alert.service';
 import {
   addTehranDays,
@@ -154,6 +154,15 @@ function asStringRecord(value: unknown): Record<string, string> {
   }
   return out;
 }
+
+export const PUBLIC_PRODUCT_SORTS = [
+  'newest',
+  'popular',
+  'price_asc',
+  'price_desc',
+] as const;
+export type PublicProductSort = (typeof PUBLIC_PRODUCT_SORTS)[number];
+const MIN_ORDERS_FOR_POPULAR_SORT = 3;
 
 @Injectable()
 export class StoreService {
@@ -681,7 +690,14 @@ export class StoreService {
   // و بقیه‌ی فیلدهای داخلی که listProducts بالا برای پنل فروشنده برمی‌گرداند)
   async listPublicProducts(
     slug: string,
-    opts: { q?: string; page: number; pageSize: number; ids?: string[] },
+    opts: {
+      q?: string;
+      page: number;
+      pageSize: number;
+      ids?: string[];
+      // docs/PRD-buyer-chat-redesign.md B1 — پیش‌فرض newest
+      sort?: PublicProductSort;
+    },
   ) {
     const store = await this.prisma.store.findUnique({ where: { slug } });
     if (!store || store.status !== 'ACTIVE')
@@ -693,12 +709,45 @@ export class StoreService {
       ...(opts.q ? { name: { contains: opts.q, mode: 'insensitive' } } : {}),
       ...(opts.ids ? { id: { in: opts.ids } } : {}),
     };
-    const [items, total, shippingRules] = await Promise.all([
+    // B1 — «پرفروش‌ترین»: تعداد اقلام سفارش‌های موفق ۹۰ روز اخیر؛ items داخل Order یک Json است،
+    // پس شمارش در حافظه (سقف ۵۰۰۰ سفارش) و مرتب‌سازی/صفحه‌بندی شناسه‌ها قبل از خواندن کامل محصولات
+    const sort: PublicProductSort = opts.sort ?? 'newest';
+    let pageIds: string[] | null = null;
+    if (sort === 'popular') {
+      const [candidates, popularity] = await Promise.all([
+        this.prisma.product.findMany({
+          where,
+          select: { id: true, createdAt: true },
+        }),
+        this.popularityByProduct(store.id),
+      ]);
+      candidates.sort(
+        (a, b) =>
+          (popularity.get(b.id) ?? 0) - (popularity.get(a.id) ?? 0) ||
+          b.createdAt.getTime() - a.createdAt.getTime(),
+      );
+      pageIds = candidates
+        .slice((opts.page - 1) * opts.pageSize, opts.page * opts.pageSize)
+        .map((c) => c.id);
+    }
+    // قیمت طلا at-request-time محاسبه می‌شود؛ مرتب‌سازی قیمت برای محصولات طلا روی basePrice
+    // (سند B1 این سادگی را مجاز کرده)
+    const orderBy: Prisma.ProductOrderByWithRelationInput[] =
+      sort === 'price_asc'
+        ? [{ basePrice: 'asc' }, { createdAt: 'desc' }]
+        : sort === 'price_desc'
+          ? [{ basePrice: 'desc' }, { createdAt: 'desc' }]
+          : [{ createdAt: 'desc' }];
+    const [rawItems, total, shippingRules, successfulOrders] = await Promise.all([
       this.prisma.product.findMany({
-        where,
-        orderBy: { createdAt: 'desc' },
-        skip: (opts.page - 1) * opts.pageSize,
-        take: opts.pageSize,
+        where: pageIds ? { ...where, id: { in: pageIds } } : where,
+        orderBy,
+        ...(pageIds
+          ? {}
+          : {
+              skip: (opts.page - 1) * opts.pageSize,
+              take: opts.pageSize,
+            }),
         select: {
           id: true,
           name: true,
@@ -741,7 +790,18 @@ export class StoreService {
             select: { cost: true },
           })
         : Promise.resolve([] as { cost: number }[]),
+      this.prisma.order.count({
+        where: {
+          storeId: store.id,
+          status: { in: [...SUCCESSFUL_ORDER_STATUSES] },
+        },
+      }),
     ]);
+    const items = pageIds
+      ? [...rawItems].sort(
+          (a, b) => pageIds.indexOf(a.id) - pageIds.indexOf(b.id),
+        )
+      : rawItems;
 
     // docs/PRD-category-specific-product-pricing-and-attributes.md بخش ۲.۳/۴.۱ — قیمت محصولات
     // WEIGHT_BASED_FORMULA هیچ‌وقت از basePrice خوانده نمی‌شود، همیشه at-request-time محاسبه
@@ -890,12 +950,43 @@ export class StoreService {
       total,
       page: opts.page,
       pageSize: opts.pageSize,
+      // B1/§6.2 — تا سفارش موفق کمتر از ۳ است، «پرفروش‌ترین» رندوم به نظر می‌رسد و فرانت مخفی‌اش می‌کند
+      popularSortAvailable: successfulOrders >= MIN_ORDERS_FOR_POPULAR_SORT,
       shippingEstimate,
       // R3.3 — «معمولاً ۲–۴ روز کاری ارسال می‌شه»؛ فقط برای فروشگاه‌هایی که کالای فیزیکی ارسال می‌کنند
       shippingDaysText: store.requiresShipping
         ? formatShippingDays(store.shippingDaysMin, store.shippingDaysMax)
         : null,
     };
+  }
+
+  // docs/PRD-buyer-chat-redesign.md B1 — productId → تعداد فروش (مجموع qty) در ۹۰ روز اخیر
+  private async popularityByProduct(
+    storeId: string,
+  ): Promise<Map<string, number>> {
+    const since = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+    const orders = await this.prisma.order.findMany({
+      where: {
+        storeId,
+        status: { in: [...SUCCESSFUL_ORDER_STATUSES] },
+        createdAt: { gte: since },
+      },
+      select: { items: true },
+      orderBy: { createdAt: 'desc' },
+      take: 5000,
+    });
+    const counts = new Map<string, number>();
+    for (const order of orders) {
+      if (!Array.isArray(order.items)) continue;
+      for (const raw of order.items) {
+        const item = raw as { productId?: unknown; qty?: unknown } | null;
+        if (!item || typeof item.productId !== 'string') continue;
+        const qty =
+          typeof item.qty === 'number' && item.qty > 0 ? item.qty : 1;
+        counts.set(item.productId, (counts.get(item.productId) ?? 0) + qty);
+      }
+    }
+    return counts;
   }
 
   // docs/PRD-seller-demo-sandbox-hub-promo-and-release-prep.md بخش ۱۴.۲ — «مشاهده نظرات
