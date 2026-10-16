@@ -5,6 +5,7 @@ import { ConfigModule } from '@nestjs/config';
 import { validate } from './config/env.validation';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter';
 import { PrismaModule } from './prisma/prisma.module';
+import { AiCostEngineModule } from './common/ai-cost-engine/ai-cost-engine.module';
 import { RedisModule } from './redis/redis.module';
 import { AiProviderModule } from './common/services/ai-provider.module';
 import { ProductEventModule } from './common/analytics/product-event.module';
@@ -68,6 +69,7 @@ import { InstagramModule } from './modules/instagram/instagram.module';
     SentryModule.forRoot(),
     ConfigModule.forRoot({ isGlobal: true, validate }),
     PrismaModule,
+    AiCostEngineModule,
     RedisModule,
     AiProviderModule,
     ProductEventModule,

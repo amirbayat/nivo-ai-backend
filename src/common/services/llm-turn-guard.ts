@@ -5,6 +5,8 @@ import {
   LLM_QUEUE_MAX_WAITING,
   LLM_TURN_DEADLINE_MS,
 } from '../constants/sales-ops.constants';
+import { runWithAceTurn, type AceContext } from '../ai-cost-engine/ace-context';
+import { meterResponse } from '../ai-cost-engine/fetch-meter';
 
 // 2.1 — محافظ call های LLM موتور فروش. به‌جای دست‌زدن به ~۱۶ نقطه‌ی call، همه از
 // AiProviderService.buildClient رد می‌شوند و fetch آن از اینجا می‌گذرد. فقط وقتی «context
@@ -57,12 +59,14 @@ export function waitForLlmTurnsToDrain(timeoutMs: number): Promise<boolean> {
 export function runLlmTurn<T>(
   fn: () => Promise<T>,
   deadlineMs = LLM_TURN_DEADLINE_MS,
+  aceInit: Partial<AceContext> = {},
 ): Promise<T> {
   // turn تودرتو (مثلاً drain داخل handleMessage) deadline بیرونی را نگه می‌دارد
   if (storage.getStore()) return fn();
   activeTurns++;
+  // ACE-0 — turnId مشترک برای همه‌ی callهای این نوبت
   return storage
-    .run({ deadlineAt: Date.now() + deadlineMs }, fn)
+    .run({ deadlineAt: Date.now() + deadlineMs }, () => runWithAceTurn(fn, aceInit))
     .finally(() => {
       activeTurns--;
       if (activeTurns === 0) drainWaiters.splice(0).forEach((w) => w());
@@ -130,7 +134,13 @@ export function guardFetch(inner: FetchFn | undefined): FetchFn {
   return (async (input: Parameters<FetchFn>[0], init?: RequestInit) => {
     const call = inner ?? globalThis.fetch;
     const ctx = storage.getStore();
-    if (!ctx) return call(input, init);
+    const startedAt = Date.now();
+    // ACE-0 — meter سطح fetch: هیچ call مدلی از ledger فرار نمی‌کند (callSite ندارد → untagged)
+    if (!ctx) {
+      const res = await call(input, init);
+      meterResponse(input, init, res, startedAt);
+      return res;
+    }
 
     const remaining = ctx.deadlineAt - Date.now();
     if (remaining <= 0) throw new LlmDeadlineError();
@@ -142,7 +152,9 @@ export function guardFetch(inner: FetchFn | undefined): FetchFn {
         AbortSignal.timeout(Math.min(LLM_CALL_TIMEOUT_MS, left)),
       ];
       if (init?.signal) signals.push(init.signal);
-      return await call(input, { ...init, signal: AbortSignal.any(signals) });
+      const res = await call(input, { ...init, signal: AbortSignal.any(signals) });
+      meterResponse(input, init, res, startedAt);
+      return res;
     } finally {
       release();
     }

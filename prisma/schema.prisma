@@ -3621,3 +3621,42 @@ model AdminAuditLog {
   @@index([adminId, createdAt])
   @@map("admin_audit_logs")
 }
+
+// ACE-0 (docs/PRD-ai-cost-engine-2026-10-16.md) — ledger هر call مدل؛ منبع حقیقت هزینه‌ی AI.
+// نوشتن بافرشده و fail-safe است (جدول نبود → فقط warning، چیزی نمی‌شکند)
+model AiCallLedger {
+  id                String   @id @default(uuid())
+  createdAt         DateTime @default(now())
+  storeId           String?
+  conversationId    String?
+  turnId            String? // یک id برای همه‌ی callهای یک پیام خریدار
+  callSite          String // main_loop, faq_pick, ..., untagged
+  servedBy          String // llm | memo | semantic | deterministic | dedupe | single_flight
+  model             String?
+  inputTokens       Int      @default(0)
+  cachedInputTokens Int      @default(0)
+  cacheWriteTokens  Int      @default(0)
+  outputTokens      Int      @default(0)
+  reasoningTokens   Int      @default(0)
+  steps             Int      @default(0)
+  costUsdMicros     Int      @default(0) // واقعی از OpenRouter usage.cost؛ نبود → 0 با costIsEstimate
+  costIsEstimate    Boolean  @default(false)
+  avoidedUsdMicros  Int      @default(0) // برای hitها: هزینه‌ی تخمینی‌ای که خرج نشد
+  latencyMs         Int      @default(0)
+  meta              Json?
+
+  @@index([createdAt])
+  @@index([storeId, createdAt])
+  @@index([callSite, createdAt])
+  @@map("ai_call_ledger")
+}
+
+// ACE — کلید هر لایه (off|shadow|on) و پارامترها؛ singleton. جدول جدا تا نبودنش قابل‌catch باشد
+model AiCostEngineConfig {
+  id        String   @id @default("singleton")
+  layers    Json
+  params    Json
+  updatedAt DateTime @updatedAt
+
+  @@map("ai_cost_engine_config")
+}

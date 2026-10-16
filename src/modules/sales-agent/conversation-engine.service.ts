@@ -167,6 +167,7 @@ import { setLogCtx } from '../../common/logging/log-context';
 import { formatTomanAmountsInText, stripUnauthorizedPriceSentences } from '../../common/utils/fa-amounts.util';
 import { isValidCartQty, reconcileCart, lineKey } from './cart-validation.util';
 import type { CatalogLine } from './cart-validation.util';
+import { setCallSite } from '../../common/ai-cost-engine/ace-context';
 import { DEMO_FAKE_CARD_NUMBER, DEMO_FAKE_CARD_OWNER, isNivoLeadStore } from '../../common/utils/store-mode';
 
 export type ConversationWithStore = Prisma.SalesConversationGetPayload<{
@@ -995,6 +996,7 @@ export class ConversationEngineService {
     inputTokens: number;
     outputTokens: number;
   }> {
+    setCallSite('parse_intent');
     const { object, usage } = await generateObject({
       maxRetries: LLM_MAX_RETRIES,
       model: this.aiProvider.buildClient(undefined, {
@@ -1216,6 +1218,7 @@ export class ConversationEngineService {
     bridgeNeedSummary?: string | null,
   ): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
     const tone = toneForCategory(category);
+    setCallSite('caption_browse');
     const { text, usage } = await generateText({
       maxRetries: LLM_MAX_RETRIES,
       model: this.aiProvider.buildClient()(model),
@@ -1373,6 +1376,7 @@ export class ConversationEngineService {
     outputTokens: number;
   }> {
     const tone = toneForCategory(category);
+    setCallSite('caption_structured');
     const { object, usage } = await generateObject({
       maxRetries: LLM_MAX_RETRIES,
       model: this.aiProvider.buildClient(undefined, {
@@ -1564,6 +1568,7 @@ export class ConversationEngineService {
     skipGreeting = false,
   ): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
     const tone = toneForCategory(category);
+    setCallSite('caption_text');
     const { text, usage } = await generateText({
       maxRetries: LLM_MAX_RETRIES,
       model: this.aiProvider.buildClient()(model),
@@ -1880,6 +1885,7 @@ export class ConversationEngineService {
       }),
     });
 
+    setCallSite('caption_agentic');
     const result = await generateText({
       maxRetries: LLM_MAX_RETRIES,
       model: client,
@@ -3101,6 +3107,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
 
     let result;
     try {
+      setCallSite('main_loop');
       result = await generateShopTurn({
         maxRetries: LLM_MAX_RETRIES,
         model: this.aiProvider.buildClient(undefined, {
@@ -3230,6 +3237,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           `FULL_AGENT self-report contradiction (${reason}), retrying once: conversation=${conversation.id}`,
         );
         try {
+          setCallSite('main_retry_contradiction');
           const retryResult = await generateShopTurn({
             maxRetries: LLM_MAX_RETRIES,
             model: this.aiProvider.buildClient(undefined, {
@@ -3307,6 +3315,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         `FULL_AGENT price guard retry: amounts=[${suspiciousPriceClaims.join(', ')}] conversation=${conversation.id}`,
       );
       try {
+        setCallSite('main_retry_price');
         const retryResult = await generateShopTurn({
           maxRetries: LLM_MAX_RETRIES,
           model: this.aiProvider.buildClient(undefined, {
@@ -3648,6 +3657,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         .join('\n'),
     });
     const run = async (model: string) => {
+      setCallSite('perception');
       const { object, usage } = await generateObject({
         maxRetries: LLM_MAX_RETRIES,
         model: this.aiProvider.buildClient(undefined, {
@@ -4175,8 +4185,9 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           }
         : { role: 'assistant' as const, content: m.content },
     );
-    const generate = (system: string) =>
-      generateText({
+    const generate = (system: string) => {
+      setCallSite('main_state_machine');
+      return generateText({
         maxRetries: LLM_MAX_RETRIES,
         model: this.aiProvider.buildClient(undefined, {
           supportsStructuredOutputs: true,
@@ -4188,6 +4199,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         messages,
         temperature: 0.4,
       });
+    };
 
     // خروج بدون respond_to_customer (فلو قطعی/handoff/salvage): حافظه همچنان ثبت می‌شود
     const finishPlain = async (
@@ -4628,7 +4640,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     if (blocked) return blocked;
     if (isLlmSaturated()) return this.saturatedResult(conversation);
     return this.withTurnReservation(conversation, () =>
-      runLlmTurn(() => this.handleMessageTurn(conversation, text, opts)).catch(
+      runLlmTurn(() => this.handleMessageTurn(conversation, text, opts), undefined, { storeId: conversation.storeId, conversationId: conversation.id }).catch(
         (err: unknown) => this.onTurnError(conversation, err),
       ),
     );
@@ -5122,6 +5134,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     inputTokens: number;
     outputTokens: number;
   }> {
+    setCallSite('satisfaction');
     const { object, usage } = await generateObject({
       maxRetries: LLM_MAX_RETRIES,
       model: this.aiProvider.buildClient(undefined, {
@@ -5481,7 +5494,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     }
     if (isLlmSaturated()) return this.saturatedResult(conversation);
     return this.withTurnReservation(conversation, () =>
-      runLlmTurn(() => this.handleActionTurn(conversation, action)).catch(
+      runLlmTurn(() => this.handleActionTurn(conversation, action), undefined, { storeId: conversation.storeId, conversationId: conversation.id }).catch(
         (err: unknown) => this.onTurnError(conversation, err),
       ),
     );
@@ -8310,6 +8323,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     const attempt = async (
       model: string,
     ): Promise<{ extractedAmountToman: number; match: boolean } | null> => {
+      setCallSite('receipt_vision');
       const { object } = await generateObject({
         maxRetries: LLM_MAX_RETRIES,
         model: this.aiProvider.buildClient(undefined, {
@@ -8645,6 +8659,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
 
     const tone = toneForCategory(conversation.store.category);
     const attempt = async (model: string): Promise<string | null> => {
+      setCallSite('faq_desc');
       const { object, usage } = await generateObject({
         maxRetries: LLM_MAX_RETRIES,
         // فیدبک کاربر ۱۴۰۵/۰۷/۲۱ — بدون supportsStructuredOutputs=true، @ai-sdk/openai-compatible
@@ -8730,6 +8745,7 @@ answered=false بده (به‌جای حدس‌زدن).`,
 
     const tone = toneForCategory(conversation.store.category);
     const attempt = async (model: string): Promise<string | null> => {
+      setCallSite('faq_profile');
       const { object, usage } = await generateObject({
         maxRetries: LLM_MAX_RETRIES,
         // همون فیکس tryAnswerFromProductDescriptions بالا — بدون supportsStructuredOutputs=true

@@ -4,6 +4,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { setCallSite } from '../../common/ai-cost-engine/ace-context';
 import { embed, cosineSimilarity, generateObject, generateText } from 'ai';
 import type { RepairTextFunction, UserModelMessage } from 'ai';
 import { z } from 'zod';
@@ -411,6 +412,7 @@ JSON را برگردان، بدون توضیح یا markdown fence.`,
       answer: string;
       usage: { model: string; inputTokens: number; outputTokens: number };
     } | null> => {
+      setCallSite('faq_pick');
       const { object, usage } = await generateObject({
         model: this.provider(model),
         schema: z.object({
@@ -2062,6 +2064,7 @@ ${resourceText.slice(0, MAX_EXTRACTED_CHARS)}`,
 
   private async computeEmbedding(text: string): Promise<number[] | null> {
     try {
+      setCallSite('embedding');
       const { embedding } = await embed({
         model: this.provider.embeddingModel(EMBEDDING_MODEL),
         value: text,
