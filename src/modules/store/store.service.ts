@@ -81,6 +81,7 @@ import {
 } from '../../common/utils/shipping-days.util';
 import { ORDER_CARRIERS } from '../../common/constants/sales-ops.constants';
 import { RedisService } from '../../redis/redis.service';
+import { omitStoreSecrets } from './store-public-fields.util';
 import {
   computeDisplayPrice,
   describeGoldPricing,
@@ -215,7 +216,10 @@ export class StoreService {
         this.prisma.salesConversation.count({ where: { storeId: st.id, isTest: false } }),
       ),
     );
-    return stores.map((st, i) => ({ ...st, slugLocked: locks[i] > 0 }));
+    return stores.map((st, i) => ({
+      ...omitStoreSecrets(st),
+      slugLocked: locks[i] > 0,
+    }));
   }
 
   async isSlugAvailable(slug: string): Promise<boolean> {
@@ -280,7 +284,7 @@ export class StoreService {
         );
         void this.recordTermsAcceptance(sellerId, now);
         if (!store.isDemo) void this.markLeadStoreCreated(sellerId);
-        return store;
+        return omitStoreSecrets(store);
       } catch (err) {
         if (!isSlugUniqueConflict(err) || attempt >= 5) {
           if (isSlugUniqueConflict(err)) throw new ConflictException(fa.store.slugTaken);
@@ -333,7 +337,7 @@ export class StoreService {
       }
     }
     try {
-      return await this.prisma.store.update({
+      const updatedStore = await this.prisma.store.update({
         where: { id: storeId },
         data: {
           name: dto.name,
@@ -355,6 +359,7 @@ export class StoreService {
             : {}),
         },
       });
+      return omitStoreSecrets(updatedStore);
     } catch (err) {
       if (isSlugUniqueConflict(err)) {
         throw new ConflictException(fa.store.slugTaken);
@@ -454,7 +459,7 @@ export class StoreService {
           source,
         })),
     );
-    return updated;
+    return omitStoreSecrets(updated);
   }
 
   // مالکیت را چک می‌کند (۴۰۴/۴۰۳ مناسب پرتاب می‌کند) — الگوی ProjectsService.get
@@ -2200,10 +2205,12 @@ export class StoreService {
         .deleteObject(store.logoImageKey)
         .catch(() => undefined);
     }
-    return this.prisma.store.update({
-      where: { id: storeId },
-      data: { logoImageKey: key },
-    });
+    return omitStoreSecrets(
+      await this.prisma.store.update({
+        where: { id: storeId },
+        data: { logoImageKey: key },
+      }),
+    );
   }
 
   async removeStoreLogo(sellerId: string, storeId: string) {
@@ -2213,10 +2220,12 @@ export class StoreService {
         .deleteObject(store.logoImageKey)
         .catch(() => undefined);
     }
-    return this.prisma.store.update({
-      where: { id: storeId },
-      data: { logoImageKey: null },
-    });
+    return omitStoreSecrets(
+      await this.prisma.store.update({
+        where: { id: storeId },
+        data: { logoImageKey: null },
+      }),
+    );
   }
 
   // بدون چک مالکیت — محتوای عمومی ویترین، باید در <img> مرورگر مشتری ناشناس و در پیام
