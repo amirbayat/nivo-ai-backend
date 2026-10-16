@@ -24,7 +24,19 @@ export type ProductEventName =
   | 'ask_from_products'
   | 'checkout_sheet_opened'
   | 'about_opened'
-  | 'menu_item';
+  | 'menu_item'
+  // docs/PRD-nivo-lead-shop-seller-signup.md §5.9 — فانل فروشگاه لید (بدون PII)
+  | 'lead_view'
+  | 'lead_chip_how'
+  | 'lead_chip_price'
+  | 'lead_chip_demo'
+  | 'lead_chip_signup'
+  | 'lead_signup_open'
+  | 'lead_phone_submit'
+  | 'lead_otp_sent'
+  | 'lead_otp_fail'
+  | 'lead_verified'
+  | 'lead_go_onboarding';
 
 // فهرست سفید نام‌های مجاز ui-events (B5)
 export const SHOP_UI_EVENT_NAMES = [
@@ -35,6 +47,17 @@ export const SHOP_UI_EVENT_NAMES = [
   'checkout_sheet_opened',
   'about_opened',
   'menu_item',
+  'lead_view',
+  'lead_chip_how',
+  'lead_chip_price',
+  'lead_chip_demo',
+  'lead_chip_signup',
+  'lead_signup_open',
+  'lead_phone_submit',
+  'lead_otp_sent',
+  'lead_otp_fail',
+  'lead_verified',
+  'lead_go_onboarding',
 ] as const;
 export type ShopUiEventName = (typeof SHOP_UI_EVENT_NAMES)[number];
 
