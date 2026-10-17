@@ -30,7 +30,9 @@ export class ShadowJudgeService implements OnModuleInit, OnModuleDestroy {
     this.provider = this.aiProvider.buildClient(undefined, { supportsStructuredOutputs: true });
   }
 
+  // داوری خودکار فقط با ACE_SHADOW_JUDGE_AUTO=1 روشن می‌شود؛ دکمه‌ی دستی ادمین همیشه کار می‌کند
   onModuleInit(): void {
+    if (process.env.ACE_SHADOW_JUDGE_AUTO !== '1') return;
     this.timer = setInterval(() => void this.runBatch(DAILY_JUDGE_CAP).catch(() => undefined), INTERVAL_MS);
     this.timer.unref?.();
   }
