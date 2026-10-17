@@ -169,6 +169,7 @@ import { isValidCartQty, reconcileCart, lineKey } from './cart-validation.util';
 import type { CatalogLine } from './cart-validation.util';
 import { setCallSite } from '../../common/ai-cost-engine/ace-context';
 import { aceActive, resolveEngineMode } from '../../common/ai-cost-engine/ace-config';
+import { loopDietPrepareStep } from './loop-diet';
 import { PROMPT_CACHE_BREAK } from '../../common/ai-cost-engine/prompt-cache';
 import { DEMO_FAKE_CARD_NUMBER, DEMO_FAKE_CARD_OWNER, isNivoLeadStore } from '../../common/utils/store-mode';
 
@@ -3298,6 +3299,10 @@ ${customerStateSummary}${
       respondToCustomer,
     });
 
+    // ACE-6 — بودجه‌ی step فقط در موتور بهینه با لایه‌ی loopDiet
+    const dietArgs = ((await aceActive('loopDiet'))
+      ? { prepareStep: loopDietPrepareStep() }
+      : {}) as Record<string, never>;
     let result;
     try {
       setCallSite('main_loop');
@@ -3311,6 +3316,7 @@ ${customerStateSummary}${
         // تعداد قدم ابزار در هر نوبت محدود است، نه بی‌نهایت (Track B مشابه از ۴ استفاده می‌کند؛
         // اینجا چون کل مکالمه‌ست نه فقط doBrowse، کمی بیشتر لازم است)
         stopWhen: stepCountIs(6),
+        ...dietArgs,
         system: systemPrompt,
         prompt: customerMessage,
         temperature: 0.3,
@@ -3438,6 +3444,7 @@ ${customerStateSummary}${
             })(model),
             tools,
             stopWhen: stepCountIs(6),
+            ...dietArgs,
             system: `${systemPrompt}\n\n${
               readyWithoutAction
                 ? CTA_CORRECTIVE_INSTRUCTION
@@ -3516,6 +3523,7 @@ ${customerStateSummary}${
           })(model),
           tools,
           stopWhen: stepCountIs(6),
+          ...dietArgs,
           system: `${systemPrompt}\n\n${buildCorrectiveInstruction([
             { code: 'SUSPICIOUS_PRICE', amounts: suspiciousPriceClaims },
           ])}`,

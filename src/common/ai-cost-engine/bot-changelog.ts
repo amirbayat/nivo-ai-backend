@@ -41,4 +41,12 @@ export const BOT_CHANGELOG: BotChangelogEntry[] = [
     layerKey: 'promptCache',
     rollback: 'layers.promptCache=off در پنل؛ کامل: git revert کامیت ACE-2',
   },
+  {
+    date: '1405/07/25', item: 'ACE-6 (بودجه‌ی step)', commit: '(ace(ACE-6))', tag: 'ace/ACE-6/start..done',
+    sql: 'none',
+    change: 'prepareStep: از step چهارم یا ابزار تکراری با ورودی یکسان، respond_to_customer اجباری می‌شود',
+    answerImpact: 'نوبت‌های طولانی زودتر جمع می‌شوند؛ فقط موتور بهینه',
+    layerKey: 'loopDiet',
+    rollback: 'layers.loopDiet=off در پنل؛ کامل: git revert',
+  },
 ];
