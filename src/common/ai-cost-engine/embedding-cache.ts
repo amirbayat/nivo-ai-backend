@@ -1,5 +1,6 @@
 import { createHash } from 'crypto';
 import { aceParams, engineAllowsLayers, layerMode } from './ace-config';
+import { aceNote } from './ace-context';
 import { aceRuntime } from './ace-runtime';
 
 export function normalizeEmbeddingText(text: string): string {
@@ -27,7 +28,10 @@ export async function cachedEmbedding(
   const key = `ace:emb:${model}:${createHash('sha1').update(normalizeEmbeddingText(text)).digest('hex')}`;
   try {
     const hit = await redis.get(key);
-    if (hit) return decode(hit);
+    if (hit) {
+      aceNote('embedCache', 'embedding همین متن از کش برگشت؛ فراخوانی embedding انجام نشد', 'embedding');
+      return decode(hit);
+    }
   } catch {
     return compute();
   }

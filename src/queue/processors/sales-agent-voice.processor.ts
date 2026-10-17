@@ -29,6 +29,12 @@ const KIE_USD_PER_CREDIT = 0.005;
 // docs/PRD-sales-agent-voice.md بخش ۱.۲ — همان الگوی job-based کیو ویدیو (video-edit.processor.ts)
 // روی همان KieProviderService، فقط مدل/payload فرق دارد. نتیجه روی همان ConversationEvent
 // (نه یک event جدا) با آپدیت payload.voiceKey نوشته می‌شود.
+const TTS_CACHE_NOTE = {
+  layer: 'ttsCache',
+  reason: 'وویس همین متن با همین صدا قبلاً ساخته شده بود؛ همان فایل برگشت و هزینه‌ی TTS ثبت نشد',
+  callSite: 'tts',
+};
+
 @Processor('sales-agent-voice')
 export class SalesAgentVoiceProcessor {
   private readonly logger = new Logger(SalesAgentVoiceProcessor.name);
@@ -52,7 +58,7 @@ export class SalesAgentVoiceProcessor {
       // docs/PRD-sales-agent-voice.md بخش ۶.۴ — تخمین جنسیت خریدار از اسم تلگرام (اگر در
       // دسترس بود) و انتخاب صدای مخالف آن؛ وقتی اسم نیست/ناشناس است، صدای خنثی پیش‌فرض
       const voice = voiceForBuyer(conversation?.customer.fullName);
-      const { key, toneVariant } = await this.generateAndUpload(
+      const { key, toneVariant, cacheHit } = await this.generateAndUpload(
         eventId,
         traceEventId,
         text,
@@ -65,7 +71,7 @@ export class SalesAgentVoiceProcessor {
       this.logger.log(
         `voice generation succeeded for event=${eventId} conversation=${conversationId} channel=${conversation?.customer.channel ?? 'unknown'}`,
       );
-      await this.finishEvent(eventId, key, traceEventId, toneVariant, voice);
+      await this.finishEvent(eventId, key, traceEventId, toneVariant, voice, cacheHit ? TTS_CACHE_NOTE : undefined);
       await this.pushToTelegramIfNeeded(conversationId, key);
     } catch (err) {
       // فیدبک کاربر ۱۴۰۵/۰۷/۰۱ — قبلاً اینجا همیشه خطا را می‌بلعید (catch بدون throw دوباره)،
@@ -228,7 +234,7 @@ export class SalesAgentVoiceProcessor {
     } | null,
     voice: string,
     engine?: 'stable' | 'lean',
-  ): Promise<{ key: string; toneVariant: string }> {
+  ): Promise<{ key: string; toneVariant: string; cacheHit?: boolean }> {
     const modelSlug =
       this.config.get<string>('KIE_TTS_MODEL_SLUG') ?? DEFAULT_TTS_MODEL_SLUG;
     const tone = toneForCategory(storeCategory);
@@ -250,7 +256,7 @@ export class SalesAgentVoiceProcessor {
             storeId: billing?.storeId, conversationId, callSite: 'tts', servedBy: 'memo',
             model: modelSlug, meta: { engineMode: 'lean', ttsCache: 'hit' },
           });
-          return { key: hit, toneVariant: tone };
+          return { key: hit, toneVariant: tone, cacheHit: true };
         }
       } catch {
         /* fail-open */
@@ -338,7 +344,13 @@ export class SalesAgentVoiceProcessor {
     traceEventId?: string,
     toneVariant?: string,
     voiceName?: string,
+    aceNote?: { layer: string; reason: string; callSite?: string },
   ): Promise<void> {
+    const withNote = (p: Prisma.InputJsonObject): Prisma.InputJsonObject => {
+      if (!aceNote) return p;
+      const prev = Array.isArray(p.ace) ? (p.ace as Prisma.InputJsonValue[]) : [];
+      return { ...p, ace: [...prev, aceNote] };
+    };
     const event = await this.prisma.conversationEvent.findUnique({
       where: { id: eventId },
     });
@@ -364,7 +376,7 @@ export class SalesAgentVoiceProcessor {
         : { ...rest, voice: finalVoice };
       await this.prisma.conversationEvent.update({
         where: { id: eventId },
-        data: { payload },
+        data: { payload: withNote(payload) },
       });
     }
 
@@ -385,7 +397,7 @@ export class SalesAgentVoiceProcessor {
       : { generated: false, reason: 'FAILED' };
     await this.prisma.conversationEvent.update({
       where: { id: traceEventId },
-      data: { payload: { ...trace, voice } },
+      data: { payload: withNote({ ...trace, voice }) },
     });
   }
 

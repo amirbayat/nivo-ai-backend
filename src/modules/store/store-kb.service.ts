@@ -6,7 +6,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { getAceContext, setCallSite } from '../../common/ai-cost-engine/ace-context';
+import { aceNote, getAceContext, setCallSite } from '../../common/ai-cost-engine/ace-context';
 import { memoCall } from '../../common/ai-cost-engine/memo-cache';
 import { cachedEmbedding } from '../../common/ai-cost-engine/embedding-cache';
 import { scheduleStoreReview } from './quality-review-scheduler';
@@ -473,7 +473,9 @@ JSON را برگردان، بدون توضیح یا markdown fence.`,
     // ACE-5 — موتور بهینه + subcallDiet: انتخاب کاندید کار سبکی است، مدل perception (flash) کافی است.
     // خطا → همان زنجیره‌ی fallback قبلی روی defaultModel. (آستانه‌ی «بدون LLM» عمداً پیاده نشد: فیدبک
     // ۱۴۰۵/۰۷/۲۱ می‌گوید cosine تنها برای پارافریز فارسی قابل‌اعتماد نیست.)
-    const firstModel = (await aceActive('subcallDiet')) ? PERCEPTION_MODEL : defaultModel();
+    const lightPick = await aceActive('subcallDiet');
+    if (lightPick) aceNote('subcallDiet', 'انتخاب سؤال مرتبط از پایگاه دانش با مدل سبک انجام شد (به‌جای مدل اصلی)', 'faq_pick');
+    const firstModel = lightPick ? PERCEPTION_MODEL : defaultModel();
     try {
       return await attempt(firstModel);
     } catch (err) {

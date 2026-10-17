@@ -169,6 +169,7 @@ import { isValidCartQty, reconcileCart, lineKey } from './cart-validation.util';
 import type { CatalogLine } from './cart-validation.util';
 import { getAceContext, setCallSite } from '../../common/ai-cost-engine/ace-context';
 import { aceActive, resolveEngineMode } from '../../common/ai-cost-engine/ace-config';
+import { aceNote, aceTraceInfo } from '../../common/ai-cost-engine/ace-context';
 import { loopDietPrepareStep } from './loop-diet';
 import { PROMPT_CACHE_BREAK } from '../../common/ai-cost-engine/prompt-cache';
 import { DEMO_FAKE_CARD_NUMBER, DEMO_FAKE_CARD_OWNER, isNivoLeadStore } from '../../common/utils/store-mode';
@@ -3275,7 +3276,10 @@ ${customerStateSummary}${
     // گمراه‌کننده بود)؛ حالا متن واقعی پرامپت سیستم همین‌جا یک‌بار ساخته و هم به generateText هم
     // به logReply پاس داده می‌شود
     // ACE-2 — فقط موتور بهینه با لایه‌ی promptCache؛ پایدار همان تابع قدیمی را صدا می‌زند
-    const buildPrompt = (await aceActive('promptCache'))
+    const promptCacheOn = await aceActive('promptCache');
+    if (promptCacheOn)
+      aceNote('promptCache', 'prompt با ساختار قابل‌کش (بخش ثابت جدا از بخش متغیر) ساخته شد تا provider بخش ثابت را ارزان‌تر حساب کند', 'full_agent');
+    const buildPrompt = promptCacheOn
       ? this.buildFullAgentSystemPromptLean.bind(this)
       : this.buildFullAgentSystemPrompt.bind(this);
     const systemPrompt = await buildPrompt(
@@ -5376,7 +5380,9 @@ ${customerStateSummary}${
     conversation: ConversationWithStore,
   ): Promise<'POSITIVE' | 'NEGATIVE' | 'UNRELATED'> {
     // ACE-5 — موتور بهینه + subcallDiet: طبقه‌بندی رضایت با مدل سبک
-    const primaryModel = (await aceActive('subcallDiet'))
+    const lightSat = await aceActive('subcallDiet');
+    if (lightSat) aceNote('subcallDiet', 'طبقه‌بندی رضایت با مدل سبک انجام شد (به‌جای مدل اصلی)', 'satisfaction');
+    const primaryModel = lightSat
       ? PERCEPTION_MODEL
       : resolveModel(conversation.abVariant);
     const started = Date.now();
@@ -8909,7 +8915,9 @@ answered=false بده (به‌جای حدس‌زدن).`,
     };
 
     try {
-      return await attempt((await aceActive('subcallDiet')) ? PERCEPTION_MODEL : defaultModel());
+      const lightFaq = await aceActive('subcallDiet');
+      if (lightFaq) aceNote('subcallDiet', 'پاسخ از توضیحات/پروفایل با مدل سبک تولید شد (به‌جای مدل اصلی)', 'faq_desc');
+      return await attempt(lightFaq ? PERCEPTION_MODEL : defaultModel());
     } catch (err) {
       this.logger.error(
         `tryAnswerFromProductDescriptions failed (conversation=${conversation.id})`,
@@ -8991,7 +8999,9 @@ answered=false بده (به‌جای حدس‌زدن).`,
     };
 
     try {
-      return await attempt((await aceActive('subcallDiet')) ? PERCEPTION_MODEL : defaultModel());
+      const lightFaq = await aceActive('subcallDiet');
+      if (lightFaq) aceNote('subcallDiet', 'پاسخ از توضیحات/پروفایل با مدل سبک تولید شد (به‌جای مدل اصلی)', 'faq_profile');
+      return await attempt(lightFaq ? PERCEPTION_MODEL : defaultModel());
     } catch (err) {
       this.logger.error(
         `tryAnswerFromStoreProfile failed (conversation=${conversation.id})`,
@@ -9504,7 +9514,14 @@ answered=false بده (به‌جای حدس‌زدن).`,
     // همیشه همین‌جا ثبت می‌شود — finishEvent در sales-agent-voice.processor.ts بعداً این فیلد
     // را با نتیجه‌ی نهایی (موفق/ناموفق) آپدیت می‌کند
     const turnId = currentShopTurnId();
+    // موتور این نوبت + لایه‌های بهینه‌سازی که واقعاً به‌کار رفتند (با علت) — برای لاگ مکالمه‌ی ادمین
+    const aceInfo = aceTraceInfo();
+    const acePayload = {
+      engine: aceInfo.engine,
+      ...(aceInfo.used.length ? { ace: aceInfo.used } : {}),
+    } as unknown as Prisma.InputJsonObject;
     const payload: Prisma.InputJsonObject = {
+      ...acePayload,
       text,
       uiBlock,
       ...(flag ? { flag } : {}),
@@ -9527,6 +9544,7 @@ answered=false بده (به‌جای حدس‌زدن).`,
     let traceEventId: string | undefined;
     if (trace) {
       const tracePayload: Prisma.InputJsonObject = {
+        ...acePayload,
         intent: trace.intent,
         handler: trace.handler,
         factsOrPrompt: trace.factsOrPrompt,

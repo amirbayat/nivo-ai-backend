@@ -1,6 +1,6 @@
 import { createHash } from 'crypto';
 import { aceParams, engineAllowsLayers, layerMode } from './ace-config';
-import { getAceContext } from './ace-context';
+import { aceNote, getAceContext } from './ace-context';
 import { aceRuntime } from './ace-runtime';
 import { recordAiCall } from './ledger-sink';
 import { versionsFor } from './version-keys';
@@ -62,6 +62,7 @@ export async function memoCall<T>(opts: MemoOptions<T>): Promise<T> {
   };
   const recordHit = (servedBy: 'memo' | 'single_flight') => {
     const ctx = getAceContext();
+    aceNote('memo', servedBy === 'memo' ? 'جواب همین پرسش (ورودی دقیقاً یکسان) از کش برگشت؛ فراخوانی مدل انجام نشد' : 'همین فراخوانی هم‌زمان در جریان بود؛ منتظر ماند و جواب مشترک گرفت', opts.callSite);
     recordAiCall({
       storeId: ctx?.storeId, conversationId: ctx?.conversationId, turnId: ctx?.turnId,
       callSite: opts.callSite, servedBy, avoidedUsdMicros: opts.estimateCostUsdMicros ?? 0,

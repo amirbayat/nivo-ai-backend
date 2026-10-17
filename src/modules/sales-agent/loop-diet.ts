@@ -1,3 +1,5 @@
+import { aceNote } from '../../common/ai-cost-engine/ace-context';
+
 // ACE-6 — بودجه‌ی step حلقه‌ی اصلی (فقط موتور بهینه، لایه‌ی loopDiet).
 // جواب نهایی از طریق ابزار respond_to_customer می‌آید، پس به‌جای toolChoice:'none' آن ابزار را اجباری می‌کنیم.
 export const LOOP_DIET_FORCE_FROM_STEP = 3; // stepNumber صفرپایه: step چهارم به بعد
@@ -11,19 +13,26 @@ const sig = (s: StepLike | undefined): string | null => {
 };
 
 // هر ابزاری جز respond_to_customer دو step پشت‌سرهم با ورودی یکسان → loop
-export function shouldForceFinalAnswer(stepNumber: number, steps: StepLike[]): boolean {
-  if (stepNumber >= LOOP_DIET_FORCE_FROM_STEP) return true;
+export function forceReason(stepNumber: number, steps: StepLike[]): string | null {
+  if (stepNumber >= LOOP_DIET_FORCE_FROM_STEP)
+    return `step ${stepNumber + 1} رسید؛ جواب نهایی اجباری شد (سقف حلقه‌ی ابزار)`;
   if (steps.length >= 2) {
     const a = sig(steps[steps.length - 1]);
     const b = sig(steps[steps.length - 2]);
-    if (a && a === b && !a.startsWith('respond_to_customer:')) return true;
+    if (a && a === b && !a.startsWith('respond_to_customer:'))
+      return 'یک ابزار دو بار پشت‌سرهم با ورودی یکسان صدا شد؛ جواب نهایی اجباری شد';
   }
-  return false;
+  return null;
 }
 
+export const shouldForceFinalAnswer = (stepNumber: number, steps: StepLike[]): boolean =>
+  forceReason(stepNumber, steps) !== null;
+
 export function loopDietPrepareStep() {
-  return ({ stepNumber, steps }: { stepNumber: number; steps: StepLike[] }) =>
-    shouldForceFinalAnswer(stepNumber, steps)
-      ? { toolChoice: { type: 'tool' as const, toolName: 'respond_to_customer' } }
-      : undefined;
+  return ({ stepNumber, steps }: { stepNumber: number; steps: StepLike[] }) => {
+    const why = forceReason(stepNumber, steps);
+    if (!why) return undefined;
+    aceNote('loopDiet', why, 'full_agent');
+    return { toolChoice: { type: 'tool' as const, toolName: 'respond_to_customer' } };
+  };
 }
