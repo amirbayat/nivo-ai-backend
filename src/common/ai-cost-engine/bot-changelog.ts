@@ -57,4 +57,12 @@ export const BOT_CHANGELOG: BotChangelogEntry[] = [
     layerKey: 'subcallDiet',
     rollback: 'layers.subcallDiet=off در پنل؛ کامل: git revert',
   },
+  {
+    date: '1405/07/25', item: 'ACE-8 (کش وویس)', commit: '(ace(ACE-8))', tag: 'ace/ACE-8/start..done',
+    sql: 'none',
+    change: 'کش وویس: متن/صدا/مدل/فروشگاه یکسان → همان فایل mp3 (۷ روز)، بدون هزینه‌ی kie.ai',
+    answerImpact: 'ندارد (همان صدا)؛ روی hit کسر اعتبار وویس ثبت نمی‌شود (تصمیم ACE-14)',
+    layerKey: 'ttsCache',
+    rollback: 'layers.ttsCache=off در پنل؛ کامل: git revert',
+  },
 ];

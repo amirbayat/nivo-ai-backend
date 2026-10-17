@@ -12,6 +12,10 @@ import { toneForCategory } from '../../modules/sales-agent/tone-by-category';
 import { voiceForBuyer } from '../../modules/sales-agent/voice-gender';
 import { CreditService } from '../../modules/sales-agent/credit.service';
 import { buildSalesAgentVoiceWebhookCallbackUrl } from '../../modules/sales-agent/sales-agent-voice-webhook.constants';
+import { aceRuntime } from '../../common/ai-cost-engine/ace-runtime';
+import { layerMode } from '../../common/ai-cost-engine/ace-config';
+import { recordAiCall } from '../../common/ai-cost-engine/ledger-sink';
+import { createHash } from 'crypto';
 import type { SalesAgentVoiceJobData } from '../../modules/sales-agent/sales-agent.types';
 
 const POLL_INTERVAL_MS = 3_000;
@@ -41,7 +45,7 @@ export class SalesAgentVoiceProcessor {
 
   @Process('generate')
   async handleGenerate(job: Job<SalesAgentVoiceJobData>): Promise<void> {
-    const { eventId, conversationId, text, storeCategory, traceEventId } =
+    const { eventId, conversationId, text, storeCategory, traceEventId, engine } =
       job.data;
     try {
       const conversation = await this.loadBillingConversation(conversationId);
@@ -56,6 +60,7 @@ export class SalesAgentVoiceProcessor {
         conversationId,
         conversation,
         voice,
+        engine,
       );
       this.logger.log(
         `voice generation succeeded for event=${eventId} conversation=${conversationId} channel=${conversation?.customer.channel ?? 'unknown'}`,
@@ -222,10 +227,35 @@ export class SalesAgentVoiceProcessor {
       customer: { telegramChatId: string | null };
     } | null,
     voice: string,
+    engine?: 'stable' | 'lean',
   ): Promise<{ key: string; toneVariant: string }> {
     const modelSlug =
       this.config.get<string>('KIE_TTS_MODEL_SLUG') ?? DEFAULT_TTS_MODEL_SLUG;
     const tone = toneForCategory(storeCategory);
+
+    // ACE-8 — کش وویس: متن/صدا/مدل/فروشگاه یکسان → همان فایل. فقط موتور بهینه + layers.ttsCache=on؛
+    // خطای Redis/لایه → مسیر عادی. روی hit هیچ هزینه‌ی kie.ai و هیچ کسر اعتبار وویسی ثبت نمی‌شود.
+    const ttsCacheKey = `ace:tts:${createHash('sha1').update(`${billing?.storeId ?? '-'}|${modelSlug}|${voice}|${text}`).digest('hex')}`;
+    let ttsCacheOn = false;
+    try {
+      ttsCacheOn = engine === 'lean' && (await layerMode('ttsCache')) === 'on' && !!aceRuntime().redis;
+    } catch {
+      ttsCacheOn = false;
+    }
+    if (ttsCacheOn) {
+      try {
+        const hit = await aceRuntime().redis?.get(ttsCacheKey);
+        if (hit) {
+          recordAiCall({
+            storeId: billing?.storeId, conversationId, callSite: 'tts', servedBy: 'memo',
+            model: modelSlug, meta: { engineMode: 'lean', ttsCache: 'hit' },
+          });
+          return { key: hit, toneVariant: tone };
+        }
+      } catch {
+        /* fail-open */
+      }
+    }
 
     // اسکیمای واقعی این مدل با تست دستی مستقیم روی kie.ai تایید شد (۱۴۰۵/۰۷/۰۸) — فرض قبلی
     // ({text, style_prompt}) اصلاً معتبر نبود و createTask همیشه fail می‌شد (به‌خاطر همین
@@ -292,6 +322,13 @@ export class SalesAgentVoiceProcessor {
     if (!resultUrl) throw new Error('kie tts task timed out');
 
     const key = await this.downloadAndStore(resultUrl, conversationId);
+    if (ttsCacheOn) {
+      try {
+        await aceRuntime().redis?.set(ttsCacheKey, key, 'EX', 7 * 24 * 3600);
+      } catch {
+        /* fail-open */
+      }
+    }
     return { key, toneVariant: tone };
   }
 

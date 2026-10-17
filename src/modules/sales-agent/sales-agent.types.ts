@@ -430,6 +430,8 @@ export type SalesAgentVoiceJobData = {
   // docs/PRD-admin-ai-decision-trace-log.md بخش ۲ — اگر این پاسخ trace داشت، پردازشگر وویس
   // بعداً بخش voice همان ConversationEvent(AI_TRACE) را هم آپدیت می‌کند
   traceEventId?: string;
+  // ACE-8 — موتور نوبتی که این وویس را خواست؛ کش وویس فقط برای 'lean'
+  engine?: 'stable' | 'lean';
 };
 
 // docs/PRD-sales-agent-persuasion-principles.md بخش ۸ — خودِ مدل در respond_to_customer این را

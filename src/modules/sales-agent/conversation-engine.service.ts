@@ -167,7 +167,7 @@ import { setLogCtx } from '../../common/logging/log-context';
 import { formatTomanAmountsInText, stripUnauthorizedPriceSentences } from '../../common/utils/fa-amounts.util';
 import { isValidCartQty, reconcileCart, lineKey } from './cart-validation.util';
 import type { CatalogLine } from './cart-validation.util';
-import { setCallSite } from '../../common/ai-cost-engine/ace-context';
+import { getAceContext, setCallSite } from '../../common/ai-cost-engine/ace-context';
 import { aceActive, resolveEngineMode } from '../../common/ai-cost-engine/ace-config';
 import { loopDietPrepareStep } from './loop-diet';
 import { PROMPT_CACHE_BREAK } from '../../common/ai-cost-engine/prompt-cache';
@@ -9614,6 +9614,7 @@ answered=false بده (به‌جای حدس‌زدن).`,
           text: truncateForVoice(text),
           storeCategory: conversation.store.category,
           ...(traceEventId ? { traceEventId } : {}),
+          ...(getAceContext()?.engine ? { engine: getAceContext()?.engine } : {}),
         },
         { attempts: 2, backoff: { type: 'fixed', delay: 5_000 } },
       );
