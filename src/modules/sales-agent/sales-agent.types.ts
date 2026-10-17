@@ -1,3 +1,4 @@
+import type { LastSearch } from './product-finder/finder-output';
 import type { SalesMemory } from './sales-machine/sales-machine.types';
 import type { ProductVideoItem } from '../store/product-video.types';
 import type { ProductSpecItem } from '../store/product-specs.types';
@@ -118,6 +119,9 @@ export type ConversationContext = {
   // docs/PRD-sales-agent-sales-state-machine.md §۵ — حافظه‌ی ماشین‌حالت فروش؛ نبودنش یعنی
   // مکالمه قبل از این فیچر شروع شده (loadSalesMemory آن را از customerState/lastShownProducts می‌سازد)
   sales?: SalesMemory | null;
+  // docs/DESIGN-structured-product-search-for-chat-agent.md §۶.۳ — آخرین search_products ساختاریافته؛
+  // برای ارجاع‌هایی مثل «پایین‌تر ندارید؟» در نوبت بعد (بدون migration، داخل contextData)
+  lastSearch?: LastSearch | null;
 };
 
 export type UiBlock =

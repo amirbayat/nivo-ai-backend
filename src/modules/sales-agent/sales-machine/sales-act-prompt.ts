@@ -9,6 +9,7 @@ import {
   objectionPlaybookText,
   renderTemplate,
 } from './sales-playbook';
+import { STRUCTURED_SEARCH_RULES } from '../product-finder/finder-output';
 import type {
   ObjectionType,
   ProductInterest,
@@ -114,6 +115,8 @@ export type SalesActPromptInput = {
   fallbackCatalogText: string | null; // «چند نمونه از کاتالوگ» وقتی کاندیدی نیست
   persuasionInstruction: string | null; // فقط وقتی فروشگاه persuasion را روشن کرده
   leadCaptureInstruction: string | null; // فقط leadCaptureOnly
+  // docs/DESIGN-structured-product-search-for-chat-agent.md §۶.۳ — آخرین جست‌وجوی ساختاریافته
+  lastSearchLine?: string | null;
 };
 
 export const EVIDENCE_GOALS: TurnGoal[] = [
@@ -234,7 +237,9 @@ export function buildSalesActSystemPrompt(input: SalesActPromptInput): string {
   parts.push(
     `${GENERAL_REPLY_CONTRACT}${decision.welcomeBack ? `\n${WELCOME_BACK_LINE}` : ''}`,
   );
+  parts.push(STRUCTURED_SEARCH_RULES);
   parts.push(describeKnown(input.mem, input.cartSummary));
+  if (input.lastSearchLine) parts.push(input.lastSearchLine);
 
   parts.push(
     `مرحله‌ی فعلی فروش: ${STAGE_FA[decision.stage]}

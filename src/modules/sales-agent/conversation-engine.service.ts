@@ -181,11 +181,35 @@ import { BRIEF_PROMPT_RULE, isBriefUsable, readSections, renderBriefFacts, type 
 import { normalizeDescription } from '../store/product-brief/normalize';
 import { loopDietPrepareStep } from './loop-diet';
 import { PROMPT_CACHE_BREAK } from '../../common/ai-cost-engine/prompt-cache';
+import { ProductFinderService } from './product-finder/product-finder.service';
+import {
+  buildFinderItem,
+  buildLastSearch,
+  type LastSearch,
+  buildZeroHint,
+  describeLastSearch,
+  nextPageExcludeIds,
+  priceMismatch,
+  STRUCTURED_SEARCH_RULES,
+} from './product-finder/finder-output';
+import {
+  buildSearchDescription,
+  buildSearchInputSchema,
+  GENERIC_SEARCH_PROFILE,
+  isQueryOnly,
+  sortLabel,
+  appliedOf,
+  toFinderSpec,
+  type FinderSpec,
+  type StoreSearchProfile,
+} from './product-finder/finder-spec';
 import { DEMO_FAKE_CARD_NUMBER, DEMO_FAKE_CARD_OWNER, isNivoLeadStore } from '../../common/utils/store-mode';
 
 export type ConversationWithStore = Prisma.SalesConversationGetPayload<{
   include: { store: true };
 }>;
+
+type ConsultationProduct = Awaited<ReturnType<ConversationEngineService['searchProductsForConsultation']>>[number];
 
 type ProductLike = {
   id: string;
@@ -711,6 +735,7 @@ export class ConversationEngineService {
     private readonly receiptChecks: ReceiptCheckService,
     private readonly notifications: NotificationService,
     private readonly productEvents: ProductEventService,
+    private readonly productFinder: ProductFinderService,
   ) {}
 
   // docs/PRD-category-specific-product-pricing-and-attributes.md بخش ۲.۳ — نقطه‌ی مرکزی حل
@@ -830,6 +855,9 @@ export class ConversationEngineService {
       // docs/PRD-sales-agent-sales-state-machine.md §۵ — بدون این whitelist هر persistTransition
       // (که contextData را از getContext می‌سازد) حافظه‌ی فروش را پاک می‌کرد
       sales: raw?.sales ?? null,
+      // docs/DESIGN-structured-product-search-for-chat-agent.md §۶.۳ — بدون این whitelist هر
+      // persistTransition آخرین جست‌وجوی ساختاریافته را پاک می‌کرد
+      lastSearch: raw?.lastSearch ?? null,
     };
   }
 
@@ -2576,6 +2604,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
   کل کاتالوگ است و ممکن است هیچ ربطی به این گفتگوی خاص نداشته باشد.
 - قبل از هر ادعای قیمت/موجودی/جزئیات محصولی که در کاتالوگ اولیه نبود، حتماً search_products یا
   get_product_details را صدا بزن — حدس نزن.
+${STRUCTURED_SEARCH_RULES}
 - اگر مشتری سؤال واقعی درباره‌ی خودِ فروشگاه/کسب‌وکار پرسید (قیمت/هزینه/شرایط/زمان و مشابه) و
   جوابش قبلاً همین مکالمه داده شده (در تاریخچه‌ی بالا) یا در باکس دانش/پروفایل فروشگاه هست، همان
   جواب واقعی را بده — حتی اگر عبارت سؤال با دفعه‌ی قبل فرق دارد (مثل «قیمتش چقدره؟» در برابر
@@ -2630,11 +2659,14 @@ ${
 جست‌وجوی دقیق یا محصولی که اینجا نیست از search_products استفاده کن):
 ${catalogFacts}`;
 
+    const lastSearchLine = describeLastSearch(ctx.lastSearch);
     const block4 = `${cartSummary}
 ${customerStateSummary}${
       ctx.lastShownProducts?.length
         ? `\nآخرین محصولاتی که واقعاً در همین مکالمه مطرح/پیشنهاد شده‌اند: ${ctx.lastShownProducts.map((p) => p.name).join('، ')}\n`
         : ''
+    }${
+      lastSearchLine ? `\n${lastSearchLine}\n` : ''
     }${
       transcript
         ? `\nتاریخچه‌ی اخیر مکالمه (حتماً برای فهمیدن منظور پیام‌های ناقص/ادامه‌دار مشتری — مثل «پس اگه بخوام X بشم چی؟» بعد از بحث قبلی — این را در نظر بگیر):\n${transcript}\n`
@@ -2795,15 +2827,73 @@ ${customerStateSummary}${
     return this.doClarifyUnclear(conversation);
   }
 
+  // docs/DESIGN-structured-product-search-for-chat-agent.md §۲ — جست‌وجوی ساختاریافته روی کل
+  // کاتالوگ: ترتیب/شمارش از SQL، قیمت نمایشی از resolveProductPrices (منبع حقیقت)
+  private async runStructuredSearch(
+    storeId: string,
+    spec: FinderSpec,
+    warnings: string[],
+    profile: StoreSearchProfile,
+    rt: AgentTurnRuntime,
+    remember: (p: ConsultationProduct) => void,
+  ) {
+    const run = await this.productFinder.find(storeId, spec, profile);
+    const products = run.rows.length
+      ? await this.prisma.product.findMany({
+          where: { id: { in: run.rows.map((r) => r.productId) }, storeId, ...BUYER_VISIBLE },
+          include: PRODUCT_VARIANT_INCLUDE,
+        })
+      : [];
+    await this.resolveProductPrices(storeId, products);
+    const byId = new Map(products.map((p) => [p.id, p]));
+    const items: ReturnType<typeof buildFinderItem>[] = [];
+    for (const row of run.rows) {
+      const p = byId.get(row.productId);
+      if (!p) continue;
+      const variant = row.variantId ? p.variants?.find((v) => v.id === row.variantId) : undefined;
+      const tsPrice = variant?.priceOverride ?? p.basePrice;
+      if (priceMismatch(row.price, tsPrice)) {
+        this.logger.warn(
+          `finder price mismatch product=${p.id} variant=${row.variantId ?? '-'} sql=${row.price} ts=${tsPrice}`,
+        );
+        aceNote('productFinder', `قیمت SQL (${row.price}) با قیمت نمایشی (${tsPrice}) برای «${p.name}» فرق داشت؛ مقدار نمایشی استفاده شد`, 'search_products');
+      }
+      remember(p);
+      items.push(buildFinderItem(row, p, tsPrice, spec));
+    }
+    if (warnings.length) this.logger.warn(`finder spec warnings store=${storeId}: ${warnings.join(' | ')}`);
+    rt.ctx.lastSearch = buildLastSearch(spec, run.totalMatched, items.map((i) => i.id));
+    const priceInvolved = spec.minPrice !== undefined || spec.maxPrice !== undefined || spec.sortBy === 'price';
+    const hint = run.totalMatched === 0 ? buildZeroHint(spec, profile) : undefined;
+    return {
+      catalog: run.totalCatalog,
+      matched: run.totalMatched,
+      applied: appliedOf(spec),
+      sorted: sortLabel(spec),
+      items,
+      ...(priceInvolved && run.unpricedCount > 0 ? { unpriced: run.unpricedCount } : {}),
+      ...(hint ? { hint } : {}),
+      ...(warnings.length ? { warnings } : {}),
+    };
+  }
+
   // docs/PRD-sales-agent-sales-state-machine.md §۱۵.۲ — ساخت ابزارها از callFullAgentTurn بیرون
   // کشیده شد تا مسیر فعلی و مسیر ماشین‌حالت فروش همان ابزارها را بدون کپی استفاده کنند. بدنه‌ی
   // هر ابزار عیناً همان قبلی است؛ فقط متغیرهای closure (ctx/mutationHappened/...) حالا روی rt هستند
   private buildAgentTools<R>(
     conversation: ConversationWithStore,
     rt: AgentTurnRuntime,
-    opts: { persuasionEnabled: boolean; respondToCustomer: R; briefOn?: boolean },
+    opts: {
+      persuasionEnabled: boolean;
+      respondToCustomer: R;
+      briefOn?: boolean;
+      // docs/DESIGN-structured-product-search-for-chat-agent.md §۴.۵ — پروفایل داده‌ی فروشگاه؛
+      // نبودنش (تست‌ها) یعنی اسکیمای کامل
+      searchProfile?: StoreSearchProfile;
+    },
   ) {
     const storeId = conversation.storeId;
+    const searchProfile = opts.searchProfile ?? GENERIC_SEARCH_PROFILE;
     const storePersuasionEnabled = opts.persuasionEnabled;
 
     // ACE-16 — فقط وقتی لایه‌ی productBrief روشن است به ابزارها اضافه می‌شود
@@ -2828,52 +2918,56 @@ ${customerStateSummary}${
       },
     });
 
+    const rememberProduct = (p: ConsultationProduct) => {
+      rt.seenProducts.set(p.id, {
+        id: p.id,
+        name: p.name,
+        basePrice: p.basePrice,
+        stock: displayStock(p),
+        images: p.images,
+        description: p.description,
+        videos: parseProductVideos(p.videos),
+        weightGrams: p.weightGrams,
+        purityKarat: p.purityKarat,
+        isWeightBasedPricing: p.pricingModel === 'WEIGHT_BASED_FORMULA',
+        goldPricingSummary: goldPricingSummaryOf(p),
+      });
+      rt.toolFetchedProductIds.add(p.id);
+    };
+
     const searchProductsTool = tool({
-      description:
-        'در کاتالوگ فروشگاه جست‌وجو می‌کند — هم روی نام هم روی توضیحات محصول. برای پیام‌های ' +
-        'نیازمحور (مثل «پیجم رشد نمی‌کنه») هم کاربرد دارد، نه فقط وقتی مشتری اسم محصول را گفته؛ ' +
-        'اگر هیچ تطابقی پیدا نشود کل کاتالوگ فروشگاه برگردانده می‌شود تا خودت تناسب را تشخیص بدهی.',
-      inputSchema: z.object({ query: z.string() }),
-      execute: async ({ query }: { query: string }) => {
-        const results = await this.searchProductsForConsultation(
-          storeId,
-          query,
-        );
-        for (const p of results) {
-          rt.seenProducts.set(p.id, {
+      description: buildSearchDescription(searchProfile),
+      inputSchema: buildSearchInputSchema(searchProfile),
+      execute: async (input: Record<string, unknown>) => {
+        const { spec, notes } = toFinderSpec(input, searchProfile);
+        // §۱۱.۸ — شناسه‌ها در پرامپت نیستند؛ «صفحه‌ی بعد» را سرور از آخرین جست‌وجو پر می‌کند
+        if (notes.nextPage) spec.excludeIds = nextPageExcludeIds(rt.ctx.lastSearch);
+        // docs/DESIGN-structured-product-search-for-chat-agent.md §۴.۱ — فقط query: رفتار
+        // مشاوره‌ای امروز (کد، تطابق متنی روی نام/توضیح، fallback کاتالوگ برای پیام نیازمحور)
+        if (spec.query && isQueryOnly(spec)) {
+          const results = await this.searchProductsForConsultation(storeId, spec.query);
+          for (const p of results) rememberProduct(p);
+          return results.map((p) => ({
             id: p.id,
             name: p.name,
             basePrice: p.basePrice,
-            stock: displayStock(p),
-            images: p.images,
-            description: p.description,
-            videos: parseProductVideos(p.videos),
-            weightGrams: p.weightGrams,
-            purityKarat: p.purityKarat,
-            isWeightBasedPricing: p.pricingModel === 'WEIGHT_BASED_FORMULA',
-            goldPricingSummary: goldPricingSummaryOf(p),
-          });
-          rt.toolFetchedProductIds.add(p.id);
+            inStock: displayStock(p) > 0,
+            description: p.description
+              ? truncateDescriptionForFacts(
+                  p.description,
+                  descriptionMaxFor(results.length),
+                )
+              : null,
+            specs: parseProductSpecs(p.specs),
+            ...(hasVariantOptions(p)
+              ? { options: this.describeVariantOptions(p).trim() }
+              : {}),
+            ...(goldPricingSummaryOf(p)
+              ? { goldPricing: goldPricingSummaryOf(p) }
+              : {}),
+          }));
         }
-        return results.map((p) => ({
-          id: p.id,
-          name: p.name,
-          basePrice: p.basePrice,
-          inStock: displayStock(p) > 0,
-          description: p.description
-            ? truncateDescriptionForFacts(
-                p.description,
-                descriptionMaxFor(results.length),
-              )
-            : null,
-          specs: parseProductSpecs(p.specs),
-          ...(hasVariantOptions(p)
-            ? { options: this.describeVariantOptions(p).trim() }
-            : {}),
-          ...(goldPricingSummaryOf(p)
-            ? { goldPricing: goldPricingSummaryOf(p) }
-            : {}),
-        }));
+        return this.runStructuredSearch(storeId, spec, notes.warnings, searchProfile, rt, rememberProduct);
       },
     });
 
@@ -3426,7 +3520,7 @@ ${customerStateSummary}${
             'با مشتری‌ها آشنا می‌شود و لید جمع می‌کند. هیچ‌وقت نگو «محصولی نداریم»؛ طبق معرفی ' +
             'فروشگاه (storeProfile) و باکس دانش زیر به مشتری جواب بده.'
           : 'فعلاً هیچ محصولی در فروشگاه نیست.'
-        : `این محصولات فروشگاه است: ${(
+        : `این ${initialProducts.length} محصول جدید فروشگاه است (از ${await this.prisma.product.count({ where: { storeId, ...BUYER_VISIBLE } })} محصول فعال؛ برای مقایسه، رتبه‌بندی یا هر محصول دیگر حتماً search_products را با فیلتر/sortBy مناسب صدا بزن): ${(
             await Promise.all(
               initialProducts.map((p) =>
                 this.buildProductFactsLine(
@@ -3601,6 +3695,7 @@ ${customerStateSummary}${
       persuasionEnabled: storePersuasionEnabled,
       respondToCustomer,
       briefOn: briefs.size > 0,
+      searchProfile: await this.productFinder.getProfile(storeId, conversation.store.category),
     });
 
     // ACE-6 — بودجه‌ی step فقط در موتور بهینه با لایه‌ی loopDiet
@@ -4288,6 +4383,7 @@ ${customerStateSummary}${
     opts: {
       lastShownProducts?: { id: string; name: string }[];
       progressHappened?: boolean;
+      lastSearch?: LastSearch | null;
     } = {},
   ): Promise<void> {
     const fresh = await this.prisma.salesConversation.findUnique({
@@ -4300,6 +4396,7 @@ ${customerStateSummary}${
       ...(opts.lastShownProducts?.length
         ? { lastShownProducts: opts.lastShownProducts }
         : {}),
+      ...(opts.lastSearch ? { lastSearch: opts.lastSearch } : {}),
       sales: mem,
     };
     const funnel = isNivoLeadStore(conversation.store)
@@ -4435,13 +4532,31 @@ ${customerStateSummary}${
         }
       }
     }
+    const budget = mem.slots.budgetMaxToman;
+    // docs/DESIGN-structured-product-search-for-chat-agent.md §۶.۴ — بودجه‌ی گفته‌شده روی کل
+    // کاتالوگ در SQL اعمال می‌شود (نه فقط روی چند محصول جدید). فقط مکمل است: کاندیدهای مرتبط
+    // قبلی همچنان اول می‌مانند و «در بودجه نیست» برای آن‌ها حذف نمی‌شود
+    if (budget !== null && ids.length < MAX_CANDIDATES) {
+      try {
+        const profile = await this.productFinder.getProfile(storeId, conversation.store.category);
+        const { spec } = toFinderSpec(
+          { maxPrice: Math.floor(budget * BUDGET_SOFT_CEILING), sortBy: 'newest', limit: MAX_CANDIDATES },
+          profile,
+        );
+        const extra = await this.productFinder.find(storeId, spec, profile);
+        for (const r of extra.rows) {
+          if (!rejected.has(r.productId) && !ids.includes(r.productId)) ids.push(r.productId);
+        }
+      } catch (err) {
+        this.logger.warn(`prefetch budget finder failed: ${err instanceof Error ? err.message : err}`);
+      }
+    }
     if (ids.length === 0) return { text: null, ids: [] };
     const products = await this.prisma.product.findMany({
       where: { id: { in: ids }, storeId, ...BUYER_VISIBLE },
       include: PRODUCT_VARIANT_INCLUDE,
     });
     await this.resolveProductPrices(storeId, products);
-    const budget = mem.slots.budgetMaxToman;
     const inBudget = (p: { basePrice: number }) =>
       budget === null || p.basePrice <= budget * BUDGET_SOFT_CEILING;
     const order = new Map(ids.map((id, i) => [id, i]));
@@ -4676,6 +4791,7 @@ ${customerStateSummary}${
       leadCaptureInstruction: isNivoLeadStore(store)
         ? buildSalesLeadCaptureNote()
         : null,
+      lastSearchLine: describeLastSearch(rt.ctx.lastSearch),
     });
 
     const respondToCustomer = tool({
@@ -4689,6 +4805,7 @@ ${customerStateSummary}${
     const tools = this.buildAgentTools(conversation, rt, {
       persuasionEnabled,
       respondToCustomer,
+      searchProfile: await this.productFinder.getProfile(storeId, store.category),
     });
     const activeTools = decision.allowedTools.filter(
       (t) => t in tools,
@@ -4734,7 +4851,7 @@ ${customerStateSummary}${
           cartProductIds: rt.ctx.cart.map((i) => i.productId),
           comparedProductIds: [],
         }),
-        { progressHappened: rt.progressHappened },
+        { progressHappened: rt.progressHappened, lastSearch: rt.ctx.lastSearch },
       );
       return { engineResult, inputTokens, outputTokens };
     };
@@ -4930,6 +5047,7 @@ ${customerStateSummary}${
     await this.persistSalesMemory(conversation, nextMem, {
       lastShownProducts,
       progressHappened: rt.progressHappened,
+      lastSearch: rt.ctx.lastSearch,
     });
 
     const suspiciousAmounts = allViolations.flatMap((v) =>

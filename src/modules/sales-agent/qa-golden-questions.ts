@@ -6,6 +6,11 @@ export interface GoldenQuestion {
   id: string;
   category: string;
   question: string;
+  // docs/DESIGN-structured-product-search-for-chat-agent.md §۸.۳ — آرگومان مورد انتظار
+  // search_products برای سوال‌های رتبه‌ای؛ QA ادمین آرگومان واقعی ابزار را کنار آن نشان می‌دهد
+  // (بازبینی انسانی، نه قضاوت خودکار). followUpOf = سوال پیگیری بعد از آن سوال
+  expectSpec?: Record<string, unknown>;
+  followUpOf?: string;
 }
 
 export const GOLDEN_QUESTIONS: GoldenQuestion[] = [
@@ -37,4 +42,21 @@ export const GOLDEN_QUESTIONS: GoldenQuestion[] = [
     category: 'عمومی',
     question: 'سلام، چیکار می‌تونید برام بکنید؟',
   },
+  // سوال‌های رتبه‌ای/محدوده‌ای — جست‌وجوی ساختاریافته روی کل کاتالوگ
+  { id: 'g21', category: 'رتبه‌ای', question: 'ارزون‌ترین چیزی که دارید چیه؟', expectSpec: { sortBy: 'price' } },
+  {
+    id: 'g22',
+    category: 'رتبه‌ای',
+    question: 'زیر ۲ گرم با اجرت کمتر از ۱۰ درصد دارید؟',
+    expectSpec: { maxWeightGrams: 2, maxWagePercent: 10, sortBy: 'wage' },
+  },
+  { id: 'g23', category: 'رتبه‌ای', question: 'سبک‌ترین انگشترتون کدومه؟', expectSpec: { query: 'انگشتر', sortBy: 'weight' } },
+  {
+    id: 'g24',
+    category: 'رتبه‌ای',
+    question: 'مشکی سایز ۴۲ زیر ۳ میلیون دارید؟',
+    expectSpec: { attributes: [{ name: 'رنگ', value: 'مشکی' }, { name: 'سایز', value: '42' }], maxPrice: 3000000 },
+  },
+  { id: 'g25', category: 'رتبه‌ای', question: 'یه کار گرم پایین‌تر ندارید؟', followUpOf: 'g22', expectSpec: { sortBy: 'weight', nextPage: true } },
+  { id: 'g26', category: 'رتبه‌ای', question: 'بودجم ۳ میلیون تومنه', expectSpec: { maxPrice: 3000000 } },
 ];

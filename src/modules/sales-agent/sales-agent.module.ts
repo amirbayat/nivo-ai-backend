@@ -25,6 +25,7 @@ import { PostPurchaseFollowUpService } from './post-purchase-followup.service';
 import { AbandonedCartReminderService } from './abandoned-cart-reminder.service';
 import { SalesAgentQaService } from './sales-agent-qa.service';
 import { SalesAgentQaController } from './sales-agent-qa.controller';
+import { ProductFinderService } from './product-finder/product-finder.service';
 
 @Module({
   imports: [
@@ -67,6 +68,8 @@ import { SalesAgentQaController } from './sales-agent-qa.controller';
     PostPurchaseFollowUpService,
     AbandonedCartReminderService,
     SalesAgentQaService,
+    // docs/DESIGN-structured-product-search-for-chat-agent.md — جست‌وجوی ساختاریافته‌ی محصول
+    ProductFinderService,
   ],
   // CreditService هم از TelegramModule (handleStart) هم از QueueModule (voice processor) لازم است.
   // PostPurchaseFollowUpService/AbandonedCartReminderService از QueueModule (پردازشگرهای جدید
