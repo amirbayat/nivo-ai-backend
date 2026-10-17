@@ -31,10 +31,10 @@ export interface StoreGoldPricingSettings {
 
 const ROUND_TO_TOMAN = 1000;
 
-// docs/PRD-category-specific-product-pricing-and-attributes.md بخش ۲.۱ — پاسخ BrsApi فرمت
+// docs/PRD-category-specific-product-pricing-and-attributes.md بخش ۲.۱ — پاسخ Ratebox فرمت
 // دقیق symbol را برای طلای ۱۸ عیار مستند نمی‌کند (فقط در تست اولیه‌ی API دیده شده، نه در کد)؛
 // این تابع با چند الگوی محتمل (symbol، نام فارسی «۱۸ عیار»، نام انگلیسی "18") تطبیق می‌دهد تا
-// اگر فرمت دقیق symbol فرق داشت هم کار کند. اولین باری که BRSAPI_API_KEY واقعی ست شد، باید
+// اگر فرمت دقیق symbol فرق داشت هم کار کند. اولین باری که RATEBOX_API_TOKEN واقعی ست شد، باید
 // پاسخ واقعی لاگ و این تطبیق verify شود.
 export function find18kGoldItem(items: GoldPriceItem[]): GoldPriceItem | null {
   const bySymbol = items.find((i) => /^IR_?GOLD_?18/i.test(i.symbol));

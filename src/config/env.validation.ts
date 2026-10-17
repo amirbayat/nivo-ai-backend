@@ -82,7 +82,7 @@ class EnvironmentVariables {
   // docs/PRD-gold-silver-price-ticker.md — قیمت طلا برای فروشنده‌های طلا. عمداً اختیاری:
   // بدون آن فقط رفرش قیمت غیرفعال می‌ماند (لاگ WARN) و GET /market-prices/gold آرایه‌ی
   // خالی برمی‌گرداند، بقیه‌ی اپ طبیعی کار می‌کند.
-  @IsOptional() @IsString() BRSAPI_API_KEY?: string;
+  @IsOptional() @IsString() RATEBOX_API_TOKEN?: string;
 
   // docs/PRD-instagram-smart-dm-and-ir-intl-split.md بخش ۳ — کدام دیپلوی: ایران (دارکوب، موجود)
   // یا خارجی (آلمان، nivoai.site، تازه). عمداً اختیاری با پیش‌فرض IR تا دیپلوی فعلی دست‌نخورده بماند.
