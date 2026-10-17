@@ -357,7 +357,16 @@ const DESCRIPTION_FACTS_MAX_CHARS = 700;
 
 // وقتی تمرکز روی «یک» محصول است (لینک مستقیم/فوکوس/getProductDetails) جدول سایز و موجودی
 // معمولاً ته توضیحات است؛ با ۷۰۰ کاراکتر بریده می‌شد و ربات سایز پیشنهاد نمی‌داد.
-const DESCRIPTION_FACTS_SINGLE_MAX_CHARS = 2500;
+const DESCRIPTION_FACTS_SINGLE_MAX_CHARS = 5000; // = سقف ذخیره‌سازی؛ یعنی توضیحات کامل
+const DESCRIPTION_FACTS_FEW_MAX_CHARS = 2500;
+
+// سقف بر اساس تعداد محصولِ همزمان در یک پاسخ: یک محصول = توضیحات کامل، ۲–۳ تا = متوسط،
+// بیشتر (browse/کاتالوگ) = ۷۰۰ تا هزینه‌ی توکن بالا نرود
+function descriptionMaxFor(productCount: number): number {
+  if (productCount <= 1) return DESCRIPTION_FACTS_SINGLE_MAX_CHARS;
+  if (productCount <= 3) return DESCRIPTION_FACTS_FEW_MAX_CHARS;
+  return DESCRIPTION_FACTS_MAX_CHARS;
+}
 
 function truncateDescriptionForFacts(
   description: string,
@@ -956,8 +965,9 @@ export class ConversationEngineService {
       goldPricingSummary?: string | null;
     },
     storePersuasionEnabled: boolean,
+    descriptionMaxChars = DESCRIPTION_FACTS_MAX_CHARS,
   ): Promise<string> {
-    const base = `${product.name} (شناسه: ${product.id}, ${product.basePrice} تومان)${displayStock(product) === 0 ? ' — فعلاً ناموجود' : ''}${product.goldPricingSummary ? ` — ${product.goldPricingSummary}` : ''}${product.description ? ` — توضیحات: ${truncateDescriptionForFacts(product.description)}` : ''}${formatSpecsForFacts(parseProductSpecs(product.specs))}`;
+    const base = `${product.name} (شناسه: ${product.id}, ${product.basePrice} تومان)${displayStock(product) === 0 ? ' — فعلاً ناموجود' : ''}${product.goldPricingSummary ? ` — ${product.goldPricingSummary}` : ''}${product.description ? ` — توضیحات: ${truncateDescriptionForFacts(product.description, descriptionMaxChars)}` : ''}${formatSpecsForFacts(parseProductSpecs(product.specs))}`;
     const note = await this.buildPersuasionNote(
       storeId,
       product,
@@ -2416,7 +2426,10 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           basePrice: p.basePrice,
           inStock: displayStock(p) > 0,
           description: p.description
-            ? truncateDescriptionForFacts(p.description)
+            ? truncateDescriptionForFacts(
+                p.description,
+                descriptionMaxFor(results.length),
+              )
             : null,
           specs: parseProductSpecs(p.specs),
           ...(hasVariantOptions(p)
@@ -2975,7 +2988,12 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         : `این محصولات فروشگاه است: ${(
             await Promise.all(
               initialProducts.map((p) =>
-                this.buildProductFactsLine(storeId, p, storePersuasionEnabled),
+                this.buildProductFactsLine(
+                  storeId,
+                  p,
+                  storePersuasionEnabled,
+                  descriptionMaxFor(initialProducts.length),
+                ),
               ),
             )
           ).join('، ')}`;
@@ -3992,6 +4010,8 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           storeId,
           { ...p, stock: displayStock(p) },
           persuasionEnabled,
+          // نتیجه‌ی تک‌محصولی (مثلاً «دامن زنانه دارید؟») = تمرکز روی یک محصول؛ جدول سایز نباید بریده شود
+          descriptionMaxFor(sorted.length),
         );
         const budgetTag =
           budget === null
@@ -4144,6 +4164,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
                 storeId,
                 { ...p, stock: displayStock(p) },
                 persuasionEnabled,
+                descriptionMaxFor(initial.length),
               ),
             ),
           )
@@ -6130,7 +6151,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
 
     // همون دلیل showProduct بالا — بدون عدد موجودی در واقعیت‌ها. hasVariantOptions هم همان‌جا
     // توضیح داده شد: فقط یک اشاره‌ی کوتاه که این محصول گزینه دارد، بدون جزئیات
-    const facts = `این محصولات فروشگاه است: ${products.map((p) => `${p.name} (${p.basePrice} تومان)${displayStock(p) === 0 ? ' — فعلاً ناموجود' : ''}${goldPricingSummaryOf(p) ? ` — ${goldPricingSummaryOf(p)}` : ''}${hasVariantOptions(p) ? ` — دارای گزینه‌های مختلف (${p.optionTypes.map((o) => o.name).join('/')})${this.describeVariantOptions(p)}` : ''}${p.description ? ` — توضیحات: ${truncateDescriptionForFacts(p.description)}` : ''}${formatSpecsForFacts(parseProductSpecs(p.specs))}`).join('، ')}`;
+    const facts = `این محصولات فروشگاه است: ${products.map((p) => `${p.name} (${p.basePrice} تومان)${displayStock(p) === 0 ? ' — فعلاً ناموجود' : ''}${goldPricingSummaryOf(p) ? ` — ${goldPricingSummaryOf(p)}` : ''}${hasVariantOptions(p) ? ` — دارای گزینه‌های مختلف (${p.optionTypes.map((o) => o.name).join('/')})${this.describeVariantOptions(p)}` : ''}${p.description ? ` — توضیحات: ${truncateDescriptionForFacts(p.description, descriptionMaxFor(products.length))}` : ''}${formatSpecsForFacts(parseProductSpecs(p.specs))}`).join('، ')}`;
 
     // docs/PRD-sales-agent-response-strategy-ab.md بخش ۱، جدول Track A — جدول تصمیمی که
     // docs/PRD-sales-agent-implicit-need-detection.md فاز ۱ محاسبه می‌کرد ولی تا امروز هیچ‌جا
