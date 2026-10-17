@@ -1,3 +1,5 @@
+import { aceActive } from '../../common/ai-cost-engine/ace-config';
+import { PERCEPTION_MODEL } from '../sales-agent/model-variants';
 import {
   BadRequestException,
   Injectable,
@@ -468,11 +470,15 @@ JSON را برگردان، بدون توضیح یا markdown fence.`,
       };
     };
 
+    // ACE-5 — موتور بهینه + subcallDiet: انتخاب کاندید کار سبکی است، مدل perception (flash) کافی است.
+    // خطا → همان زنجیره‌ی fallback قبلی روی defaultModel. (آستانه‌ی «بدون LLM» عمداً پیاده نشد: فیدبک
+    // ۱۴۰۵/۰۷/۲۱ می‌گوید cosine تنها برای پارافریز فارسی قابل‌اعتماد نیست.)
+    const firstModel = (await aceActive('subcallDiet')) ? PERCEPTION_MODEL : defaultModel();
     try {
-      return await attempt(defaultModel());
+      return await attempt(firstModel);
     } catch (err) {
       this.logger.error(
-        `pickRelevantCandidate failed (model=${defaultModel()}): ${err instanceof Error ? err.message : String(err)}`,
+        `pickRelevantCandidate failed (model=${firstModel}): ${err instanceof Error ? err.message : String(err)}`,
       );
       return withDefaultModelFallbackChain(attempt, (model, chainErr) =>
         this.logger.error(

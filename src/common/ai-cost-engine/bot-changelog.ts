@@ -49,4 +49,12 @@ export const BOT_CHANGELOG: BotChangelogEntry[] = [
     layerKey: 'loopDiet',
     rollback: 'layers.loopDiet=off در پنل؛ کامل: git revert',
   },
+  {
+    date: '1405/07/25', item: 'ACE-5 (زیرفراخوانی‌ها)', commit: '(ace(ACE-5))', tag: 'ace/ACE-5/start..done',
+    sql: 'none',
+    change: 'faq_pick، faq_desc، faq_profile و طبقه‌بندی رضایت با مدل سبک (PERCEPTION_MODEL)؛ خطا → زنجیره‌ی fallback قبلی',
+    answerImpact: 'جواب سؤال‌های KB/پروفایل ممکن است با مدل سبک‌تر نوشته شود؛ فقط موتور بهینه',
+    layerKey: 'subcallDiet',
+    rollback: 'layers.subcallDiet=off در پنل؛ کامل: git revert',
+  },
 ];

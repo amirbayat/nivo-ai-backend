@@ -5375,7 +5375,10 @@ ${customerStateSummary}${
     text: string,
     conversation: ConversationWithStore,
   ): Promise<'POSITIVE' | 'NEGATIVE' | 'UNRELATED'> {
-    const primaryModel = resolveModel(conversation.abVariant);
+    // ACE-5 — موتور بهینه + subcallDiet: طبقه‌بندی رضایت با مدل سبک
+    const primaryModel = (await aceActive('subcallDiet'))
+      ? PERCEPTION_MODEL
+      : resolveModel(conversation.abVariant);
     const started = Date.now();
     try {
       const { verdict, inputTokens, outputTokens } =
@@ -8906,7 +8909,7 @@ answered=false بده (به‌جای حدس‌زدن).`,
     };
 
     try {
-      return await attempt(defaultModel());
+      return await attempt((await aceActive('subcallDiet')) ? PERCEPTION_MODEL : defaultModel());
     } catch (err) {
       this.logger.error(
         `tryAnswerFromProductDescriptions failed (conversation=${conversation.id})`,
@@ -8988,7 +8991,7 @@ answered=false بده (به‌جای حدس‌زدن).`,
     };
 
     try {
-      return await attempt(defaultModel());
+      return await attempt((await aceActive('subcallDiet')) ? PERCEPTION_MODEL : defaultModel());
     } catch (err) {
       this.logger.error(
         `tryAnswerFromStoreProfile failed (conversation=${conversation.id})`,
