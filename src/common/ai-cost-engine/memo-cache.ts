@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { aceParams, layerMode } from './ace-config';
+import { aceParams, engineAllowsLayers, layerMode } from './ace-config';
 import { getAceContext } from './ace-context';
 import { aceRuntime } from './ace-runtime';
 import { recordAiCall } from './ledger-sink';
@@ -39,6 +39,7 @@ export interface MemoOptions<T> {
 // I-6: Redis/لایه خاموش/هر خطا → مستقیم compute (رفتار قبلی).
 export async function memoCall<T>(opts: MemoOptions<T>): Promise<T> {
   const redis = aceRuntime().redis;
+  if (!engineAllowsLayers()) return opts.compute();
   let mode;
   try {
     mode = await layerMode('memo');

@@ -1,4 +1,5 @@
 import { resetAceConfigCache } from './ace-config';
+import { runWithAceTurn } from './ace-context';
 import { setAceRuntime } from './ace-runtime';
 import { cachedEmbedding } from './embedding-cache';
 import { memoCall } from './memo-cache';
@@ -91,4 +92,21 @@ describe('cachedEmbedding (ACE-4)', () => {
     await cachedEmbedding('m', 'x', compute);
     expect(compute).toHaveBeenCalledTimes(2);
   });
+});
+
+describe('engine gate [I-9]', () => {
+  const calls = async (engine: 'stable' | 'lean') => {
+    setup({ memo: 'on' });
+    let n = 0;
+    const run = () =>
+      runWithAceTurn(
+        () => memoCall({ callSite: 'faq_pick', keyInput: { q: 1 }, sources: { storeId: 's1' }, compute: async () => ++n }),
+        { engine },
+      );
+    await run();
+    await run();
+    return n;
+  };
+  it('در نوبت stable حتی با layer=on کش نمی‌کند', async () => expect(await calls('stable')).toBe(2));
+  it('در نوبت lean کش می‌کند', async () => expect(await calls('lean')).toBe(1));
 });

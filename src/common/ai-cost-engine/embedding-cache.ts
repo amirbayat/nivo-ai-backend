@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { aceParams, layerMode } from './ace-config';
+import { aceParams, engineAllowsLayers, layerMode } from './ace-config';
 import { aceRuntime } from './ace-runtime';
 
 export function normalizeEmbeddingText(text: string): string {
@@ -16,6 +16,7 @@ export async function cachedEmbedding(
   compute: () => Promise<number[] | null>,
 ): Promise<number[] | null> {
   const redis = aceRuntime().redis;
+  if (!engineAllowsLayers()) return compute();
   let on = false;
   try {
     on = (await layerMode('embedCache')) === 'on';

@@ -178,6 +178,12 @@ export async function resolveEngineMode(conversationId: string, storeId: string)
   }
 }
 
+// لایه‌های بدون اثر روی متن جواب (memo، embedCache) هم در نوبت‌های بات فقط در lean کار می‌کنند (I-9)؛
+// بیرون از نوبت بات (سمت فروشنده) context موتور ندارد و فقط کلید لایه تصمیم می‌گیرد.
+export function engineAllowsLayers(): boolean {
+  return getAceContext()?.engine !== 'stable';
+}
+
 // هر لایه فقط همین را می‌پرسد (بخش ۱۲.۲)
 export async function aceActive(layer: LayerName): Promise<boolean> {
   if (getAceContext()?.engine !== 'lean') return false;
