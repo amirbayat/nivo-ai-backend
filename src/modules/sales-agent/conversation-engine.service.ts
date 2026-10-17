@@ -355,9 +355,16 @@ function truncateForVoice(text: string): string {
 // می‌رفت. فروشنده هرچقدر می‌خواهد می‌نویسد، ولی فقط این مقدار به مدل تزریق می‌شود.
 const DESCRIPTION_FACTS_MAX_CHARS = 700;
 
-function truncateDescriptionForFacts(description: string): string {
-  if (description.length <= DESCRIPTION_FACTS_MAX_CHARS) return description;
-  return `${description.slice(0, DESCRIPTION_FACTS_MAX_CHARS)}...`;
+// وقتی تمرکز روی «یک» محصول است (لینک مستقیم/فوکوس/getProductDetails) جدول سایز و موجودی
+// معمولاً ته توضیحات است؛ با ۷۰۰ کاراکتر بریده می‌شد و ربات سایز پیشنهاد نمی‌داد.
+const DESCRIPTION_FACTS_SINGLE_MAX_CHARS = 2500;
+
+function truncateDescriptionForFacts(
+  description: string,
+  max = DESCRIPTION_FACTS_MAX_CHARS,
+): string {
+  if (description.length <= max) return description;
+  return `${description.slice(0, max)}...`;
 }
 
 // docs/PRD-sales-agent-sales-state-machine.md §۱۵.۲ — وضعیت قابل‌تغییر یک نوبت FULL_AGENT؛
@@ -1843,7 +1850,7 @@ export class ConversationEngineService {
           basePrice: product.basePrice,
           inStock: displayStock(product) > 0,
           description: product.description
-            ? truncateDescriptionForFacts(product.description)
+            ? truncateDescriptionForFacts(product.description, DESCRIPTION_FACTS_SINGLE_MAX_CHARS)
             : null,
           specs: parseProductSpecs(product.specs),
           ...(hasVariantOptions(product)
@@ -2460,7 +2467,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
           basePrice: product.basePrice,
           inStock: displayStock(product) > 0,
           description: product.description
-            ? truncateDescriptionForFacts(product.description)
+            ? truncateDescriptionForFacts(product.description, DESCRIPTION_FACTS_SINGLE_MAX_CHARS)
             : null,
           specs: parseProductSpecs(product.specs),
           ...(hasVariantOptions(product)
@@ -4031,7 +4038,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
         await this.resolveProductPrices(conversation.storeId, [product]);
         if (product.description) {
           lines.push(
-            `توضیحات «${product.name}»: ${truncateDescriptionForFacts(product.description)}`,
+            `توضیحات «${product.name}»: ${truncateDescriptionForFacts(product.description, DESCRIPTION_FACTS_SINGLE_MAX_CHARS)}`,
           );
         }
         const specs = formatSpecsForFacts(parseProductSpecs(product.specs));
@@ -6055,7 +6062,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     // نمی‌خواهد تعداد واقعی موجودی افشا شود؛ فقط وضعیت موجود/ناموجود کافی است.
     // docs/PRD-product-display-focus-and-variations.md §۴.۲ — اگر محصول گزینه (سایز/رنگ) دارد،
     // caption از قبل مشتری را آگاه می‌کند که بعد از «افزودن به سبد» باید گزینه انتخاب کند
-    const facts = `مشتری از لینک مستقیم این محصول وارد شده: ${product.name} (${product.basePrice} تومان)${displayStock(product) === 0 ? ' — فعلاً ناموجود' : ''}${product.goldPricingSummary ? ` — ${product.goldPricingSummary}` : ''}${hasVariantOptions(product) ? ` — این محصول گزینه‌های مختلف (${product.optionTypes!.map((o) => o.name).join('/')}) دارد${this.describeVariantOptions(product)}` : ''}${product.description ? `\nتوضیحات محصول: ${truncateDescriptionForFacts(product.description)}` : ''}${formatSpecsForFacts(parseProductSpecs(product.specs))}${await this.commentsFactsSuffix(product.id)}${await this.crossSellFactsSuffix(conversation.storeId, product.id)}`;
+    const facts = `مشتری از لینک مستقیم این محصول وارد شده: ${product.name} (${product.basePrice} تومان)${displayStock(product) === 0 ? ' — فعلاً ناموجود' : ''}${product.goldPricingSummary ? ` — ${product.goldPricingSummary}` : ''}${hasVariantOptions(product) ? ` — این محصول گزینه‌های مختلف (${product.optionTypes!.map((o) => o.name).join('/')}) دارد${this.describeVariantOptions(product)}` : ''}${product.description ? `\nتوضیحات محصول: ${truncateDescriptionForFacts(product.description, DESCRIPTION_FACTS_SINGLE_MAX_CHARS)}` : ''}${formatSpecsForFacts(parseProductSpecs(product.specs))}${await this.commentsFactsSuffix(product.id)}${await this.crossSellFactsSuffix(conversation.storeId, product.id)}`;
     // skipGreeting=true چون finalReply پایین همیشه (بدون قید isFirstReply) یک buildGreeting
     // جلوی همین reply می‌چسباند — بدون این پرچم، caption() خودش هم یک «سلام!» جدا می‌ساخت
     const reply = await this.caption(facts, conversation, undefined, true);
