@@ -18,16 +18,20 @@ import { parseFaAmounts } from '../../common/utils/fa-amounts.util';
 import { fa } from '../../i18n/fa';
 import { StoreService } from './store.service';
 import { VARIANT_PRONE_CATEGORIES } from './store-kb.service';
-import {
-  defaultModel,
-  DEFAULT_MODEL_FALLBACK_CHAIN,
-} from '../sales-agent/model-variants';
+import { defaultModel } from '../sales-agent/model-variants';
 import { clampProductSpecs } from './product-specs.types';
 
 // docs/PRD-seller-panel-simplification.md §4.4 — «عکس + یک جمله ← فیلدها». هیچ‌چیز نمی‌نویسد؛
 // فرانت نتیجه را روی فیلدهای خالی اعمال می‌کند. برای فروشنده رایگان است (مسیر فعال‌سازی).
 export const AI_FILL_DAILY_LIMIT = 150;
-const AI_FILL_TIMEOUT_MS = 25_000;
+// timeout برای هر مدل جداست (نه مشترک) تا شکست مدل اول به fallback فرصت کامل بدهد
+const AI_FILL_TIMEOUT_MS = 45_000;
+const AI_FILL_MAX_ATTEMPTS = 3;
+// fallback سریع‌ها؛ luna-pro (reasoning) با عکس کند است و در بازه‌ی باقی‌مانده timeout می‌خورد
+const AI_FILL_FALLBACKS = [
+  'openai/gpt-6-luna',
+  'google/gemini-3.8-flash',
+];
 const MAX_IMAGES = 2;
 const MAX_IMAGE_SIDE = 1024;
 const UNTRACKED_RE = /همیشه\s*(داریم|موجوده|موجود)|سفارشی|تولیدی/;
@@ -245,15 +249,14 @@ export class ProductAiFillService {
       },
     ];
 
-    const deadline = AbortSignal.timeout(AI_FILL_TIMEOUT_MS);
     const first = defaultModel();
     const models = [
       first,
-      ...DEFAULT_MODEL_FALLBACK_CHAIN.filter((m) => m !== first),
-    ];
+      ...AI_FILL_FALLBACKS.filter((m) => m !== first),
+    ].slice(0, AI_FILL_MAX_ATTEMPTS);
     let lastErr: unknown;
     for (const model of models) {
-      if (deadline.aborted) break;
+      const deadline = AbortSignal.timeout(AI_FILL_TIMEOUT_MS);
       try {
         const { object } = await generateObject({
           model: this.aiProvider.buildClient(undefined, {
@@ -270,7 +273,13 @@ export class ProductAiFillService {
       } catch (err) {
         lastErr = err;
         this.logger.warn(
-          `ai-fill model ${model} failed: ${(err as Error).message}`,
+          `ai-fill model ${model} failed: ${(err as Error).message}` +
+            ((err as { cause?: unknown }).cause
+              ? ` | cause=${String((err as { cause?: unknown }).cause).slice(0, 400)}`
+              : '') +
+            ((err as { text?: string }).text
+              ? ` | raw=${(err as { text?: string }).text!.slice(0, 600)}`
+              : ''),
         );
       }
     }
