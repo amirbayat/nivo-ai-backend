@@ -3,7 +3,7 @@ import type Redis from 'ioredis';
 // ACE — دسترسی بدون DI به Redis/Prisma برای توابع کش (تا سازنده‌ی سرویس‌های موجود عوض نشود).
 // I-6: هر جا ست نشده باشد (تست، بوت ناقص) همه‌ی لایه‌ها fail-open می‌شوند.
 export interface AceRuntime {
-  redis: Pick<Redis, 'get' | 'set' | 'incr' | 'del' | 'expire'> | null;
+  redis: Pick<Redis, 'get' | 'set' | 'incr' | 'del' | 'expire' | 'lpush' | 'ltrim' | 'lrange'> | null;
   loadConfig: (() => Promise<{ layers?: unknown; params?: unknown } | null>) | null;
   saveConfig: ((data: { layers: unknown; params: unknown }) => Promise<void>) | null;
 }
