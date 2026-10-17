@@ -168,12 +168,14 @@ import { formatTomanAmountsInText, stripUnauthorizedPriceSentences } from '../..
 import { isValidCartQty, reconcileCart, lineKey } from './cart-validation.util';
 import type { CatalogLine } from './cart-validation.util';
 import { getAceContext, setCallSite } from '../../common/ai-cost-engine/ace-context';
-import { aceActive, aceOn, aceShadow, resolveEngineMode } from '../../common/ai-cost-engine/ace-config';
+import { aceActive, aceOn, aceParams, aceShadow, resolveEngineMode } from '../../common/ai-cost-engine/ace-config';
+import { normalizeFa } from './answer-engine/normalize';
 import { aceNote, aceTraceInfo } from '../../common/ai-cost-engine/ace-context';
 import { pushShadow } from '../../common/ai-cost-engine/shadow/shadow-store';
 import { buildSignature } from './answer-engine/signature';
 import { isContextDependent } from './answer-engine/context-dependence';
 import { composeFastAnswer, eligibleForFastAnswer } from './answer-engine/fast-answers';
+import { eligibleToLookup, eligibleToStore, semanticLookup, semanticMaybeStore } from './answer-engine/semantic-cache';
 import { briefInputHash } from '../store/product-brief/brief-hash';
 import { BRIEF_PROMPT_RULE, isBriefUsable, readSections, renderBriefFacts, type BriefRow } from '../store/product-brief/brief-prompt';
 import { normalizeDescription } from '../store/product-brief/normalize';
@@ -962,32 +964,33 @@ export class ConversationEngineService {
     return ` [متقاعدسازی: مجاز]${signalsText}`;
   }
 
-  // ACE-10 (shadow) — هرگز خطا نمی‌دهد و نوبت را کند نمی‌کند (void). قیمت از DB، پیچ از برگه‌ی ACE-16.
-  private async recordFastAnswerShadow(
+  // ACE-10 — کاندید جواب قطعی (مشترک بین shadow و on). null = شرایط برقرار نیست → LLM
+  private async fastAnswerCandidate(
     conversation: ConversationWithStore,
     customerMessage: string,
-    realText: string,
-    rt: AgentTurnRuntime,
+    ctx: { lastShownProducts?: Array<{ id: string }> | null; usedPitchLines?: string[] },
     catalog: Array<{ id: string; name: string }>,
-  ): Promise<void> {
-    if (!(await aceShadow('fastAnswers'))) return;
+    requireNamedProduct: boolean,
+  ) {
     const sig = buildSignature(customerMessage, {
       catalog: catalog.map((p) => ({ id: p.id, name: p.name })),
-      lastShownProductIds: (rt.ctx.lastShownProducts ?? []).map((p) => p.id),
+      lastShownProductIds: (ctx.lastShownProducts ?? []).map((p) => p.id),
     });
     const mentionsProduct = sig.entities.some((e) => e.startsWith('prod:'));
+    if (requireNamedProduct && !mentionsProduct) return null;
     if (
       !eligibleForFastAnswer({ intent: sig.intent, negated: sig.negated, wordCount: sig.norm.split(' ').length, scope: sig.scope }) ||
       isContextDependent({ text: customerMessage, currentState: conversation.currentState, mentionsProduct })
     ) {
-      return;
+      return null;
     }
     const productId = sig.scope.slice(2);
     const product = await this.prisma.product.findUnique({
       where: { id: productId, ...BUYER_VISIBLE },
       include: PRODUCT_VARIANT_INCLUDE,
     });
-    if (!product || product.storeId !== conversation.storeId || product.pricingModel === 'WEIGHT_BASED_FORMULA') return;
+    if (!product || product.storeId !== conversation.storeId || product.pricingModel === 'WEIGHT_BASED_FORMULA') return null;
+    await this.resolveProductPrices(conversation.storeId, [product]);
     const briefs = await this.loadUsableBriefs([product]);
     const pitch = briefs.get(product.id)?.brief.pitch ?? null;
     const prices = [product.basePrice, ...(product.variants ?? []).map((v) => v.priceOverride ?? product.basePrice)];
@@ -998,20 +1001,184 @@ export class ConversationEngineService {
       inStock: displayStock(product) > 0,
       pitch,
       seed: conversation.id,
+      usedLines: ctx.usedPitchLines,
     });
-    if (!composed) return;
+    return composed ? { sig, product, composed, mentionsProduct } : null;
+  }
+
+  // ACE-7 — همان پیام (دابل‌تپ/ارسال دوباره) در پنجره‌ی کوتاه، بدون هیچ رویداد بین‌شان → همان جواب قبلی بدون LLM.
+  // فقط وقتی جواب قبلی کارت محصول/بدون کارت بوده (جهش سبد/سفارش هرگز تکرار نمی‌شود).
+  private async tryServeDuplicate(conversation: ConversationWithStore, text: string): Promise<EngineResult | null> {
+    const events = await this.prisma.conversationEvent.findMany({
+      where: { conversationId: conversation.id, type: { in: ['CUSTOMER_MESSAGE', 'AGENT_REPLY'] } },
+      orderBy: { createdAt: 'desc' },
+      take: 3,
+    });
+    const [cur, reply, prev] = events;
+    if (events.length < 3 || cur.type !== 'CUSTOMER_MESSAGE' || reply.type !== 'AGENT_REPLY' || prev.type !== 'CUSTOMER_MESSAGE') return null;
+    const pText = (prev.payload as { text?: string } | null)?.text;
+    const rp = reply.payload as { text?: string; uiBlock?: UiBlock; quickReplies?: string[] } | null;
+    if (!pText || !rp?.text || normalizeFa(pText) !== normalizeFa(text)) return null;
+    const { dedupeWindowSec } = await aceParams();
+    if (cur.createdAt.getTime() - prev.createdAt.getTime() > dedupeWindowSec * 1000) return null;
+    const ui: UiBlock = rp.uiBlock && (rp.uiBlock.type === 'NONE' || rp.uiBlock.type === 'PRODUCT_CARD') ? rp.uiBlock : { type: 'NONE' };
+    if (rp.uiBlock && ui.type === 'NONE' && rp.uiBlock.type !== 'NONE') return null;
+    aceNote('dedupe', `همین پیام کمتر از ${dedupeWindowSec} ثانیه پیش هم آمده بود؛ جواب قبلی تکرار شد، بدون LLM`, 'dedupe');
+    await this.logReply(conversation, rp.text, ui, undefined, {
+      intent: 'FULL_AGENT', handler: 'dedupe', factsOrPrompt: 'dedupe', model: 'none',
+      toolsCalled: [], initialCatalogProductIds: [], stepsUsed: 0, mutationHappened: false, progressHappened: false, isFallbackAttempt: false,
+    } as never, rp.quickReplies);
+    return { reply: rp.text, uiBlocks: [ui], state: conversation.currentState, quickReplies: rp.quickReplies };
+  }
+
+  // ACE-11 — hit: همان جواب قبلی (سؤال عیناً تکراری، بدون LLM)
+  private async trySemanticHit(
+    conversation: ConversationWithStore,
+    text: string,
+    ctx: { cart?: unknown[]; lastShownProducts?: Array<{ id: string }> },
+    catalog: Array<{ id: string; name: string }>,
+  ): Promise<EngineResult | null> {
+    const sig = buildSignature(text, { catalog, lastShownProductIds: (ctx.lastShownProducts ?? []).map((p) => p.id) });
+    const dependent = isContextDependent({ text, currentState: conversation.currentState, mentionsProduct: sig.entities.some((e) => e.startsWith('prod:')) });
+    if (!eligibleToLookup({ sig, state: conversation.currentState, cartEmpty: (ctx.cart ?? []).length === 0, dependent })) return null;
+    const e = await semanticLookup(conversation.storeId, sig);
+    if (!e) return null;
+    aceNote('semanticCache', `سؤال عیناً تکراری (${sig.intent}) در همین فروشگاه؛ جواب قبلی از کش، بدون LLM`, 'semantic_cache');
+    const uiBlock: UiBlock = { type: 'NONE' };
+    await this.logReply(conversation, e.text, uiBlock, undefined, {
+      intent: 'FULL_AGENT', handler: 'semanticCache', factsOrPrompt: `semantic_cache:${sig.intent}`, model: 'none',
+      toolsCalled: [], initialCatalogProductIds: [], stepsUsed: 0, mutationHappened: false, progressHappened: false, isFallbackAttempt: false,
+    } as never, e.quickReplies);
+    return { reply: e.text, uiBlocks: [uiBlock], state: conversation.currentState, quickReplies: e.quickReplies };
+  }
+
+  // ACE-11 — نوشتن بعد از نوبت LLM (دو بار دیده شود)؛ هرگز خطا نمی‌دهد
+  private async maybeStoreSemantic(
+    conversation: ConversationWithStore,
+    text: string,
+    reply: string,
+    rt: AgentTurnRuntime,
+    toolNames: string[],
+    uiBlockType: string,
+    quickReplies: string[],
+    catalog: Array<{ id: string; name: string }>,
+  ): Promise<void> {
+    try {
+      if (!(await aceOn('semanticCache'))) return;
+      const sig = buildSignature(text, { catalog, lastShownProductIds: (rt.ctx.lastShownProducts ?? []).map((p) => p.id) });
+      const dependent = isContextDependent({ text, currentState: conversation.currentState, mentionsProduct: sig.entities.some((e) => e.startsWith('prod:')) });
+      if (!eligibleToStore({
+        sig, state: conversation.currentState, cartEmpty: rt.ctx.cart.length === 0, toolsCalled: toolNames,
+        mutationHappened: rt.mutationHappened, uiBlockType, dependent, replyText: reply,
+      })) return;
+      const r = await semanticMaybeStore(conversation.storeId, sig, reply, quickReplies);
+      if (r === 'stored') aceNote('semanticCache', `جواب سؤال سیاستی (${sig.intent}) برای تکرار بعدی در کش ذخیره شد`, 'semantic_cache');
+    } catch {
+      /* fail-open */
+    }
+  }
+
+  // ACE-10 (on) — جواب ترکیبی بدون LLM؛ هر شکی → null و مسیر عادی. سؤال دوم قیمت در همان گفتگو → LLM (چانه‌زنی)
+  private async tryServeFastAnswer(conversation: ConversationWithStore, text: string): Promise<EngineResult | null> {
+    try {
+      const dedupeOn = await aceOn('dedupe');
+      if (dedupeOn) {
+        const dup = await this.tryServeDuplicate(conversation, text);
+        if (dup) return dup;
+      }
+      const fastOn = await aceOn('fastAnswers');
+      const semOn = await aceOn('semanticCache');
+      if (!fastOn && !semOn) return null;
+      const ctx = (conversation.contextData ?? {}) as {
+        lastShownProducts?: Array<{ id: string; name: string }>;
+        usedPitchLines?: string[];
+        customerState?: unknown;
+        cart?: unknown[];
+      };
+      const catalog = await this.prisma.product.findMany({
+        where: { storeId: conversation.storeId, ...BUYER_VISIBLE },
+        select: { id: true, name: true },
+        take: 300,
+      });
+      if (semOn) {
+        const hit = await this.trySemanticHit(conversation, text, ctx, catalog);
+        if (hit) return hit;
+      }
+      if (!fastOn || (ctx.usedPitchLines ?? []).length > 0) return null;
+      const c = await this.fastAnswerCandidate(conversation, text, ctx, catalog, true);
+      if (!c) return null;
+      const { product, composed, sig } = c;
+      const inStock = displayStock(product) > 0;
+      const uiBlock: UiBlock = {
+        type: 'PRODUCT_CARD',
+        products: [{
+          id: product.id,
+          name: product.name,
+          basePrice: product.basePrice,
+          stock: displayStock(product),
+          images: product.images,
+          videos: parseProductVideos(product.videos),
+          weightGrams: product.weightGrams ?? null,
+          purityKarat: product.purityKarat ?? null,
+          isWeightBasedPricing: false,
+          goldPricingSummary: null,
+        }],
+      };
+      const quickReplies = inStock ? ['بذار تو سبد', 'عکس بیشتر'] : [];
+      aceNote('fastAnswers', `جواب قطعی (${sig.intent}) بدون LLM: قیمت/موجودی زنده از DB + پیچ برگه‌ی محصول`, 'fast_answer');
+      await this.prisma.salesConversation.update({
+        where: { id: conversation.id },
+        data: {
+          contextData: {
+            ...ctx,
+            lastShownProducts: [{ id: product.id, name: product.name }],
+            usedPitchLines: composed.usedLines,
+          } as never,
+        },
+      });
+      await this.logReply(conversation, composed.text, uiBlock, undefined, {
+        intent: 'FULL_AGENT',
+        handler: 'tryServeFastAnswer',
+        factsOrPrompt: `fast_answer:${sig.intent}`,
+        model: 'none',
+        lastShownProducts: [{ id: product.id, name: product.name }],
+        toolsCalled: [],
+        initialCatalogProductIds: [],
+        stepsUsed: 0,
+        mutationHappened: false,
+        progressHappened: false,
+        isFallbackAttempt: false,
+      } as never, quickReplies);
+      return { reply: composed.text, uiBlocks: [uiBlock], state: conversation.currentState, quickReplies };
+    } catch (err) {
+      this.logger.warn(`fast answer failed, LLM path used: ${(err as Error).message}`);
+      return null;
+    }
+  }
+
+  // ACE-10 (shadow) — هرگز خطا نمی‌دهد و نوبت را کند نمی‌کند (void). قیمت از DB، پیچ از برگه‌ی ACE-16.
+  private async recordFastAnswerShadow(
+    conversation: ConversationWithStore,
+    customerMessage: string,
+    realText: string,
+    rt: AgentTurnRuntime,
+    catalog: Array<{ id: string; name: string }>,
+  ): Promise<void> {
+    if (!(await aceShadow('fastAnswers'))) return;
+    const c = await this.fastAnswerCandidate(conversation, customerMessage, rt.ctx as never, catalog, false);
+    if (!c) return;
     await pushShadow({
       layer: 'fastAnswers',
-      intent: sig.intent,
+      intent: c.sig.intent,
       storeId: conversation.storeId,
       storeCategory: conversation.store.category,
       conversationId: conversation.id,
       customerMessage,
       realText,
-      candidateText: composed.text,
+      candidateText: c.composed.text,
       tags: [
-        ...(hasVariantOptions(product) ? ['multi_variant'] : []),
-        ...(sig.entities.some((e) => e.startsWith('prod:')) ? [] : ['anaphora']),
+        ...(hasVariantOptions(c.product) ? ['multi_variant'] : []),
+        ...(c.mentionsProduct ? [] : ['anaphora']),
       ],
     });
   }
@@ -3777,12 +3944,15 @@ ${customerStateSummary}${
       ...(correctiveRetryReason ? { correctiveRetryReason } : {}),
     });
 
+    const finalQuickReplies = [...new Set((finalCall.input.quickReplies ?? []).map((q) => q.trim()).filter((q) => q.length > 0 && q.length <= 48))].slice(0, 3);
+    await this.maybeStoreSemantic(conversation, customerMessage, text, rt, toolsCalled.map((t) => t.name), uiBlock.type, finalQuickReplies, initialProducts);
+
     return {
       engineResult: {
         reply: text,
         uiBlocks: [uiBlock],
         state: conversation.currentState,
-        quickReplies: [...new Set((finalCall.input.quickReplies ?? []).map((q) => q.trim()).filter((q) => q.length > 0 && q.length <= 48))].slice(0, 3),
+        quickReplies: finalQuickReplies,
       },
       inputTokens: usedInputTokens,
       outputTokens: usedOutputTokens,
@@ -3797,6 +3967,8 @@ ${customerStateSummary}${
     conversation: ConversationWithStore,
     text: string,
   ): Promise<EngineResult> {
+    const fast = await this.tryServeFastAnswer(conversation, text);
+    if (fast) return fast;
     // docs/PRD-sales-agent-sales-state-machine.md §۱۵.۳ — با فلگ خاموش (پیش‌فرض) دقیقاً همان
     // مسیر قبلی؛ ادراک+تصمیم فقط یک‌بار قبل از زنجیره‌ی fallback مدل انجام می‌شود
     let turnFn = (model: string, isFallback: boolean) =>
