@@ -14,6 +14,8 @@ function build(username?: string) {
     {} as never,
     {} as never,
     {} as never,
+    {} as never,
+    {} as never,
   );
   return new SellerBotController(svc);
 }

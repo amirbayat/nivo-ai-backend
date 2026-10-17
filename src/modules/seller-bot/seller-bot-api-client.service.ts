@@ -133,6 +133,10 @@ export class SellerBotApiClientService {
     return this.callApi('sendPhoto', form);
   }
 
+  sendChatAction(chatId: string, action: 'typing' = 'typing') {
+    return this.callApi('sendChatAction', { chat_id: chatId, action });
+  }
+
   answerCallbackQuery(callbackQueryId: string, text?: string) {
     return this.callApi('answerCallbackQuery', {
       callback_query_id: callbackQueryId,

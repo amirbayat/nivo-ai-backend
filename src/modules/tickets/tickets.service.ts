@@ -10,9 +10,39 @@ import { fa } from '../../i18n/fa';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { AdminNotificationsService } from '../admin-notifications/admin-notifications.service';
 
+export interface TicketAdminRepliedEvent {
+  ticketId: string;
+  body: string;
+}
+export interface TicketStatusChangedEvent {
+  ticketId: string;
+  status: TicketStatus;
+}
+
 @Injectable()
 export class TicketsService {
   private readonly logger = new Logger(TicketsService.name);
+  // docs/PRD-seller-bot-support-agent.md بخش ۵.۳ — رله‌ی جواب ادمین به بات فروشنده بدون وابستگی
+  // چرخه‌ای TicketsModule ↔ SellerSupportModule: ماژول seller-support listener ثبت می‌کند
+  // (معادل ساده‌ی event؛ پکیج event-emitter در پروژه نیست). خطای listener هرگز مسیر اصلی را نمی‌شکند
+  private readonly adminRepliedListeners: ((e: TicketAdminRepliedEvent) => Promise<void> | void)[] = [];
+  private readonly statusChangedListeners: ((e: TicketStatusChangedEvent) => Promise<void> | void)[] = [];
+
+  onAdminReplied(fn: (e: TicketAdminRepliedEvent) => Promise<void> | void): void {
+    this.adminRepliedListeners.push(fn);
+  }
+
+  onStatusChanged(fn: (e: TicketStatusChangedEvent) => Promise<void> | void): void {
+    this.statusChangedListeners.push(fn);
+  }
+
+  private emit<T>(listeners: ((e: T) => Promise<void> | void)[], event: T): void {
+    for (const fn of listeners) {
+      Promise.resolve()
+        .then(() => fn(event))
+        .catch((err) => this.logger.error('ticket listener failed', err));
+    }
+  }
 
   constructor(
     private readonly prisma: PrismaService,
@@ -157,7 +187,63 @@ export class TicketsService {
       }),
     ]);
 
+    this.emit(this.adminRepliedListeners, { ticketId, body });
     return { reply };
+  }
+
+  // docs/PRD-seller-bot-support-agent.md بخش ۴ — تیکت از بات فروشنده؛ اگر تیکت باز همان فروشگاه
+  // هست پیام به همان اضافه می‌شود (تیکت تکراری ساخته نمی‌شود)
+  async createFromSellerBot(
+    store: { id: string; name: string; sellerId: string },
+    opts: { subject: string; body: string; aiSummary: string },
+  ) {
+    const open = await this.prisma.supportTicket.findFirst({
+      where: {
+        storeId: store.id,
+        category: 'SELLER',
+        channel: 'SELLER_BOT',
+        status: { in: [TicketStatus.OPEN, TicketStatus.IN_PROGRESS] },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (open) {
+      await this.prisma.ticketReply.create({
+        data: { ticketId: open.id, body: opts.body, fromAdmin: false },
+      });
+      return { ticket: open, created: false as const };
+    }
+    const ticket = await this.prisma.supportTicket.create({
+      data: {
+        userId: store.sellerId,
+        storeId: store.id,
+        category: 'SELLER',
+        channel: 'SELLER_BOT',
+        subject: opts.subject,
+        body: opts.body,
+        aiSummary: opts.aiSummary,
+      },
+    });
+    this.adminNotifications
+      .notify(
+        'TICKET_CREATED',
+        fa.adminNotification.ticketTitle,
+        fa.adminNotification.ticketBody(opts.subject, store.name),
+        { ticketId: ticket.id, storeId: store.id },
+      )
+      .catch((err) =>
+        this.logger.error(`admin notification failed for ticket=${ticket.id}`, err),
+      );
+    return { ticket, created: true as const };
+  }
+
+  // «✅ مشکلم حل شد» از سمت فروشنده — عمداً event وضعیت نمی‌فرستد (فروشنده خودش زده، پیام
+  // «ادمین بست» نباید برایش برگردد)
+  async resolveBySeller(storeId: string, ticketId: string) {
+    const res = await this.prisma.supportTicket.updateMany({
+      where: { id: ticketId, storeId, status: { in: [TicketStatus.OPEN, TicketStatus.IN_PROGRESS] } },
+      data: { status: TicketStatus.RESOLVED },
+    });
+    return res.count > 0;
   }
 
   async updateStatus(
@@ -181,6 +267,13 @@ export class TicketsService {
       },
     });
 
+    if (
+      status !== undefined &&
+      status !== ticket.status &&
+      (status === TicketStatus.RESOLVED || status === TicketStatus.CLOSED)
+    ) {
+      this.emit(this.statusChangedListeners, { ticketId, status });
+    }
     return { message: fa.ticket.updated, ticket: updated };
   }
 }

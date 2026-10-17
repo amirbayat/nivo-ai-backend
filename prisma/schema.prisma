@@ -899,13 +899,20 @@ model SupportTicket {
   status    TicketStatus   @default(OPEN)
   priority  TicketPriority @default(NORMAL)
   adminNote String?
+  // docs/PRD-seller-bot-support-agent.md بخش ۲.۲
+  category  TicketCategory @default(GENERAL)
+  channel   TicketChannel  @default(WEB)
+  storeId   String? // فقط برای SELLER
+  aiSummary String? // خلاصه‌ی عامل از مشکل، لحظه‌ی ارجاع
   createdAt DateTime       @default(now())
   updatedAt DateTime       @updatedAt
 
   user    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  store   Store?        @relation(fields: [storeId], references: [id], onDelete: SetNull)
   replies TicketReply[]
 
   @@index([status, createdAt])
+  @@index([category, status, createdAt])
   @@map("support_tickets")
 }
 
@@ -919,6 +926,53 @@ model TicketReply {
   ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
 
   @@map("ticket_replies")
+}
+
+enum TicketCategory {
+  GENERAL // محصول اصلی نیوو — پیش‌فرض
+  SELLER // فروشنده‌های نیوو فروش
+}
+
+enum TicketChannel {
+  WEB
+  SELLER_BOT // از بات تلگرام فروشنده
+}
+
+enum SupportMessageRole {
+  SELLER
+  ASSISTANT
+  ADMIN
+}
+
+// docs/PRD-seller-bot-support-agent.md بخش ۲.۱ — داک‌های راهنما (ویرایش از پنل ادمین)
+model SupportDoc {
+  id        String   @id @default(uuid())
+  slug      String   @unique
+  title     String
+  body      String // Markdown فارسی
+  isActive  Boolean  @default(true)
+  sortOrder Int      @default(0)
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+
+  @@map("support_docs")
+}
+
+// docs/PRD-seller-bot-support-agent.md بخش ۲.۳ — لاگ گفتگوی پشتیبانی بات فروشنده
+model SellerSupportMessage {
+  id        String             @id @default(uuid())
+  storeId   String
+  role      SupportMessageRole
+  body      String
+  ticketId  String?
+  model     String? // فقط ASSISTANT
+  costToman Int? // فقط ASSISTANT
+  createdAt DateTime           @default(now())
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId, createdAt])
+  @@map("seller_support_messages")
 }
 
 enum TicketStatus {
@@ -2298,6 +2352,12 @@ model Store {
   // docs/PRD-instagram-smart-dm-and-ir-intl-split.md بخش ۴.۲ — rule های اتوماسیون دایرکت هوشمند
   instagramAutomationRules InstagramAutomationRule[]
 
+  // docs/PRD-seller-bot-support-agent.md بخش ۲.۴ — یادآوری روزانه‌ی بات + پشتیبانی هوشمند
+  supportNudgesEnabled Boolean                @default(true)
+  lastSupportNudgeAt   DateTime?
+  supportTickets       SupportTicket[]
+  supportMessages      SellerSupportMessage[]
+
   @@index([sellerId])
   @@index([isDemoTemplate, category])
   @@index([sellerId, isDemo])
@@ -2470,13 +2530,13 @@ model Product {
 
   // docs/PRD-customer-comments-and-discounts.md بخش ۱۳ — کدهای تخفیف محدود به این محصول
   discountCodes StoreDiscountCode[]
+  // ACE-16 — برگه‌ی محصول (جدول product_brief؛ SQL دستی 20261058)
+  brief         ProductBrief?
 
   @@unique([storeId, code])
   @@index([storeId, status])
   @@index([storeId])
   @@index([canonicalProductId])
-  // ACE-16 — برگه‌ی محصول (جدول product_brief؛ SQL دستی 20261058)
-  brief                       ProductBrief?
   @@map("products")
 }
 

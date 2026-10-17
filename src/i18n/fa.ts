@@ -870,7 +870,42 @@ export const fa = {
         : `✅ ${ok.toLocaleString('fa-IR')} مورد با موفقیت اعمال شد.`,
   },
   // docs/PRD-seller-telegram-management-bot.md — بات جدا برای مدیریت پنل فروشنده (نه مشتری)
+  // docs/PRD-seller-bot-support-agent.md
+  sellerSupport: {
+    intro:
+      'سؤالت رو همین‌جا بنویس 🙋 اگه نتونستم جواب بدم، به تیم پشتیبانی می‌رسونم.',
+    dailyCapReached:
+      'امروز به سقف پیام‌های پشتیبان هوشمند رسیدی؛ پیامت رو مستقیم برای تیم پشتیبانی فرستادم 🙋 جواب همین‌جا میاد.',
+    agentFailed:
+      'الان نتونستم جواب بدم — چند دقیقه بعد دوباره امتحان کن.',
+    escalated:
+      'سؤالت رو برای تیم پشتیبانی فرستادم 🙋 جواب همین‌جا میاد. اگه چیز دیگه‌ای یادت اومد، روی همون پیام پشتیبانی reply کن.',
+    escalatedAppended:
+      'پیامت رو به تیکت بازِ قبلی‌ات اضافه کردم و به تیم پشتیبانی رسید ✅',
+    sellerReplyRecorded: 'پیامت به پشتیبانی رسید ✅',
+    adminReplyToSeller: (body: string, ticketId: string) =>
+      `👤 پاسخ پشتیبانی نیوو:\n${body}\n\n(برای جواب دادن روی همین پیام reply کن)\n[ref:t_${ticketId}]`,
+    resolvedButton: '✅ مشکلم حل شد',
+    resolvedAck: 'خوشحالیم که حل شد ✅',
+    ticketClosedByAdmin: 'تیکت پشتیبانی‌ات توسط تیم نیوو بسته شد. اگه هنوز مشکل داری، دوباره بنویس.',
+    smsReplyReady: 'نیوو: پاسخ تیکت پشتیبانی‌ات آماده‌ست. بات تلگرام نیوو رو باز کن یا از پنل ببین.',
+    adminNewTicket: (storeName: string, slug: string, summary: string, last: string, id: string) =>
+      `🎫 تیکت جدید — ${storeName} (${slug})\n${summary}\n\nآخرین پیام فروشنده: «${last}»\n[ref:t_${id}]`,
+    adminNewMessage: (storeName: string, slug: string, last: string, id: string) =>
+      `💬 پیام جدید روی تیکت — ${storeName} (${slug})\n«${last}»\n[ref:t_${id}]`,
+    adminReplyButton: '✍️ جواب',
+    adminCloseButton: '✅ بستن',
+    adminLogButton: '📜 گفتگوی کامل',
+    adminReplyPrompt: (id: string) => `✍️ جواب به تیکت — متن جواب رو بنویس.\n[ref:t_${id}]`,
+    adminReplySent: 'جواب برای فروشنده فرستاده شد ✅',
+    adminClosed: 'تیکت بسته شد ✅',
+    adminHelp: 'برای جواب دادن روی پیام تیکت reply کن یا دکمه‌ی ✍️ جواب رو بزن.',
+    adminLogEmpty: 'گفتگویی ثبت نشده.',
+    whoami: (chatId: string) =>
+      `chatId این گفتگو: ${chatId}\nاگه ادمین پشتیبانی هستی، این عدد رو به SELLER_SUPPORT_ADMIN_CHAT_IDS اضافه کن.`,
+  },
   sellerBot: {
+    menuSupportButton: '🙋 پشتیبانی',
     shareContactPrompt:
       'سلام 👋 این بات مخصوص مدیریت پنل فروشگاه شماست. برای ورود، لطفاً دکمه‌ی زیر رو بزن تا شماره‌ات رو تایید کنیم.',
     shareContactButton: '📱 اشتراک‌گذاری شماره',

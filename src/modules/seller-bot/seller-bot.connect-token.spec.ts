@@ -20,7 +20,7 @@ function build(opts: { store?: object | null; linkedElsewhere?: object | null; u
   const config = { get: (k: string) => (k === 'SELLER_BOT_USERNAME' ? 'nivo_seller_bot' : undefined) };
   const storeService = { getOwned: jest.fn().mockResolvedValue({ id: 's1' }) };
   const svc = new SellerBotService(
-    prisma as never, config as never, {} as never, storeService as never, {} as never, api as never, {} as never, productEvents as never,
+    prisma as never, config as never, {} as never, storeService as never, {} as never, api as never, {} as never, productEvents as never, {} as never, {} as never,
   );
   (svc as unknown as { sendMenu: unknown }).sendMenu = jest.fn(async (_c: string, t: string) => void sent.push(t));
   return { svc, prisma, sent, productEvents };

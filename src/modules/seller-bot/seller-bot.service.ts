@@ -15,6 +15,11 @@ import { AuthService } from '../auth/auth.service';
 import { StoreService } from '../store/store.service';
 import { StoreCreditService } from '../store/store-credit.service';
 import { RefundService } from '../order-lifecycle/refund.service';
+import { SellerSupportAgentService } from '../seller-support/seller-support-agent.service';
+import {
+  SellerSupportTicketService,
+  TICKET_REF_REGEX,
+} from '../seller-support/seller-support-ticket.service';
 import { SellerBotApiClientService } from './seller-bot-api-client.service';
 import { normalizePhone } from '../../common/utils/normalize-phone';
 import { fa } from '../../i18n/fa';
@@ -54,7 +59,10 @@ const MAIN_MENU_KEYBOARD = {
       { text: fa.sellerBot.menuStockButton },
       { text: fa.sellerBot.menuCreditButton },
     ],
-    [{ text: fa.sellerBot.menuLogoutButton }],
+    [
+      { text: fa.sellerBot.menuSupportButton },
+      { text: fa.sellerBot.menuLogoutButton },
+    ],
   ],
   resize_keyboard: true,
 };
@@ -81,6 +89,8 @@ export class SellerBotService {
     private readonly api: SellerBotApiClientService,
     private readonly refunds: RefundService,
     private readonly productEvents: ProductEventService,
+    private readonly supportAgent: SellerSupportAgentService,
+    private readonly supportTickets: SellerSupportTicketService,
   ) {
     this.webhookSecret = this.config.get<string>('SELLER_BOT_WEBHOOK_SECRET');
     this.botUsername =
@@ -98,6 +108,22 @@ export class SellerBotService {
 
   async handleUpdate(update: TelegramUpdate): Promise<void> {
     try {
+      // docs/PRD-seller-bot-support-agent.md بخش ۵.۱ — chatهای ادمین پشتیبانی قبل از هر منطق
+      // فروشنده مسیر جدا دارند و هرگز به فروشگاه وصل نمی‌شوند
+      const adminChatId = update.callback_query
+        ? String(update.callback_query.message?.chat.id ?? update.callback_query.from.id)
+        : update.message
+          ? String(update.message.chat.id)
+          : null;
+      if (adminChatId && this.supportTickets.isAdminChat(adminChatId)) {
+        if (update.callback_query) {
+          await this.api.answerCallbackQuery(update.callback_query.id);
+          await this.supportTickets.handleAdminCallback(adminChatId, update.callback_query.data ?? '');
+        } else if (update.message) {
+          await this.supportTickets.handleAdminMessage(update.message);
+        }
+        return;
+      }
       if (update.callback_query) {
         await this.handleCallback(update.callback_query);
         return;
@@ -131,6 +157,14 @@ export class SellerBotService {
         if (conversationId) {
           await this.handleAttentionReplyMessage(message, conversationId);
           return;
+        }
+        const ticketId = this.extractRef(message, TICKET_REF_REGEX);
+        if (ticketId) {
+          const store = await this.getLinkedStore(String(message.chat.id));
+          if (store && (await this.supportTickets.handleSellerTicketReply(store, ticketId, message.text.trim()))) {
+            return;
+          }
+          // تیکت بسته/نامعتبر — مثل سؤال تازه ادامه می‌دهد
         }
         if (message.reply_to_message?.text === fa.sellerBot.stockSearchPrompt) {
           await this.handleStockSearch(
@@ -179,6 +213,10 @@ export class SellerBotService {
       await this.handleLogout(chatId);
       return;
     }
+    if (text === '/whoami' && !(await this.getLinkedStore(chatId))) {
+      await this.api.sendText(chatId, fa.sellerSupport.whoami(chatId));
+      return;
+    }
     if (text === '/help') {
       await this.sendMenu(chatId, fa.sellerBot.help);
       return;
@@ -218,7 +256,23 @@ export class SellerBotService {
       return;
     }
 
-    await this.sendMenu(chatId, fa.sellerBot.unknownCommand);
+    if (text === fa.sellerBot.menuSupportButton) {
+      const store = await this.requireLinkedStore(chatId);
+      if (!store) return;
+      await this.sendMenu(chatId, fa.sellerSupport.intro);
+      return;
+    }
+
+    // docs/PRD-seller-bot-support-agent.md بخش ۳ — هر متن آزاد دیگر از فروشنده‌ی وصل‌شده به
+    // عامل پشتیبانی می‌رود؛ فروشگاه وصل‌نشده همان پیام قبلی را می‌گیرد
+    const store = await this.getLinkedStore(chatId);
+    if (!store) {
+      await this.sendMenu(chatId, fa.sellerBot.unknownCommand);
+      return;
+    }
+    await this.api.sendChatAction(chatId);
+    const reply = await this.supportAgent.handle(store, text);
+    await this.sendMenu(chatId, reply.text);
   }
 
   // SP-7/S9 — اتصال با یک تپ: t.me/<bot>?start=c_<token>؛ توکن یک‌بارمصرف با TTL ۱۵ دقیقه
@@ -548,6 +602,11 @@ export class SellerBotService {
     }
     if (data.startsWith('sbrp:')) {
       await this.handleAttentionReplyButton(chatId, data.slice('sbrp:'.length));
+      return;
+    }
+    if (data.startsWith('ss:ok:')) {
+      const store = await this.getLinkedStore(chatId);
+      if (store) await this.supportTickets.handleSellerResolved(store, data.slice('ss:ok:'.length));
       return;
     }
     if (data.startsWith('sbrf:')) {
