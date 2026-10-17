@@ -260,7 +260,7 @@ export class StoreQualityReviewService implements OnModuleInit, OnModuleDestroy 
     const item = guide.find((g) => g.key === key);
     if (!item || !(TEXT_FIELDS as readonly string[]).includes(item.target)) throw new NotFoundException();
     const field = item.target as StoreTextField;
-    const max = field === 'brandIntro' ? (store.leadCaptureOnly ? 2000 : 300) : 1000;
+    const max = field === 'brandIntro' ? (store.leadCaptureOnly ? 2000 : 1500) : 1000;
     const current = store[field] ?? '';
     await assertQualityApplyCap(this.redis, storeId);
     setCallSite('store_quality_apply');

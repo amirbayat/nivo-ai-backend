@@ -82,7 +82,7 @@ export class UpdateStoreDto {
   returnPolicy?: string;
 
   // docs/PRD-leadgen-store-rich-brand-intro.md — سقف واقعی اینجا فقط یک سقفِ سخت ضدِ سوءاستفاده‌ست
-  // (۲۰۰۰)؛ سقف واقعی روزمره (۳۰۰ عادی / ۲۰۰۰ برای leadCaptureOnly) در StoreService.update چک
+  // (۲۰۰۰)؛ سقف واقعی روزمره (۱۵۰۰ عادی / ۲۰۰۰ برای leadCaptureOnly) در StoreService.update چک
   // می‌شود چون آنجا وضعیت فعلی leadCaptureOnly فروشگاه در دسترس است، نه اینجا
   @IsOptional()
   @IsString()

@@ -414,7 +414,7 @@ export class StoreService {
     // پس برندینترو تنها جای همیشه-حاضر برای یک اسکریپت فروش واقعی است؛ برای بقیه‌ی فروشگاه‌ها
     // همان سقف قبلی (۳۰۰) می‌ماند تا هزینه‌ی توکن هر نوبت برای اکثریت فروشگاه‌ها بالا نرود
     if (data.brandIntro !== undefined) {
-      const maxLen = before.leadCaptureOnly ? 2000 : 300;
+      const maxLen = before.leadCaptureOnly ? 2000 : 1500;
       if (data.brandIntro.length > maxLen) {
         throw new BadRequestException(fa.validation.stringTooLong);
       }
