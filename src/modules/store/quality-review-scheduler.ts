@@ -7,9 +7,21 @@ export function setQualityReviewHandler(h: Handler | null): void {
   handler = h;
 }
 
+// ACE-16 — ساخت برگه‌ی محصول با همان trigger (call جدا، debounce جدا)
+let briefHandler: Handler | null = null;
+
+export function setProductBriefHandler(h: Handler | null): void {
+  briefHandler = h;
+}
+
 export function scheduleProductReview(productId: string): void {
   try {
     if (productId) handler?.(productId);
+  } catch {
+    /* best-effort */
+  }
+  try {
+    if (productId) briefHandler?.(productId);
   } catch {
     /* best-effort */
   }

@@ -2475,6 +2475,8 @@ model Product {
   @@index([storeId, status])
   @@index([storeId])
   @@index([canonicalProductId])
+  // ACE-16 — برگه‌ی محصول (جدول product_brief؛ SQL دستی 20261058)
+  brief                       ProductBrief?
   @@map("products")
 }
 
@@ -3680,4 +3682,20 @@ model ContentQualityReview {
   @@unique([entityType, entityId])
   @@index([storeId])
   @@map("content_quality_review")
+}
+
+// ACE-16 — برگه‌ی محصول و فهرست بخش‌های توضیح؛ ساخته‌شده در پس‌زمینه، بدون اثر روی جواب تا لایه‌ی productBrief روشن شود
+model ProductBrief {
+  productId String   @id
+  storeId   String
+  // sha1(name + description نرمال‌شده + specs + optionTypes) + BRIEF_PROMPT_VERSION
+  descHash  String
+  sections  Json
+  brief     Json
+  status    String // 'ok' | 'failed'
+  builtAt   DateTime @default(now())
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([storeId])
+  @@map("product_brief")
 }

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { StoreQualityReviewService } from './store-quality-review.service';
 import { ProductQualityReviewService } from './product-quality-review.service';
+import { ProductBriefService } from './product-brief/product-brief.service';
 import { PaymentsModule } from '../payments/payments.module';
 import { CreditsModule } from '../credits/credits.module';
 import { UsageModule } from '../usage/usage.module';
@@ -66,6 +67,7 @@ import { ContentChangeLogService } from './content-change-log.service';
     ContentChangeLogService,
     ProductAiFillService,
     ProductQualityReviewService,
+    ProductBriefService,
     StoreQualityReviewService,
   ],
   // docs/PRD-seller-guide-assistant-modal.md بخش ۱.۳ — ContentChangeLogService هم از
