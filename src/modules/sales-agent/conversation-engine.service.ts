@@ -168,6 +168,7 @@ import { formatTomanAmountsInText, stripUnauthorizedPriceSentences } from '../..
 import { isValidCartQty, reconcileCart, lineKey } from './cart-validation.util';
 import type { CatalogLine } from './cart-validation.util';
 import { setCallSite } from '../../common/ai-cost-engine/ace-context';
+import { resolveEngineMode } from '../../common/ai-cost-engine/ace-config';
 import { DEMO_FAKE_CARD_NUMBER, DEMO_FAKE_CARD_OWNER, isNivoLeadStore } from '../../common/utils/store-mode';
 
 export type ConversationWithStore = Prisma.SalesConversationGetPayload<{
@@ -4690,8 +4691,9 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     const blocked = await this.guardStoreAndAi(conversation, text, true);
     if (blocked) return blocked;
     if (isLlmSaturated()) return this.saturatedResult(conversation);
+    const engine = await resolveEngineMode(conversation.id, conversation.storeId);
     return this.withTurnReservation(conversation, () =>
-      runLlmTurn(() => this.handleMessageTurn(conversation, text, opts), undefined, { storeId: conversation.storeId, conversationId: conversation.id }).catch(
+      runLlmTurn(() => this.handleMessageTurn(conversation, text, opts), undefined, { storeId: conversation.storeId, conversationId: conversation.id, engine }).catch(
         (err: unknown) => this.onTurnError(conversation, err),
       ),
     );
@@ -5544,8 +5546,9 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
       );
     }
     if (isLlmSaturated()) return this.saturatedResult(conversation);
+    const engine = await resolveEngineMode(conversation.id, conversation.storeId);
     return this.withTurnReservation(conversation, () =>
-      runLlmTurn(() => this.handleActionTurn(conversation, action), undefined, { storeId: conversation.storeId, conversationId: conversation.id }).catch(
+      runLlmTurn(() => this.handleActionTurn(conversation, action), undefined, { storeId: conversation.storeId, conversationId: conversation.id, engine }).catch(
         (err: unknown) => this.onTurnError(conversation, err),
       ),
     );

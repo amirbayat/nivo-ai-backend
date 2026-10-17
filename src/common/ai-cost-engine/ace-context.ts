@@ -8,6 +8,8 @@ export interface AceContext {
   callSite?: string;
   storeId?: string;
   conversationId?: string;
+  // موتور این گفتگو (بخش ۱.۵)؛ نبودنش = stable
+  engine?: 'stable' | 'lean';
 }
 
 const storage = new AsyncLocalStorage<AceContext>();

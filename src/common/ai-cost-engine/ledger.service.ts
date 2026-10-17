@@ -30,13 +30,22 @@ export class LedgerService implements OnModuleInit, OnModuleDestroy {
       redis: this.redis,
       loadConfig: () => this.prisma.aiCostEngineConfig.findUnique({ where: { id: 'singleton' } }),
     });
+    setAceRuntime({
+      saveConfig: async (data) => {
+        await this.prisma.aiCostEngineConfig.upsert({
+          where: { id: 'singleton' },
+          create: { id: 'singleton', layers: data.layers as never, params: data.params as never },
+          update: { layers: data.layers as never, params: data.params as never },
+        });
+      },
+    });
     this.timer = setInterval(() => void this.flush(), FLUSH_INTERVAL_MS);
     this.timer.unref?.();
   }
 
   async onModuleDestroy(): Promise<void> {
     setLedgerSink(null);
-    setAceRuntime({ redis: null, loadConfig: null });
+    setAceRuntime({ redis: null, loadConfig: null, saveConfig: null });
     if (this.timer) clearInterval(this.timer);
     await this.flush();
   }

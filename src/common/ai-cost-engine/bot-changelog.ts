@@ -1,0 +1,36 @@
+// بخش ۱۱ سند: دفتر تغییرات رفتار بات. هر کامیتی که چیزی در مسیر بات عوض می‌کند همین‌جا و در سند ردیف اضافه می‌کند.
+export interface BotChangelogEntry {
+  date: string;
+  item: string;
+  commit: string;
+  tag: string;
+  sql: string;
+  change: string;
+  answerImpact: string;
+  layerKey: string | null;
+  rollback: string;
+}
+
+export const BOT_CHANGELOG: BotChangelogEntry[] = [
+  {
+    date: '1405/07/24', item: 'ACE-0', commit: 'a3602e5', tag: '—',
+    sql: '20261055_ai_call_ledger.sql / rollback/20261055_ai_call_ledger.down.sql',
+    change: 'ثبت مصرف هر فراخوانی AI در ai_call_ledger؛ fetch مدل از meter رد می‌شود',
+    answerImpact: 'ندارد (فقط ثبت)', layerKey: 'ledger',
+    rollback: 'layers.ledger=off در پنل (meter کاملاً دور زده می‌شود)؛ کامل: revert کامیت',
+  },
+  {
+    date: '1405/07/24', item: 'ACE-3، ACE-4', commit: '102fba3', tag: '—',
+    sql: '20261056_ai_cost_engine_config.sql / rollback/20261056_ai_cost_engine_config.down.sql',
+    change: 'کش memo + single-flight برای faq_pick، کش embedding برای KB',
+    answerImpact: 'ندارد تا وقتی کلید روشن نشود', layerKey: 'memo',
+    rollback: 'کلید off در پنل',
+  },
+  {
+    date: '1405/07/25', item: 'دو موتور پایدار/بهینه', commit: '—', tag: 'bot-baseline-1405-07-25',
+    sql: 'none (داخل JSON جدول config)',
+    change: 'engineMode، storeOverrides، audit، برگرداندن فوری، sticky هر گفتگو',
+    answerImpact: 'ندارد (پیش‌فرض stable)', layerKey: null,
+    rollback: 'دکمه‌ی «برگرداندن فوری به پایدار»؛ آخرین راه: deploy تگ bot-baseline-1405-07-25',
+  },
+];

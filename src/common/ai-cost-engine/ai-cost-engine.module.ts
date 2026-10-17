@@ -1,6 +1,7 @@
 import { Global, Module } from '@nestjs/common';
+import { AiCostAdminController } from './ai-cost.admin.controller';
 import { LedgerService } from './ledger.service';
 
 @Global()
-@Module({ providers: [LedgerService], exports: [LedgerService] })
+@Module({ controllers: [AiCostAdminController], providers: [LedgerService], exports: [LedgerService] })
 export class AiCostEngineModule {}

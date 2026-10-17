@@ -1,4 +1,5 @@
 import { getAceContext } from './ace-context';
+import { ledgerEnabledSync } from './ace-config';
 import { recordAiCall } from './ledger-sink';
 
 type OpenAiUsage = {
@@ -62,6 +63,8 @@ export function extractUsage(text: string): { usage?: OpenAiUsage; model?: strin
 // هر خطایی بی‌صدا نادیده گرفته می‌شود.
 export function meterResponse(input: unknown, init: RequestInit | undefined, res: Response, startedAt: number): void {
   try {
+    // layers.ledger=off → meter کاملاً دور زده می‌شود (حتی res.clone() صدا نمی‌شود)
+    if (!ledgerEnabledSync()) return;
     const url = urlOf(input);
     if (!isMeteredUrl(url)) return;
     // snapshot همین لحظه: setCallSite درجا عوض می‌شود و then بعداً اجرا می‌شود
@@ -88,7 +91,10 @@ export function meterResponse(input: unknown, init: RequestInit | undefined, res
           costUsdMicros: typeof usage?.cost === 'number' ? Math.round(usage.cost * 1e6) : 0,
           costIsEstimate: typeof usage?.cost !== 'number',
           latencyMs: Date.now() - startedAt,
-          meta: ctx?.callSite ? null : { urlPath: url.replace(/^https?:\/\/[^/]+/, '').slice(0, 80) },
+          meta: {
+            engineMode: ctx?.engine ?? 'stable',
+            ...(ctx?.callSite ? {} : { urlPath: url.replace(/^https?:\/\/[^/]+/, '').slice(0, 80) }),
+          },
         });
       })
       .catch(() => undefined);
