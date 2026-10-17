@@ -10,6 +10,7 @@ import {
   undoEmergencyRevert,
   updateAceSettings,
 } from './ace-config';
+import { AiCostReportService } from './ai-cost-report.service';
 import { BOT_CHANGELOG } from './bot-changelog';
 
 const isEngine = (v: unknown): v is EngineMode => v === 'stable' || v === 'lean';
@@ -18,7 +19,10 @@ const isEngine = (v: unknown): v is EngineMode => v === 'stable' || v === 'lean'
 @Controller('admin/ai-cost')
 @UseGuards(JwtGuard, AdminGuard)
 export class AiCostAdminController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly reports: AiCostReportService,
+  ) {}
 
   @Get('settings')
   async settings() {
@@ -60,6 +64,16 @@ export class AiCostAdminController {
     const ok = await undoEmergencyRevert(admin.sub);
     if (!ok) throw new BadRequestException('برگرداندن فوری‌ای برای لغو پیدا نشد');
     return this.settings();
+  }
+
+  @Get('cost-report')
+  costReport(@Query('days') days?: string) {
+    return this.reports.costReport(Number(days) || 7);
+  }
+
+  @Get('compare')
+  compare(@Query('days') days?: string) {
+    return this.reports.compare(Number(days) || 7);
   }
 
   @Get('changelog')
