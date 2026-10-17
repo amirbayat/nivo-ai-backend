@@ -168,8 +168,11 @@ import { formatTomanAmountsInText, stripUnauthorizedPriceSentences } from '../..
 import { isValidCartQty, reconcileCart, lineKey } from './cart-validation.util';
 import type { CatalogLine } from './cart-validation.util';
 import { getAceContext, setCallSite } from '../../common/ai-cost-engine/ace-context';
-import { aceActive, resolveEngineMode } from '../../common/ai-cost-engine/ace-config';
+import { aceActive, aceOn, resolveEngineMode } from '../../common/ai-cost-engine/ace-config';
 import { aceNote, aceTraceInfo } from '../../common/ai-cost-engine/ace-context';
+import { briefInputHash } from '../store/product-brief/brief-hash';
+import { BRIEF_PROMPT_RULE, isBriefUsable, readSections, renderBriefFacts, type BriefRow } from '../store/product-brief/brief-prompt';
+import { normalizeDescription } from '../store/product-brief/normalize';
 import { loopDietPrepareStep } from './loop-diet';
 import { PROMPT_CACHE_BREAK } from '../../common/ai-cost-engine/prompt-cache';
 import { DEMO_FAKE_CARD_NUMBER, DEMO_FAKE_CARD_OWNER, isNivoLeadStore } from '../../common/utils/store-mode';
@@ -955,6 +958,38 @@ export class ConversationEngineService {
     return ` [متقاعدسازی: مجاز]${signalsText}`;
   }
 
+  // ACE-16 — برگه‌ی معتبر هر محصول (hash باید با متن فعلی بخواند)؛ هر خطا/نبود جدول → Map خالی = رفتار امروز
+  private async loadUsableBriefs(
+    products: Array<{
+      id: string; name: string; description?: string | null; specs?: unknown;
+      optionTypes?: Array<{ name: string; values: Array<{ value: string }> }>;
+    }>,
+  ): Promise<Map<string, BriefRow>> {
+    const out = new Map<string, BriefRow>();
+    const withDesc = products.filter((p) => (p.description?.length ?? 0) > 0);
+    if (!withDesc.length) return out;
+    try {
+      const rows = await this.prisma.productBrief.findMany({
+        where: { productId: { in: withDesc.map((p) => p.id) }, status: 'ok' },
+      });
+      for (const r of rows) {
+        const p = withDesc.find((x) => x.id === r.productId);
+        if (!p) continue;
+        const hash = briefInputHash({
+          name: p.name,
+          description: p.description ?? null,
+          specs: p.specs ?? null,
+          options: (p.optionTypes ?? []).map((o) => ({ name: o.name, values: o.values.map((v) => v.value) })),
+        });
+        const row = { descHash: r.descHash, status: r.status, sections: r.sections, brief: r.brief } as unknown as BriefRow;
+        if (isBriefUsable(row, hash, p.description?.length ?? 0)) out.set(p.id, row);
+      }
+    } catch {
+      /* جدول نیست/خطا: متن کامل مثل امروز */
+    }
+    return out;
+  }
+
   private async buildProductFactsLine(
     storeId: string,
     product: {
@@ -970,8 +1005,15 @@ export class ConversationEngineService {
     },
     storePersuasionEnabled: boolean,
     descriptionMaxChars = DESCRIPTION_FACTS_MAX_CHARS,
+    // ACE-16 — فقط وقتی لایه‌ی productBrief روشن و برگه‌ی معتبر هست؛ جایگزین «توضیحات» بریده‌شده
+    briefRow?: BriefRow,
   ): Promise<string> {
-    const base = `${product.name} (شناسه: ${product.id}, ${product.basePrice} تومان)${displayStock(product) === 0 ? ' — فعلاً ناموجود' : ''}${product.goldPricingSummary ? ` — ${product.goldPricingSummary}` : ''}${product.description ? ` — توضیحات: ${truncateDescriptionForFacts(product.description, descriptionMaxChars)}` : ''}${formatSpecsForFacts(parseProductSpecs(product.specs))}`;
+    const descPart = product.description
+      ? briefRow
+        ? ` — برگه‌ی محصول: ${renderBriefFacts(briefRow, normalizeDescription(product.description))}`
+        : ` — توضیحات: ${truncateDescriptionForFacts(product.description, descriptionMaxChars)}`
+      : '';
+    const base = `${product.name} (شناسه: ${product.id}, ${product.basePrice} تومان)${displayStock(product) === 0 ? ' — فعلاً ناموجود' : ''}${product.goldPricingSummary ? ` — ${product.goldPricingSummary}` : ''}${descPart}${formatSpecsForFacts(parseProductSpecs(product.specs))}`;
     const note = await this.buildPersuasionNote(
       storeId,
       product,
@@ -2256,6 +2298,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     urgentDiscount: { code: string; expiresAt: Date } | null,
     leadCaptureOnly: boolean,
     leadCaptureNudgeActive: boolean,
+    briefOn = false,
   ): Promise<string> {
     const tone = toneForCategory(conversation.store.category);
     const store = conversation.store;
@@ -2325,7 +2368,7 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
   را صدا نزن — مکالمه همان‌جا تمام می‌شود.
 - اگر مشتری قبلاً محصولی را دیده (طبق سبد/تاریخچه/آخرین محصولات مطرح‌شده بالا) و فقط سوال عمومی
   پرسید، به‌جای جست‌وجوی دوباره روی همان محصول تمرکز کن.
-- اگر مشتری صریح عکس بیشتر خواست، از show_product_photos استفاده کن.
+${briefOn ? `${BRIEF_PROMPT_RULE}\n` : ''}- اگر مشتری صریح عکس بیشتر خواست، از show_product_photos استفاده کن.
 - اگر مشتری صریح بین ۲-۳ محصول مشخص مردد است یا مقایسه خواسته («این بهتره یا اون؟»، «فرقشون
   چیه؟» با حداقل دو محصول مشخص)، از compare_products استفاده کن تا جدولی کنار هم نشان داده شود
   — به‌جای توضیح تفاوت‌ها فقط در متن آزاد.
@@ -2533,10 +2576,32 @@ ${customerStateSummary}${
   private buildAgentTools<R>(
     conversation: ConversationWithStore,
     rt: AgentTurnRuntime,
-    opts: { persuasionEnabled: boolean; respondToCustomer: R },
+    opts: { persuasionEnabled: boolean; respondToCustomer: R; briefOn?: boolean },
   ) {
     const storeId = conversation.storeId;
     const storePersuasionEnabled = opts.persuasionEnabled;
+
+    // ACE-16 — فقط وقتی لایه‌ی productBrief روشن است به ابزارها اضافه می‌شود
+    const readProductSectionTool = tool({
+      description:
+        'متن کامل و عین بخش‌های توضیح یک محصول را با شناسه‌ی بخش (مثل s3) برمی‌گرداند؛ حداکثر ۳ بخش در هر بار. ' +
+        'فقط برای بخش‌هایی که در «بخش‌های دیگر توضیح» همان محصول فهرست شده‌اند.',
+      inputSchema: z.object({ productId: z.string(), sectionIds: z.array(z.string()).min(1).max(3) }),
+      execute: async ({ productId, sectionIds }: { productId: string; sectionIds: string[] }) => {
+        const product = await this.prisma.product.findUnique({
+          where: { id: productId, ...BUYER_VISIBLE },
+          include: { optionTypes: { include: { values: true } } },
+        });
+        if (!product || product.storeId !== storeId || !product.description) {
+          return { error: 'محصولی با این شناسه در این فروشگاه پیدا نشد' };
+        }
+        const rows = await this.loadUsableBriefs([product]);
+        const row = rows.get(product.id);
+        if (!row) return { fullDescription: product.description };
+        aceNote('productBrief', `مدل بخش‌های ${sectionIds.join('، ')} از توضیح «${product.name}» را با ابزار خواند`, 'read_product_section');
+        return { sections: readSections(row, normalizeDescription(product.description), sectionIds) };
+      },
+    });
 
     const searchProductsTool = tool({
       description:
@@ -3049,6 +3114,8 @@ ${customerStateSummary}${
       request_human_handoff: requestHumanHandoffTool,
       show_product_photos: showProductPhotosTool,
       compare_products: compareProductsTool,
+      // نوع tools عمداً با ابزار اختیاری عوض نمی‌شود (استنتاج toolCalls در حلقه‌ی اصلی)
+      ...((opts.briefOn ? { read_product_section: readProductSectionTool } : {}) as Record<never, never>),
       respond_to_customer: opts.respondToCustomer,
     };
   }
@@ -3123,6 +3190,10 @@ ${customerStateSummary}${
     // فقط جمع‌آوری لید بر اساس brandIntro/باکس دانش است)؛ جمله‌ی «فعلاً هیچ محصولی در فروشگاه
     // نیست» باعث می‌شد مدل عذرخواهی کند و گفت‌وگو را همان‌جا ببندد، به‌جای این‌که طبق معرفی
     // فروشگاه ادامه بدهد
+    const briefOn = await aceOn('productBrief');
+    const briefs = briefOn ? await this.loadUsableBriefs(initialProducts) : new Map<string, BriefRow>();
+    if (briefs.size)
+      aceNote('productBrief', `توضیح ${briefs.size} محصول به‌جای متن بریده‌شده، به‌صورت برگه (واقعیت‌ها/قیدها/فهرست بخش‌ها) به مدل داده شد`, 'full_agent');
     const catalogFacts =
       initialProducts.length === 0
         ? isNivoLeadStore(conversation.store)
@@ -3138,6 +3209,7 @@ ${customerStateSummary}${
                   p,
                   storePersuasionEnabled,
                   descriptionMaxFor(initialProducts.length),
+                  briefs.get(p.id),
                 ),
               ),
             )
@@ -3279,8 +3351,10 @@ ${customerStateSummary}${
     const promptCacheOn = await aceActive('promptCache');
     if (promptCacheOn)
       aceNote('promptCache', 'prompt با ساختار قابل‌کش (بخش ثابت جدا از بخش متغیر) ساخته شد تا provider بخش ثابت را ارزان‌تر حساب کند', 'full_agent');
-    const buildPrompt = promptCacheOn
-      ? this.buildFullAgentSystemPromptLean.bind(this)
+    const useLeanPrompt = promptCacheOn || briefs.size > 0;
+    const buildPrompt = useLeanPrompt
+      ? (...a: Parameters<typeof this.buildFullAgentSystemPromptLean>) =>
+          this.buildFullAgentSystemPromptLean(a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[8], briefs.size > 0)
       : this.buildFullAgentSystemPrompt.bind(this);
     const systemPrompt = await buildPrompt(
       conversation,
@@ -3301,6 +3375,7 @@ ${customerStateSummary}${
     const tools = this.buildAgentTools(conversation, rt, {
       persuasionEnabled: storePersuasionEnabled,
       respondToCustomer,
+      briefOn: briefs.size > 0,
     });
 
     // ACE-6 — بودجه‌ی step فقط در موتور بهینه با لایه‌ی loopDiet

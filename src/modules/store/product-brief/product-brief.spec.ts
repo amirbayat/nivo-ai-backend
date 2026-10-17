@@ -184,3 +184,58 @@ describe('validateBrief', () => {
     expect(normForMatch('پلی‌استر')).toBe('پلیاستر');
   });
 });
+
+import { BRIEF_PROMPT_RULE, isBriefUsable, readSections, renderBriefFacts, type BriefRow } from './brief-prompt';
+
+describe('brief-prompt', () => {
+  const { text, sections } = splitSections(RESTA);
+  const v = validateBrief(
+    {
+      sectionTopics: [{ id: sections[0].id, topics: ['OVERVIEW'] }],
+      facts: [{ k: 'جنس', v: 'پلی‌استر', sure: true, src: sections.find((s) => s.heading === 'مشخصات')!.id }],
+      caveats: [{ quote: 'اتو با حرارت کم انجام شود', src: sections.find((s) => s.heading === 'نگهداری')!.id }],
+      sellerRules: [],
+      pitch: { benefits: [], benefitSources: [], valueLines: [], followUps: [], openers: [] },
+      textPriceStock: { prices: [], stockMentions: [] },
+    },
+    { text, sections, specs: [], optionTypes: [] },
+  );
+  const row: BriefRow = {
+    descHash: 'h', status: 'ok', brief: v.brief,
+    sections: sections.map((s) => ({ ...s, topics: v.topics[s.id] })),
+  };
+
+  it('خط facts: واقعیت با «؟»، قید، دستور فروشنده، فهرست بخش‌ها؛ هرگز رنگ/موجودی', () => {
+    const line = renderBriefFacts(row, text);
+    expect(line).toContain('جنس: پلی‌استر (؟ فروشنده مطمئن نیست)');
+    expect(line).toContain('«اتو با حرارت کم انجام شود»');
+    expect(line).toContain('دستور فروشنده به تو:');
+    expect(line).toMatch(/s4 سایز و اندازه/);
+    expect(line).not.toContain('رنگ و سایز و موجودی');
+    expect(line).not.toContain('شیرمالی');
+    expect(line.length).toBeLessThan(text.length);
+  });
+
+  it('خروجی بین دو فراخوانی بایت‌به‌بایت یکسان است', () => {
+    expect(renderBriefFacts(row, text)).toBe(renderBriefFacts(row, text));
+  });
+
+  it('readSections: حداکثر ۳، عین متن، VARIANTS_STOCK هرگز', () => {
+    const ids = sections.map((s) => s.id);
+    const r = readSections(row, text, ids);
+    expect(r).toHaveLength(3);
+    const stock = sections.find((s) => s.heading === 'رنگ و سایز و موجودی')!.id;
+    expect(readSections(row, text, [stock])).toEqual([]);
+    const size = sections.find((s) => s.heading === 'سایز و اندازه')!;
+    expect(readSections(row, text, [size.id])[0].text).toBe(text.slice(size.start, size.end));
+  });
+
+  it('isBriefUsable: hash متفاوت، failed، متن کوتاه، نبود → false', () => {
+    expect(isBriefUsable(row, 'h', 900)).toBe(true);
+    expect(isBriefUsable(row, 'other', 900)).toBe(false);
+    expect(isBriefUsable({ ...row, status: 'failed' }, 'h', 900)).toBe(false);
+    expect(isBriefUsable(row, 'h', 500)).toBe(false);
+    expect(isBriefUsable(null, 'h', 900)).toBe(false);
+    expect(BRIEF_PROMPT_RULE).toContain('read_product_section');
+  });
+});

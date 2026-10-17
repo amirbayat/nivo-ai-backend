@@ -3,7 +3,7 @@ import { getAceContext } from './ace-context';
 
 export type LayerName =
   | 'ledger' | 'promptCache' | 'memo' | 'embedCache' | 'subcallDiet' | 'loopDiet' | 'dedupe'
-  | 'offTopicBudget' | 'fastAnswers' | 'semanticCache' | 'ttsCache';
+  | 'offTopicBudget' | 'fastAnswers' | 'semanticCache' | 'ttsCache' | 'productBrief';
 export type LayerMode = 'off' | 'shadow' | 'on';
 export type EngineMode = 'stable' | 'lean';
 
@@ -13,6 +13,7 @@ export const DEFAULT_LAYERS: Record<LayerName, LayerMode> = {
   ledger: 'on',
   promptCache: 'off', memo: 'off', embedCache: 'off', subcallDiet: 'off', loopDiet: 'off',
   dedupe: 'off', offTopicBudget: 'off', fastAnswers: 'off', semanticCache: 'off', ttsCache: 'off',
+  productBrief: 'off',
 };
 export const DEFAULT_PARAMS = {
   memoTtlSec: 3600,
@@ -188,6 +189,12 @@ export function engineAllowsLayers(): boolean {
 export async function aceActive(layer: LayerName): Promise<boolean> {
   if (getAceContext()?.engine !== 'lean') return false;
   return (await layerMode(layer)) !== 'off';
+}
+
+// لایه‌ای که فقط در حالت on اثر می‌گذارد (shadow برای آن هنوز مصرف نیست: نیاز به judge ACE-12)
+export async function aceOn(layer: LayerName): Promise<boolean> {
+  if (getAceContext()?.engine !== 'lean') return false;
+  return (await layerMode(layer)) === 'on';
 }
 
 // ───────── نوشتن (فقط ادمین) ─────────

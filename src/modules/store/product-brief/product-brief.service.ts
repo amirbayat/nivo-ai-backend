@@ -1,4 +1,3 @@
-import { createHash } from 'crypto';
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { generateObject } from 'ai';
 import { PrismaService } from '../../../prisma/prisma.service';
@@ -10,25 +9,16 @@ import { maskPaymentSecrets } from '../../../common/utils/payment-secret-mask.ut
 import { PERCEPTION_MODEL } from '../../sales-agent/model-variants';
 import { parseProductSpecs } from '../product-specs.types';
 import { setProductBriefHandler } from '../quality-review-scheduler';
+import { briefInputHash } from './brief-hash';
 import { briefLlmSchema } from './brief.schema';
 import { splitSections } from './section-splitter';
 import { BRIEF_TOPICS } from './topics';
 import { validateBrief } from './validate';
 
-// با هر تغییر prompt/اعتبارسنجی بالا ببر تا برگه‌ها دوباره ساخته شوند
-export const BRIEF_PROMPT_VERSION = 'v1';
+export { briefInputHash };
 const DEBOUNCE_MS = 10_000;
 const DAILY_CAP_PER_STORE = 300;
 const MIN_DESCRIPTION_CHARS = 120;
-
-export function briefInputHash(p: {
-  name: string; description: string | null; specs: unknown; options: { name: string; values: string[] }[];
-}): string {
-  const { text } = splitSections(p.description);
-  return createHash('sha1')
-    .update(JSON.stringify([p.name, text, p.specs ?? null, p.options, BRIEF_PROMPT_VERSION]))
-    .digest('hex');
-}
 
 const SYSTEM = `تو یک «برچسب‌زن و استخراج‌کننده» برای توضیح محصول فروشگاه هستی. هیچ جمله‌ای را بازنویسی نمی‌کنی.
 متن توضیح به بخش‌های [s1] [s2] … شکسته شده. خروجی JSON طبق schema:

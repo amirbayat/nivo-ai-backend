@@ -65,4 +65,12 @@ export const BOT_CHANGELOG: BotChangelogEntry[] = [
     layerKey: 'ttsCache',
     rollback: 'layers.ttsCache=off در پنل؛ کامل: git revert',
   },
+  {
+    date: '1405/07/25', item: 'ACE-16 (برگه‌ی محصول)', commit: '(ace(ACE-16))', tag: 'ace/ACE-16/start..done',
+    sql: '20261058_ace16_product_brief.sql',
+    change: 'برای هر محصول با توضیح بلند، در پس‌زمینه برگه (واقعیت‌ها/قیدها/دستورهای فروشنده، بخش‌بندی کلمه‌به‌کلمه) ساخته می‌شود. با layers.productBrief=on در خط facts به‌جای توضیح بریده‌شده می‌آید و ابزار read_product_section اضافه می‌شود',
+    answerImpact: 'ساخت برگه روی جواب اثر ندارد. مصرف (on) محتوای prompt و ابزارها را عوض می‌کند؛ فقط موتور بهینه',
+    layerKey: 'productBrief',
+    rollback: 'layers.productBrief=off در پنل؛ کامل: git revert، سپس rollback/20261058_ace16_product_brief.down.sql',
+  },
 ];
