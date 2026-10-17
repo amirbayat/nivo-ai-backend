@@ -33,4 +33,12 @@ export const BOT_CHANGELOG: BotChangelogEntry[] = [
     answerImpact: 'ندارد (پیش‌فرض stable)', layerKey: null,
     rollback: 'دکمه‌ی «برگرداندن فوری به پایدار»؛ آخرین راه: deploy تگ bot-baseline-1405-07-25',
   },
+  {
+    date: '1405/07/25', item: 'ACE-2', commit: '(ace(ACE-2) پرامپت)', tag: '—',
+    sql: 'none',
+    change: 'buildFullAgentSystemPromptLean: بلوک‌بندی prompt (قانون ثابت | فروشگاه | کاتالوگ | پویا) + cache_control برای anthropic/* + session_id',
+    answerImpact: 'ترتیب prompt عوض می‌شود (قانون‌ها قبل از داده‌ی پویا)؛ فقط موتور بهینه',
+    layerKey: 'promptCache',
+    rollback: 'layers.promptCache=off در پنل؛ کامل: git revert کامیت ACE-2',
+  },
 ];

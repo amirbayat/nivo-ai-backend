@@ -1,3 +1,4 @@
+import { applyPromptCache } from '../ai-cost-engine/prompt-cache';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
@@ -276,9 +277,11 @@ export class AiProviderService {
                 reasoning_effort?: string;
                 [key: string]: unknown;
               };
-              const withMedia = extraUserContentParts?.length
-                ? injectUserContentParts(rest, extraUserContentParts)
-                : rest;
+              const withMedia = applyPromptCache(
+                extraUserContentParts?.length
+                  ? injectUserContentParts(rest, extraUserContentParts)
+                  : rest,
+              );
               return {
                 ...withMedia,
                 ...(reasoning_effort

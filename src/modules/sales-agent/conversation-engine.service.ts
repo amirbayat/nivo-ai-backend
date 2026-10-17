@@ -168,7 +168,8 @@ import { formatTomanAmountsInText, stripUnauthorizedPriceSentences } from '../..
 import { isValidCartQty, reconcileCart, lineKey } from './cart-validation.util';
 import type { CatalogLine } from './cart-validation.util';
 import { setCallSite } from '../../common/ai-cost-engine/ace-context';
-import { resolveEngineMode } from '../../common/ai-cost-engine/ace-config';
+import { aceActive, resolveEngineMode } from '../../common/ai-cost-engine/ace-config';
+import { PROMPT_CACHE_BREAK } from '../../common/ai-cost-engine/prompt-cache';
 import { DEMO_FAKE_CARD_NUMBER, DEMO_FAKE_CARD_OWNER, isNivoLeadStore } from '../../common/utils/store-mode';
 
 export type ConversationWithStore = Prisma.SalesConversationGetPayload<{
@@ -2240,6 +2241,147 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     }${empathyMissing ? `\n\n${EMPATHY_MISSING_INSTRUCTION}` : ''}`;
   }
 
+  // ACE-2 — نسخه‌ی بلوک‌بندی‌شده برای کش prompt (فقط موتور بهینه، لایه‌ی promptCache). تابع پایدار بالا
+  // عمداً دست‌نخورده است (I-9). ترتیب: قانون‌های ثابت ⟦بلوک ۱⟧ | فروشگاه ⟦بلوک ۲⟧ | کاتالوگ ⟦بلوک ۳⟧ | پویا ⟦بلوک ۴⟧.
+  // هیچ timestamp/شمارنده‌ای در بلوک ۱ تا ۳ نیست؛ هر چیز زمان‌دار یا وابسته‌ به نوبت در بلوک ۴ است.
+  private async buildFullAgentSystemPromptLean(
+    conversation: ConversationWithStore,
+    ctx: ConversationContext,
+    catalogFacts: string,
+    transcript: string,
+    nudgeActive: boolean,
+    persuasionEnabled: boolean,
+    urgentDiscount: { code: string; expiresAt: Date } | null,
+    leadCaptureOnly: boolean,
+    leadCaptureNudgeActive: boolean,
+  ): Promise<string> {
+    const tone = toneForCategory(conversation.store.category);
+    const store = conversation.store;
+    const storeProfile = await this.buildStoreProfileText(conversation);
+    const cartSummary = ctx.cart.length
+      ? `سبد فعلی مشتری: ${ctx.cart.map((i) => `${i.name} × ${i.qty}`).join('، ')} — جمع ${this.cartTotal(ctx.cart)} تومان`
+      : 'سبد فعلی مشتری خالی است.';
+
+    // فیدبک کاربر ۱۴۰۵/۰۸/۲۱ — خودگزارش‌دهی نوبت قبل (CustomerState)، به‌عنوان یک fact برای
+    // تداوم تحلیل؛ به مدل می‌گوییم این تحلیل قبلی است تا اگر پیام تازه چیزی را عوض کرد، خودش
+    // در customerState همین نوبت به‌روزش کند، نه این‌که کورکورانه همان مقدار قبلی را تکرار کند
+    const customerState = ctx.customerState;
+    const customerStateSummary = customerState
+      ? `\nآخرین تحلیل خودت از وضعیت مشتری (نوبت قبل — اگر پیام تازه چیزی را عوض کرد، در ` +
+        `customerState همین پاسخ به‌روزش کن): درد شناسایی‌شده: ${customerState.pain ?? 'هنوز نامشخص'}، ` +
+        `قابل‌حل‌بودن با این فروشگاه: ${
+          { UNKNOWN: 'نامشخص', YES: 'بله', PARTIAL: 'تا حدی', NO: 'خیر' }[
+            customerState.painSolvable
+          ]
+        }، همدلی نشان‌داده‌شده: ${customerState.empathyShown ? 'بله' : 'خیر'}، توجه/درگیری مشتری: ${
+          customerState.attentionCaptured ? 'دارد' : 'ندارد'
+        }، مرحله: ${
+          {
+            DISCOVERY: 'کشف نیاز',
+            PAIN_IDENTIFIED: 'درد شناسایی‌شده',
+            PITCHED: 'راه‌حل پرزنت‌شده',
+            OBJECTION: 'اعتراض/تردید',
+            READY: 'آماده‌ی اقدام',
+            STALLED: 'گیرکرده/بدون پیشرفت',
+            LOST: 'ازدست‌رفته',
+          }[customerState.stage]
+        }.\n`
+      : '';
+    const painNotSolvable = customerState?.painSolvable === 'NO';
+    const empathyMissing =
+      customerState?.stage === 'PAIN_IDENTIFIED' &&
+      customerState.empathyShown === false;
+
+    const block1 = `تو دستیار فروش یک فروشگاه در دایرکت اینستاگرام هستی و با ابزارهای زیر مستقیماً سبد/
+سفارش مشتری را مدیریت می‌کنی، نه فقط متن می‌نویسی.
+
+قوانین حیاتی:
+- هیچ عدد/اسم/شماره‌ای که از ابزارها یا واقعیت‌های بالا نیامده اختراع نکن.
+- هر کد/شناسه‌ی حروفی-عددی (مثل کد تخفیف) که از ابزارها برگشته، در پاسخ باید عیناً و حرف‌به‌حرف
+  همان‌طور تکرار شود — هیچ تبدیل رقم فارسی⇄انگلیسی، تغییر حروف، یا بازنویسی روی آن مجاز نیست.
+- هرگز تعداد دقیق موجودی انبار را اعلام نکن، فقط «موجود است» یا «فعلاً ناموجود».
+- اگر پیام مشتری مبهم است و اسم هیچ محصولی را نمی‌آورد (مثل «کدوم بهتره؟»، «فرقشون چیه؟»،
+  «همینو بذار تو سبد»)، منظورش تقریباً همیشه «آخرین محصولاتی که مطرح/پیشنهاد شده‌اند» (بالا) یا
+  تاریخچه‌ی اخیر مکالمه است — نه «چند نمونه از محصولات فروشگاه» که فقط یک نمونه‌ی کلی و تصادفی از
+  کل کاتالوگ است و ممکن است هیچ ربطی به این گفتگوی خاص نداشته باشد.
+- قبل از هر ادعای قیمت/موجودی/جزئیات محصولی که در کاتالوگ اولیه نبود، حتماً search_products یا
+  get_product_details را صدا بزن — حدس نزن.
+- اگر مشتری سؤال واقعی درباره‌ی خودِ فروشگاه/کسب‌وکار پرسید (قیمت/هزینه/شرایط/زمان و مشابه) و
+  جوابش قبلاً همین مکالمه داده شده (در تاریخچه‌ی بالا) یا در باکس دانش/پروفایل فروشگاه هست، همان
+  جواب واقعی را بده — حتی اگر عبارت سؤال با دفعه‌ی قبل فرق دارد (مثل «قیمتش چقدره؟» در برابر
+  «هزینه‌ها چقدره؟»). هرگز نگو «مشخص نیست» یا مستقیم به سمت CTA/جمع‌آوری لید نرو مگر اول یک‌بار
+  answer_faq را با همان سؤال مشتری هم صدا زده باشی؛ «علاقه نشان‌دادن مشتری» هیچ‌وقت بهانه‌ای برای
+  رد‌کردن یک سؤال واقعی و بی‌جواب‌گذاشتنش نیست — اول جواب بده، بعد به سمت CTA ادامه بده.
+- افزودن/حذف واقعی از سبد فقط با update_cart انجام می‌شود؛ هرگز فقط در متن بگو «به سبد اضافه
+  کردم» بدون این‌که واقعاً این ابزار را صدا زده باشی.
+- اگر مشتری درباره‌ی وضعیت سفارشی که قبلاً ثبت کرده سؤال کرد (مثل «سفارشم کجاست؟»/«سفارشم چی
+  شد؟»)، همیشه اول check_order_status را صدا بزن و همان جواب را بده — فقط اگر سفارشی پیدا نشد یا
+  سؤال واقعاً چیز دیگری بود (شکایت، درخواست تغییر/لغو که ابزاری برایش نداری)، request_human_handoff
+  را صدا بزن.
+- اگر مشتری مشکل پرداخت یا سوال پس از خرید دیگری دارد که با ابزارهای بالا قابل‌حل نیست، یا صریح
+  خواست با یک آدم/پشتیبان صحبت کند، request_human_handoff را صدا بزن و دیگر respond_to_customer
+  را صدا نزن — مکالمه همان‌جا تمام می‌شود.
+- اگر مشتری قبلاً محصولی را دیده (طبق سبد/تاریخچه/آخرین محصولات مطرح‌شده بالا) و فقط سوال عمومی
+  پرسید، به‌جای جست‌وجوی دوباره روی همان محصول تمرکز کن.
+- اگر مشتری صریح عکس بیشتر خواست، از show_product_photos استفاده کن.
+- اگر مشتری صریح بین ۲-۳ محصول مشخص مردد است یا مقایسه خواسته («این بهتره یا اون؟»، «فرقشون
+  چیه؟» با حداقل دو محصول مشخص)، از compare_products استفاده کن تا جدولی کنار هم نشان داده شود
+  — به‌جای توضیح تفاوت‌ها فقط در متن آزاد.
+- همیشه اول به سوال/نیاز واقعی مشتری یک جواب کامل و مفید بده، بعد (در صورت نیاز) پیشنهاد یا دعوت
+  به خرید را اضافه کن — نه برعکس.
+- (docs/PRD-sales-agent-consultative-recommendation.md) اگر پیام مشتری توصیف یک وضعیت/مشکل/هدف
+  است (نه اسم مشخص یک محصول)، مثل یک مشاور رفتار کن: اگر با قطعیت می‌دانی کدام محصول واقعی
+  مناسب است، همان یکی (حداکثر دو تای کاملاً هم‌سطح) را با توضیح کوتاهِ *چرا* دقیقاً برای همین نیاز
+  مناسب است پیشنهاد بده — نه تعریف کلی/تبلیغاتی. اگر واقعاً مطمئن نیستی، به‌جای حدس‌زدن یک سوال
+  کوتاه و مشخص بپرس تا هدف را دقیق‌تر کنی؛ در این حالت هیچ محصولی نام نبر و relevantProductIds را
+  خالی بگذار — **مگر این‌که دستورالعمل «مشتری چند پیام پشت‌سرهم فقط سوال پرسیده» (اگر پایین
+  حاضر باشد) فعال باشد، که آن وقت آن دستورالعمل اولویت دارد** (پایین توضیح داده شده دقیقاً چطور).
+  لازم نیست عبارت جست‌وجو دقیقاً با اسم محصول یکی باشد — search_products روی توضیحات هم
+  جست‌وجو می‌کند و اگر هیچ‌چیز پیدا نکرد کل کاتالوگ را برمی‌گرداند تا خودت تناسب را تشخیص بدهی.
+- در پایان (مگر وقتی request_human_handoff زده‌ای)، همیشه دقیقاً یک‌بار respond_to_customer را
+  به‌عنوان آخرین قدم صدا بزن؛ relevantProductIds فقط باید شامل محصولاتی باشد که واقعاً در متن
+  همین پاسخ نام برده‌ای یا معرفی کرده‌ای — هرگز شناسه‌ی محصولی از «چند نمونه از محصولات فروشگاه»
+  را صرفاً چون آنجا بوده اضافه نکن، مگر همان محصول را واقعاً در پاسخت هم آورده باشی.`;
+
+    const block2 = `لحن نوشتار باید ${tone} باشد.
+${storeProfile ? `\nاطلاعات فروشگاه:\n${storeProfile}\n` : ''}
+قوانین ویژه‌ی این فروشگاه:
+${
+  leadCaptureOnly
+    ? '- این فروشگاه هیچ create_order ندارد؛ پایین دستورالعمل جدا برایش آمده.'
+    : `- ثبت نهایی سفارش فقط با create_order انجام می‌شود، و فقط وقتی مشتری صریحاً تایید خرید کرده
+  (نه صرفاً علاقه نشان داده). بعد از صدازدنش سیستم خودش آدرس/روش پرداخت را می‌پرسد؛ تو دیگر
+  respond_to_customer را صدا نزن.`
+}${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
+      leadCaptureOnly ? `\n\n${buildLeadCaptureOnlyInstruction()}` : ''
+    }`;
+
+    const block3 = `چند نمونه از محصولات فروشگاه (فقط چند نمونه‌ی کلی، لزوماً ربطی به بحث فعلی ندارند — برای
+جست‌وجوی دقیق یا محصولی که اینجا نیست از search_products استفاده کن):
+${catalogFacts}`;
+
+    const block4 = `${cartSummary}
+${customerStateSummary}${
+      ctx.lastShownProducts?.length
+        ? `\nآخرین محصولاتی که واقعاً در همین مکالمه مطرح/پیشنهاد شده‌اند: ${ctx.lastShownProducts.map((p) => p.name).join('، ')}\n`
+        : ''
+    }${
+      transcript
+        ? `\nتاریخچه‌ی اخیر مکالمه (حتماً برای فهمیدن منظور پیام‌های ناقص/ادامه‌دار مشتری — مثل «پس اگه بخوام X بشم چی؟» بعد از بحث قبلی — این را در نظر بگیر):\n${transcript}\n`
+        : ''
+    }${
+      persuasionEnabled && urgentDiscount
+        ? `\n\nیک کد تخفیف واقعی و زمان‌دار همین الان فعال است: «${urgentDiscount.code}»، تا ${urgentDiscount.expiresAt.toLocaleString('fa-IR')} معتبر. اگر به مکالمه مرتبط است (مثلاً مشتری نزدیک تصمیم خرید است)، می‌توانی طبیعی مطرحش کنی، حتی اگر مشتری نپرسیده — وگرنه لازم نیست اشاره کنی.`
+        : ''
+    }${nudgeActive ? `\n\n${OPEN_QUESTION_NUDGE_INSTRUCTION}` : ''}${
+      leadCaptureNudgeActive ? `\n\n${LEAD_CAPTURE_NUDGE_INSTRUCTION}` : ''
+    }${painNotSolvable ? `\n\n${PAIN_NOT_SOLVABLE_INSTRUCTION}` : ''}${
+      empathyMissing ? `\n\n${EMPATHY_MISSING_INSTRUCTION}` : ''
+    }`;
+
+    return [block1, block2, block3, block4].join(`\n${PROMPT_CACHE_BREAK}\n`);
+  }
+
   // docs/PRD-sales-agent-tool-calling-architecture.md بخش ۳.۴ — نرده‌ی حفاظتی حیاتی: قیمت/
   // موجودی/مبلغ سفارش هرگز از متن تولیدی مدل گرفته نمی‌شود، همیشه از خروجی واقعی ابزاری که
   // همین نوبت صدا زده شده
@@ -3131,7 +3273,11 @@ ${persuasionEnabled ? `\n\n${PERSUASION_INSTRUCTION}` : ''}${
     // برای FULL_AGENT فقط دوباره‌ی customerMessage بود (برچسب «نمایش کامل prompt/facts» در ادمین
     // گمراه‌کننده بود)؛ حالا متن واقعی پرامپت سیستم همین‌جا یک‌بار ساخته و هم به generateText هم
     // به logReply پاس داده می‌شود
-    const systemPrompt = await this.buildFullAgentSystemPrompt(
+    // ACE-2 — فقط موتور بهینه با لایه‌ی promptCache؛ پایدار همان تابع قدیمی را صدا می‌زند
+    const buildPrompt = (await aceActive('promptCache'))
+      ? this.buildFullAgentSystemPromptLean.bind(this)
+      : this.buildFullAgentSystemPrompt.bind(this);
+    const systemPrompt = await buildPrompt(
       conversation,
       rt.ctx,
       catalogFacts,
