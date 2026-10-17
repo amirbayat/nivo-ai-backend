@@ -197,6 +197,12 @@ export async function aceOn(layer: LayerName): Promise<boolean> {
   return (await layerMode(layer)) === 'on';
 }
 
+// لایه‌ای که در حالت shadow فقط کاندید می‌سازد و ثبت می‌کند (جواب واقعی از LLM)
+export async function aceShadow(layer: LayerName): Promise<boolean> {
+  if (getAceContext()?.engine !== 'lean') return false;
+  return (await layerMode(layer)) === 'shadow';
+}
+
 // ───────── نوشتن (فقط ادمین) ─────────
 async function persist(next: { layers: Record<string, unknown>; params: AceParams }): Promise<void> {
   const save = aceRuntime().saveConfig;

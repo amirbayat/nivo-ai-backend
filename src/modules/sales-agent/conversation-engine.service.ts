@@ -168,8 +168,12 @@ import { formatTomanAmountsInText, stripUnauthorizedPriceSentences } from '../..
 import { isValidCartQty, reconcileCart, lineKey } from './cart-validation.util';
 import type { CatalogLine } from './cart-validation.util';
 import { getAceContext, setCallSite } from '../../common/ai-cost-engine/ace-context';
-import { aceActive, aceOn, resolveEngineMode } from '../../common/ai-cost-engine/ace-config';
+import { aceActive, aceOn, aceShadow, resolveEngineMode } from '../../common/ai-cost-engine/ace-config';
 import { aceNote, aceTraceInfo } from '../../common/ai-cost-engine/ace-context';
+import { pushShadow } from '../../common/ai-cost-engine/shadow/shadow-store';
+import { buildSignature } from './answer-engine/signature';
+import { isContextDependent } from './answer-engine/context-dependence';
+import { composeFastAnswer, eligibleForFastAnswer } from './answer-engine/fast-answers';
 import { briefInputHash } from '../store/product-brief/brief-hash';
 import { BRIEF_PROMPT_RULE, isBriefUsable, readSections, renderBriefFacts, type BriefRow } from '../store/product-brief/brief-prompt';
 import { normalizeDescription } from '../store/product-brief/normalize';
@@ -956,6 +960,60 @@ export class ConversationEngineService {
       ? ` — سیگنال‌های واقعی: ${signals.join('؛ ')}`
       : '';
     return ` [متقاعدسازی: مجاز]${signalsText}`;
+  }
+
+  // ACE-10 (shadow) — هرگز خطا نمی‌دهد و نوبت را کند نمی‌کند (void). قیمت از DB، پیچ از برگه‌ی ACE-16.
+  private async recordFastAnswerShadow(
+    conversation: ConversationWithStore,
+    customerMessage: string,
+    realText: string,
+    rt: AgentTurnRuntime,
+    catalog: Array<{ id: string; name: string }>,
+  ): Promise<void> {
+    if (!(await aceShadow('fastAnswers'))) return;
+    const sig = buildSignature(customerMessage, {
+      catalog: catalog.map((p) => ({ id: p.id, name: p.name })),
+      lastShownProductIds: (rt.ctx.lastShownProducts ?? []).map((p) => p.id),
+    });
+    const mentionsProduct = sig.entities.some((e) => e.startsWith('prod:'));
+    if (
+      !eligibleForFastAnswer({ intent: sig.intent, negated: sig.negated, wordCount: sig.norm.split(' ').length, scope: sig.scope }) ||
+      isContextDependent({ text: customerMessage, currentState: conversation.currentState, mentionsProduct })
+    ) {
+      return;
+    }
+    const productId = sig.scope.slice(2);
+    const product = await this.prisma.product.findUnique({
+      where: { id: productId, ...BUYER_VISIBLE },
+      include: PRODUCT_VARIANT_INCLUDE,
+    });
+    if (!product || product.storeId !== conversation.storeId || product.pricingModel === 'WEIGHT_BASED_FORMULA') return;
+    const briefs = await this.loadUsableBriefs([product]);
+    const pitch = briefs.get(product.id)?.brief.pitch ?? null;
+    const prices = [product.basePrice, ...(product.variants ?? []).map((v) => v.priceOverride ?? product.basePrice)];
+    const composed = composeFastAnswer({
+      intent: sig.intent,
+      productName: product.name,
+      price: { min: Math.min(...prices), max: Math.max(...prices) },
+      inStock: displayStock(product) > 0,
+      pitch,
+      seed: conversation.id,
+    });
+    if (!composed) return;
+    await pushShadow({
+      layer: 'fastAnswers',
+      intent: sig.intent,
+      storeId: conversation.storeId,
+      storeCategory: conversation.store.category,
+      conversationId: conversation.id,
+      customerMessage,
+      realText,
+      candidateText: composed.text,
+      tags: [
+        ...(hasVariantOptions(product) ? ['multi_variant'] : []),
+        ...(sig.entities.some((e) => e.startsWith('prod:')) ? [] : ['anaphora']),
+      ],
+    });
   }
 
   // ACE-16 — برگه‌ی معتبر هر محصول (hash باید با متن فعلی بخواند)؛ هر خطا/نبود جدول → Map خالی = رفتار امروز
@@ -3637,6 +3695,8 @@ ${customerStateSummary}${
     }
     // هنوز مبلغ غیرمجاز مانده (یا retry ممکن نبود) ← جمله‌ی حاوی مبلغ حذف + «قیمت دقیق روی کارت»
     text = await this.applyPriceGuard(conversation, text, allowedAmounts(), priceRetries);
+    // ACE-10/12 — فقط shadow: جواب قطعی کاندید ساخته و برای judge ثبت می‌شود؛ جواب واقعی دست‌نخورده
+    void this.recordFastAnswerShadow(conversation, customerMessage, text, rt, initialProducts).catch(() => undefined);
 
     const uiBlock = this.deriveFullAgentUiBlock({
       orderResult: rt.orderResult,

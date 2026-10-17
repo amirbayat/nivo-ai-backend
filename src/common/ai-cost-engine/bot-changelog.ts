@@ -73,4 +73,20 @@ export const BOT_CHANGELOG: BotChangelogEntry[] = [
     layerKey: 'productBrief',
     rollback: 'layers.productBrief=off در پنل؛ کامل: git revert، سپس rollback/20261058_ace16_product_brief.down.sql',
   },
+  {
+    date: '1405/07/25', item: 'ACE-12 (shadow و judge)', commit: '(ace(ACE-12))', tag: 'ace/ACE-12/start..done',
+    sql: 'none',
+    change: 'ذخیره‌ی نمونه‌های shadow در Redis (۳۰ روز)، judge سبک (حداکثر ۲۰۰ در روز، هر ۶ ساعت)، گزارش لایه‌بندی‌شده با دروازه‌ها و صف بازبینی انسانی در تب shadow',
+    answerImpact: 'ندارد؛ فقط ثبت و داوری. هیچ جوابی از کاندید ارسال نمی‌شود',
+    layerKey: null,
+    rollback: 'git revert؛ کلید Redis با پیشوند ace:shadow: قابل حذف',
+  },
+  {
+    date: '1405/07/25', item: 'ACE-10 (جواب قطعی — فقط shadow)', commit: '(ace(ACE-10))', tag: 'ace/ACE-10/start',
+    sql: 'none',
+    change: 'با layers.fastAnswers=shadow برای ASK_PRICE و STOCK_CHECK تک‌محصولی، جواب ترکیبی (قیمت زنده + پیچ برگه‌ی محصول) ساخته و برای judge ثبت می‌شود',
+    answerImpact: 'ندارد؛ جواب واقعی همیشه از LLM است. حالت on هنوز پیاده نشده',
+    layerKey: 'fastAnswers',
+    rollback: 'layers.fastAnswers=off در پنل؛ کامل: git revert',
+  },
 ];
