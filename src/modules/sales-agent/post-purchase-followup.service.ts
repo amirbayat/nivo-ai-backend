@@ -74,6 +74,7 @@ export class PostPurchaseFollowUpService {
         this.prisma.salesConversation.update({
           where: { id: conversation.id },
           data: {
+            lastMessageAt: new Date(),
             contextData: {
               ...existingContext,
               awaitingSatisfactionCheck: true,
@@ -161,6 +162,7 @@ export class PostPurchaseFollowUpService {
         this.prisma.salesConversation.update({
           where: { id: conversation.id },
           data: {
+            lastMessageAt: new Date(),
             contextData: {
               ...existingContext,
               awaitingReview: true,

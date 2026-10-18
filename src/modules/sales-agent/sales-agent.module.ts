@@ -23,6 +23,7 @@ import { CreditAlertService } from './credit-alert.service';
 import { AbuseGuardService } from './abuse-guard.service';
 import { PostPurchaseFollowUpService } from './post-purchase-followup.service';
 import { AbandonedCartReminderService } from './abandoned-cart-reminder.service';
+import { SellerConversationFollowUpService } from './seller-conversation-followup.service';
 import { SalesAgentQaService } from './sales-agent-qa.service';
 import { SalesAgentQaController } from './sales-agent-qa.controller';
 import { ProductFinderService } from './product-finder/product-finder.service';
@@ -67,6 +68,7 @@ import { ProductFinderService } from './product-finder/product-finder.service';
     AbuseGuardService,
     PostPurchaseFollowUpService,
     AbandonedCartReminderService,
+    SellerConversationFollowUpService,
     SalesAgentQaService,
     // docs/DESIGN-structured-product-search-for-chat-agent.md — جست‌وجوی ساختاریافته‌ی محصول
     ProductFinderService,
@@ -80,6 +82,7 @@ import { ProductFinderService } from './product-finder/product-finder.service';
     CreditService,
     PostPurchaseFollowUpService,
     AbandonedCartReminderService,
+    SellerConversationFollowUpService,
   ],
 })
 export class SalesAgentModule {}

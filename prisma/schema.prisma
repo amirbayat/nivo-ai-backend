@@ -2953,6 +2953,11 @@ model SalesConversation {
   // مراحل بعد از تصمیم خرید را مدل می‌کند). منبع حقیقت contextData.sales است؛ این ستون فقط
   // برای فیلتر/گزارش ادمین
   salesStage                        SalesStage?
+  // docs/PRD-seller-conversations-inbox.md §۴.۱ — مرتب‌سازی لیست و تشخیص خوانده‌نشده
+  lastMessageAt                     DateTime? // آخرین پیام از هر طرف (مشتری/بات/فروشنده)
+  lastCustomerMessageAt             DateTime? // آخرین پیام مشتری
+  sellerLastReadAt                  DateTime? // آخرین باری که فروشنده این گفتگو را باز کرد
+  humanTakenOverAt                  DateTime? // زمان دست‌گرفتن فعلی؛ null یعنی دست بات است
   createdAt                         DateTime          @default(now())
   updatedAt                         DateTime          @updatedAt
 
@@ -2960,6 +2965,7 @@ model SalesConversation {
   order       Order?
   usageEvents CreditUsageEvent[]
 
+  @@index([storeId, isTest, lastMessageAt])
   @@index([storeId])
   @@index([storeId, salesStage])
   @@index([storeId, isMutedForHuman])

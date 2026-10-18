@@ -786,11 +786,35 @@ export class StoreController {
   }
 
   @Get(':id/conversations')
-  listNeededAttention(
+  listConversations(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Query('filter') filter?: string,
+    @Query('q') q?: string,
+    @Query('cursor') cursor?: string,
+  ) {
+    return this.storeService.listConversations(user.sub, id, {
+      filter,
+      q,
+      cursor,
+    });
+  }
+
+  @Get(':id/conversations/unread-count')
+  getUnreadConversationCount(
     @CurrentUser() user: JwtPayload,
     @Param('id') id: string,
   ) {
-    return this.storeService.listNeededAttention(user.sub, id);
+    return this.storeService.getUnreadConversationCount(user.sub, id);
+  }
+
+  @Post(':id/conversations/:conversationId/read')
+  markConversationRead(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('conversationId') conversationId: string,
+  ) {
+    return this.storeService.markConversationRead(user.sub, id, conversationId);
   }
 
   @Get(':id/conversations/:conversationId')

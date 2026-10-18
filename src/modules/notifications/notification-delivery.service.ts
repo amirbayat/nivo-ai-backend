@@ -16,6 +16,7 @@ import { fa } from '../../i18n/fa';
 import { NotificationJob } from './notification.types';
 import { ensureBuyerOrderLink } from '../order-lifecycle/order-link.util';
 import { formatShippingDays } from '../../common/utils/shipping-days.util';
+import { touchConversation } from '../sales-agent/conversation-touch.util';
 
 type OrderForNotify = {
   id: string;
@@ -114,6 +115,7 @@ export class NotificationDeliveryService {
           payload: { text },
         },
       });
+      await touchConversation(this.prisma, job.data.conversationId, 'AGENT');
       if (customer.channel === 'TELEGRAM' && customer.telegramChatId) {
         try {
           await this.telegramApi.sendText(customer.telegramChatId, text);
@@ -183,6 +185,7 @@ export class NotificationDeliveryService {
         payload: { text, ...(uiBlock ? { uiBlock } : {}) },
       },
     });
+    await touchConversation(this.prisma, order.conversationId, 'AGENT');
     if (customer.channel === 'TELEGRAM' && customer.telegramChatId) {
       try {
         await this.telegramApi.sendText(customer.telegramChatId, text);

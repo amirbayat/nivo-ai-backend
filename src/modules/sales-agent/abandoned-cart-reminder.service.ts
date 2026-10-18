@@ -4,6 +4,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { TelegramApiClientService } from '../telegram/telegram-api-client.service';
 import { fa } from '../../i18n/fa';
 import type { CartItem } from './sales-agent.types';
+import { touchConversation } from './conversation-touch.util';
 
 // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۴ — اگر مکالمه به سبد رسید ولی رسید هیچ‌وقت
 // نیامد، بعد از این‌قدر ساعت یک یادآوری ملایم یک‌باره
@@ -70,6 +71,7 @@ export class AbandonedCartReminderService {
           data: { abandonedCartReminderSentAt: new Date() },
         }),
       ]);
+      await touchConversation(this.prisma, conversation.id, 'AGENT');
 
       if (
         conversation.customer.channel === 'TELEGRAM' &&
@@ -158,6 +160,7 @@ export class AbandonedCartReminderService {
           data: { secondAbandonedCartReminderSentAt: new Date() },
         }),
       ]);
+      await touchConversation(this.prisma, conversation.id, 'AGENT');
 
       if (
         conversation.customer.channel === 'TELEGRAM' &&

@@ -11,7 +11,7 @@ describe('sendSellerMessage takeover [0.8]', () => {
       conversationEvent: {
         create: jest.fn().mockResolvedValue({ id: 'e1' }),
       },
-      salesConversation: { update: jest.fn() },
+      salesConversation: { update: jest.fn(), updateMany: jest.fn() },
       $transaction: jest.fn(async (ops: unknown[]) => ops),
     };
     const svc = Object.create(StoreService.prototype) as StoreService;
@@ -20,6 +20,7 @@ describe('sendSellerMessage takeover [0.8]', () => {
       telegramApi: { sendText: jest.fn() },
       getOwnedConversation: jest.fn().mockResolvedValue({
         isMutedForHuman: muted,
+        humanTakenOverAt: muted ? new Date() : null,
         customer: { channel: 'WEB' },
       }),
     });
@@ -30,7 +31,9 @@ describe('sendSellerMessage takeover [0.8]', () => {
     const { svc, prisma } = build(false);
     await svc.sendSellerMessage('s', 'st', 'cv1', 'سلام');
     expect(prisma.salesConversation.update).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { isMutedForHuman: true } }),
+      expect.objectContaining({
+        data: { isMutedForHuman: true, humanTakenOverAt: expect.any(Date) },
+      }),
     );
     const payloads = prisma.conversationEvent.create.mock.calls.map(
       (c) => c[0].data,

@@ -75,6 +75,7 @@ import {
   MESSAGE_IDEMPOTENCY_TTL_SECONDS,
 } from '../../common/constants/sales-ops.constants';
 import { isNivoLeadStore } from '../../common/utils/store-mode';
+import { touchConversation } from './conversation-touch.util';
 
 type SendMessageResponse = EngineResult & {
   voiceEventId?: string;
@@ -575,6 +576,7 @@ export class SalesAgentService {
         payload: { text: captured.masked },
       },
     });
+    await touchConversation(this.prisma, conversation.id, 'CUSTOMER');
     await this.prisma.conversationEvent.create({
       data: {
         conversationId: conversation.id,
@@ -582,6 +584,7 @@ export class SalesAgentService {
         payload: { text: captured.reply, uiBlock },
       },
     });
+    await touchConversation(this.prisma, conversation.id, 'AGENT');
     return {
       reply: captured.reply,
       uiBlocks: [uiBlock],
@@ -610,6 +613,7 @@ export class SalesAgentService {
           },
         },
       });
+      await touchConversation(this.prisma, conversation.id, 'CUSTOMER');
       return {
         reply: '',
         uiBlocks: [],
@@ -725,6 +729,7 @@ export class SalesAgentService {
         },
       },
     });
+    await touchConversation(this.prisma, conversation.id, 'CUSTOMER');
     return { reply: '', uiBlocks: [], state: conversation.currentState };
   }
 
@@ -772,6 +777,7 @@ export class SalesAgentService {
         payload: { videoKey },
       },
     });
+    await touchConversation(this.prisma, conversation.id, 'CUSTOMER');
     return { reply: '', uiBlocks: [], state: conversation.currentState };
   }
 

@@ -92,6 +92,7 @@ import {
 import { scheduleProductReview } from './quality-review-scheduler';
 import { onStoreContentChanged } from './store-content-changed';
 import { isNivoLeadStore } from '../../common/utils/store-mode';
+import { touchConversation } from '../sales-agent/conversation-touch.util';
 
 // docs/PRD-product-strategy-and-roadmap.md بخش ۳.۱ — چک‌لیست سطح فروشگاه
 // SP-2 §4.11.5 — نسخه‌ی متن شرایط استفاده که با ساخت فروشگاه پذیرفته می‌شود (R3.7 متن را می‌سازد)
@@ -2631,6 +2632,7 @@ export class StoreService {
       this.prisma.salesConversation.update({
         where: { id: conversation.id },
         data: {
+          lastMessageAt: new Date(),
           contextData: {
             ...existingContext,
             awaitingReview: true,
@@ -3279,6 +3281,8 @@ export class StoreService {
     return {
       id: conversation.id,
       isMutedForHuman: conversation.isMutedForHuman,
+      // docs/PRD-seller-conversations-inbox.md §۴.۳
+      control: conversationControl(conversation),
       currentState: conversation.currentState,
       customerLabel:
         conversation.customer.phone ??
@@ -3305,13 +3309,14 @@ export class StoreService {
     const event = await this.prisma.conversationEvent.create({
       data: { conversationId, type: 'SELLER_MESSAGE', payload: { text } },
     });
+    await touchConversation(this.prisma, conversationId, 'SELLER');
     // 0.8 — پیام فروشنده = takeover: AI از این به بعد ساکت می‌شود (قبلاً فروشنده جواب می‌داد و
     // AI هم به پیام بعدی خریدار جواب می‌داد). «برگشت به بات» = unmute
     if (!conversation.isMutedForHuman) {
       await this.prisma.$transaction([
         this.prisma.salesConversation.update({
           where: { id: conversationId },
-          data: { isMutedForHuman: true },
+          data: { isMutedForHuman: true, humanTakenOverAt: new Date() },
         }),
         this.prisma.conversationEvent.create({
           data: {
@@ -3321,6 +3326,12 @@ export class StoreService {
           },
         }),
       ]);
+    } else if (!conversation.humanTakenOverAt) {
+      // دست‌گرفتن از حالت «بات ارجاع داده»: گفتگو از قبل ساکت بود، فقط زمان دست‌گرفتن ثبت می‌شود
+      await this.prisma.salesConversation.update({
+        where: { id: conversationId },
+        data: { humanTakenOverAt: new Date() },
+      });
     }
     // docs/PRD-telegram-bot-channel.md بخش ۹.۱ — قبلاً فقط وب (polling) این پیام را می‌دید؛
     // اگر مشتری از کانال تلگرام است، مستقیم پوش می‌شود
@@ -3382,11 +3393,33 @@ export class StoreService {
     storeId: string,
     conversationId: string,
   ) {
-    await this.getOwnedConversation(sellerId, storeId, conversationId);
-    return this.prisma.salesConversation.update({
-      where: { id: conversationId },
-      data: { isMutedForHuman: true },
-    });
+    const conversation = await this.getOwnedConversation(
+      sellerId,
+      storeId,
+      conversationId,
+    );
+    if (conversation.isMutedForHuman && conversation.humanTakenOverAt) {
+      return conversation;
+    }
+    const wasMuted = conversation.isMutedForHuman;
+    const [updated] = await this.prisma.$transaction([
+      this.prisma.salesConversation.update({
+        where: { id: conversationId },
+        data: { isMutedForHuman: true, humanTakenOverAt: new Date() },
+      }),
+      ...(wasMuted
+        ? []
+        : [
+            this.prisma.conversationEvent.create({
+              data: {
+                conversationId,
+                type: 'SYSTEM',
+                payload: { kind: 'SELLER_TAKEOVER' },
+              },
+            }),
+          ]),
+    ]);
+    return updated;
   }
 
   async unmuteConversation(
@@ -3394,7 +3427,11 @@ export class StoreService {
     storeId: string,
     conversationId: string,
   ) {
-    await this.getOwnedConversation(sellerId, storeId, conversationId);
+    const conversation = await this.getOwnedConversation(
+      sellerId,
+      storeId,
+      conversationId,
+    );
     // 1.3 — اگر فروشگاه حالا اعتبار دارد، مکالمات BLOCKED آن (از جمله همین مکالمه) دوباره PAID
     // می‌شوند؛ وگرنه «برگشت به بات» دوباره handoff و هشدار تکراری می‌داد
     await this.creditDeduction
@@ -3405,16 +3442,187 @@ export class StoreService {
           err,
         ),
       );
-    return this.prisma.salesConversation.update({
-      where: { id: conversationId },
-      data: {
-        isMutedForHuman: false,
-        currentState: 'BROWSING',
-        clarifyAttempts: 0,
-      },
+    const [updated] = await this.prisma.$transaction([
+      this.prisma.salesConversation.update({
+        where: { id: conversationId },
+        data: {
+          isMutedForHuman: false,
+          humanTakenOverAt: null,
+          currentState: 'BROWSING',
+          clarifyAttempts: 0,
+        },
+      }),
+      ...(conversation.isMutedForHuman
+        ? [
+            this.prisma.conversationEvent.create({
+              data: {
+                conversationId,
+                type: 'SYSTEM',
+                payload: { kind: 'BACK_TO_BOT' },
+              },
+            }),
+          ]
+        : []),
+    ]);
+    return updated;
+  }
+
+  // docs/PRD-seller-conversations-inbox.md §۴.۳ — لیست صندوق گفتگوها (cursor: "<lastMessageAt ISO>|<id>")
+  async listConversations(
+    sellerId: string,
+    storeId: string,
+    opts: { filter?: string; q?: string; cursor?: string },
+  ) {
+    await this.getOwned(sellerId, storeId);
+    const filter = opts.filter === 'all' || opts.filter === 'ordered' ? opts.filter : 'attention';
+    const and: Prisma.SalesConversationWhereInput[] = [
+      { storeId, isTest: false, lastMessageAt: { not: null } },
+    ];
+    if (filter === 'attention') {
+      // آرشیوشده = سفارش تکمیل/رد شده (رد شدن mute هم می‌کند)؛ کاری برای فروشنده ندارد. در «همه» و
+      // «سفارش‌دار» به‌عنوان تاریخچه می‌ماند
+      and.push({
+        archivedAt: null,
+        OR: [{ isMutedForHuman: true }, { currentState: 'HANDOFF_HUMAN' }],
+      });
+    } else if (filter === 'ordered') {
+      and.push({ order: { isNot: null } });
+    }
+    const q = opts.q?.trim();
+    if (q) {
+      and.push({
+        customer: {
+          OR: [
+            { phone: { contains: toEnglishDigits(q) } },
+            { fullName: { contains: q, mode: 'insensitive' } },
+          ],
+        },
+      });
+    }
+    if (opts.cursor) {
+      const [iso, cursorId] = opts.cursor.split('|');
+      const at = new Date(iso);
+      if (cursorId && !Number.isNaN(at.getTime())) {
+        and.push({
+          OR: [
+            { lastMessageAt: { lt: at } },
+            { lastMessageAt: at, id: { lt: cursorId } },
+          ],
+        });
+      }
+    }
+    const rows = await this.prisma.salesConversation.findMany({
+      where: { AND: and },
+      orderBy: [{ lastMessageAt: 'desc' }, { id: 'desc' }],
+      take: CONVERSATIONS_PAGE_SIZE + 1,
+      include: { customer: true, order: { select: { id: true } } },
     });
+    const hasMore = rows.length > CONVERSATIONS_PAGE_SIZE;
+    const page = rows.slice(0, CONVERSATIONS_PAGE_SIZE);
+    const ids = page.map((c) => c.id);
+
+    const [lastEvents, unreadRows] = ids.length
+      ? await Promise.all([
+          this.prisma.$queryRaw<
+            { conversationId: string; type: string; payload: Prisma.JsonValue }[]
+          >`
+            SELECT DISTINCT ON ("conversationId") "conversationId", "type"::text AS "type", "payload"
+            FROM "conversation_events"
+            WHERE "conversationId" IN (${Prisma.join(ids)})
+              AND "type" IN ('CUSTOMER_MESSAGE', 'AGENT_REPLY', 'SELLER_MESSAGE')
+            ORDER BY "conversationId", "createdAt" DESC`,
+          this.prisma.$queryRaw<{ conversationId: string; count: number }[]>`
+            SELECT e."conversationId", COUNT(*)::int AS count
+            FROM "conversation_events" e
+            JOIN "sales_conversations" c ON c."id" = e."conversationId"
+            WHERE e."conversationId" IN (${Prisma.join(ids)})
+              AND e."type" = 'CUSTOMER_MESSAGE'
+              AND (c."sellerLastReadAt" IS NULL OR e."createdAt" > c."sellerLastReadAt")
+            GROUP BY e."conversationId"`,
+        ])
+      : [[], []];
+    const lastById = new Map(lastEvents.map((e) => [e.conversationId, e]));
+    const unreadById = new Map(unreadRows.map((r) => [r.conversationId, r.count]));
+
+    const items = page.map((c) => {
+      const last = lastById.get(c.id);
+      const payload = (last?.payload ?? {}) as { text?: string; imageKey?: string };
+      const rawText = payload.text ?? (payload.imageKey ? '📷 عکس' : '');
+      return {
+        id: c.id,
+        customerLabel: c.customer.phone ?? c.customer.fullName ?? 'مشتری ناشناس',
+        channel: c.customer.channel,
+        currentState: c.currentState,
+        control: conversationControl(c),
+        lastMessageAt: c.lastMessageAt,
+        lastMessagePreview: last
+          ? {
+              from:
+                last.type === 'CUSTOMER_MESSAGE'
+                  ? 'CUSTOMER'
+                  : last.type === 'SELLER_MESSAGE'
+                    ? 'SELLER'
+                    : 'BOT',
+              text: rawText.length > 80 ? `${rawText.slice(0, 80)}…` : rawText,
+            }
+          : null,
+        unreadCount: unreadById.get(c.id) ?? 0,
+        orderId: c.order?.id ?? null,
+      };
+    });
+    const lastRow = page[page.length - 1];
+    return {
+      items,
+      nextCursor:
+        hasMore && lastRow?.lastMessageAt
+          ? `${lastRow.lastMessageAt.toISOString()}|${lastRow.id}`
+          : null,
+    };
+  }
+
+  // تعداد گفتگوهای attention که پیام خوانده‌نشده‌ی مشتری دارند (نشان تب «گفتگوها»)
+  async getUnreadConversationCount(sellerId: string, storeId: string) {
+    await this.getOwned(sellerId, storeId);
+    const rows = await this.prisma.$queryRaw<{ count: number }[]>`
+      SELECT COUNT(*)::int AS count
+      FROM "sales_conversations" c
+      WHERE c."storeId" = ${storeId}
+        AND c."isTest" = false
+        AND c."archivedAt" IS NULL
+        AND (c."isMutedForHuman" = true OR c."currentState" = 'HANDOFF_HUMAN')
+        AND c."lastCustomerMessageAt" IS NOT NULL
+        AND (c."sellerLastReadAt" IS NULL OR c."lastCustomerMessageAt" > c."sellerLastReadAt")`;
+    return { count: rows[0]?.count ?? 0 };
+  }
+
+  async markConversationRead(
+    sellerId: string,
+    storeId: string,
+    conversationId: string,
+  ) {
+    await this.getOwnedConversation(sellerId, storeId, conversationId);
+    await this.prisma.salesConversation.update({
+      where: { id: conversationId },
+      data: { sellerLastReadAt: new Date() },
+    });
+    return { ok: true };
   }
 }
+
+// docs/PRD-seller-conversations-inbox.md §۴.۳ — «دست شما» فقط وقتی فروشنده واقعاً دست گرفته
+// (humanTakenOverAt)؛ ساکت‌بودن بدون آن یعنی بات خودش ارجاع داده
+export function conversationControl(c: {
+  isMutedForHuman: boolean;
+  currentState: string;
+  humanTakenOverAt: Date | null;
+}): 'BOT' | 'SELLER' | 'BOT_HANDOFF' {
+  if (c.isMutedForHuman || c.currentState === 'HANDOFF_HUMAN') {
+    return c.humanTakenOverAt ? 'SELLER' : 'BOT_HANDOFF';
+  }
+  return 'BOT';
+}
+
+const CONVERSATIONS_PAGE_SIZE = 20;
 
 function isSlugUniqueConflict(err: unknown): boolean {
   if (typeof err !== 'object' || err === null || !('code' in err)) return false;

@@ -904,6 +904,12 @@ export const fa = {
     whoami: (chatId: string) =>
       `chatId این گفتگو: ${chatId}\nاگه ادمین پشتیبانی هستی، این عدد رو به SELLER_SUPPORT_ADMIN_CHAT_IDS اضافه کن.`,
   },
+  // docs/PRD-seller-conversations-inbox.md §۴.۵
+  sellerConversations: {
+    replyReminder: (customerLabel: string) =>
+      `مشتری ${customerLabel} منتظر جواب شماست ⏳`,
+    replyReminderButton: 'باز کردن گفتگو',
+  },
   sellerBot: {
     menuSupportButton: '🙋 پشتیبانی',
     shareContactPrompt:

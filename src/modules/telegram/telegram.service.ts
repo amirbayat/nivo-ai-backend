@@ -53,6 +53,7 @@ import type {
   TelegramUpdate,
 } from './telegram.types';
 import { createHash, randomUUID } from 'crypto';
+import { touchConversation } from '../sales-agent/conversation-touch.util';
 
 // docs/PRD-product-strategy-and-roadmap.md بخش ۶ آیتم #۲۱ — از ۵ نتیجه‌ی نمایش‌داده‌شده‌ی سرچ
 // فروشگاه، حداکثر همین تعداد می‌توانند ⭐ باشند؛ حل «۳۰ نفر هم‌زمان بخرن» را به «همه نوبتی دیده
@@ -881,6 +882,7 @@ export class TelegramService {
           },
         },
       });
+      await touchConversation(this.prisma, conversation.id, 'CUSTOMER');
       return;
     }
 
@@ -1002,6 +1004,7 @@ export class TelegramService {
     await this.prisma.conversationEvent.create({
       data: { conversationId, type: 'CUSTOMER_MESSAGE', payload: { text } },
     });
+    await touchConversation(this.prisma, conversationId, 'CUSTOMER');
   }
 
   // docs/PRD-telegram-bot-channel.md بخش ۹.۱ — کد گفتگو داخل متن پیام force_reply (نه در

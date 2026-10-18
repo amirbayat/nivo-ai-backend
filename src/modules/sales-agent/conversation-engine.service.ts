@@ -204,6 +204,7 @@ import {
   type StoreSearchProfile,
 } from './product-finder/finder-spec';
 import { DEMO_FAKE_CARD_NUMBER, DEMO_FAKE_CARD_OWNER, isNivoLeadStore } from '../../common/utils/store-mode';
+import { touchConversation } from './conversation-touch.util';
 
 export type ConversationWithStore = Prisma.SalesConversationGetPayload<{
   include: { store: true };
@@ -5185,16 +5186,70 @@ ${customerStateSummary}${
       };
     }
     try {
+      const startedAt = new Date();
       const first = await this.handleMessageInner(
         await this.reloadConversation(conversation),
         text,
         opts,
       );
+      const endedAt = new Date();
       token = await this.drainPendingUnderLock(conversation, token);
-      return first;
+      return await this.dropIfSellerTookOver(
+        conversation,
+        first,
+        startedAt,
+        endedAt,
+      );
     } finally {
       if (token) await this.lock.release(conversation.id, token);
     }
+  }
+
+  // docs/PRD-seller-conversations-inbox.md §۴.۴ — فروشنده (humanTakenOverAt؛ handoff خودکار بات آن را
+  // پر نمی‌کند) وسط تولید جواب AI دست گرفته؛ جواب نباید ذخیره/ارسال شود
+  private async sellerTookOverMidTurn(conversationId: string): Promise<boolean> {
+    // fail-open: خطای این چک نباید جواب عادی را از بین ببرد
+    try {
+      const row = await this.prisma.salesConversation.findUnique({
+        where: { id: conversationId },
+        select: { isMutedForHuman: true, humanTakenOverAt: true },
+      });
+      return !!row?.isMutedForHuman && !!row.humanTakenOverAt;
+    } catch {
+      return false;
+    }
+  }
+
+  // اگر AGENT_REPLY همین turn (بین startedAt و endedAt) قبل از دست‌گرفتن ذخیره شده، ارسال می‌شود تا
+  // آنچه مشتری می‌گیرد با تاریخچه‌ای که فروشنده می‌بیند یکی باشد؛ فقط جوابِ ذخیره‌نشده (logReply
+  // به‌خاطر دست‌گرفتن ردش کرده) دور ریخته می‌شود
+  private async dropIfSellerTookOver(
+    conversation: ConversationWithStore,
+    result: EngineResult,
+    startedAt: Date,
+    endedAt: Date,
+  ): Promise<EngineResult> {
+    if (!result.reply && result.uiBlocks.length === 0) return result;
+    if (!(await this.sellerTookOverMidTurn(conversation.id))) return result;
+    const persisted = await this.prisma.conversationEvent
+      .findFirst({
+        where: {
+          conversationId: conversation.id,
+          type: 'AGENT_REPLY',
+          createdAt: { gte: startedAt, lte: endedAt },
+        },
+        select: { id: true },
+      })
+      .catch(() => null);
+    if (persisted) return result;
+    await this.prisma.conversationEvent.create({
+      data: {
+        conversationId: conversation.id,
+        type: 'SYSTEM',
+        payload: { kind: 'AI_REPLY_DROPPED_TAKEOVER' },
+      },
+    });
+    return { reply: '', uiBlocks: [], state: result.state };
   }
 
   // پیام‌های صف‌شده را (تا سقف دور) یکجا پردازش می‌کند؛ توکن قفل (احتمالاً تازه) یا null برمی‌گرداند
@@ -5225,11 +5280,20 @@ ${customerStateSummary}${
         continue;
       }
       try {
+        const startedAt = new Date();
         const result = await this.handleMessageInner(
           await this.reloadConversation(conversation),
           pending.join('\n'),
         );
-        await this.queuedResultListener?.(conversation.id, result);
+        await this.queuedResultListener?.(
+          conversation.id,
+          await this.dropIfSellerTookOver(
+            conversation,
+            result,
+            startedAt,
+            new Date(),
+          ),
+        );
       } catch (err) {
         this.logger.error(
           `queued turn failed (conversation=${conversation.id})`,
@@ -5256,9 +5320,16 @@ ${customerStateSummary}${
     }
     let held: string | null = token;
     try {
+      const startedAt = new Date();
       const result = await run(await this.reloadConversation(conversation));
+      const endedAt = new Date();
       held = await this.drainPendingUnderLock(conversation, token);
-      return result;
+      return await this.dropIfSellerTookOver(
+        conversation,
+        result,
+        startedAt,
+        endedAt,
+      );
     } finally {
       if (held) await this.lock.release(conversation.id, held);
     }
@@ -5338,6 +5409,7 @@ ${customerStateSummary}${
           payload: { text },
         },
       });
+      await touchConversation(this.prisma, conversation.id, 'CUSTOMER');
     }
     if (conversation.currentState === 'HANDOFF_HUMAN') {
       return {
@@ -5407,6 +5479,7 @@ ${customerStateSummary}${
         },
       },
     });
+    await touchConversation(this.prisma, conversation.id, 'CUSTOMER');
 
     const demoCapResult = await this.checkDemoMessageCap(conversation);
     if (demoCapResult) return demoCapResult;
@@ -6187,6 +6260,7 @@ ${customerStateSummary}${
             payload: { text: fa.salesAgent.addToCartAction },
           },
         });
+        await touchConversation(this.prisma, conversation.id, 'CUSTOMER');
         return this.doClarify(conversation, fa.salesAgent.productNotFound);
       }
       await this.resolveProductPrices(conversation.storeId, [product]);
@@ -6197,6 +6271,7 @@ ${customerStateSummary}${
           payload: { text: fa.salesAgent.addToCartActionNamed(product.name) },
         },
       });
+      await touchConversation(this.prisma, conversation.id, 'CUSTOMER');
       if (action.variantId) {
         const picked = product.variants.find((item) => item.id === action.variantId);
         const optionValues = picked
@@ -6385,6 +6460,7 @@ ${customerStateSummary}${
           },
         },
       });
+      await touchConversation(this.prisma, conversation.id, 'CUSTOMER');
       if (existing) {
         await this.prisma.savedProduct.delete({ where: { id: existing.id } });
       } else {
@@ -6412,6 +6488,7 @@ ${customerStateSummary}${
           payload: { text: fa.salesAgent.viewOrdersAction },
         },
       });
+      await touchConversation(this.prisma, conversation.id, 'CUSTOMER');
       const orders = await this.prisma.order.findMany({
         where: { conversation: { customerId: conversation.customerId } },
         orderBy: { createdAt: 'desc' },
@@ -6469,6 +6546,7 @@ ${customerStateSummary}${
           payload: { text: fa.salesAgent.reorderAction },
         },
       });
+      await touchConversation(this.prisma, conversation.id, 'CUSTOMER');
       let cart = ctx.cart;
       let anyAdded = false;
       for (const item of order.items as CartItem[]) {
@@ -6551,6 +6629,7 @@ ${customerStateSummary}${
         payload: { text: fa.salesAgent.confirmCartAction },
       },
     });
+    await touchConversation(this.prisma, conversation.id, 'CUSTOMER');
     if (conversation.currentState !== 'CART_REVIEW') {
       return this.doClarify(conversation, fa.salesAgent.nothingToConfirm);
     }
@@ -9865,6 +9944,8 @@ answered=false بده (به‌جای حدس‌زدن).`,
     // docs/PRD-sales-agent-sales-state-machine.md §۱۲.۱ — فقط مسیر ماشین‌حالت فروش
     quickReplies?: string[],
   ) {
+    // §۴.۴ — قبل از ذخیره‌ی AGENT_REPLY (و تولید وویس) دوباره چک می‌شود
+    if (await this.sellerTookOverMidTurn(conversation.id)) return;
     uiBlock = await this.withHasVariants(uiBlock);
     // برخلاف قبل، طول کوتاه/رسیدن به سقف باید از هم تفکیک شوند (نه فقط یک بولین) — بخش
     // voice.reason در AI_TRACE (docs/PRD-admin-ai-decision-trace-log.md بخش ۱) به همین نیاز دارد
@@ -9965,6 +10046,7 @@ answered=false بده (به‌جای حدس‌زدن).`,
         payload,
       },
     });
+    await touchConversation(this.prisma, conversation.id, 'AGENT');
 
     let traceEventId: string | undefined;
     if (trace) {

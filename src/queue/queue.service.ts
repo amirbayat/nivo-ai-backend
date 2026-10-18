@@ -30,6 +30,8 @@ const MEDIA_REVIEW_FOLLOWUP_CRON = '0 11 * * *';
 // docs/PRD-product-strategy-and-roadmap.md بخش ۵.۴ — هر نیم‌ساعت، چون آستانه‌ی خودِ فیچر
 // (۳ ساعت) به این دقت حساس‌تر از فالوآپ رضایت است
 const ABANDONED_CART_REMINDER_CRON = '*/30 * * * *';
+// docs/PRD-seller-conversations-inbox.md §۴.۵ — آستانه‌ی یادآوری ۱۵ دقیقه است، پس هر ۵ دقیقه
+const SELLER_CONVERSATION_FOLLOWUP_CRON = '*/5 * * * *';
 // docs/PRD-sales-agent-checkout-pricing-and-roadmap.md بخش ۹ — هفته‌ای یک‌بار کافی است
 // (خودِ cooldown داخلی سرویس هم ۲۵ روزه است)؛ شنبه ساعت ۹ صبح، شروع هفته‌ی کاری ایران
 const PRODUCT_ENRICHMENT_REMINDER_CRON = '0 9 * * 6';
@@ -283,6 +285,11 @@ export class QueueService implements OnApplicationBootstrap {
       'send-second-reminders',
       {},
       { repeat: { cron: ABANDONED_CART_REMINDER_CRON } },
+    );
+    await this.abandonedCartReminderQueue.add(
+      'seller-conversation-followup',
+      {},
+      { repeat: { cron: SELLER_CONVERSATION_FOLLOWUP_CRON } },
     );
     this.logger.log(
       `Abandoned cart reminder job scheduled: ${ABANDONED_CART_REMINDER_CRON}`,
